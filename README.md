@@ -29,7 +29,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 | :---: | :---: |
 | <img src="docs/images/quick-entry.png" width="280" alt="Offline Quick entry recognizing a date, time and duration from a sentence"> | <img src="docs/images/find-free-time.png" width="280" alt="Find free time showing available gaps between sample events"> |
 
-[Download the APK](https://github.com/baslawson/Planner/releases) (repository access required).
+[Download the APK](https://github.com/baslawson/Planner/releases).
 
 ## Build and run
 
