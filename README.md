@@ -23,6 +23,10 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 [Download the APK](https://github.com/baslawson/Planner/releases) (repository access required).
 
+## Support Planner
+
+If Planner makes your day a little easier, [☕ buy me a coffee](https://ko-fi.com/baslawson) to support its development. Thank you!
+
 ## Build and run
 
 1. Clone this repository and open its root folder in Android Studio.
