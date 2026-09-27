@@ -73,3 +73,11 @@ Local JVM tests live in `app/src/test`. Device tests live in `app/src/androidTes
 - `gradle`: pinned dependency versions and build wrapper.
 
 Local QA captures, working notes, credentials, SDK paths, caches and APK binaries are excluded from Git. Keep personal working history and device backups separately.
+
+## Licence
+
+Planner's original code is licensed under **GPLv3**, with a narrow additional
+permission for its existing Google ML Kit OCR dependency. See [LICENSE](LICENSE)
+and [LICENSING.md](LICENSING.md) for the full terms. Bundled fonts and other
+third-party components retain their own licences. The Google OCR component is
+not open source.
