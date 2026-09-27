@@ -23,7 +23,7 @@ fun QuickInput.edited(value: String): QuickInput {
     }
     fun changed(kind: QuickPhraseKind) = signature(kind, true) != signature(kind, false)
     fun anchors(old: Boolean) = signature(QuickPhraseKind.REPEAT, old)
-        .filter { Regex("every\\s+(?:mon|tue|wed|thu|fri|sat|sun)", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        .filter { Regex("every\\s+(?:mon|tue|wed|thu|fri|sat|sun|weekday)|weekdays|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE).containsMatchIn(it) }
     return copy(text = value, literals = moved, ai = null,
         dateOverride = dateOverride.takeUnless { changed(QuickPhraseKind.DATE) || anchors(true) != anchors(false) },
         timeOverride = timeOverride.takeUnless { changed(QuickPhraseKind.TIME) },

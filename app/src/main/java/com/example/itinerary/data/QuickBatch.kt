@@ -14,12 +14,18 @@ data class QuickInput(
     val durationText: String? = null,
     val ai: QuickAiEntry? = null,
 ) {
-    fun suggestion(): QuickEntrySuggestion {
-        val parsed = ai?.suggestion(baseDate) ?: QuickEntry.parse(text, baseDate, literals)
-        return parsed.corrected(dateOverride, timeOverride).copy(
+    fun suggestion(now: ZonedDateTime = ZonedDateTime.now()): QuickEntrySuggestion {
+        // "In 30 minutes" counts from now, so only for entries based on today.
+        val clock = now.toLocalDateTime().takeIf { baseDate == now.toLocalDate() }
+        val parsed = ai?.suggestion(baseDate) ?: QuickEntry.parse(text, baseDate, literals, clock)
+        val corrected = parsed.corrected(dateOverride, timeOverride)
+        // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
+        val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
+            reminderTrigger(corrected.date, if (task) null else corrected.time, parsed.reminderMinutes.toLong(), now.zone) <= now
+        return corrected.copy(
             title = if (task && parsed.location.isNotBlank()) "${parsed.title} at ${parsed.location}" else parsed.title,
             location = if (task) "" else parsed.location,
-            reminderMinutes = parsed.reminderMinutes.takeUnless { removeReminder },
+            reminderMinutes = parsed.reminderMinutes.takeUnless { removeReminder || impliedPassed },
             durationMinutes = if (durationText == null) parsed.durationMinutes else if (durationText.isEmpty()) null else durationText.toIntOrNull() ?: 0,
             repeatCount = countText?.toIntOrNull() ?: if (countText == null) parsed.repeatCount else 0,
         )
@@ -50,7 +56,7 @@ data class QuickRow(
     fun problem(now: ZonedDateTime): String? = when {
         !typeChosen -> "Choose Task or Event."
         input.text.length > 500 -> "Use at most 500 characters per entry."
-        else -> input.suggestion().quickProblem(input.task, now)
+        else -> input.suggestion(now).quickProblem(input.task, now)
     }
     val count: Int get() = if (input.task || input.suggestion().repeat == RepeatRule.NONE) 1 else input.suggestion().repeatCount
 }
@@ -72,7 +78,8 @@ object QuickBatch {
             if (index >= 0) unused.removeAt(index) else {
                 val input = QuickInput(text = line, baseDate = today)
                 val s = input.suggestion()
-                QuickRow(source = line, input = input, typeChosen = s.time != null || s.ambiguousTime || s.durationMinutes != null)
+                QuickRow(source = line, input = input.copy(task = s.taskHint && !s.timed()),
+                    typeChosen = s.time != null || s.ambiguousTime || s.durationMinutes != null || s.taskHint)
             }
         }
     }

@@ -35,6 +35,9 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         dateChoices = dates, ambiguousTime = ambiguous, error = problem)
 }
 
+/** Has a clock time, a vague time awaiting one, or a duration: an event rather than a task. */
+fun QuickEntrySuggestion.timed(): Boolean = phrases.any { it.kind == QuickPhraseKind.TIME || it.kind == QuickPhraseKind.DURATION }
+
 fun QuickEntrySuggestion.quickReminders(): List<Reminder> = reminderMinutes?.let { minutes ->
     val unit = when { minutes > 0 && minutes % 1440 == 0 -> ReminderUnit.DAYS; minutes > 0 && minutes % 60 == 0 -> ReminderUnit.HOURS; else -> ReminderUnit.MINUTES }
     listOf(Reminder(itemId = 0, amount = (minutes / unit.minutes).toInt(), unit = unit))

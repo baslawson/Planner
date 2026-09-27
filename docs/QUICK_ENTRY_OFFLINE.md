@@ -20,7 +20,8 @@ Reminder aliases share the existing reminder model and its bounds; nothing sched
 Recognised vague time phrases such as tomorrow morning/evening, tonight, this afternoon and after lunch
 never pick a clock time automatically. Choose a specific time using the existing preview control. Conflicting
 time phrases still require editing. Tasks use due dates; switch to Event for a time, or keep the words literally.
-Other unsupported schedules, such as every weekday, still need a supported repeat or literal text.
+Other unsupported schedules, such as every weekend, next week or end of month, still need a specific date,
+a supported repeat or literal text.
 
 Quote title/place words you want left untouched, or use Details → Adjust recognised text → Keep in title.
 Manual corrections survive unrelated title edits; editing the corresponding scheduling phrase reconsiders
@@ -41,3 +42,23 @@ existing preview. Quotes and Keep in title still protect literal text.
 While typing a date word, near-miss spellings such as `tommorow` or `wedensday` offer a suggestion in
 the existing suggestion row. Tap to replace that word; nothing is corrected automatically. Suggestions
 respect quoted/literal text and the cursor, and leave the rest of the sentence intact.
+
+More everyday wording:
+
+- `Remind me to call mum tomorrow` — a task called Call mum, reminded at 09:00. With a time it becomes an event
+  reminded at that time. Choosing Task or Event yourself overrides the suggestion.
+- `Call mum in 30 minutes` or `in an hour` — today, counted from now and rounded up to the next five minutes.
+- `Meeting in 2 months`, `a year from today`
+- `Dentist on the 5th`, `the 5th of October` — the next 5th on or after today.
+- `Pay rent 1st of every month` — a monthly repeat starting on the next 1st.
+- `Team sync every weekday 9am` — Monday to Friday; also `on weekdays`. A weekend start moves to Monday.
+- `Dentist Friday 2 October 3pm` — the weekday is checked against the date; a mismatch asks you to correct it.
+  `Fri 3/10` picks whichever reading is a Friday.
+- `weds` and `thur` are recognised.
+
+Times such as `7:30` ask Morning or afternoon; `07:30`, `19:30` and `7:30pm` do not. Numeric dates such as `3/4`
+follow Settings → Date format when it is day-first or month-first (including the system setting); otherwise
+Quick entry asks which date you meant.
+
+`sun`, `sat`, `wed`, `noon` and `midnight` stay in the title when an ordinary word follows them: `Buy sun cream`,
+`Sat nav`, `Midnight Mass`. Before a time, a date or words such as `at` and `with` they still schedule.

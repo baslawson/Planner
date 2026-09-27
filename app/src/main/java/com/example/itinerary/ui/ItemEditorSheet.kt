@@ -696,6 +696,7 @@ fun ItemEditorSheet(
                         supportingText = { Text(if (validRepeat) "Last occurrence: ${plannedDates.last().dayLabel(LocalDateFormat.current)}" else "Enter a number from 2 to 365") },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (repeat == RepeatRule.WEEKDAYS) Text("Monday to Friday. A weekend start moves to the following Monday.")
                     if (repeat == RepeatRule.MONTHLY) Text("Shorter months use their last day, then return to this day of the month.")
                     if (repeat == RepeatRule.YEARLY && date.monthValue == 2 && date.dayOfMonth == 29)
                         Text("Uses 28 February in non-leap years, then returns to 29 February in leap years.")

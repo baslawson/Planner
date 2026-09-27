@@ -29,7 +29,7 @@ class QuickTypingTest {
     }
     @Test fun incompleteUnrelatedPhraseDoesNotWipeRecognisedCorrections() {
         val original = input()
-        val changed = original.edited(original.text + " every weekday")
+        val changed = original.edited(original.text + " every weekend")
         assertEquals(original.dateOverride, changed.dateOverride)
         assertEquals(original.timeOverride, changed.timeOverride)
         assertEquals(original.countText, changed.countText)

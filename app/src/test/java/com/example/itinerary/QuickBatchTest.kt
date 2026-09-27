@@ -13,7 +13,7 @@ class QuickBatchTest {
     private fun candidate(title: String = "New", day: LocalDate = date, time: LocalTime? = LocalTime.NOON, duration: Int? = 30) =
         QuickCandidate("new", QuickEntrySuggestion(title, day, time, durationMinutes = duration), false)
     @Test fun unsupportedPhrasesRequireReviewButLiteralsRemainAvailable() {
-        listOf("every weekday", "after lunch", "before dinner", "tomorrow morning", "tonight", "every other month").forEach { phrase ->
+        listOf("every weekend", "after lunch", "before dinner", "tomorrow morning", "tonight", "every other month").forEach { phrase ->
             val text = "Call $phrase"
             val s = QuickEntry.parse(text, date)
             assertNotNull(phrase, s.error)

@@ -4,15 +4,18 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 enum class RepeatRule(val label: String) {
-    NONE("Does not repeat"), DAILY("Daily"), WEEKLY("Weekly"), FORTNIGHTLY("Fortnightly"), MONTHLY("Monthly"), YEARLY("Yearly");
+    NONE("Does not repeat"), DAILY("Daily"), WEEKDAYS("Weekdays"), WEEKLY("Weekly"), FORTNIGHTLY("Fortnightly"), MONTHLY("Monthly"), YEARLY("Yearly");
 
     // Always advance from the original date: Jan 31 → Feb 28 → Mar 31, without month-end drift.
     fun dates(start: LocalDate, count: Int): List<LocalDate> {
         require(count in 1..365) { "Choose between 1 and 365 occurrences" }
+        // Monday to Friday; a weekend start moves to the following Monday.
+        if (this == WEEKDAYS) return generateSequence(start) { it.plusDays(1) }.filter { it.dayOfWeek.value <= 5 }.take(count).toList()
         return List(if (this == NONE) 1 else count) { index ->
             when (this) {
                 NONE -> start
                 DAILY -> start.plusDays(index.toLong())
+                WEEKDAYS -> error("Handled above")
                 WEEKLY -> start.plusWeeks(index.toLong())
                 FORTNIGHTLY -> start.plusWeeks(index.toLong() * 2)
                 MONTHLY -> start.plusMonths(index.toLong())

@@ -62,6 +62,8 @@ fun QuickEntryEditor(
     LaunchedEffect(text) { delay(650); settled = true }
     val showFeedback = settled || attempted || !fieldFocused
     var task by rememberSaveable { mutableStateOf(initial.task) }
+    // "Remind me to …" picks Task or Event until the person chooses a type themselves.
+    var typeChosen by rememberSaveable { mutableStateOf(false) }
     var literalOffsets by rememberSaveable { mutableStateOf(initial.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()) }
     val literalRanges = literalOffsets.asList().chunked(2).map { it[0] until it[1] }
     val literalKey = literalOffsets.contentHashCode()
@@ -78,7 +80,6 @@ fun QuickEntryEditor(
     var saveError by remember(text, task) { mutableStateOf<String?>(null) }
     val parsed = remember(text, literalKey, today) { QuickEntry.parse(text, today, literalRanges) }
     val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, today, durationText, ai)
-    val suggestion = remember(currentInput) { currentInput.suggestion() }
     SideEffect { onInput(currentInput) }
     val context = LocalContext.current
     val notifications = rememberNotificationState()
@@ -88,6 +89,7 @@ fun QuickEntryEditor(
     var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
     LaunchedEffect(Unit) { while (true) { now = ZonedDateTime.now(); delay(30_000) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { now = ZonedDateTime.now(); exactAllowed = app.reminderScheduler.canScheduleExact() }
+    val suggestion = remember(currentInput, now) { currentInput.suggestion(now) }
     val reminder = suggestion.reminderMinutes?.let { reminderTrigger(suggestion.date, if (task) null else suggestion.time, it.toLong(), now.zone) }
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
         runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
@@ -101,6 +103,7 @@ fun QuickEntryEditor(
     fun editField(value: TextFieldValue) {
         if (value.text != text) {
             val updated = currentInput.edited(value.text)
+            if (!typeChosen) QuickEntry.parse(value.text, today, updated.literals).takeIf { it.taskHint }?.let { task = !it.timed() }
             aiJson = null
             literalOffsets = updated.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()
             dateOverride = updated.dateOverride; timeOverride = updated.timeOverride
@@ -157,8 +160,8 @@ fun QuickEntryEditor(
                 modeControls()
                 if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !task, enabled = !busy, onClick = { task = false }, label = { Text("Event") })
-                    FilterChip(selected = task, enabled = !busy, onClick = { task = true }, label = { Text("Task") })
+                    FilterChip(selected = !task, enabled = !busy, onClick = { task = false; typeChosen = true }, label = { Text("Event") })
+                    FilterChip(selected = task, enabled = !busy, onClick = { task = true; typeChosen = true }, label = { Text("Task") })
                 }
                 OutlinedTextField(field, ::editField, enabled = !busy,
                     label = { Text(if (task) "Task and optional due date" else "Event and when") },
@@ -196,7 +199,8 @@ fun QuickEntryEditor(
                     if (showFeedback && !task && suggestion.ambiguousTime && suggestion.dateChoices.isEmpty()) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             suggestion.timeChoices.forEach { choice -> TextButton(enabled = !busy, onClick = { timeOverride = choice.toString() }) {
-                                Text(if (choice.hour < 12) "${if (choice.hour == 0) 12 else choice.hour} AM" else "${if (choice.hour == 12) 12 else choice.hour - 12} PM")
+                                val minutes = if (choice.minute == 0) "" else ":%02d".format(choice.minute)
+                                Text("${if (choice.hour % 12 == 0) 12 else choice.hour % 12}$minutes ${if (choice.hour < 12) "AM" else "PM"}")
                             } }
                         }
                     }

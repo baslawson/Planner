@@ -7,7 +7,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 enum class TaskRepeat(val label: String) {
-    NONE("Never"), DAILY("Daily"), WEEKLY("Weekly"), FORTNIGHTLY("Fortnightly"), MONTHLY("Monthly"), YEARLY("Yearly"), AFTER_COMPLETION("Days after completion")
+    NONE("Never"), DAILY("Daily"), WEEKDAYS("Weekdays"), WEEKLY("Weekly"), FORTNIGHTLY("Fortnightly"), MONTHLY("Monthly"), YEARLY("Yearly"), AFTER_COMPLETION("Days after completion")
 }
 
 /** Calendar repeats advance from their due date; late completions skip missed occurrences. */
@@ -19,6 +19,7 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
     val next = when (rule) {
         TaskRepeat.NONE -> return null
         TaskRepeat.AFTER_COMPLETION -> today.plusDays(repeatDays.toLong())
+        TaskRepeat.WEEKDAYS -> generateSequence(maxOf(base, today).plusDays(1)) { it.plusDays(1) }.first { it.dayOfWeek.value <= 5 }
         TaskRepeat.DAILY, TaskRepeat.WEEKLY, TaskRepeat.FORTNIGHTLY -> {
             val step = when (rule) {
                 TaskRepeat.FORTNIGHTLY -> 14L

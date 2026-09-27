@@ -66,6 +66,16 @@ enum class DateFormatChoice(val label: String) {
     }
 }
 
+/** How Quick entry reads a numeric date such as 3/4: day first, month first, or null to ask. */
+fun DateFormatChoice.numericDayFirst(locale: java.util.Locale = java.util.Locale.getDefault()): Boolean? = when (this) {
+    DateFormatChoice.DAY_MONTH_YEAR, DateFormatChoice.NUMERIC_DMY -> true
+    DateFormatChoice.MONTH_DAY_YEAR, DateFormatChoice.NUMERIC_MDY -> false
+    DateFormatChoice.SYSTEM -> java.time.format.DateTimeFormatterBuilder.getLocalizedDateTimePattern(
+        java.time.format.FormatStyle.SHORT, null, java.time.chrono.IsoChronology.INSTANCE, locale,
+    ).let { pattern -> pattern.indexOf('d').takeIf { it >= 0 }?.let { day -> pattern.indexOf('M').takeIf { it >= 0 }?.let { day < it } } }
+    else -> null
+}
+
 // All text in the app can be made smaller or larger; 100 is normal.
 object TextSize {
     const val MIN_PERCENT = 80
@@ -282,6 +292,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
             .getOrDefault(DateFormatChoice.DEFAULT),
     )
     val dateFormat: StateFlow<DateFormatChoice> = _dateFormat.asStateFlow()
+    init { QuickEntry.numericDayFirst = _dateFormat.value.numericDayFirst() }
 
     private fun notifyChanged() {
         try { onChanged() }
@@ -291,6 +302,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     fun setDateFormat(choice: DateFormatChoice) {
         prefs.edit { putString(KEY_DATE_FORMAT, choice.name) }
         _dateFormat.value = choice
+        QuickEntry.numericDayFirst = choice.numericDayFirst()
         notifyChanged()
     }
 
