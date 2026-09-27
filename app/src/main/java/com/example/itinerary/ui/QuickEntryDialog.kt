@@ -1,8 +1,22 @@
 package com.example.itinerary.ui
 
 import com.example.itinerary.ui.MatrixTextButton as TextButton
-import com.example.itinerary.ui.MatrixFilterChip as FilterChip
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
@@ -106,7 +120,7 @@ fun QuickEntryDialog(
 
 internal class QuickSaveCancelled : Exception()
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun QuickEntryEditor(
     today: LocalDate,
@@ -238,17 +252,23 @@ fun QuickEntryEditor(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 modeControls()
                 if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !task, enabled = !busy, onClick = { task = false; typeChosen = true }, label = { Text("Event") })
-                    FilterChip(selected = task, enabled = !busy, onClick = { task = true; typeChosen = true }, label = { Text("Task") })
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    val green = MaterialTheme.colorScheme.primary
+                    listOf(false to "Event", true to "Task").forEachIndexed { index, (isTask, label) ->
+                        SegmentedButton(selected = task == isTask, enabled = !busy, onClick = { task = isTask; typeChosen = true },
+                            shape = SegmentedButtonDefaults.itemShape(index, 2),
+                            colors = SegmentedButtonDefaults.colors(activeContainerColor = green.copy(alpha = 0.16f), activeContentColor = green,
+                                activeBorderColor = green, inactiveContainerColor = Color.Transparent,
+                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant, inactiveBorderColor = green.copy(alpha = 0.5f))) { Text(label) }
+                    }
                 }
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
-                    label = { Text("Title (optional)") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
+                    label = { Text("Title") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                     keyboardActions = KeyboardActions(onNext = { focus.requestFocus() }))
                 OutlinedTextField(field, ::editField, enabled = !busy,
-                    label = { Text(if (title.isNotBlank()) (if (task) "Due date (optional)" else "When") else if (task) "Task and optional due date" else "Event and when") },
+                    label = { Text(if (title.isNotBlank()) (if (task) "Due" else "When") else if (task) "Task and due date" else "Event and when") },
                     placeholder = { Text(if (title.isNotBlank()) (if (task) "tmr" else "every Monday 6pm") else if (task) "Buy groceries tmr" else "Gym every Monday 6pm") },
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.onGloballyPositioned { fieldReady = true }, visualTransformation = highlight,
                     keyboardOptions = KeyboardOptions(capitalization = if (title.isNotBlank()) KeyboardCapitalization.None else KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
@@ -279,7 +299,6 @@ fun QuickEntryEditor(
                         editTitle(TextFieldValue(exampleTitle, TextRange(exampleTitle.length))); edit(exampleWhen)
                     }) { Text("$exampleTitle $exampleWhen".trim()) } }
                 } else {
-                    if (ai == null) Text(suggestion.title, style = MaterialTheme.typography.titleMedium)
                     if (showFeedback && suggestion.dateChoices.isNotEmpty()) {
                         Text("Which date did you mean?")
                         suggestion.dateChoices.forEach { choice -> TextButton(enabled = !busy, onClick = { dateOverride = choice.toString() }) { Text(choice.fullLabel()) } }
@@ -292,35 +311,42 @@ fun QuickEntryEditor(
                             } }
                         }
                     }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(enabled = !busy, onClick = { keyboard?.hide(); pickingDate = true }) {
-                            Text(if (suggestion.dateChoices.isNotEmpty()) "Choose date" else if (task && !suggestion.dateSpecified) "No due date" else if (showDetails) suggestion.date.dayLabel(LocalDateFormat.current) else when (suggestion.date) {
-                                LocalDate.now() -> "Today"
-                                LocalDate.now().plusDays(1) -> "Tomorrow"
-                                else -> suggestion.date.fullLabel()
-                            })
-                        }
-                        if (showDetails && task && suggestion.dateSpecified) TextButton(enabled = !busy, onClick = { dateOverride = "" }) { Text("Clear date") }
-                        if (!task) {
-                            TextButton(enabled = !busy, onClick = { keyboard?.hide(); pickingTime = true }) {
-                                Text(suggestion.time?.label(LocalTimeFormat.current, context) ?: if (suggestion.ambiguousTime || suggestion.durationMinutes != null) "Choose time" else "All day · set time")
+                    // What will be saved, as one summary; the date and time open their pickers.
+                    Text("Will add", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Surface(shape = RoundedCornerShape(12.dp), color = Color.Transparent,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            if (ai == null) Text(suggestion.title.ifBlank { "Add a title" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                                color = if (suggestion.title.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                            FlowRow {
+                                SummaryButton({ Icon(Icons.Filled.DateRange, contentDescription = null, Modifier.size(18.dp)) }, kind = if (task) "Due date" else "Date", enabled = !busy, onClick = { keyboard?.hide(); pickingDate = true },
+                                    label = if (suggestion.dateChoices.isNotEmpty()) "Choose date" else if (task && !suggestion.dateSpecified) "No due date" else if (showDetails) suggestion.date.dayLabel(LocalDateFormat.current) else when (suggestion.date) {
+                                        LocalDate.now() -> "Today"
+                                        LocalDate.now().plusDays(1) -> "Tomorrow"
+                                        else -> suggestion.date.fullLabel()
+                                    })
+                                if (showDetails && task && suggestion.dateSpecified) MatrixQuietButton(enabled = !busy, onClick = { dateOverride = "" }) { Text("Clear date") }
+                                if (!task) {
+                                    SummaryButton({ Icon(painterResource(com.example.itinerary.R.drawable.action_clock), contentDescription = null, Modifier.size(18.dp)) }, kind = "Time", enabled = !busy, onClick = { keyboard?.hide(); pickingTime = true },
+                                        label = suggestion.time?.label(LocalTimeFormat.current, context) ?: if (suggestion.ambiguousTime || suggestion.durationMinutes != null) "Choose time" else "All day · set time")
+                                    if (showDetails && suggestion.time != null && suggestion.durationMinutes == null) MatrixQuietButton(enabled = !busy, onClick = { timeOverride = "" }) { Text("All day") }
+                                }
+                                if (!task && (suggestion.durationMinutes != null || showDetails && suggestion.time != null)) SummaryButton(null, kind = "Duration", enabled = !busy, onClick = { pickingDuration = true; keyboard?.hide() },
+                                    label = suggestion.durationMinutes?.let { "for $it min" } ?: "Duration")
+                                if (ai == null && suggestion.location.isNotBlank()) SummaryButton({ Icon(Icons.Filled.Place, contentDescription = null, Modifier.size(18.dp)) }, kind = "Place", enabled = !busy, label = suggestion.location, onClick = {
+                                    parsed.phrases.firstOrNull { it.kind == QuickPhraseKind.LOCATION }?.let { val prefix = Regex("^at\\s+", RegexOption.IGNORE_CASE).find(text.substring(it.start, it.end))?.value?.length ?: 0; field = field.copy(selection = TextRange(it.start + prefix, it.end)); focus.requestFocus(); keyboard?.show() }
+                                })
+                                if (suggestion.repeat != RepeatRule.NONE) SummaryButton({ Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp)) }, kind = "Repeat", enabled = !busy, onClick = { showDetails = !showDetails },
+                                    label = if (task) suggestion.repeat.label else "${suggestion.repeat.label} · ${suggestion.repeatCount} events")
+                                if (reminder != null) SummaryButton({ Icon(Icons.Filled.Notifications, contentDescription = null, Modifier.size(18.dp)) }, kind = "Reminder", enabled = !busy, onClick = { showDetails = !showDetails },
+                                    label = suggestion.quickReminders().single().label)
                             }
-                            if (showDetails && suggestion.time != null && suggestion.durationMinutes == null) TextButton(enabled = !busy, onClick = { timeOverride = "" }) { Text("All day") }
-                        }
-                        if (!task && (suggestion.durationMinutes != null || showDetails && suggestion.time != null)) TextButton(enabled = !busy, onClick = { pickingDuration = true; keyboard?.hide() }) {
-                            Text(suggestion.durationMinutes?.let { "$it min" } ?: "Duration")
                         }
                     }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (ai == null && suggestion.location.isNotBlank()) TextButton(enabled = !busy, onClick = {
-                            parsed.phrases.firstOrNull { it.kind == QuickPhraseKind.LOCATION }?.let { val prefix = Regex("^at\\s+", RegexOption.IGNORE_CASE).find(text.substring(it.start, it.end))?.value?.length ?: 0; field = field.copy(selection = TextRange(it.start + prefix, it.end)); focus.requestFocus(); keyboard?.show() }
-                        }) { Text(suggestion.location) }
-                        if (suggestion.repeat != RepeatRule.NONE) TextButton(enabled = !busy, onClick = { showDetails = !showDetails }) {
-                            Text(if (task) suggestion.repeat.label else "${suggestion.repeat.label} · ${suggestion.repeatCount} events")
-                        }
-                        if (reminder != null) TextButton(enabled = !busy, onClick = { showDetails = !showDetails }) { Text("Reminder: ${suggestion.quickReminders().single().label}") }
+                    MatrixQuietButton(enabled = !busy, onClick = { showDetails = !showDetails }) {
+                        Text(if (showDetails) "Fewer options" else "More options")
+                        Icon(if (showDetails) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null)
                     }
-                    TextButton(enabled = !busy, onClick = { showDetails = !showDetails }) { Text(if (showDetails) "Hide details" else "Details") }
                     if (showDetails) {
                         if (!task && suggestion.durationMinutes != null) {
                             val end = suggestion.time?.plusMinutes(suggestion.durationMinutes.toLong())
@@ -366,17 +392,20 @@ fun QuickEntryEditor(
                     }
                     if (showFeedback && problem != null && problem != "Which date did you mean?") Text(problem, color = MaterialTheme.colorScheme.error)
                     if (!showFeedback && problem != null) Text("Keep typing, or choose a suggestion.", style = MaterialTheme.typography.bodySmall)
-                    if (showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("More details") }
+                    if (showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("Open in full editor") }
                     if (showDetails && onDiscard != null) TextButton(enabled = !busy, onClick = onDiscard) { Text("Discard draft") }
                 }
                 if (saveError != null) Text(saveError!!, color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (onContinue != null) TextButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add(true) }) { Text("Add another") }
-            TextButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add() }) { Text(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event") }
+        // Three buttons do not fit one row at phone width: the main action gets its own full-width row.
+        confirmButton = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MatrixQuietButton(enabled = !busy, onClick = onDismiss) { Text("Close") }
+                if (onContinue != null) MatrixQuietButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add(true) }) { Text("Add another") }
+            }
+            MatrixPrimaryButton(modifier = Modifier.fillMaxWidth(), enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add() }) { Text(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event") }
         } },
-        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } },
     )
     selectedPhrase?.let { phrase ->
         AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { selectedPhrase = null }, title = { Text(text.substring(phrase.start, phrase.end).trim()) },
@@ -398,4 +427,17 @@ fun QuickEntryEditor(
     }
     if (pickingDate) SingleDateDialog(suggestion.date, onDismiss = { pickingDate = false }, onConfirm = { dateOverride = it.toString(); pickingDate = false })
     if (pickingTime) TimePickerDialog(suggestion.time ?: LocalTime.of(9, 0), onDismiss = { pickingTime = false }, onConfirm = { timeOverride = it.toString(); pickingTime = false })
+}
+
+/** A tappable line in the Will add summary: icon, value, and a small pencil showing it can be changed. */
+@Composable
+private fun SummaryButton(icon: (@Composable () -> Unit)?, kind: String, label: String, enabled: Boolean, onClick: () -> Unit) {
+    // Screen readers get the meaning the icon shows on screen: "Time, 18:00".
+    MatrixQuietButton(enabled = enabled, onClick = onClick, contentPadding = PaddingValues(horizontal = 4.dp),
+        modifier = Modifier.semantics { contentDescription = "$kind, $label" }) {
+        if (icon != null) { icon(); Spacer(Modifier.width(6.dp)) }
+        Text(label)
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.Filled.Edit, contentDescription = null, Modifier.size(14.dp))
+    }
 }

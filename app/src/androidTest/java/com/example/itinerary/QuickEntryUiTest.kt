@@ -150,7 +150,7 @@ class QuickEntryUiTest {
         click("Choose time");await { find("Choose a time")!=null };screenshot("analog-clock")
         click("Set time")
         // Default picker time is 09:00; committing it resolves the ambiguous input.
-        click("Details");click("More details")
+        click("More options");click("Open in full editor")
         reveal { find("Discard")!=null };screenshot("event-more-details")
         click("Save");await { data().items.any { it.title=="QA quick clock" } }
         assertEquals(java.time.LocalTime.of(9,0),data().items.single { it.title=="QA quick clock" }.startTime)
@@ -162,7 +162,7 @@ class QuickEntryUiTest {
     @Test fun taskMoreDetailsAndExampleReuseExistingFlows()=runBlocking {
         start();click("Task");click("Call plumber tmr")
         await { nodes().any { it.isEditable && it.text?.toString()=="Call plumber tmr" } }
-        setText("Call plumber tmr","QA detailed task tmr");click("Details");click("More details")
+        setText("Call plumber tmr","QA detailed task tmr");click("More options");click("Open in full editor")
         reveal { find("Save task")!=null || find("Save")!=null };screenshot("task-more-details")
         click(if(find("Save task")!=null) "Save task" else "Save")
         await { data().tasks.any { it.title=="QA detailed task" } }
@@ -185,7 +185,7 @@ class QuickEntryUiTest {
         await { find("Tasks use due dates. Choose Event for a time or duration.")!=null }
         assertFalse(enabled("Add task"));screenshot("task-time-guidance")
         setText("QA ambiguous task at 3","QA cleared date tmr")
-        click("Details");click("Clear date");await { find("No due date")!=null }
+        click("More options");click("Clear date");await { find("No due date")!=null }
         click("Add task");await { data().tasks.any { it.title=="QA cleared date" } }
         assertNull(data().tasks.single { it.title=="QA cleared date" }.dueDate)
         assertEquals(before.items,data().items)
@@ -194,14 +194,14 @@ class QuickEntryUiTest {
     }
     @Test fun naturalRangeAndLocationSaveThroughDirectAndFullEditorPaths()=runBlocking {
         start();setText("","QA natural lunch in 3 days 2pm–3:30pm at Riverside Cafe")
-        click("Details");reveal { find("Location: Riverside Cafe")!=null };screenshot("natural-range-location")
+        click("More options");reveal { find("Location: Riverside Cafe")!=null };screenshot("natural-range-location")
         click("Add event");await { data().items.any { it.title=="QA natural lunch" } }
         val direct=data().items.single { it.title=="QA natural lunch" }
         assertEquals(LocalDate.now().plusDays(3),direct.date)
         assertEquals(java.time.LocalTime.of(14,0),direct.startTime)
         assertEquals(90,direct.durationMinutes);assertEquals("Riverside Cafe",direct.location)
         click("Quick entry");setText("","QA natural study tomorrow 3pm for 1h 30m at Library")
-        click("Details");click("More details");reveal { find("Discard")!=null };click("Save")
+        click("More options");click("Open in full editor");reveal { find("Discard")!=null };click("Save")
         await { data().items.any { it.title=="QA natural study" } }
         val detailed=data().items.single { it.title=="QA natural study" }
         assertEquals(90,detailed.durationMinutes);assertEquals("Library",detailed.location)

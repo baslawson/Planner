@@ -129,7 +129,7 @@ class QuickReviewUiTest {
         assertEquals(date,saved.date);assertEquals(java.time.LocalTime.of(15,0),saved.startTime)
     }
     @Test fun keepInTitleSurvivesTypingAndCanBeUndone()=runBlocking {
-        start();click("Task");setText("","QA discuss Friday tomorrow");click("Details")
+        start();click("Task");setText("","QA discuss Friday tomorrow");click("More options")
         click("Adjust recognised text");click("Date: Friday");click("Keep in title")
         await { find("QA discuss Friday")!=null };screenshot("kept-title")
         setText("QA discuss Friday tomorrow","QA discuss Friday tomorrow please")
@@ -163,7 +163,7 @@ class QuickReviewUiTest {
     @Test fun moreDetailsRetainsRepeatCountAndSeededReminder()=runBlocking {
         val date=LocalDate.now().plusDays(3)
         start();setText("","QA repeat editor $date noon every month remind me 1 hour before for 2 occurrences")
-        click("Details");click("More details");reveal { find("Discard")!=null }
+        click("More options");click("Open in full editor");reveal { find("Discard")!=null }
         val draft=EditorDraftStore(context).read()!!
         assertEquals("2",draft.getJSONObject("state").getString("count"))
         assertEquals("MONTHLY",draft.getJSONObject("state").getString("repeat"))
@@ -191,7 +191,7 @@ class QuickReviewUiTest {
         start();setText("","QA past warning $past 3pm remind me 30 minutes before")
         reveal { find("This reminder time has passed. Change the date or time, or remove the reminder.")!=null }
         assertEquals(before,data().items.size)
-        click("Details");click("Remove reminder")
+        click("More options");click("Remove reminder")
         reveal { find("This date or time is in the past.")!=null };screenshot("past-warning")
         click("Move to tomorrow");click("Add event")
         await { data().items.any { it.title=="QA past warning" } }
@@ -200,7 +200,7 @@ class QuickReviewUiTest {
     }
     @Test fun keepPlaceInTitlePreservesTheChosenTime()=runBlocking {
         start();setText("","QA keep place in 3 days at 3 at Cafe every week remind me 30 minutes before for 3 occurrences")
-        click("3 PM");click("Details");setText("3","2");click("Remove reminder")
+        click("3 PM");click("More options");setText("3","2");click("Remove reminder")
         click("Adjust recognised text");click("Place: at Cafe");click("Keep in title")
         assertNull(find("3 PM"))
         click("Add 2 events");await { data().items.count { it.title=="QA keep place at Cafe" }==2 }

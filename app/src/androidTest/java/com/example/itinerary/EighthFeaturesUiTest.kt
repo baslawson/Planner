@@ -92,7 +92,7 @@ class EighthFeaturesUiTest {
         val before=data().items.size
         open();click("Quick entry");setText("","QA dentist Tuesday 3 pm")
         await { find("QA dentist")!=null };screenshot("quick-entry-preview")
-        click("More details")
+        click("Open in full editor")
         assertEquals(before,data().items.size)
         click("Save")
         await { data().items.any { it.title=="QA dentist" } }

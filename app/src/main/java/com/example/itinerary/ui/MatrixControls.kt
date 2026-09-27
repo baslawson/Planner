@@ -1,6 +1,7 @@
 package com.example.itinerary.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -37,6 +38,27 @@ fun MatrixOutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, ena
 fun MatrixTextButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit) {
     TextButton(onClick, modifier, enabled, colors = matrixButtonColors(), border = matrixBorder(enabled), content = content)
+}
+
+/** The one main action in a dialog: filled, so it stands out from the outlined controls around it. */
+@Composable
+fun MatrixPrimaryButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit) {
+    Button(onClick, modifier, enabled, colors = ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
+        disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (com.example.itinerary.ui.theme.LocalHighContrast.current) 0.6f else 0.38f)),
+        content = content)
+}
+
+/** Low-emphasis actions beside a primary one, or links that open more options: no border or fill. */
+@Composable
+fun MatrixQuietButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding, content: @Composable RowScope.() -> Unit) {
+    TextButton(onClick, modifier, enabled, contentPadding = contentPadding, colors = ButtonDefaults.textButtonColors(
+        contentColor = MaterialTheme.colorScheme.primary,
+        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (com.example.itinerary.ui.theme.LocalHighContrast.current) 0.6f else 0.38f)),
+        content = content)
 }
 
 @Composable

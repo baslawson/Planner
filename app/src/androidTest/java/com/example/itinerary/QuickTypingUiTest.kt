@@ -121,7 +121,7 @@ class QuickTypingUiTest {
         start();setText("","QA Green Bin every two week")
         await { find("Add 12 events")!=null }
         screenshot("fortnightly-recognised")
-        click("Details");setText("12","2");click("Add 2 events")
+        click("More options");setText("12","2");click("Add 2 events")
         if(find("Add anyway")!=null)click("Add anyway")
         await { data().items.count { it.title=="QA Green Bin" }==2 }
         val items=data().items.filter { it.title=="QA Green Bin" }.sortedBy { it.date }
@@ -147,7 +147,7 @@ class QuickTypingUiTest {
         start()
         val raw="QA retained 03/04/2030 at 3 every week remind me 30 minutes before for 3 occurrences"
         setText("",raw);click(LocalDate.of(2030,4,3).fullLabel());click("3 PM")
-        click("Details");setText("3","2");click("Remove reminder")
+        click("More options");setText("3","2");click("Remove reminder")
         setText(raw,raw.replace("QA retained","QA retained check-up"))
         ins.runOnMainSync {
             androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()

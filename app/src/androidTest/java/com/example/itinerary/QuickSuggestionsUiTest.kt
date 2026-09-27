@@ -163,7 +163,7 @@ class QuickSuggestionsUiTest {
         val first=generateSequence(LocalDate.now()) { it.plusDays(1) }.first { it.dayOfWeek.value<=5 }
         assertEquals(generateSequence(first) { it.plusDays(1) }.filter { it.dayOfWeek.value<=5 }.take(4).toList(),saved.map { it.date })
         assertTrue(saved.all { it.repeatRule=="WEEKDAYS" && it.seriesId!=null && it.startTime==LocalTime.of(9,0) })
-        click("Quick entry");setText("","QA editor repeat tomorrow 10am");click("Details");click("More details")
+        click("Quick entry");setText("","QA editor repeat tomorrow 10am");click("More options");click("Open in full editor")
         reveal { find("Does not repeat")!=null };click("Does not repeat")
         click("Weekdays");reveal { find("Monday to Friday. A weekend start moves to the following Monday.")!=null }
         screenshot("editor-weekdays");click("Discard")
