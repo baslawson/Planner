@@ -65,7 +65,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val categoryCounts by vm.categoryCounts.collectAsStateWithLifecycle()
     val hiddenCategories by vm.hiddenCategories.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ItineraryItem?>(null) }
-    var showMore by remember { mutableStateOf(false) }
+    val moreMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
 
@@ -88,119 +88,108 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
     PlanningToolDialogs(planningTools, onEvent = { editing = it })
 
-    Scaffold(
-        bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
-        topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    Box(Modifier.padding(start = 12.dp, end = 8.dp)) {
-                        ViewModeToggle(agendaSelected = false, onSwitch = onAgenda)
-                    }
-                },
-                title = {
-                    HeadingText(
-                        "CALENDAR",
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                actions = {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Filled.Search, contentDescription = "Search")
-                    }
-                    Box {
-                        IconButton(onClick = { showMore = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        Box(Modifier.padding(start = 12.dp, end = 8.dp)) {
+                            ViewModeToggle(agendaSelected = false, onSwitch = onAgenda)
                         }
-                        DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
-                            PlanningToolMenuItems(planningTools) { showMore = false }
-                            DropdownMenuItem(text = { Text("Themes") },
-                                leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },
-                                onClick = { showMore = false; showThemes = true })
-                            DropdownMenuItem(
-                                text = { Text("Settings") },
-                                leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                                onClick = { showMore = false; onOpenSettings() },
+                    },
+                    title = {
+                        HeadingText(
+                            "CALENDAR",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSearch) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search")
+                        }
+                        MoreOptionsButton(moreMenu)
+                    },
+                )
+            },
+            floatingActionButton = {
+                if (!selection.active && !selection.busy) ExtendedFloatingActionButton(
+                    onClick = {
+                        // A new event starts on the colour the fewest of that day's events use.
+                        editing = ItineraryItem(
+                            tripId = 0L,
+                            date = selected,
+                            startTime = null,
+                            title = "",
+                            // Events with a colour of their own don't use up a palette colour.
+                            colorIndex = PlanColors.next(
+                                dayItems.filter { it.customColor == null }.map { it.colorIndex },
+                                PlanColors.EVENT_COUNT,
+                            ),
+                        )
+                    },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("Add event") },
+                    modifier = Modifier.border(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.primary, androidx.compose.material3.FloatingActionButtonDefaults.extendedFabShape),
+                )
+            },
+        ) { inner ->
+            // The calendar and day header stay put; only the event list below them scrolls.
+            Column(Modifier.fillMaxSize().padding(inner)) {
+                MonthCalendar(
+                    month = month,
+                    selected = selected,
+                    datesWithItems = datesWithItems,
+                    collapsed = calendarCollapsed,
+                    onSelect = vm::select,
+                    onMonthChange = vm::showMonth,
+                )
+                // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
+                val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
+                CalendarToggleBar(
+                    collapsed = calendarCollapsed,
+                    showToday = showToday,
+                    onToday = {
+                        vm.select(LocalDate.now())
+                        vm.showMonth(YearMonth.now())
+                    },
+                    onToggle = {
+                        // Opening the full month should land on the month of the day being viewed.
+                        if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
+                        vm.setCalendarCollapsed(!calendarCollapsed)
+                    },
+                )
+                DayHeader(date = selected)
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
+                    if (dayItems.isEmpty()) {
+                        item {
+                            Text(
+                                "Nothing planned for this day. Tap Add event to start.",
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                },
-            )
-        },
-        floatingActionButton = {
-            if (!selection.active && !selection.busy) ExtendedFloatingActionButton(
-                onClick = {
-                    // A new event starts on the colour the fewest of that day's events use.
-                    editing = ItineraryItem(
-                        tripId = 0L,
-                        date = selected,
-                        startTime = null,
-                        title = "",
-                        // Events with a colour of their own don't use up a palette colour.
-                        colorIndex = PlanColors.next(
-                            dayItems.filter { it.customColor == null }.map { it.colorIndex },
-                            PlanColors.EVENT_COUNT,
-                        ),
-                    )
-                },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add event") },
-                modifier = Modifier.border(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.primary, androidx.compose.material3.FloatingActionButtonDefaults.extendedFabShape),
-            )
-        },
-    ) { inner ->
-        // The calendar and day header stay put; only the event list below them scrolls.
-        Column(Modifier.fillMaxSize().padding(inner)) {
-            MonthCalendar(
-                month = month,
-                selected = selected,
-                datesWithItems = datesWithItems,
-                collapsed = calendarCollapsed,
-                onSelect = vm::select,
-                onMonthChange = vm::showMonth,
-            )
-            // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
-            val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
-            CalendarToggleBar(
-                collapsed = calendarCollapsed,
-                showToday = showToday,
-                onToday = {
-                    vm.select(LocalDate.now())
-                    vm.showMonth(YearMonth.now())
-                },
-                onToggle = {
-                    // Opening the full month should land on the month of the day being viewed.
-                    if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
-                    vm.setCalendarCollapsed(!calendarCollapsed)
-                },
-            )
-            DayHeader(date = selected)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
-                if (dayItems.isEmpty()) {
-                    item {
-                        Text(
-                            "Nothing planned for this day. Tap Add event to start.",
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    items(dayItems, key = { it.id }) { item ->
+                        if (item.category == "Bills") BillTaskCard(item.billTaskSummary(), today, selection) { editing = item }
+                        else ItemRow(
+                            item = item,
+                            selection = selection,
+                            attachmentCount = attachmentsByItem[item.id]?.size ?: 0,
+                            today = today,
+                            displayedDate = selected,
+                            onMove = { vm.moveToTomorrow(item.id) },
+                            reminderCount = remindersByItem[item.id]?.size ?: 0
+                        ) { if (selection.active) selection.toggle(item.id) else editing = item }
                     }
-                }
-                items(dayItems, key = { it.id }) { item ->
-                    if (item.category == "Bills") BillTaskCard(item.billTaskSummary(), today, selection) { editing = item }
-                    else ItemRow(
-                        item = item,
-                        selection = selection,
-                        attachmentCount = attachmentsByItem[item.id]?.size ?: 0,
-                        today = today,
-                        displayedDate = selected,
-                        onMove = { vm.moveToTomorrow(item.id) },
-                        reminderCount = remindersByItem[item.id]?.size ?: 0
-                    ) { if (selection.active) selection.toggle(item.id) else editing = item }
                 }
             }
         }
+        // Drawn above the screen; see OverlayMenu.kt for why it is not a DropdownMenu.
+        MoreOptionsMenu(moreMenu, planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings)
     }
 
     editing?.let { current ->

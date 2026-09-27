@@ -108,7 +108,7 @@ fun AgendaScreen(
 
     // Kept across rotation and while another screen is on top, so coming back finds the agenda as it was left.
     var showSettings by rememberSaveable { mutableStateOf(value = false) }
-    var showMore by remember { mutableStateOf(false) }
+    val moreMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
     var addMenuOpen by rememberSaveable { mutableStateOf(false) }
@@ -194,22 +194,7 @@ fun AgendaScreen(
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        Box {
-                            IconButton(onClick = { showMore = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
-                            }
-                            DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
-                            PlanningToolMenuItems(planningTools) { showMore = false }
-                            DropdownMenuItem(text = { Text("Themes") },
-                                leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },
-                                onClick = { showMore = false; showThemes = true })
-                                DropdownMenuItem(
-                                    text = { Text("Settings") },
-                                    leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                                    onClick = { showMore = false; showSettings = true },
-                                )
-                            }
-                        }
+                        MoreOptionsButton(moreMenu)
                     },
                 )
             },
@@ -348,6 +333,8 @@ fun AgendaScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
             )
         }
+        // Drawn above the screen and the + button; see OverlayMenu.kt for why it is not a DropdownMenu.
+        MoreOptionsMenu(moreMenu, planningTools, onThemes = { showThemes = true }, onSettings = { showSettings = true })
 
         fun quickEvent(suggestion: com.example.itinerary.data.QuickEntrySuggestion) = ItineraryItem(
             tripId = 0L, title = suggestion.title, date = suggestion.date, startTime = suggestion.time,
