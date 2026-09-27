@@ -33,7 +33,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 [Download the APK](https://github.com/baslawson/Planner/releases/latest), or install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
-<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" height="60" alt="Get it on Obtainium"></a>
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
 Release tags match the app's version (tag `v0.1.4` is version 0.1.4), so Obtainium can tell when an update is available.
 
