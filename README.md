@@ -1,4 +1,4 @@
-# Planner
+# <img src="docs/images/planner-icon.svg" width="64" height="64" alt="Planner app icon"> Planner
 
 An offline-first Android planner built with Kotlin and Jetpack Compose.
 
@@ -8,6 +8,20 @@ An offline-first Android planner built with Kotlin and Jetpack Compose.
 - Reminders, recurring entries, calendar invitation import and free-time search.
 - Document and bill scanning with cropping and on-device text recognition.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
+
+## Screenshots
+
+Screenshots from the app using fictional demo entries. Shown in the Matrix Green theme.
+
+| Agenda | Calendar |
+| :---: | :---: |
+| <img src="docs/images/agenda.png" width="280" alt="Agenda with sample tasks and timed events"> | <img src="docs/images/calendar.png" width="280" alt="Month calendar with sample events"> |
+
+| Quick entry | Find free time |
+| :---: | :---: |
+| <img src="docs/images/quick-entry.png" width="280" alt="Offline Quick entry recognizing a date, time and duration from a sentence"> | <img src="docs/images/find-free-time.png" width="280" alt="Find free time showing available gaps between sample events"> |
+
+[Download the APK](https://github.com/baslawson/Planner/releases) (repository access required).
 
 ## Build and run
 
