@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Planner</string>
+    <string name="shortcut_add_event">Add event</string>
+    <string name="shortcut_add_bill">Add bill</string>
+    <string name="shortcut_scan">Scan document</string>
+</resources>

@@ -1,0 +1,321 @@
+package com.example.itinerary.ui
+
+import androidx.compose.runtime.*
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.example.itinerary.ItineraryApp
+import java.time.LocalDate
+
+// Goes back from [entry], but only while it is the screen being shown. A second quick tap on a back arrow lands on
+// the screen that is already animating away; without this it would pop the screen underneath as well and leave the
+// app blank. The first screen is never popped.
+private fun NavController.popFrom(entry: NavBackStackEntry) {
+    if (entry.lifecycle.currentState == Lifecycle.State.RESUMED && previousBackStackEntry != null) popBackStack()
+}
+
+// Goes to [route] from [entry], but only while it is the screen being shown. A second quick tap on an event row (or on
+// the search icon) lands on the screen that is already animating away; without this it would push a second copy of the
+// destination, so one tap on back would appear to do nothing. launchSingleTop is a second guard, for when both taps
+// aim at the same destination.
+private fun NavController.navigateFrom(entry: NavBackStackEntry, route: String) {
+    if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
+        navigate(route) { launchSingleTop = true }
+    }
+}
+
+private const val CALENDAR_ROUTE = "calendar?date={date}"
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isViewSwitch(): Boolean {
+    val from = initialState.destination.route
+    val to = targetState.destination.route
+    return (from == "agenda" && to == CALENDAR_ROUTE) || (from == CALENDAR_ROUTE && to == "agenda")
+}
+
+private fun NavController.openCalendar(entry: NavBackStackEntry, date: LocalDate? = null) {
+    if (entry.lifecycle.currentState != Lifecycle.State.RESUMED) return
+    // Explicit event dates must never restore an older cached Calendar destination.
+    if (date != null) clearBackStack(CALENDAR_ROUTE)
+    navigate(if (date == null) "calendar" else "calendar?date=$date") {
+        launchSingleTop = true
+        restoreState = date == null
+    }
+}
+
+@Composable
+fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}) {
+    val nav = rememberNavController()
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) }
+    if (widgetTaskId != null) {
+        val widgetTasks by app.repository.tasks.collectAsStateWithLifecycle(initialValue = null)
+        val task = widgetTasks?.find { it.id == widgetTaskId }
+        if (task != null) PlanningOverlay(onWidgetTaskOpened) { TaskEditor(task, false, onWidgetTaskOpened) }
+        else if (widgetTasks != null) AlertDialog(onDismissRequest = onWidgetTaskOpened,
+            title = { Text("Task unavailable") }, text = { Text("This task may have been deleted.") },
+            confirmButton = { TextButton(onClick = onWidgetTaskOpened) { Text("Close") } })
+    }
+    var viewRestored by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(nav) {
+        nav.currentBackStackEntryFlow.collect { entry ->
+            val route = entry.destination.route
+            if (!viewRestored) {
+                viewRestored = true
+                // Keep Agenda underneath Calendar so Back and the toggle still work.
+                // Explicit widget dates take priority over the saved view/date.
+                if (route == "agenda" && app.settings.lastViewCalendar && widgetDate == null) {
+                    nav.navigate("calendar") { launchSingleTop = true }
+                    return@collect
+                }
+            }
+            when (route) {
+                "agenda" -> app.settings.lastViewCalendar = false
+                "calendar?date={date}" -> app.settings.lastViewCalendar = true
+            }
+        }
+    }
+    var recovered by remember { mutableStateOf(runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }.getOrNull()) }
+
+    var shortcutItem by remember { mutableStateOf<com.example.itinerary.data.ItineraryItem?>(null) }
+    var shortcutScan by remember { mutableStateOf(false) }
+    if (calendarUri != null) CalendarImportDialog(initialUri = calendarUri, onDismiss = onCalendarOpened)
+    var draftChecked by remember { mutableStateOf(recovered == null) }
+    LaunchedEffect(Unit) {
+        val token = recovered?.optString("token")?.takeIf { it.isNotEmpty() }
+        if (token != null && app.repository.snapshot().items.any { it.draftToken == token }) {
+            // The transaction committed before the old process could remove its draft journal.
+            com.example.itinerary.data.EditorDraftStore(app).clear()
+            java.io.File(app.filesDir, "draft-scan").deleteRecursively()
+            recovered = null
+        }
+        draftChecked = true
+    }
+
+    // The agenda owns event, backup and settings state.
+    val tripsFactory = viewModelFactory {
+        initializer { TripsViewModel(app.repository, app.settings, app.backup, app.nextcloudBackups) }
+    }
+
+    val pending by app.repository.pendingDeletions.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val next = pending.firstOrNull()
+    LaunchedEffect(next?.token) {
+        while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
+            try {
+                val result = snackbar.showSnackbar(
+                    message = if (next.tasks.isNotEmpty()) "Task deleted" else if (next.items.size == 1) "Event deleted" else "${next.items.size} events deleted",
+                    actionLabel = "Undo",
+                    withDismissAction = true,
+                    duration = SnackbarDuration.Long,
+                )
+                withContext(NonCancellable) {
+                    if (result == SnackbarResult.ActionPerformed) app.repository.undoDeletion(next.token)
+                    else app.repository.finishDeletion(next.token)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                Toast.makeText(app, "Couldn't undo deletion. Try Undo again.", Toast.LENGTH_LONG).show()
+                // Offer the same Undo again if storage temporarily failed.
+            }
+        }
+    }
+    val moves by app.repository.pendingMoves.collectAsStateWithLifecycle()
+    val nextMove = moves.firstOrNull()
+    // Deletion Undo gets priority. Cancelling this effect leaves a move available until it can be shown.
+    LaunchedEffect(nextMove?.token, pending.isNotEmpty()) {
+        if (pending.isEmpty() && nextMove != null) {
+            while (app.repository.pendingMoves.value.any { it.token == nextMove.token }) {
+                try {
+                    val result = snackbar.showSnackbar("Moved ${nextMove.title} to tomorrow", actionLabel = "Undo",
+                        withDismissAction = true, duration = SnackbarDuration.Long)
+                    withContext(NonCancellable) {
+                        if (result == SnackbarResult.ActionPerformed) {
+                            if (!app.repository.undoMove(nextMove.token))
+                                Toast.makeText(app, "The event was changed or deleted, so its date wasn't undone.", Toast.LENGTH_LONG).show()
+                        } else app.repository.finishMove(nextMove.token)
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { Toast.makeText(app, "Couldn't undo the move. Try Undo again.", Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+    val payments by app.repository.pendingPayments.collectAsStateWithLifecycle()
+    val payment = payments.firstOrNull()
+    LaunchedEffect(payment?.token, pending.isNotEmpty(), moves.isNotEmpty()) {
+        if (payment != null && pending.isEmpty() && moves.isEmpty()) {
+            val result = snackbar.showSnackbar(
+                "${payment.before.title} marked ${if (payment.paid) "paid" else "unpaid"}",
+                actionLabel = "Undo", withDismissAction = true, duration = SnackbarDuration.Long)
+            withContext(NonCancellable) {
+                try {
+                    if (result == SnackbarResult.ActionPerformed) {
+                        if (!app.repository.undoPayment(payment.token))
+                            Toast.makeText(app, "This bill changed; payment was not undone.", Toast.LENGTH_LONG).show()
+                    } else app.repository.finishPayment(payment.token)
+                } catch (_: Exception) {
+                    app.repository.finishPayment(payment.token)
+                    Toast.makeText(app, "Couldn't undo payment. Please check the bill.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+    val maintenanceIssues by app.repository.maintenanceIssues.collectAsStateWithLifecycle()
+    LaunchedEffect(maintenanceIssues) {
+        if (maintenanceIssues.isNotEmpty()) {
+            do {
+                val description = app.repository.maintenanceIssues.value.map {
+                    when (it) { "reminders" -> "reminders"; "widget" -> "the home-screen widget"; else -> "unused attachment cleanup" }
+                }.joinToString(" and ")
+                val result = snackbar.showSnackbar(
+                    "Your data is saved. Couldn't update $description.",
+                    actionLabel = "Retry", withDismissAction = true, duration = SnackbarDuration.Long)
+                if (result != SnackbarResult.ActionPerformed) break
+                app.repository.retryMaintenance()
+            } while (app.repository.maintenanceIssues.value.isNotEmpty())
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        NavHost(navController = nav, startDestination = "agenda") {
+            composable(
+                "agenda",
+                enterTransition = { if (isViewSwitch()) EnterTransition.None else null },
+                exitTransition = { if (isViewSwitch()) ExitTransition.None else null },
+                popEnterTransition = { if (isViewSwitch()) EnterTransition.None else null },
+                popExitTransition = { if (isViewSwitch()) ExitTransition.None else null },
+            ) { entry ->
+                val vm: TripsViewModel = viewModel(factory = tripsFactory)
+                AgendaScreen(
+                    vm = vm,
+                    // Opens the shared calendar on the event date.
+                    onOpenEvent = { date -> nav.openCalendar(entry, date) },
+                    onOpenSearch = { nav.navigateFrom(entry, "search") },
+                    onOpenCalendar = { nav.openCalendar(entry) },
+                )
+            }
+            composable("search") { entry ->
+                val vm: SearchViewModel = viewModel(
+                    factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings) } },
+                )
+                SearchScreen(
+                    vm = vm,
+                    onBack = { nav.popFrom(entry) },
+                    onOpenResult = { date -> nav.openCalendar(entry, date) },
+                )
+            }
+            composable(
+                route = CALENDAR_ROUTE,
+                enterTransition = { if (isViewSwitch()) EnterTransition.None else null },
+                exitTransition = { if (isViewSwitch()) ExitTransition.None else null },
+                popEnterTransition = { if (isViewSwitch()) EnterTransition.None else null },
+                popExitTransition = { if (isViewSwitch()) ExitTransition.None else null },
+                arguments = listOf(
+                    navArgument("date") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
+                val startDate = entry.arguments?.getString("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                val vm: ItineraryViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { ItineraryViewModel(app.repository, app.settings, startDate, createSavedStateHandle()) }
+                    },
+                )
+                var showSettings by rememberSaveable { mutableStateOf(false) }
+                var settingsOpened by rememberSaveable { mutableStateOf(false) }
+                Box(Modifier.fillMaxSize()) {
+                    ItineraryScreen(
+                        vm = vm,
+                        onOpenSettings = { settingsOpened = true; showSettings = true },
+                        onOpenSearch = { nav.navigateFrom(entry, "search") },
+                        onAgenda = {
+                            if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
+                                // Save just Calendar, not a Search screen that may sit underneath it.
+                                nav.popBackStack(CALENDAR_ROUTE, inclusive = true, saveState = true)
+                                nav.popBackStack("agenda", inclusive = false)
+                            }
+                        },
+                    )
+                    // Once opened, keep the host for outstanding picker/backup results even after closing it.
+                    if (settingsOpened) {
+                        val settingsVm: TripsViewModel = viewModel(factory = tripsFactory)
+                        SettingsHost(vm = settingsVm, show = showSettings, onDismiss = { showSettings = false })
+                    }
+                }
+            }
+        }
+        LaunchedEffect(widgetDate) {
+            widgetDate?.let { date ->
+                nav.clearBackStack(CALENDAR_ROUTE)
+                nav.navigate("calendar?date=$date") {
+                    popUpTo("agenda")
+                }
+                onWidgetOpened()
+            }
+        }
+        LaunchedEffect(entryAction, draftChecked) {
+            if (entryAction != null && draftChecked) {
+                val existingDraft = runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }
+                if (existingDraft.isFailure || existingDraft.getOrNull() != null || recovered != null || shortcutItem != null) {
+                    Toast.makeText(app, "Finish or discard your current draft before using a shortcut.", Toast.LENGTH_LONG).show()
+                } else if (com.example.itinerary.EntryShortcuts.accepts(entryAction)) {
+                    shortcutScan = entryAction == com.example.itinerary.EntryShortcuts.SCAN
+                    shortcutItem = com.example.itinerary.data.ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null,
+                        title = "", category = if (entryAction == com.example.itinerary.EntryShortcuts.ADD_BILL) "Bills" else "Other")
+                }
+                onEntryOpened()
+            }
+        }
+        shortcutItem?.let { item ->
+            val vm: TripsViewModel = viewModel(key = "shortcut-editor", factory = tripsFactory)
+            val counts by vm.categoryCounts.collectAsStateWithLifecycle()
+            val hidden by vm.hiddenCategories.collectAsStateWithLifecycle()
+            ItemEditorSheet(initial = item, existingAttachments = emptyList(), existingReminders = emptyList(),
+                categoryCounts = counts, hiddenCategories = hidden, onRemoveCategories = vm::removeCategories,
+                onShowCategory = vm::showCategory, onDismiss = { shortcutItem = null }, startWithScan = shortcutScan,
+                onSave = { event, added, removed, ar, rr, options -> vm.saveEvent(event, added, removed, ar, rr, options) },
+                onDelete = { _, _ -> })
+        }
+        if (draftChecked) recovered?.let { draft ->
+            val vm: TripsViewModel = viewModel(key = "draft-recovery", factory = tripsFactory)
+            val counts by vm.categoryCounts.collectAsStateWithLifecycle()
+            val hidden by vm.hiddenCategories.collectAsStateWithLifecycle()
+            ItemEditorSheet(
+                initial = com.example.itinerary.data.DraftCodec.item(draft.getJSONObject("initial")),
+                existingAttachments = com.example.itinerary.data.DraftCodec.attachments(draft.optJSONArray("existingAttachments")),
+                existingReminders = com.example.itinerary.data.DraftCodec.reminders(draft.optJSONArray("existingReminders")),
+                categoryCounts = counts, hiddenCategories = hidden, onRemoveCategories = vm::removeCategories,
+                onShowCategory = vm::showCategory, onDismiss = { recovered = null },
+                onSave = { item, added, removed, ar, rr, options -> vm.saveEvent(item, added, removed, ar, rr, options) },
+                onDelete = { item, series -> app.repository.deleteWithUndo(item, series) })
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(8.dp))
+    }
+
+}

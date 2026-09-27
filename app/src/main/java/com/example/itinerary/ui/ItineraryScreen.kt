@@ -1,0 +1,309 @@
+package com.example.itinerary.ui
+import androidx.compose.foundation.border
+import com.example.itinerary.ui.MatrixIconButton as IconButton
+
+import com.example.itinerary.data.billTaskSummary
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.ui.res.painterResource
+import com.example.itinerary.R
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.itinerary.data.ItineraryItem
+import com.example.itinerary.data.PlanColors
+import java.time.LocalDate
+import java.time.YearMonth
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: () -> Unit, onOpenSettings: () -> Unit) {
+    val today = rememberCurrentDate()
+    val allItems by vm.items.collectAsStateWithLifecycle()
+    val selected by vm.selected.collectAsStateWithLifecycle()
+    val month by vm.month.collectAsStateWithLifecycle()
+    val calendarCollapsed by vm.calendarCollapsed.collectAsStateWithLifecycle()
+    val allAttachments by vm.attachments.collectAsStateWithLifecycle()
+    val allReminders by vm.reminders.collectAsStateWithLifecycle()
+    val categoryCounts by vm.categoryCounts.collectAsStateWithLifecycle()
+    val hiddenCategories by vm.hiddenCategories.collectAsStateWithLifecycle()
+    var editing by remember { mutableStateOf<ItineraryItem?>(null) }
+    var showMore by remember { mutableStateOf(false) }
+    var showThemes by remember { mutableStateOf(false) }
+    val planningTools = remember { PlanningToolsState() }
+
+    val attachmentsByItem = remember(allAttachments) { allAttachments.groupBy { it.itemId } }
+    val remindersByItem = remember(allReminders) { allReminders.groupBy { it.itemId } }
+    val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
+    val selectable = remember(dayItems) { dayItems.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
+    val selection = rememberEventSelection(selectable)
+    val datesWithItems = remember(allItems) {
+        buildSet {
+            allItems.forEach { event ->
+                add(event.date)
+                if (event.category != "Bills" && event.startTime != null && event.durationMinutes != null &&
+                    event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong()) > event.date.plusDays(1).atStartOfDay()) add(event.date.plusDays(1))
+            }
+        }
+    }
+
+
+    if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
+    PlanningToolDialogs(planningTools, onEvent = { editing = it })
+
+    Scaffold(
+        bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    Box(Modifier.padding(start = 12.dp, end = 8.dp)) {
+                        ViewModeToggle(agendaSelected = false, onSwitch = onAgenda)
+                    }
+                },
+                title = {
+                    HeadingText(
+                        "CALENDAR",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                actions = {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search")
+                    }
+                    Box {
+                        IconButton(onClick = { showMore = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                            PlanningToolMenuItems(planningTools) { showMore = false }
+                            DropdownMenuItem(text = { Text("Themes") },
+                                leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },
+                                onClick = { showMore = false; showThemes = true })
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                                onClick = { showMore = false; onOpenSettings() },
+                            )
+                        }
+                    }
+                },
+            )
+        },
+        floatingActionButton = {
+            if (!selection.active && !selection.busy) ExtendedFloatingActionButton(
+                onClick = {
+                    // A new event starts on the colour the fewest of that day's events use.
+                    editing = ItineraryItem(
+                        tripId = 0L,
+                        date = selected,
+                        startTime = null,
+                        title = "",
+                        // Events with a colour of their own don't use up a palette colour.
+                        colorIndex = PlanColors.next(
+                            dayItems.filter { it.customColor == null }.map { it.colorIndex },
+                            PlanColors.EVENT_COUNT,
+                        ),
+                    )
+                },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Add event") },
+                modifier = Modifier.border(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.primary, androidx.compose.material3.FloatingActionButtonDefaults.extendedFabShape),
+            )
+        },
+    ) { inner ->
+        // The calendar and day header stay put; only the event list below them scrolls.
+        Column(Modifier.fillMaxSize().padding(inner)) {
+            MonthCalendar(
+                month = month,
+                selected = selected,
+                datesWithItems = datesWithItems,
+                collapsed = calendarCollapsed,
+                onSelect = vm::select,
+                onMonthChange = vm::showMonth,
+            )
+            // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
+            val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
+            CalendarToggleBar(
+                collapsed = calendarCollapsed,
+                showToday = showToday,
+                onToday = {
+                    vm.select(LocalDate.now())
+                    vm.showMonth(YearMonth.now())
+                },
+                onToggle = {
+                    // Opening the full month should land on the month of the day being viewed.
+                    if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
+                    vm.setCalendarCollapsed(!calendarCollapsed)
+                },
+            )
+            DayHeader(date = selected)
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
+                if (dayItems.isEmpty()) {
+                    item {
+                        Text(
+                            "Nothing planned for this day. Tap Add event to start.",
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(dayItems, key = { it.id }) { item ->
+                    if (item.category == "Bills") BillTaskCard(item.billTaskSummary(), today, selection) { editing = item }
+                    else ItemRow(
+                        item = item,
+                        selection = selection,
+                        attachmentCount = attachmentsByItem[item.id]?.size ?: 0,
+                        today = today,
+                        displayedDate = selected,
+                        onMove = { vm.moveToTomorrow(item.id) },
+                        reminderCount = remindersByItem[item.id]?.size ?: 0
+                    ) { if (selection.active) selection.toggle(item.id) else editing = item }
+                }
+            }
+        }
+    }
+
+    editing?.let { current ->
+        ItemEditorSheet(
+            initial = current,
+            existingAttachments = attachmentsByItem[current.id].orEmpty(),
+            existingReminders = remindersByItem[current.id].orEmpty(),
+            categoryCounts = categoryCounts,
+            hiddenCategories = hiddenCategories,
+            onRemoveCategories = vm::removeCategories,
+            onShowCategory = vm::showCategory,
+            onDismiss = { editing = null; planningTools.eventEditorDismissed() },
+            onSave = { item, added, removed, addedReminders, removedReminders, options ->
+                vm.saveItem(item, added, removed, addedReminders, removedReminders, options)
+                planningTools.eventSaved()
+                // If the event moved to another day, follow it so it doesn't seem to have vanished.
+                if (item.date != selected) {
+                    vm.select(item.date)
+                    vm.showMonth(YearMonth.from(item.date))
+                }
+            },
+            onDelete = vm::deleteItem,
+        )
+    }
+}
+
+@Composable
+private fun DayHeader(date: LocalDate) {
+    HeadingText(
+        date.dayLabel(LocalDateFormat.current),
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+    )
+}
+
+@Composable
+private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCount: Int, reminderCount: Int, today: LocalDate, displayedDate: LocalDate, onMove: suspend () -> Unit, onClick: () -> Unit) {
+    // The event's own colour: the bar as it is, the title in a shade that reads well on the current theme.
+    val accent = item.accentColor()
+    TappableRow(onClick = onClick, onLongClick = { selection.toggle(item.id) },
+        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.width(76.dp),
+        )
+        Box(
+            Modifier
+                .width(4.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(2.dp))
+                .background(accent),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            EventTitle(androidx.compose.ui.text.AnnotatedString(item.title), readableOnSurface(accent), item.category == "Bills")
+            if (item.skipped) Text("Skipped · reminders paused", style = MaterialTheme.typography.labelMedium)
+            if (item.category == "Bills" && item.billAmountMinor != null) Text(com.example.itinerary.data.Bills.format(item.billAmountMinor, item.billCurrency), style = MaterialTheme.typography.bodyMedium)
+            if (item.category == "Bills") {
+                BillStatus(item.paid)
+                BillBalance(item.billAmountMinor, item.billCurrency, item.paid, item.payments)
+                OverdueBill(item.date, item.paid, item.skipped, today)
+            }
+            if (item.linkedTaskId != null) Text("Task time block", style = MaterialTheme.typography.labelSmall)
+            if (item.checklist.isNotEmpty()) Text(checklistProgress(item.checklist), style = MaterialTheme.typography.bodySmall)
+            if (item.durationMinutes != null && item.startTime != null) Text(
+                eventEndLabel(item.date, item.startTime, item.durationMinutes, LocalTimeFormat.current, LocalContext.current, displayedDate),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (item.location.isNotBlank()) {
+                Text(
+                    item.location,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (item.notes.isNotBlank()) {
+                Text(
+                    item.notes,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (attachmentCount > 0 || reminderCount > 0) {
+                val badges = buildList {
+                    if (attachmentCount > 0) add("📎 $attachmentCount")
+                    if (reminderCount > 0) add("⏰ $reminderCount")
+                }
+                Text(
+                    badges.joinToString("  "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        val context = LocalContext.current
+        val format = LocalTimeFormat.current
+        if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
+        else EventActionsMenu(item.id, item.title, item.date, today, onMove,
+            billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
+            repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped,
+            onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) })
+    }
+}

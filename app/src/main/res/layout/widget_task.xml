@@ -1,0 +1,12 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+    <TextView android:id="@+id/widget_task_done" android:layout_width="48dp" android:layout_height="48dp"
+        android:gravity="center" android:text="☐" android:textSize="26sp" android:textColor="#A5E5DC" />
+    <LinearLayout android:id="@+id/widget_task_open" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingTop="6dp" android:paddingBottom="6dp">
+        <TextView android:id="@+id/widget_task_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#FFFFFF" android:textSize="16sp" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/widget_task_due" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="#C4D2D0" android:textSize="13sp" android:maxLines="2" android:ellipsize="end" />
+    </LinearLayout>
+</LinearLayout>

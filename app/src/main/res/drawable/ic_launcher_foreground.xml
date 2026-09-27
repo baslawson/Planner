@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A spiral-bound planner: white cover, coil rings down the spine, a title bar, page lines and a saffron bookmark.
+     Everything sits inside the 66dp centre of the 108dp canvas, the area every icon mask keeps visible. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Cover -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,27 H69 A5,5 0 0 1 74,32 V76 A5,5 0 0 1 69,81 H39 A5,5 0 0 1 34,76 V32 A5,5 0 0 1 39,27 Z" />
+
+    <!-- Spine -->
+    <path
+        android:fillColor="#CDEBE7"
+        android:pathData="M39,27 H43 V81 H39 A5,5 0 0 1 34,76 V32 A5,5 0 0 1 39,27 Z" />
+
+    <!-- Title bar and page lines -->
+    <path
+        android:fillColor="#0E6E6E"
+        android:pathData="M48,33 H58 A1.7,1.7 0 0 1 58,36.4 H48 A1.7,1.7 0 0 1 48,33 Z" />
+    <path
+        android:fillColor="#B7D8D4"
+        android:pathData="M48,46 H68 V47.8 H48 Z M48,53 H68 V54.8 H48 Z M48,60 H68 V61.8 H48 Z M48,67 H61 V68.8 H48 Z" />
+
+    <!-- Bookmark ribbon -->
+    <path
+        android:fillColor="#F2A93B"
+        android:pathData="M63,27 H69 V44 L66,41 L63,44 Z" />
+
+    <!-- Coil rings, drawn last so they cross the spine -->
+    <path
+        android:fillColor="#0B4F4F"
+        android:pathData="M33,34.3 H45 A1.7,1.7 0 0 1 45,37.7 H33 A1.7,1.7 0 0 1 33,34.3 Z
+                          M33,43.3 H45 A1.7,1.7 0 0 1 45,46.7 H33 A1.7,1.7 0 0 1 33,43.3 Z
+                          M33,52.3 H45 A1.7,1.7 0 0 1 45,55.7 H33 A1.7,1.7 0 0 1 33,52.3 Z
+                          M33,61.3 H45 A1.7,1.7 0 0 1 45,64.7 H33 A1.7,1.7 0 0 1 33,61.3 Z
+                          M33,70.3 H45 A1.7,1.7 0 0 1 45,73.7 H33 A1.7,1.7 0 0 1 33,70.3 Z" />
+</vector>

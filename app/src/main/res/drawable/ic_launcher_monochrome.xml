@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-colour version of the planner for Android 13+ themed icons: outline instead of fills, so it stays readable. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Cover outline -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.4"
+        android:pathData="M39,27 H69 A5,5 0 0 1 74,32 V76 A5,5 0 0 1 69,81 H39 A5,5 0 0 1 34,76 V32 A5,5 0 0 1 39,27 Z" />
+
+    <!-- Title bar, page lines and bookmark -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M48,33 H58 A1.7,1.7 0 0 1 58,36.4 H48 A1.7,1.7 0 0 1 48,33 Z
+                          M48,46 H68 V47.8 H48 Z M48,53 H68 V54.8 H48 Z M48,60 H68 V61.8 H48 Z M48,67 H61 V68.8 H48 Z
+                          M63,27 H69 V44 L66,41 L63,44 Z" />
+
+    <!-- Coil rings -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M33,34.3 H45 A1.7,1.7 0 0 1 45,37.7 H33 A1.7,1.7 0 0 1 33,34.3 Z
+                          M33,43.3 H45 A1.7,1.7 0 0 1 45,46.7 H33 A1.7,1.7 0 0 1 33,43.3 Z
+                          M33,52.3 H45 A1.7,1.7 0 0 1 45,55.7 H33 A1.7,1.7 0 0 1 33,52.3 Z
+                          M33,61.3 H45 A1.7,1.7 0 0 1 45,64.7 H33 A1.7,1.7 0 0 1 33,61.3 Z
+                          M33,70.3 H45 A1.7,1.7 0 0 1 45,73.7 H33 A1.7,1.7 0 0 1 33,70.3 Z" />
+</vector>

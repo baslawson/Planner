@@ -1,0 +1,7 @@
+<resources>
+    <string name="widget_today">Planner · Today</string>
+    <string name="widget_refresh">Refresh today’s events</string>
+    <string name="widget_empty">Nothing planned today.</string>
+    <string name="widget_open">Open today’s calendar</string>
+    <string name="widget_description">Today’s events and due tasks. Complete tasks from your home screen.</string>
+</resources>

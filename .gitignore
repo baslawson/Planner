@@ -1,0 +1,46 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Generated output and machine-specific state
+**/build/
+.kotlin/
+/APK/
+/qa/
+*.apk
+*.aab
+/.claude/
+/.codex/
+/.agents/
+
+# Local working history and obsolete deployment template
+/NOTES.md
+/CLAUDE.md
+/GEMINI.md
+/compose.yaml
+
+# Credentials, signing material and device data
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+secrets.properties
+google-services.json
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.tar
+*.tar.gz
+*.zip

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="attachments" path="attachments/" />
+    <files-path name="draft_scan" path="draft-scan/" />
+    <cache-path name="manual_scans" path="manual-scans/" />
+</paths>

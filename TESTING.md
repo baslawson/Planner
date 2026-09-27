@@ -1,0 +1,178 @@
+# Testing Planner: a checklist
+
+**Current build entry point:** use `./gradlew :app:assembleDebug :app:testDebugUnitTest`
+(`gradlew.bat` on Windows). The historical machine-specific recipes below predate the wrapper.
+Local `NOTES.md`, QA captures and device backups are intentionally excluded from Git; see README.md
+for portable setup. Use a disposable emulator for device tests.
+
+For whoever is checking a change works — a person, or an assistant driving the emulator. `NOTES.md` says what the app
+is and what has been tested; this says **how** to test it so the result can be trusted.
+
+Written 20 Sep 2026 out of what actually went wrong during a day's testing. Every rule below is here because ignoring
+it produced a wrong answer at least once.
+
+---
+
+## The five rules
+
+### 1. Prove the test can fail before you trust it passing
+The most dangerous result is a green one from a method you never validated.
+
+A real example: to test whether a config change destroys the editor, "Don't keep activities" was switched on with
+`settings put global always_finish_activities 1`. It read back as `1`. The scan came through fine. That nearly got
+reported as "the bug does not reproduce" — but the setting was **not in effect** (ActivityManager caches it; the
+`settings put` route does not work). Pressing HOME and relaunching showed the editor surviving when it should have
+been destroyed, which proved the method was broken, not the app healthy.
+
+So: before believing "X did not happen", show that your setup *can* make X happen. If you cannot, say the case is
+**untested** rather than passing.
+
+### 2. "It compiled" is not "it ran" is not "it persisted"
+Three different claims, three different proofs:
+
+- **Compiled** — check the task list, not just `BUILD SUCCESSFUL`. A build reporting every task `UP-TO-DATE` compiled
+  nothing. Look for `kspDebugKotlin` and `compileDebugKotlin` actually executing.
+- **Ran** — the feature did something on screen, observed in a screenshot or the accessibility tree.
+- **Persisted** — survived `am force-stop` (with the process confirmed gone) *and* a cold relaunch. An item visible on
+  screen is not a saved item.
+
+### 3. Prefer evidence that is not the thing you are testing
+Screenshots can mislead; independent facts do not.
+
+- `firstInstallTime` unchanged proves an install preserved data, where "the list looks the same" does not.
+- `itinerary.db-wal` byte count unchanged proves nothing was written.
+- A SHA-256 match proves an APK copy, where a size match does not.
+- A PDF **rendering** in a viewer proves the file is valid; "an app opened it" only proves an app accepted it.
+
+### 4. Re-read the screen before every tap
+Coordinates go stale between steps. Real mis-taps from one session: the on-screen keyboard shifted a dialog upward so
+a "Pick dates" tap landed on the colour swatches; the scanner's auto-capture moved on to the review screen so a
+"shutter" tap hit the Filters row. Dump or screenshot first, tap second — and after any layout change (keyboard,
+rotation, font size), dump again.
+
+### 5. Write down what you did **not** check
+A report that lists only successes is not trustworthy. Name the cases you could not reach and why — no real phone, a
+path that never ran, a message never actually seen. `NOTES.md` keeps a "Not tested" line in every section for this.
+
+---
+
+## Before you touch the emulator
+
+The user drives this emulator by hand as well. **Ask before driving it, and leave it as you found it.**
+
+Record anything you are about to change so you can put it back — app data, and any system setting
+(`font_scale`, `accelerometer_rotation`, `user_rotation`, `always_finish_activities`).
+
+---
+
+## Recipes
+
+These historical PowerShell examples use environment variables. Set `JAVA_HOME` to your installed JDK 21 directory; see README.md for the current build instructions.
+
+```
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+$env:JAVA_HOME = "<path-to-jdk-21>"
+```
+
+### Build, copy, install
+The original workflow used an unpacked `gradle.bat`; use the checked-in wrapper now, then copy to `Downloads\Planner.apk` and
+**verify the copy by hash**, not by size:
+
+```
+& "<gradle.bat path>" :app:assembleDebug --console=plain
+Copy-Item $src $dst -Force
+(Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash
+& $adb -s emulator-5554 install -r $dst
+```
+
+Expect exactly two warnings, both `VIBRATOR_SERVICE` deprecations in `AlarmService.kt`. Anything else is new.
+
+To confirm the running app is the binary you think it is, compare `md5sum` on the device
+(`adb shell pm path com.example.itinerary`) against the local file.
+
+### Screenshot
+Read `exec-out screencap` as a **raw byte stream**. Letting PowerShell redirect it into a file corrupts the PNG, and
+writing to `/sdcard` then deleting invites a blocked `rm`:
+
+```
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $adb; $psi.Arguments = "-s emulator-5554 exec-out screencap -p"
+$psi.RedirectStandardOutput = $true; $psi.UseShellExecute = $false
+$p = [System.Diagnostics.Process]::Start($psi)
+$ms = New-Object System.IO.MemoryStream
+$p.StandardOutput.BaseStream.CopyTo($ms); $p.WaitForExit()
+[System.IO.File]::WriteAllBytes($path, $ms.ToArray())
+```
+
+### Coordinates
+The screen is **1440x3120**. Do not assume a scale factor — check the one your viewer reports (a capture shown at
+923x2000 needs **1.56**). Better still, take bounds from the accessibility tree rather than reading them off a picture:
+
+```
+& $adb -s emulator-5554 shell uiautomator dump /sdcard/ui.xml
+& $adb -s emulator-5554 shell cat /sdcard/ui.xml
+```
+
+Parse `bounds="[x1,y1][x2,y2]"` and tap the centre. The dump fails transiently ("null root node") — retry a few times.
+Clean up afterwards with `adb shell rm -f /sdcard/ui.xml` as its own command.
+
+### Back up and restore app data — do this before ANY test that saves
+```
+& $adb -s emulator-5554 shell am force-stop com.example.itinerary
+& $adb -s emulator-5554 shell run-as com.example.itinerary mkdir -p files/bk
+# copy all three: itinerary.db, itinerary.db-wal, itinerary.db-shm
+& $adb -s emulator-5554 shell run-as com.example.itinerary cp databases/itinerary.db files/bk/itinerary.db
+```
+Restore by copying back the other way, then remove the folder
+(`find files/bk -type f -delete`, then `rmdir files/bk`).
+
+Skipping this means the database cannot be returned byte-for-byte, which happened once and had to be admitted in the
+write-up. Deleting test data through the app afterwards restores the *contents* but not the file.
+
+### Check for crashes
+```
+& $adb -s emulator-5554 shell logcat -d -b crash | Select-String 'itinerary'
+```
+Filter to the package. `/vendor/bin/hw/android.hardware.uwb-service` crash-loops with SIGABRT every 5 seconds on this
+emulator; it is a vendor HAL and nothing to do with Planner. Do not report it as an app crash.
+
+### Force a configuration change
+Font scale is the reliable trigger; rotation is **not**, because the Play Services scanner is portrait-locked and
+`user_rotation` gets reverted:
+```
+& $adb -s emulator-5554 shell settings put system font_scale 1.15   # then back to 1.0
+```
+
+### If the emulator freezes on startup
+`adb devices` stuck `offline`, processes alive and `Responding`, `bootcompleted.ini` still 0 bytes: it is hanging on
+the Quick Boot snapshot. Stop it, then **Cold Boot** from Android Studio's Device Manager — Cold Boot keeps data,
+**"Wipe Data" destroys it**. After a hard kill, clear the stale `hardware-qemu.ini.lock` (a directory holding a `pid`
+file — check that pid is dead first) and `multiinstance.lock` from the AVD folder. Full detail in `NOTES.md`.
+
+### Driving the UI: known traps
+- `input text` stops at the first **space**. Use one word, or `%s`.
+- The keyboard shifts dialogs upward, invalidating earlier dumps.
+- The document scanner defaults to **Auto capture**, so a scripted shutter tap often lands on the review screen's
+  Filters row. Check for "Next" in a dump first; if the filter panel opens, "Apply" backs out harmlessly.
+- The harness blocks some commands containing `rm`. Keep `rm -f <path>` as its own `adb shell` command.
+- `find /sdcard -name <file> -delete` silently fails on `/sdcard`, though it works on the app's own `databases`.
+
+---
+
+## Finishing up
+
+- [ ] Test data deleted through the app, and the database restored from your backup.
+- [ ] The `files/bk` folder removed.
+- [ ] `files/attachments` back to empty (or to whatever it held before).
+- [ ] Every system setting you changed put back — check by reading it, not by remembering.
+- [ ] Any file you pushed to `/sdcard` deleted, confirmed with `ls`.
+- [ ] `logcat -b crash` clean for the package.
+- [ ] The app left on the screen you found it on.
+- [ ] `NOTES.md` updated: what changed, what was tested, and what was **not**.
+- [ ] `Downloads\Planner.apk` refreshed and hash-verified if the build changed.
+
+## Reporting
+
+Say what was checked and how it was proven. Then say plainly what was not covered, and why — an unreached case is a
+normal outcome, a case quietly omitted is not. If a slip happened while testing (a mis-tap, a script that stopped
+early), record it as a testing slip rather than an app fault, so the next person does not chase it.

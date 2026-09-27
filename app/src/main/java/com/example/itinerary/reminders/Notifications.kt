@@ -1,0 +1,140 @@
+package com.example.itinerary.reminders
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Settings
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.example.itinerary.ItineraryApp
+import com.example.itinerary.MainActivity
+import com.example.itinerary.R
+import com.example.itinerary.ui.label
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+const val REMINDER_CHANNEL_ID = "reminders"
+
+// Reminder ids start at 1, so 0 can never collide with a real reminder's notification.
+private const val TEST_NOTIFICATION_ID = 0
+
+// Ringing alarms play their own looping sound from AlarmService, so the channel itself is silent.
+const val ALARM_CHANNEL_ID = "alarms"
+
+fun createReminderChannel(context: Context) {
+    val manager = context.getSystemService(NotificationManager::class.java)
+    manager.createNotificationChannel(
+        NotificationChannel(REMINDER_CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Reminders for your events, tasks and bills"
+        },
+    )
+    manager.createNotificationChannel(
+        NotificationChannel(ALARM_CHANNEL_ID, "Ringing alarms", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Alarms that keep ringing until you stop them"
+            setSound(null, null)
+            enableVibration(false)
+        },
+    )
+}
+
+class ReminderContent(val title: String, val text: String, val subText: String)
+
+// Builds what a reminder says from the extras that ReminderScheduler put in its intent.
+fun reminderContent(context: Context, extras: Bundle?): ReminderContent? {
+    extras ?: return null
+    val title = extras.getString(ReminderScheduler.EXTRA_TITLE) ?: return null
+    val location = extras.getString(ReminderScheduler.EXTRA_LOCATION).orEmpty()
+    val date = extras.getString(ReminderScheduler.EXTRA_DATE)?.let(LocalDate::parse) ?: return null
+    val time = extras.getString(ReminderScheduler.EXTRA_TIME)
+        ?.takeIf { it.isNotEmpty() }
+        ?.let(LocalTime::parse)
+
+    val timeFormat = (context.applicationContext as ItineraryApp).settings.timeFormat.value
+    val dayText = date.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
+    val whenText = if (extras.getBoolean(ReminderScheduler.EXTRA_BILL, false))
+        "Due $dayText${time?.let { ", ${it.label(timeFormat, context)}" }.orEmpty()}"
+    else "$dayText, ${time?.label(timeFormat, context) ?: "all day"}"
+    val text = if (location.isBlank()) whenText else "$whenText · $location"
+    return ReminderContent(title, text, extras.getString(ReminderScheduler.EXTRA_OFFSET_LABEL).orEmpty())
+}
+
+// False when the permission was refused, notifications are off for the app, or the user muted our channel.
+fun notificationsEnabled(context: Context): Boolean {
+    if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+    val channel = context.getSystemService(NotificationManager::class.java).getNotificationChannel(REMINDER_CHANNEL_ID)
+    if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) return false
+    return true
+}
+
+// Returns false if it could not be shown because notifications are off.
+fun postReminderNotification(
+    context: Context,
+    notificationId: Int,
+    title: String,
+    text: String,
+    subText: String,
+    reminderId: Long? = null,
+    billToken: String? = null,
+    snoozeToken: String? = null,
+): Boolean {
+    if (!notificationsEnabled(context)) return false
+    val open = PendingIntent.getActivity(
+        context,
+        notificationId,
+        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setSubText(subText)
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        .setContentIntent(open)
+        .apply {
+            if (reminderId != null && reminderId > 0) {
+                if (billToken != null) addAction(0, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))
+                if (snoozeToken != null) addAction(0, "Snooze", SnoozeActivity.action(context, reminderId, snoozeToken))
+            }
+        }
+        .build()
+    return try {
+        NotificationManagerCompat.from(context).notify(notificationId, notification)
+        true
+    } catch (e: SecurityException) {
+        false
+    }
+}
+
+fun sendTestNotification(context: Context): Boolean =
+    postReminderNotification(
+        context,
+        TEST_NOTIFICATION_ID,
+        title = "Test notification",
+        text = "Your reminders will look like this.",
+        subText = "Just now",
+    )
+
+fun openNotificationSettings(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+}
+
+// Where battery use ("Unrestricted") can be changed for this app.
+fun openAppSettings(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+}
