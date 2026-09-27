@@ -29,7 +29,13 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 | :---: | :---: |
 | <img src="docs/images/quick-entry.png" width="280" alt="Offline Quick entry recognizing a date, time and duration from a sentence"> | <img src="docs/images/find-free-time.png" width="280" alt="Find free time showing available gaps between sample events"> |
 
-[Download the APK](https://github.com/baslawson/Planner/releases).
+## Download
+
+[Download the APK](https://github.com/baslawson/Planner/releases/latest), or install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
+
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" height="60" alt="Get it on Obtainium"></a>
+
+Release tags match the app's version (tag `v0.1.4` is version 0.1.4), so Obtainium can tell when an update is available.
 
 ## Build and run
 
