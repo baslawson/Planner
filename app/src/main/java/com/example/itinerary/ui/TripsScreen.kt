@@ -61,6 +61,8 @@ fun TripsScreen(
     onOpenSearch: () -> Unit,
     onBack: (() -> Unit)? = null,
 ) {
+    // Plan cards open their ⋮ menu through this, drawn above the whole screen.
+    val overlayMenu = remember { OverlayMenuState() }
     // Null until the database has answered; the screen stays blank until then rather than flashing "No plans yet".
     val loadedTrips by vm.trips.collectAsStateWithLifecycle()
     val trips = loadedTrips.orEmpty()
@@ -119,7 +121,7 @@ fun TripsScreen(
         if (trips.isEmpty() && !deletingPlans) cancelSelection()
     }
 
-    Box(Modifier.fillMaxSize()) {
+    OverlayMenuScreen(overlayMenu) {
     Scaffold(
         topBar = {
             TopAppBar(

@@ -108,7 +108,7 @@ fun AgendaScreen(
 
     // Kept across rotation and while another screen is on top, so coming back finds the agenda as it was left.
     var showSettings by rememberSaveable { mutableStateOf(value = false) }
-    val moreMenu = remember { OverlayMenuState() }
+    val overlayMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
     var addMenuOpen by rememberSaveable { mutableStateOf(false) }
@@ -173,7 +173,7 @@ fun AgendaScreen(
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
     PlanningToolDialogs(planningTools, onEvent = { adding = it })
 
-    Box(Modifier.fillMaxSize()) {
+    OverlayMenuScreen(overlayMenu) {
         Scaffold(
             bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
             topBar = {
@@ -194,7 +194,7 @@ fun AgendaScreen(
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        MoreOptionsButton(moreMenu)
+                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = { showSettings = true })
                     },
                 )
             },
@@ -333,8 +333,6 @@ fun AgendaScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
             )
         }
-        // Drawn above the screen and the + button; see OverlayMenu.kt for why it is not a DropdownMenu.
-        MoreOptionsMenu(moreMenu, planningTools, onThemes = { showThemes = true }, onSettings = { showSettings = true })
 
         fun quickEvent(suggestion: com.example.itinerary.data.QuickEntrySuggestion) = ItineraryItem(
             tripId = 0L, title = suggestion.title, date = suggestion.date, startTime = suggestion.time,

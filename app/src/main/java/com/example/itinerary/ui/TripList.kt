@@ -349,7 +349,6 @@ private fun TripRow(
     onMoveToTop: () -> Unit,
     onMoveToBottom: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(value = false) }
     var suppressHoldClick by remember { mutableStateOf(false) }
     // Each plan has its own colour: a bar down the left edge (drawn in the row's left padding, so the text
     // stays where it was) and a soft tint behind the row.
@@ -414,24 +413,23 @@ private fun TripRow(
                 modifier = Modifier.semantics { contentDescription = "Select ${trip.name}" },
             )
         }
-        Box {
-            IconButton(onClick = { menuOpen = true }) {
+        OverlayMenuAnchor(title = "Plan options", items = { close ->
+            DropdownMenuItem(text = { Text("Edit plan") }, enabled = !selectionMode,
+                onClick = { close(); onEdit() })
+            DropdownMenuItem(
+                text = { Text("Move to top") },
+                enabled = !isFirst,
+                onClick = { close(); onMoveToTop() },
+            )
+            DropdownMenuItem(
+                text = { Text("Move to bottom") },
+                enabled = !isLast,
+                onClick = { close(); onMoveToBottom() },
+            )
+            DropdownMenuItem(text = { Text("Delete plan") }, onClick = { close(); onDelete() })
+        }) { open ->
+            IconButton(onClick = open) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Plan options")
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(text = { Text("Edit plan") }, enabled = !selectionMode,
-                    onClick = { menuOpen = false; onEdit() })
-                DropdownMenuItem(
-                    text = { Text("Move to top") },
-                    enabled = !isFirst,
-                    onClick = { menuOpen = false; onMoveToTop() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Move to bottom") },
-                    enabled = !isLast,
-                    onClick = { menuOpen = false; onMoveToBottom() },
-                )
-                DropdownMenuItem(text = { Text("Delete plan") }, onClick = { menuOpen = false; onDelete() })
             }
         }
     }

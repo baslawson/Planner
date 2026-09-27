@@ -25,44 +25,61 @@ import com.example.itinerary.R
 import kotlin.math.roundToInt
 
 /**
- * A menu drawn in the screen's own window. The standard DropdownMenu opens a separate pop-up window and animates
- * in, which measured 200–300 ms on the emulator before it was fully shown; this one appears on the next frame.
+ * Menus drawn in the screen's own window. The standard DropdownMenu opens a separate pop-up window and animates
+ * in, which measured 200–300 ms on the emulator before it was fully shown; these appear on the next frame.
+ * One state per screen: the top-bar ⋮ and every card's ⋮ on that screen open their items through it.
  */
 class OverlayMenuState {
-    var open by mutableStateOf(false)
+    internal var items by mutableStateOf<(@Composable ColumnScope.() -> Unit)?>(null)
+        private set
     // Plain fields, read only when the open menu is placed, so layout changes never cause extra recompositions.
+    internal var title = ""
     internal var anchor = Rect.Zero
     internal var host = Offset.Zero
+    val open get() = items != null
+    fun show(anchor: Rect, title: String, items: @Composable ColumnScope.() -> Unit) {
+        this.anchor = anchor; this.title = title; this.items = items
+    }
+    fun close() { items = null }
 }
 
-/** Marks the button the menu drops down from. */
-fun Modifier.overlayMenuAnchor(state: OverlayMenuState) = onGloballyPositioned { state.anchor = it.boundsInWindow() }
+private val LocalOverlayMenu = staticCompositionLocalOf<OverlayMenuState?> { null }
 
-/**
- * Put this last in a Box that fills the screen, so the menu draws above everything else. It stays composed while
- * closed (an empty Box) so its position is already known on the frame the menu opens.
- */
+/** A full-screen Box whose menus draw above everything in it. Use it as the screen's outermost layout. */
 @Composable
-fun OverlayMenuHost(state: OverlayMenuState, title: String, content: @Composable ColumnScope.() -> Unit) {
+fun OverlayMenuScreen(state: OverlayMenuState, modifier: Modifier = Modifier.fillMaxSize(), content: @Composable BoxScope.() -> Unit) {
+    CompositionLocalProvider(LocalOverlayMenu provides state) {
+        Box(modifier) {
+            content()
+            OverlayMenuHost(state)
+        }
+    }
+}
+
+// Stays composed while closed (an empty Box) so its position is already known on the frame a menu opens.
+@Composable
+private fun OverlayMenuHost(state: OverlayMenuState) {
     Box(Modifier.fillMaxSize().onGloballyPositioned { state.host = it.positionInWindow() }) {
-        if (!state.open) return@Box
-        BackHandler { state.open = false }
+        val items = state.items ?: return@Box
+        BackHandler { state.close() }
         // A tap anywhere outside the menu closes it and does not reach the screen underneath.
         Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() },
-            indication = null, onClickLabel = "Close menu") { state.open = false })
+            indication = null, onClickLabel = "Close menu") { state.close() })
         val margin = with(LocalDensity.current) { 8.dp.roundToPx() }
         Layout(content = {
             Surface(shape = MenuDefaults.shape, color = MenuDefaults.containerColor,
                 tonalElevation = MenuDefaults.TonalElevation, shadowElevation = MenuDefaults.ShadowElevation,
-                modifier = Modifier.semantics { paneTitle = title }) {
-                Column(Modifier.width(IntrinsicSize.Max).padding(vertical = 8.dp), content = content)
+                modifier = Modifier.semantics { paneTitle = state.title }) {
+                Column(Modifier.width(IntrinsicSize.Max).padding(vertical = 8.dp), content = items)
             }
         }) { measurables, constraints ->
             val menu = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
             layout(constraints.maxWidth, constraints.maxHeight) {
-                // Right edge under the button's right edge, just below it, kept on screen like DropdownMenu.
+                // Right edge under the button's right edge, just below it; above it if there is no room below.
                 val right = (state.anchor.right - state.host.x).roundToInt()
-                val top = (state.anchor.bottom - state.host.y).roundToInt()
+                val below = (state.anchor.bottom - state.host.y).roundToInt()
+                val above = (state.anchor.top - state.host.y).roundToInt() - menu.height
+                val top = if (below + menu.height + margin <= constraints.maxHeight || above < margin) below else above
                 menu.place((right - menu.width).coerceIn(margin, (constraints.maxWidth - menu.width - margin).coerceAtLeast(margin)),
                     top.coerceIn(margin, (constraints.maxHeight - menu.height - margin).coerceAtLeast(margin)))
             }
@@ -70,24 +87,38 @@ fun OverlayMenuHost(state: OverlayMenuState, title: String, content: @Composable
     }
 }
 
-/** The ⋮ button in the Agenda and plan top bars. */
+private class AnchorBounds { var rect = Rect.Zero }
+
+/**
+ * Wraps a button that opens a menu: [button] gets the open action, [items] get a close action. Inside an
+ * [OverlayMenuScreen] the menu draws in-window; anywhere else it falls back to a standard DropdownMenu.
+ */
 @Composable
-fun MoreOptionsButton(state: OverlayMenuState) {
-    IconButton(onClick = { state.open = true }, modifier = Modifier.overlayMenuAnchor(state)) {
-        Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+fun OverlayMenuAnchor(title: String, items: @Composable ColumnScope.(close: () -> Unit) -> Unit, button: @Composable (open: () -> Unit) -> Unit) {
+    val state = LocalOverlayMenu.current
+    val bounds = remember { AnchorBounds() }
+    Box(Modifier.onGloballyPositioned { bounds.rect = it.boundsInWindow() }) {
+        if (state != null) button { state.show(bounds.rect, title) { items { state.close() } } }
+        else {
+            var expanded by remember { mutableStateOf(false) }
+            button { expanded = true }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { items { expanded = false } }
+        }
     }
 }
 
-/** The ⋮ menu shared by the Agenda and plan screens. */
+/** The ⋮ menu in the Agenda and Calendar top bars. */
 @Composable
-fun MoreOptionsMenu(state: OverlayMenuState, planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit) {
-    OverlayMenuHost(state, title = "More options") {
-        PlanningToolMenuItems(planningTools) { state.open = false }
+fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit) {
+    OverlayMenuAnchor(title = "More options", items = { close ->
+        PlanningToolMenuItems(planningTools) { close() }
         DropdownMenuItem(text = { Text("Themes") },
             leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },
-            onClick = { state.open = false; onThemes() })
+            onClick = { close(); onThemes() })
         DropdownMenuItem(text = { Text("Settings") },
             leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-            onClick = { state.open = false; onSettings() })
+            onClick = { close(); onSettings() })
+    }) { open ->
+        IconButton(onClick = open) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
     }
 }

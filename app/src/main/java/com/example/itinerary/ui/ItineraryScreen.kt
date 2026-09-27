@@ -65,7 +65,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val categoryCounts by vm.categoryCounts.collectAsStateWithLifecycle()
     val hiddenCategories by vm.hiddenCategories.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ItineraryItem?>(null) }
-    val moreMenu = remember { OverlayMenuState() }
+    val overlayMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
 
@@ -88,7 +88,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
     PlanningToolDialogs(planningTools, onEvent = { editing = it })
 
-    Box(Modifier.fillMaxSize()) {
+    OverlayMenuScreen(overlayMenu) {
         Scaffold(
             bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
             topBar = {
@@ -111,7 +111,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        MoreOptionsButton(moreMenu)
+                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings)
                     },
                 )
             },
@@ -188,8 +188,6 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 }
             }
         }
-        // Drawn above the screen; see OverlayMenu.kt for why it is not a DropdownMenu.
-        MoreOptionsMenu(moreMenu, planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings)
     }
 
     editing?.let { current ->

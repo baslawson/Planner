@@ -120,82 +120,86 @@ fun SearchScreen(
     }
     val selection = rememberEventSelection(selectable, prune = outcome !== SearchOutcome.LOADING)
 
-    Scaffold(
-        bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
-        topBar = {
-            TopAppBar(
-                title = { HeadingText("Search", style = MaterialTheme.typography.titleLarge) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
-    ) { inner ->
-        Column(Modifier.fillMaxSize().padding(inner).imePadding()) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search events and tasks") },
-                singleLine = true,
-                isError = outcome.invalidDates.isNotEmpty(),
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+    // Bill results open their ⋮ menu through this, drawn above the whole screen.
+    val overlayMenu = remember { OverlayMenuState() }
+    OverlayMenuScreen(overlayMenu) {
+        Scaffold(
+            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+            topBar = {
+                TopAppBar(
+                    title = { HeadingText("Search", style = MaterialTheme.typography.titleLarge) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
+                    },
+                )
+            },
+        ) { inner ->
+            Column(Modifier.fillMaxSize().padding(inner).imePadding()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search events and tasks") },
+                    singleLine = true,
+                    isError = outcome.invalidDates.isNotEmpty(),
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .focusRequester(focusRequester),
+                )
+                SavedSearchControls(query, categories, showCompleted) { saved ->
+                    query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
+                }
+                // The categories work as tags: pick one or more to narrow the search.
+                Row(
+                    Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    categoryChips.forEach { category ->
+                        FilterChip(
+                            selected = category in categories,
+                            onClick = {
+                                categories = if (category in categories) categories - category else categories + category
+                            },
+                            label = { Text(category) },
+                        )
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .focusRequester(focusRequester),
-            )
-            SavedSearchControls(query, categories, showCompleted) { saved ->
-                query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
-            }
-            // The categories work as tags: pick one or more to narrow the search.
-            Row(
-                Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                categoryChips.forEach { category ->
-                    FilterChip(
-                        selected = category in categories,
-                        onClick = {
-                            categories = if (category in categories) categories - category else categories + category
-                        },
-                        label = { Text(category) },
+                }
+                if (tasks.any { it.done } || (categoryCounts["Bills"] ?: 0) > 0) FilterChip(selected = showCompleted, enabled = !selection.active,
+                    onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") }, modifier = Modifier.padding(horizontal = 16.dp))
+                if (outcome.dateLabels.isNotEmpty()) {
+                    Text(
+                        "Date: " + outcome.dateLabels.joinToString(" or "),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-            if (tasks.any { it.done } || (categoryCounts["Bills"] ?: 0) > 0) FilterChip(selected = showCompleted, enabled = !selection.active,
-                onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") }, modifier = Modifier.padding(horizontal = 16.dp))
-            if (outcome.dateLabels.isNotEmpty()) {
-                Text(
-                    "Date: " + outcome.dateLabels.joinToString(" or "),
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
 
-            when {
-                searching && outcome === SearchOutcome.LOADING -> Hint("Searching…")
-                outcome.invalidDates.isNotEmpty() -> Hint(
-                    (if (outcome.invalidDates.size == 1) "Invalid date: " else "Invalid dates: ") +
-                        outcome.invalidDates.joinToString(", ") + ". Check the year, month and day.",
-                    isError = true,
-                )
-                !searching -> Hint(
-                    "Search tasks, event titles, places, notes, attachment names and recognised document text. " +
-                        "Try words like tomorrow, next friday or 12 june, or pick a category above.",
-                )
-                visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> Hint("Nothing found. Try fewer words or check the spelling.")
-                else -> Results(visibleOutcome, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
+                when {
+                    searching && outcome === SearchOutcome.LOADING -> Hint("Searching…")
+                    outcome.invalidDates.isNotEmpty() -> Hint(
+                        (if (outcome.invalidDates.size == 1) "Invalid date: " else "Invalid dates: ") +
+                            outcome.invalidDates.joinToString(", ") + ". Check the year, month and day.",
+                        isError = true,
+                    )
+                    !searching -> Hint(
+                        "Search tasks, event titles, places, notes, attachment names and recognised document text. " +
+                            "Try words like tomorrow, next friday or 12 june, or pick a category above.",
+                    )
+                    visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> Hint("Nothing found. Try fewer words or check the spelling.")
+                    else -> Results(visibleOutcome, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
+                }
             }
         }
     }
