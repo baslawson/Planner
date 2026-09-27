@@ -124,7 +124,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     // Device-local master AI permission; provider keys are stored separately.
-    private val _aiFeaturesEnabled = MutableStateFlow(prefs.getBoolean("ai_features_enabled", true))
+    // Off until the person turns it on; their choice is saved and kept from then on.
+    private val _aiFeaturesEnabled = MutableStateFlow(prefs.getBoolean("ai_features_enabled", false))
     val aiFeaturesEnabled = _aiFeaturesEnabled.asStateFlow()
     fun setAiFeaturesEnabled(value: Boolean) {
         check(prefs.edit().putBoolean("ai_features_enabled", value).commit()) { "Couldn't save AI preference. Try again." }
