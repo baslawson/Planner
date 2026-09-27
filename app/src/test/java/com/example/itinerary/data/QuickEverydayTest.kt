@@ -69,7 +69,7 @@ class QuickEverydayTest {
         val input=QuickInput(raw,baseDate=today,timeOverride="18:30")
         assertEquals("18:30",input.edited("Dinner with Sam tomorrow evening").timeOverride)
         assertNull(input.edited("Dinner tomorrow morning").timeOverride)
-        val rows=QuickBatch.review("Dinner tomorrow evening\nDentist in two days 3pm",today,emptyList())
-        assertNotNull(rows[0].input.suggestion().error);assertNull(rows[1].input.suggestion().error)
+        assertNotNull(QuickInput("Dinner tomorrow evening",baseDate=today).suggestion().error)
+        assertNull(QuickInput("Dentist in two days 3pm",baseDate=today).suggestion().error)
     }
 }

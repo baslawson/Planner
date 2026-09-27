@@ -186,18 +186,6 @@ class QuickAiUiTest {
         val request=geminiContext(server.takeRequest().body.readUtf8())
         assertEquals("3pm",request.getJSONArray("answers").getJSONObject(0).getString("answer"))
     }
-    @Test fun multipleAiUsesExistingReviewAndSavesSelectedTypes() {
-        start();click("Paste multiple entries")
-        val a="QA gym tomorrow afternoon";val b="QA buy apples next week";setText("",a+"\n"+b)
-        response(listOf(entry(a,"QA AI batch gym"),entry(b,"QA AI batch apples",true)))
-        click("Understand with AI");await { find("Review entries")!=null };screenshot("ai-batch-review")
-        assertTrue(data().items.none { it.title=="QA AI batch gym" })
-        click("Edit entry 2");setText("QA AI batch apples","QA AI batch pears");click("Done")
-        click("Close");click("Quick entry");click("Add selected")
-        if(find("Add anyway")!=null)click("Add anyway")
-        await { data().items.any { it.title=="QA AI batch gym" } && data().tasks.any { it.title=="QA AI batch pears" } }
-        assertEquals(1,data().items.count { it.title=="QA AI batch gym" });assertEquals(1,data().tasks.count { it.title=="QA AI batch pears" })
-    }
     @Test fun networkFailureKeepsDraftAndOfflineSaveAvailable() {
         start();val raw="QA offline after AI tomorrow 4pm";setText("",raw)
         server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(429).setBody("quota"))
@@ -209,15 +197,11 @@ class QuickAiUiTest {
         await { data().items.any { it.title=="QA offline after AI" } }
         assertEquals(1,server.requestCount)
     }
-    @Test fun closingOrChangingModeCannotApplyPendingAi() {
+    @Test fun closingCannotApplyPendingAi() {
         start();val raw="QA close tomorrow 4pm";setText("",raw)
         response(listOf(entry(raw)),1500);click("Understand with AI");await { server.requestCount==1 }
         click("Close");click("Quick entry");Thread.sleep(1800)
         assertNull(find("Entry title"));assertTrue(nodes().any { it.isEditable && it.text?.toString()==raw })
-        response(listOf(entry(raw)),1500);click("Understand with AI");await { server.requestCount==2 }
-        click("Paste multiple entries");Thread.sleep(1800)
-        assertFalse(QuickDraftStore(context).read()!!.reviewing)
-        assertTrue(QuickDraftStore(context).read()!!.rows.isEmpty())
     }
     @Test fun personalKeySetupUsesOnlyMasterSwitchAndCanReplaceKeyWithoutSending() {
         start();setText("","QA private text tomorrow");click("AI provider: Gemini")
@@ -258,7 +242,7 @@ class QuickAiUiTest {
         assertNotNull(app.quickAiConnectionStore.load(QuickAiProvider.GEMINI))
     }
 
-    @Test fun masterSwitchInSettingsHidesSingleAndBatchAiAndKeepsKeys() {
+    @Test fun masterSwitchInSettingsHidesAiAndKeepsKeys() {
         start();click("Close");click("More options");click("Settings")
         click("Enable AI features")
         await { !app.settings.aiFeaturesEnabled.value }
@@ -268,9 +252,7 @@ class QuickAiUiTest {
         setText("","QA offline only tomorrow 3pm")
         assertNull(find("Understand with AI"));assertNull(find("Set up AI assistance"));assertNull(find("AI provider: Gemini"))
         screenshot("master-off-single")
-        click("Paste multiple entries")
-        assertNull(find("Understand with AI"));assertNull(find("Set up AI assistance"))
-        click("Back to single entry");click("Add event")
+        click("Add event")
         if(find("Add anyway")!=null)click("Add anyway")
         await { data().items.any { it.title == "QA offline only" } }
         assertNotNull(app.quickAiConnectionStore.load())

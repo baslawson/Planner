@@ -27,11 +27,84 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.itinerary.data.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZonedDateTime
+
+/** Quick entry with its private draft: kept across closing, cleared once the entry is added. */
+@Composable
+fun QuickEntryDialog(
+    today: LocalDate, onDismiss: () -> Unit,
+    onAdd: suspend (QuickEntrySuggestion, Boolean, String) -> Unit,
+    onReview: (QuickEntrySuggestion, Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val repository = (context.applicationContext as com.example.itinerary.ItineraryApp).repository
+    val store = remember { QuickDraftStore(context) }
+    val loaded = remember { runCatching { store.read() } }
+    var draft by remember { mutableStateOf(loaded.getOrNull() ?: QuickDraft(QuickInput(baseDate = today))) }
+    var error by remember { mutableStateOf(if (loaded.isFailure) "Couldn't read the previous draft. Close and retry, or discard it to start again." else null) }
+    var loadFailed by remember { mutableStateOf(loaded.isFailure) }
+    var generation by rememberSaveable { mutableStateOf(0) }
+    var discard by remember { mutableStateOf(false) }
+    var warnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var permission by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    fun update(next: QuickDraft) {
+        if (next == draft || loadFailed) return
+        try { store.write(next); draft = next; error = null }
+        catch (_: Exception) { error = "Couldn't keep this draft. Free some storage and try again." }
+    }
+    suspend fun confirm(candidate: QuickCandidate): Boolean {
+        val snapshot = repository.snapshot()
+        val found = withContext(Dispatchers.Default) { quickConflicts(listOf(candidate), snapshot.items, snapshot.tasks) }
+        if (found.isEmpty()) return true
+        warnings = found
+        val answer = CompletableDeferred<Boolean>()
+        permission = answer
+        return try { answer.await() } finally { permission = null; warnings = emptyList() }
+    }
+    if (loadFailed) {
+        AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = onDismiss, title = { Text("Quick entry draft") }, text = { Text(error.orEmpty()) },
+            confirmButton = { TextButton(onClick = { discard = true }) { Text("Discard draft") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+    } else key(generation) {
+        QuickEntryEditor(draft.single.baseDate, onDismiss = onDismiss,
+            onAdd = { suggestion, task, token ->
+                if (!confirm(QuickCandidate(token, suggestion, task))) throw QuickSaveCancelled()
+                require(suggestion.quickProblem(task, ZonedDateTime.now()) == null)
+                onAdd(suggestion, task, token)
+                store.clear()
+                android.widget.Toast.makeText(context, if (task) "Task added" else "Event added", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onReview = { s, t -> store.clear(); onReview(s, t) },
+            onContinue = { task ->
+                val next = QuickDraft(QuickInput(task = task, baseDate = LocalDate.now()))
+                store.write(next); draft = next
+                generation++
+            },
+            onDiscard = { discard = true },
+            initial = draft.single, inputBlocked = error != null, onInput = { input -> update(QuickDraft(input)) },
+            modeControls = { if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error) })
+    }
+    if (permission != null) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { permission?.complete(false) }, title = { Text("Check before adding") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("This entry may duplicate or overlap your plans. You can go back to edit it.")
+            warnings.forEach { Text(it) }
+        } }, confirmButton = { TextButton(onClick = { permission?.complete(true) }) { Text("Add anyway") } },
+        dismissButton = { TextButton(onClick = { permission?.complete(false) }) { Text("Go back") } })
+    if (discard) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { discard = false }, title = { Text("Discard quick entry draft?") },
+        text = { Text("Unfinished text will be removed. Entries already saved stay in your planner.") },
+        confirmButton = { TextButton(onClick = {
+            try { store.clear(); generation++; draft = QuickDraft(QuickInput(baseDate = today)); loadFailed = false; error = null; discard = false }
+            catch (_: Exception) { error = "Couldn't discard the draft. Try again."; discard = false }
+        }) { Text("Discard") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep draft") } })
+}
+
+internal class QuickSaveCancelled : Exception()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -42,7 +115,6 @@ fun QuickEntryEditor(
     onReview: (QuickEntrySuggestion, Boolean) -> Unit,
     initial: QuickInput = QuickInput(baseDate = today),
     onInput: (QuickInput) -> Unit = {},
-    batchRow: Boolean = false,
     onContinue: ((Boolean) -> Unit)? = null,
     onDiscard: (() -> Unit)? = null,
     inputBlocked: Boolean = false,
@@ -50,6 +122,9 @@ fun QuickEntryEditor(
 ) {
     var field by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initial.text, TextRange(initial.text.length))) }
     val text = field.text
+    // Optional title box: its words are always the title. Empty, the when box works as the single entry box.
+    var titleField by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initial.title, TextRange(initial.title.length))) }
+    val title = titleField.text
     var aiJson by rememberSaveable { mutableStateOf(initial.ai?.json()?.toString()) }
     val ai = remember(aiJson) { aiJson?.let { QuickAiEntry.decodeDraft(org.json.JSONObject(it)) } }
     var aiBusy by remember { mutableStateOf(false) }
@@ -71,15 +146,15 @@ fun QuickEntryEditor(
     var timeOverride by rememberSaveable { mutableStateOf(initial.timeOverride) }
     var countText by rememberSaveable { mutableStateOf(initial.countText) }
     var removeReminder by rememberSaveable { mutableStateOf(initial.removeReminder) }
-    val saveToken = rememberSaveable(text, task, literalKey, dateOverride, timeOverride, countText, removeReminder, durationText, aiJson) { java.util.UUID.randomUUID().toString() }
+    val saveToken = rememberSaveable(text, title, task, literalKey, dateOverride, timeOverride, countText, removeReminder, durationText, aiJson) { java.util.UUID.randomUUID().toString() }
     var pickingDate by rememberSaveable { mutableStateOf(false) }
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var showPhrases by rememberSaveable { mutableStateOf(false) }
     var selectedPhrase by remember { mutableStateOf<QuickEntryPhrase?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var saveError by remember(text, task) { mutableStateOf<String?>(null) }
-    val parsed = remember(text, literalKey, today) { QuickEntry.parse(text, today, literalRanges) }
-    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, today, durationText, ai)
+    var saveError by remember(text, title, task) { mutableStateOf<String?>(null) }
+    val parsed = remember(text, title, literalKey, today) { QuickInput(text, literals = literalRanges, baseDate = today, title = title).parse() }
+    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, today, durationText, ai, title)
     SideEffect { onInput(currentInput) }
     val context = LocalContext.current
     val notifications = rememberNotificationState()
@@ -93,8 +168,8 @@ fun QuickEntryEditor(
     val reminder = suggestion.reminderMinutes?.let { reminderTrigger(suggestion.date, if (task) null else suggestion.time, it.toLong(), now.zone) }
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
         runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
-    val problem = if (text.length > 500) "Use at most 500 characters per entry, or choose Paste multiple entries." else suggestion.quickProblem(task, now)
-    val valid = text.isNotBlank() && problem == null && !busy && !aiBusy && !inputBlocked
+    val problem = if (currentInput.length > 500) "Use at most 500 characters per entry." else suggestion.quickProblem(task, now)
+    val valid = !currentInput.empty && problem == null && !busy && !aiBusy && !inputBlocked
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
@@ -103,7 +178,7 @@ fun QuickEntryEditor(
     fun editField(value: TextFieldValue) {
         if (value.text != text) {
             val updated = currentInput.edited(value.text)
-            if (!typeChosen) QuickEntry.parse(value.text, today, updated.literals).takeIf { it.taskHint }?.let { task = !it.timed() }
+            if (!typeChosen) updated.parse().takeIf { it.taskHint }?.let { task = !it.timed() }
             aiJson = null
             literalOffsets = updated.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()
             dateOverride = updated.dateOverride; timeOverride = updated.timeOverride
@@ -113,6 +188,10 @@ fun QuickEntryEditor(
         field = value
     }
     fun edit(value: String) = editField(TextFieldValue(value, TextRange(value.length)))
+    fun editTitle(value: TextFieldValue) {
+        if (value.text != title) { aiJson = null; settled = false; attempted = false }
+        titleField = value
+    }
     val completions = if (fieldFocused && field.selection.collapsed && !busy)
         quickCompletions(text, field.selection.start, literalRanges, task) else emptyList()
     fun clearCorrection(kind: QuickPhraseKind?) {
@@ -125,7 +204,7 @@ fun QuickEntryEditor(
     fun undoLiteral() {
         val removed = literalRanges.last()
         val remaining = literalRanges.dropLast(1)
-        val restored = QuickEntry.parse(text, today, remaining).phrases.firstOrNull { it.start == removed.first }
+        val restored = currentInput.copy(literals = remaining).parse().phrases.firstOrNull { it.start == removed.first }
         clearCorrection(restored?.kind)
         literalOffsets = literalOffsets.dropLast(2).toIntArray()
     }
@@ -154,7 +233,7 @@ fun QuickEntryEditor(
     }
     AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, 
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { if (batchRow) Text("Review entry") else HeadingText("Quick entry") },
+        title = { HeadingText("Quick entry") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 modeControls()
@@ -163,14 +242,21 @@ fun QuickEntryEditor(
                     FilterChip(selected = !task, enabled = !busy, onClick = { task = false; typeChosen = true }, label = { Text("Event") })
                     FilterChip(selected = task, enabled = !busy, onClick = { task = true; typeChosen = true }, label = { Text("Task") })
                 }
+                OutlinedTextField(titleField, ::editTitle, enabled = !busy,
+                    label = { Text("Title (optional)") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { focus.requestFocus() }))
                 OutlinedTextField(field, ::editField, enabled = !busy,
-                    label = { Text(if (task) "Task and optional due date" else "Event and when") },
-                    placeholder = { Text(if (task) "Buy groceries tmr" else "Gym every Monday 6pm") },
+                    label = { Text(if (title.isNotBlank()) (if (task) "Due date (optional)" else "When") else if (task) "Task and optional due date" else "Event and when") },
+                    placeholder = { Text(if (title.isNotBlank()) (if (task) "tmr" else "every Monday 6pm") else if (task) "Buy groceries tmr" else "Gym every Monday 6pm") },
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.onGloballyPositioned { fieldReady = true }, visualTransformation = highlight,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(capitalization = if (title.isNotBlank()) KeyboardCapitalization.None else KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { add() }), maxLines = 3)
-                if (!batchRow && ai == null) QuickAiAction(currentInput, multiple = false, enabled = !busy && !inputBlocked,
-                    onWorking = { aiBusy = it }, onResult = { entries -> keyboard?.hide(); aiJson = entries.single().json().toString(); literalOffsets = intArrayOf() })
+                // AI gets title and when as one line, the title quoted; a typed title replaces the AI's title.
+                if (ai == null) QuickAiAction(currentInput.copy(text = currentInput.entryText, title = ""), enabled = !busy && !inputBlocked,
+                    onWorking = { aiBusy = it }, onResult = { entries -> keyboard?.hide()
+                        aiJson = entries.single().let { if (currentInput.typedTitle.isEmpty()) it else it.copy(title = currentInput.typedTitle) }.json().toString(); literalOffsets = intArrayOf() })
                 if (ai != null) {
                     Text(if (aiEnabled) "AI preview · check the details. Editing the original text returns to offline parsing." else "Check the details. Editing the original text creates a new preview.", style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(ai.title, { if (it.length <= 500) aiJson = ai.copy(title = it.filterNot { c -> c.isISOControl() }).json().toString() }, enabled = !busy,
@@ -186,10 +272,12 @@ fun QuickEntryEditor(
                         focus.requestFocus(); keyboard?.show()
                     }) { Text(completion.label) } }
                 }
-                if (text.isBlank()) {
+                if (currentInput.empty) {
                     Text("Try an example", style = MaterialTheme.typography.labelMedium)
-                    val examples = if (task) listOf("Buy groceries", "Call plumber tmr") else listOf("Dentist Fri 3pm for 45 minutes", "Gym every Monday 6pm")
-                    examples.forEach { example -> TextButton(onClick = { edit(example) }) { Text(example) } }
+                    val examples = if (task) listOf("Buy groceries" to "", "Call plumber" to "tmr") else listOf("Dentist" to "Fri 3pm for 45 minutes", "Gym" to "every Monday 6pm")
+                    examples.forEach { (exampleTitle, exampleWhen) -> TextButton(onClick = {
+                        editTitle(TextFieldValue(exampleTitle, TextRange(exampleTitle.length))); edit(exampleWhen)
+                    }) { Text("$exampleTitle $exampleWhen".trim()) } }
                 } else {
                     if (ai == null) Text(suggestion.title, style = MaterialTheme.typography.titleMedium)
                     if (showFeedback && suggestion.dateChoices.isNotEmpty()) {
@@ -278,17 +366,17 @@ fun QuickEntryEditor(
                     }
                     if (showFeedback && problem != null && problem != "Which date did you mean?") Text(problem, color = MaterialTheme.colorScheme.error)
                     if (!showFeedback && problem != null) Text("Keep typing, or choose a suggestion.", style = MaterialTheme.typography.bodySmall)
-                    if (!batchRow && showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("More details") }
+                    if (showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("More details") }
                     if (showDetails && onDiscard != null) TextButton(enabled = !busy, onClick = onDiscard) { Text("Discard draft") }
                 }
                 if (saveError != null) Text(saveError!!, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = { FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (!batchRow && onContinue != null) TextButton(enabled = text.isNotBlank() && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add(true) }) { Text("Add another") }
-            TextButton(enabled = text.isNotBlank() && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add() }) { Text(if (busy) "Saving…" else if (batchRow) "Done" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event") }
+            if (onContinue != null) TextButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add(true) }) { Text("Add another") }
+            TextButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add() }) { Text(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event") }
         } },
-        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(if (batchRow) "Back to list" else "Close") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } },
     )
     selectedPhrase?.let { phrase ->
         AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { selectedPhrase = null }, title = { Text(text.substring(phrase.start, phrase.end).trim()) },

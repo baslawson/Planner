@@ -117,8 +117,9 @@ class QuickSuggestionsTest {
         assertNull(input.suggestion(lateMorning).reminderMinutes)
         assertNull(input.suggestion(lateMorning).quickProblem(true, lateMorning))
         assertEquals(0, input.suggestion(ZonedDateTime.of(today.atTime(8, 0), ZoneId.of("UTC"))).reminderMinutes)
-        val rows = QuickBatch.review("Remind me to buy milk tomorrow\nRemind me to call at 3pm tomorrow", today, emptyList())
-        assertTrue(rows[0].typeChosen && rows[0].input.task); assertTrue(rows[1].typeChosen && !rows[1].input.task)
+        // Quick entry suggests Task for an untimed "remind me to", Event when a time is given.
+        QuickEntry.parse("Remind me to buy milk tomorrow", today).let { assertTrue(it.taskHint && !it.timed()) }
+        QuickEntry.parse("Remind me to call at 3pm tomorrow", today).let { assertTrue(it.taskHint && it.timed()) }
     }
 
     @Test fun relativeTimesCountFromNowRoundedUp() {

@@ -119,15 +119,15 @@ fun QuickAiSetup(onDismiss: () -> Unit) {
 
 /** Snapshot includes all manual corrections; editing/mode changes invalidate both answers and responses. */
 @Composable
-fun QuickAiAction(input: QuickInput, multiple: Boolean, enabled: Boolean = true,
+fun QuickAiAction(input: QuickInput, enabled: Boolean = true,
                   onWorking: (Boolean) -> Unit = {}, onResult: (List<QuickAiEntry>) -> Unit) {
     val app = LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp
     val aiEnabled by app.settings.aiFeaturesEnabled.collectAsState()
-    if (aiEnabled) QuickAiActionEnabled(input, multiple, enabled, onWorking, onResult)
+    if (aiEnabled) QuickAiActionEnabled(input, enabled, onWorking, onResult)
 }
 
 @Composable
-private fun QuickAiActionEnabled(input: QuickInput, multiple: Boolean, enabled: Boolean,
+private fun QuickAiActionEnabled(input: QuickInput, enabled: Boolean,
     onWorking: (Boolean) -> Unit, onResult: (List<QuickAiEntry>) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as com.example.itinerary.ItineraryApp
@@ -135,7 +135,6 @@ private fun QuickAiActionEnabled(input: QuickInput, multiple: Boolean, enabled: 
     val client = remember { app.quickAiClient }
     val scope = rememberCoroutineScope()
     val latestInput by rememberUpdatedState(input)
-    val latestMultiple by rememberUpdatedState(multiple)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestResult by rememberUpdatedState(onResult)
     var connection by remember { mutableStateOf<QuickAiConnection?>(null) }
@@ -152,7 +151,7 @@ private fun QuickAiActionEnabled(input: QuickInput, multiple: Boolean, enabled: 
         catch (e: QuickAiException) { message = e.message }
     }
     fun cancel() { generation++; job?.cancel(); job = null; loading = false; onWorking(false) }
-    LaunchedEffect(input, multiple, enabled, setup) {
+    LaunchedEffect(input, enabled, setup) {
         cancel(); question = null; answer = ""; answers = emptyList()
         if (message != null) message = null
     }
@@ -160,14 +159,14 @@ private fun QuickAiActionEnabled(input: QuickInput, multiple: Boolean, enabled: 
     fun submit() {
         val saved = connection ?: return
         if (loading || !enabled || setup || !app.settings.aiFeaturesEnabled.value) return
-        val snapshot = input; val mode = multiple; val revision = ++generation
+        val snapshot = input; val revision = ++generation
         val nextAnswers = if (question != null) answers + (question!! to answer.trim()) else answers
         answers = nextAnswers; question = null; answer = ""; message = null; loading = true; onWorking(true)
         job = scope.launch {
             try {
-                val result = client.understand(saved, snapshot, mode, nextAnswers)
+                val result = client.understand(saved, snapshot, nextAnswers)
                 ensureActive()
-                if (revision != generation || latestInput != snapshot || latestMultiple != mode || !latestEnabled || !app.settings.aiFeaturesEnabled.value) return@launch
+                if (revision != generation || latestInput != snapshot || !latestEnabled || !app.settings.aiFeaturesEnabled.value) return@launch
                 when (result.status) {
                     "ready" -> { latestResult(result.entries); message = "AI interpretation ready. Check the preview before adding." }
                     "clarify" -> if (nextAnswers.size < 5) question = result.message else message = "Please make the wording more precise and try again."
@@ -182,7 +181,7 @@ private fun QuickAiActionEnabled(input: QuickInput, multiple: Boolean, enabled: 
         if (loading) Row {
             Text("Understanding…", Modifier.weight(1f))
             TextButton(onClick = { cancel(); message = "Cancelled. Your draft is unchanged." }) { Text("Cancel AI") }
-        } else TextButton(enabled = enabled && question == null && input.text.isNotBlank() && input.text.length <= if (multiple) 25000 else 500, onClick = { submit() }) { Text("Understand with AI") }
+        } else TextButton(enabled = enabled && question == null && input.text.isNotBlank() && input.text.length <= 500, onClick = { submit() }) { Text("Understand with AI") }
         Text("Sends this text to ${connection?.provider?.label}. Nothing is saved automatically.", style = MaterialTheme.typography.bodySmall)
     } else TextButton(enabled = enabled, onClick = { setup = true }) { Text("Set up AI assistance") }
     if (connection != null) TextButton(enabled = !loading, onClick = { setup = true }) { Text("AI provider: ${connection?.provider?.label}") }

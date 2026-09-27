@@ -24,9 +24,9 @@ leaves the other saved profile intact. Unsaved settings edits are discarded when
 provider never falls back to another provider. The provider button beside Quick entry's AI
 controls opens the same settings, and clears any pending clarification context.
 
-Single and Multiple modes reuse the existing preview, selected-row review, conflict checks and save flow.
-AI cannot save entries itself. Clarifications require explicitly tapping Send answer. Closing, cancelling,
-editing input or changing modes rejects pending results. Provider/key/quota errors leave your draft
+AI interprets one entry at a time and reuses the existing preview, conflict checks and save flow.
+AI cannot save entries itself. Clarifications require explicitly tapping Send answer. Closing, cancelling
+or editing input rejects pending results. Provider/key/quota errors leave your draft
 available for editing and offline saving.
 
 Saving or replacing a key makes AI available when the master switch is on; it never sends a request. **Remove API key** deletes only the

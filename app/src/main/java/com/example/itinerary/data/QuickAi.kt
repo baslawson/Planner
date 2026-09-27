@@ -51,13 +51,13 @@ data class QuickAiEntry(
 
 data class QuickAiResult(val status: String, val message: String, val entries: List<QuickAiEntry>) {
     companion object {
-        fun decode(j: JSONObject, text: String, multiple: Boolean, task: Boolean): QuickAiResult {
+        fun decode(j: JSONObject, text: String, task: Boolean): QuickAiResult {
             require(j.keys().asSequence().toSet() == setOf("status", "message", "entries"))
             val status = j.get("status") as String; val message = j.get("message") as String
             require(status in setOf("ready", "clarify", "unsupported") && message.length <= 1000)
-            val a = j.getJSONArray("entries"); require(a.length() <= if (multiple) 50 else 1)
+            val a = j.getJSONArray("entries"); require(a.length() <= 1)
             val entries = List(a.length()) { QuickAiEntry.decode(a.getJSONObject(it)) }
-            require(entries.all { text.contains(it.source) && (multiple || it.task == task) })
+            require(entries.all { text.contains(it.source) && it.task == task })
             require(if (status == "ready") entries.isNotEmpty() && message.isEmpty() else entries.isEmpty() && message.isNotBlank())
             return QuickAiResult(status, message, entries)
         }

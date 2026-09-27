@@ -1,11 +1,11 @@
 package com.example.itinerary.data
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZonedDateTime
 import java.util.Locale
-import java.util.UUID
 
-/** One editable row. Its base date freezes relative phrases while a draft is unfinished. */
+/** A Quick entry. Its base date freezes relative phrases while a draft is unfinished. */
 data class QuickInput(
     val text: String = "", val task: Boolean = false,
     val literals: List<IntRange> = emptyList(), val dateOverride: String? = null,
@@ -13,11 +13,30 @@ data class QuickInput(
     val removeReminder: Boolean = false, val baseDate: LocalDate = LocalDate.now(),
     val durationText: String? = null,
     val ai: QuickAiEntry? = null,
+    /** Typed in its own box: always kept literally, never read as a date or time. */
+    val title: String = "",
 ) {
+    // Quotes would unbalance the parser's own quoting, so they are dropped from a typed title.
+    val typedTitle: String get() = title.filterNot { it == '"' || it == '“' || it == '”' }.trim()
+    private val offset get() = if (typedTitle.isEmpty()) 0 else typedTitle.length + 1
+
+    /** Title and when as one line; the title is quoted so it stays literal (sent to AI). */
+    val entryText: String get() = if (typedTitle.isEmpty()) text else "\"$typedTitle\" $text".trimEnd()
+    val length: Int get() = offset + text.length
+    val empty: Boolean get() = text.isBlank() && typedTitle.isEmpty()
+
+    /** Parses title and when together, the title kept in title; phrase offsets stay relative to [text]. */
+    fun parse(now: LocalDateTime? = null): QuickEntrySuggestion {
+        if (typedTitle.isEmpty()) return QuickEntry.parse(text, baseDate, literals, now)
+        val shifted = literals.map { it.first + offset..it.last + offset }
+        val parsed = QuickEntry.parse("$typedTitle $text", baseDate, listOf(0 until typedTitle.length) + shifted, now)
+        return parsed.copy(phrases = parsed.phrases.map { it.copy(start = it.start - offset, end = it.end - offset) })
+    }
+
     fun suggestion(now: ZonedDateTime = ZonedDateTime.now()): QuickEntrySuggestion {
         // "In 30 minutes" counts from now, so only for entries based on today.
         val clock = now.toLocalDateTime().takeIf { baseDate == now.toLocalDate() }
-        val parsed = ai?.suggestion(baseDate) ?: QuickEntry.parse(text, baseDate, literals, clock)
+        val parsed = ai?.suggestion(baseDate) ?: parse(clock)
         val corrected = parsed.corrected(dateOverride, timeOverride)
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
@@ -45,43 +64,6 @@ fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String
         task && reminder != null && !dateSpecified -> "Choose a due date for this task reminder."
         reminder != null && reminder <= now -> "This reminder time has passed. Change the date or time, or remove the reminder."
         else -> null
-    }
-}
-
-data class QuickRow(
-    val id: String = UUID.randomUUID().toString(), val source: String,
-    val input: QuickInput, val typeChosen: Boolean = false, val selected: Boolean = true,
-    val status: String = "pending",
-) {
-    fun problem(now: ZonedDateTime): String? = when {
-        !typeChosen -> "Choose Task or Event."
-        input.text.length > 500 -> "Use at most 500 characters per entry."
-        else -> input.suggestion(now).quickProblem(input.task, now)
-    }
-    val count: Int get() = if (input.task || input.suggestion().repeat == RepeatRule.NONE) 1 else input.suggestion().repeatCount
-}
-
-object QuickBatch {
-    private val bullet = Regex("^\\s*(?:[-*•]\\s*|\\d+[.)]\\s+)")
-    fun lines(text: String): List<String> = text.lineSequence().filter { it.isNotBlank() }.map { it.replaceFirst(bullet, "").trim() }.toList()
-    fun problem(text: String): String? = when {
-        text.length > 25_000 -> "Use at most 25,000 characters per list."
-        lines(text).isEmpty() -> "Enter one entry per line."
-        lines(text).size > 50 -> "Review up to 50 entries at a time."
-        else -> null
-    }
-    fun review(text: String, today: LocalDate, previous: List<QuickRow>): List<QuickRow> {
-        require(problem(text) == null)
-        val unused = previous.toMutableList()
-        return lines(text).map { line ->
-            val index = unused.indexOfFirst { it.source == line }
-            if (index >= 0) unused.removeAt(index) else {
-                val input = QuickInput(text = line, baseDate = today)
-                val s = input.suggestion()
-                QuickRow(source = line, input = input.copy(task = s.taskHint && !s.timed()),
-                    typeChosen = s.time != null || s.ambiguousTime || s.durationMinutes != null || s.taskHint)
-            }
-        }
     }
 }
 
@@ -127,25 +109,4 @@ fun quickConflicts(candidates: List<QuickCandidate>, items: List<ItineraryItem>,
         }
     }
     return messages.toList()
-}
-
-fun reconcileQuickRows(rows: List<QuickRow>, items: List<ItineraryItem>, tasks: List<PlannerTask>): List<QuickRow> = rows.map { row ->
-    if (row.status != "attempted") row else row.copy(status = if (if (row.input.task) tasks.any { it.id == row.id } else items.any { it.draftToken == row.id }) "saved" else "pending")
-}
-
-/** Write intent before the DB operation and receipt after. Retry always uses the same row identity. */
-suspend fun saveQuickRows(
-    rows: List<QuickRow>, onPersist: (List<QuickRow>) -> Unit,
-    onSave: suspend (QuickEntrySuggestion, Boolean, String) -> Unit,
-) {
-    var current = rows
-    for (row in rows.filter { it.selected && it.status != "saved" }) {
-        val s = row.input.suggestion()
-        require(row.problem(ZonedDateTime.now()) == null)
-        current = current.map { if (it.id == row.id) it.copy(status = "attempted") else it }
-        onPersist(current)
-        onSave(s, row.input.task, row.id)
-        current = current.map { if (it.id == row.id) it.copy(status = "saved") else it }
-        onPersist(current)
-    }
 }

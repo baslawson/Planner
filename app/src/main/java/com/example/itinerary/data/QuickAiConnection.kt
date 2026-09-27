@@ -117,7 +117,7 @@ class QuickAiClient(http: OkHttpClient = OkHttpClient(), private val featuresEna
     private val http = http.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(10, TimeUnit.SECONDS).callTimeout(50, TimeUnit.SECONDS).build()
 
-    suspend fun understand(connection: QuickAiConnection, input: QuickInput, multiple: Boolean, answers: List<Pair<String,String>>): QuickAiResult {
+    suspend fun understand(connection: QuickAiConnection, input: QuickInput, answers: List<Pair<String,String>>): QuickAiResult {
         if (!featuresEnabled.value) throw QuickAiException("AI features are turned off.")
         return coroutineScope {
             val requestScope = this
@@ -125,16 +125,16 @@ class QuickAiClient(http: OkHttpClient = OkHttpClient(), private val featuresEna
                 featuresEnabled.first { !it }
                 requestScope.cancel(CancellationException("AI features turned off"))
             }
-            try { understandAllowed(connection, input, multiple, answers) }
+            try { understandAllowed(connection, input, answers) }
             finally { monitor.cancel() }
         }
     }
 
-    private suspend fun understandAllowed(connection: QuickAiConnection, input: QuickInput, multiple: Boolean, answers: List<Pair<String,String>>): QuickAiResult {
+    private suspend fun understandAllowed(connection: QuickAiConnection, input: QuickInput, answers: List<Pair<String,String>>): QuickAiResult {
         return try {
             when (connection.provider) {
-                QuickAiProvider.GEMINI -> QuickGeminiProtocol.result(post(connection, QuickGeminiProtocol.request(input, multiple, answers)), input, multiple)
-                QuickAiProvider.OPENAI -> QuickOpenAiProtocol.result(post(connection, QuickOpenAiProtocol.request(connection.model, input, multiple, answers)), input, multiple)
+                QuickAiProvider.GEMINI -> QuickGeminiProtocol.result(post(connection, QuickGeminiProtocol.request(input, answers)), input)
+                QuickAiProvider.OPENAI -> QuickOpenAiProtocol.result(post(connection, QuickOpenAiProtocol.request(connection.model, input, answers)), input)
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: QuickAiException) { throw e }

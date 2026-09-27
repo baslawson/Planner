@@ -2,13 +2,13 @@ package com.example.itinerary.data
 
 import java.util.Locale
 
-/** Only the scheduling detail that changed loses its explicit correction. */
+/** Only the scheduling detail that changed loses its explicit correction. The typed title is kept. */
 fun QuickInput.edited(value: String): QuickInput {
     if (value == text) return this
-    if (value.isBlank()) return QuickInput(text = value, task = task, baseDate = baseDate)
+    if (value.isBlank()) return QuickInput(text = value, task = task, baseDate = baseDate, title = title)
     val moved = moveQuickEntryLiterals(text, value, literals)
-    val before = QuickEntry.parse(text, baseDate, literals)
-    val after = QuickEntry.parse(value, baseDate, moved)
+    val before = parse()
+    val after = copy(text = value, literals = moved).parse()
     fun signature(kind: QuickPhraseKind, old: Boolean): List<String> {
         val source = if (old) text else value
         val parsed = if (old) before else after

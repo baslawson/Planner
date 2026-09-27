@@ -53,7 +53,7 @@ class QuickAiTest {
     @After fun stop() { server.shutdown() }
     @Test fun explicitRequestSendsOnlyAllowedContextAndPersonalKey()=runBlocking {
         enqueueResult()
-        val value=client.understand(connection(),input.copy(dateOverride="2031-02-03"),false,emptyList())
+        val value=client.understand(connection(),input.copy(dateOverride="2031-02-03"),emptyList())
         assertEquals("QA gym",value.entries.single().title)
         val request=server.takeRequest();assertEquals(connection().apiKey,request.getHeader("x-goog-api-key"));assertNull(request.getHeader("Authorization"))
         assertEquals("/v1beta/models/gemini-test:generateContent",request.path)
@@ -69,49 +69,49 @@ class QuickAiTest {
             assertTrue(runCatching { QuickAiConnection.create(key) }.isFailure)
         val saved=QuickAiConnection.create(connection().apiKey,"gemini-test")
         master.value = false
-        assertTrue(runCatching { client.understand(saved,input,false,emptyList()) }.isFailure)
+        assertTrue(runCatching { client.understand(saved,input,emptyList()) }.isFailure)
         assertEquals(0,server.requestCount)
     }
     @Test fun redirectDoesNotForwardCredentialAndQuotaErrorsAreUseful()=runBlocking {
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location",server.url("/stolen")))
-        assertTrue(runCatching { client.understand(connection(),input,false,emptyList()) }.isFailure)
+        assertTrue(runCatching { client.understand(connection(),input,emptyList()) }.isFailure)
         assertEquals(1,server.requestCount)
         server.enqueue(MockResponse().setResponseCode(429).setBody("secret internal error"))
-        val error=runCatching { client.understand(connection(),input,false,emptyList()) }.exceptionOrNull()!!
+        val error=runCatching { client.understand(connection(),input,emptyList()) }.exceptionOrNull()!!
         assertTrue(error.message!!.contains("limit"));assertFalse(error.message!!.contains("secret"))
     }
     @Test fun cancelledRequestCannotReturnAnInterpretation()=runBlocking {
         server.enqueue(MockResponse().setBody(geminiReply(result()).toString()).setBodyDelay(2,TimeUnit.SECONDS))
         var applied=false
-        val job=launch { client.understand(connection(),input,false,emptyList());applied=true }
+        val job=launch { client.understand(connection(),input,emptyList());applied=true }
         withContext(Dispatchers.IO) { server.takeRequest(3,TimeUnit.SECONDS) }
         job.cancelAndJoin();assertFalse(applied)
     }
     @Test fun malformedModelOutputNeverBecomesAPreview() {
         for ((key,value) in listOf("duration" to true,"duration" to 0,"date" to "0000-01-01","time" to "25:00","repeat" to "EVERY_3_WEEKS","reminder" to -1,"count" to 999,"source" to "invented")) {
             val bad=result();bad.getJSONArray("entries").getJSONObject(0).put(key,value)
-            assertTrue(key,runCatching { QuickAiResult.decode(bad,source,false,false) }.isFailure)
+            assertTrue(key,runCatching { QuickAiResult.decode(bad,source,false) }.isFailure)
         }
         val duplicate=result();duplicate.getJSONArray("entries").put(entry.json())
-        assertTrue(runCatching { QuickAiResult.decode(duplicate,source,false,false) }.isFailure)
+        assertTrue(runCatching { QuickAiResult.decode(duplicate,source,false) }.isFailure)
     }
     @Test fun clarificationPreservesContextAndNeverIncludesEntries()=runBlocking {
         val question=JSONObject().put("status","clarify").put("message","What time after lunch?").put("entries",org.json.JSONArray())
         enqueueResult(question)
-        assertEquals("clarify",client.understand(connection(),input,false,listOf("Which day?" to "Tomorrow")).status)
+        assertEquals("clarify",client.understand(connection(),input,listOf("Which day?" to "Tomorrow")).status)
         val body=geminiContext(server.takeRequest().body.readUtf8())
         assertEquals("Tomorrow",body.getJSONArray("answers").getJSONObject(0).getString("answer"))
         question.getJSONArray("entries").put(entry.json())
-        assertTrue(runCatching { QuickAiResult.decode(question,source,false,false) }.isFailure)
+        assertTrue(runCatching { QuickAiResult.decode(question,source,false) }.isFailure)
     }
     @Test fun blockedTruncatedOrToolResponsesAreRejected() {
         val blocked=JSONObject().put("promptFeedback",JSONObject().put("blockReason","SAFETY"))
-        assertTrue(runCatching { QuickGeminiProtocol.result(blocked,input,false) }.isFailure)
+        assertTrue(runCatching { QuickGeminiProtocol.result(blocked, input) }.isFailure)
         val truncated=geminiReply(result());truncated.getJSONArray("candidates").getJSONObject(0).put("finishReason","MAX_TOKENS")
-        assertTrue(runCatching { QuickGeminiProtocol.result(truncated,input,false) }.isFailure)
+        assertTrue(runCatching { QuickGeminiProtocol.result(truncated, input) }.isFailure)
         val tool=geminiReply(result());tool.getJSONArray("candidates").getJSONObject(0).getJSONObject("content")
             .put("parts",org.json.JSONArray().put(JSONObject().put("functionCall",JSONObject())))
-        assertTrue(runCatching { QuickGeminiProtocol.result(tool,input,false) }.isFailure)
+        assertTrue(runCatching { QuickGeminiProtocol.result(tool, input) }.isFailure)
     }
     @Test fun secureConnectionRoundTripsWithoutPlaintextAndCanBeRemoved() {
         val alias="planner.quick-ai.qa";val name="qa-quick-ai-connection"
@@ -144,7 +144,7 @@ class QuickAiTest {
         val original=runCatching { store.read() }.getOrNull()
         try {
             val edited=input.copy(dateOverride="2031-02-03",timeOverride="16:00",durationText="45",countText="2",removeReminder=true).withAi(entry.copy(title="Corrected title"))
-            val draft=QuickDraft(text=source,single=edited)
+            val draft=QuickDraft(edited)
             store.write(draft);assertEquals(draft,QuickDraftStore(context).read())
             val s=edited.suggestion();assertEquals(LocalDate.of(2031,2,3),s.date);assertEquals("16:00",s.time.toString())
             assertEquals(45,s.durationMinutes);assertEquals(2,s.repeatCount);assertNull(s.reminderMinutes)
@@ -157,14 +157,14 @@ class QuickAiTest {
     private fun openAiConnection() = QuickAiConnection.create("sk-test-" + "o".repeat(35), "gpt-4.1-mini", QuickAiProvider.OPENAI)
     @Test fun openAiUsesFixedEndpointSeparateAuthorizationAndSharedContract() = runBlocking {
         server.enqueue(MockResponse().setBody(openAiReply(result()).toString()))
-        assertEquals("QA gym", client.understand(openAiConnection(), input, false, emptyList()).entries.single().title)
+        assertEquals("QA gym", client.understand(openAiConnection(), input, emptyList()).entries.single().title)
         val request = server.takeRequest()
         assertEquals("/v1/responses", request.path)
         assertEquals("Bearer " + openAiConnection().apiKey, request.getHeader("Authorization"))
         assertNull(request.getHeader("x-goog-api-key"))
         val body = JSONObject(request.body.readUtf8())
         assertFalse(body.getBoolean("store")); assertEquals("gpt-4.1-mini", body.getString("model"))
-        assertEquals(QuickAiContract.context(input, false, emptyList()).toString(), body.getString("input"))
+        assertEquals(QuickAiContract.context(input, emptyList()).toString(), body.getString("input"))
         assertTrue(body.getJSONObject("text").getJSONObject("format").getBoolean("strict"))
         assertEquals(QuickAiContract.schema.let { JSONObject(it).toString() }, body.getJSONObject("text").getJSONObject("format").getJSONObject("schema").toString())
         assertFalse(body.toString().contains(openAiConnection().apiKey))
@@ -175,7 +175,7 @@ class QuickAiTest {
             .put("content", org.json.JSONArray().put(JSONObject().put("type", "refusal").put("refusal", "private provider text"))) }
         val tool = openAiReply(result()).apply { getJSONArray("output").put(JSONObject().put("type", "function_call")) }
         for (body in listOf(incomplete, refusal, tool, openAiReply(result()).put("error", JSONObject())))
-            assertTrue(runCatching { QuickOpenAiProtocol.result(body, input, false) }.isFailure)
+            assertTrue(runCatching { QuickOpenAiProtocol.result(body, input) }.isFailure)
     }
     @Test fun providerProfilesSurviveSwitchesAndRemovalWithoutFallback() {
         val name = "qa-openai-profiles"; val alias = "planner.openai.qa"
@@ -200,22 +200,22 @@ class QuickAiTest {
     }
     @Test fun openAiRedirectAndUnauthorizedErrorsNeverExposeKey() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", server.url("/stolen")))
-        assertTrue(runCatching { client.understand(openAiConnection(), input, false, emptyList()) }.isFailure)
+        assertTrue(runCatching { client.understand(openAiConnection(), input, emptyList()) }.isFailure)
         assertEquals(1, server.requestCount)
         server.enqueue(MockResponse().setResponseCode(401).setBody(openAiConnection().apiKey))
-        val error = runCatching { client.understand(openAiConnection(), input, false, emptyList()) }.exceptionOrNull()!!
+        val error = runCatching { client.understand(openAiConnection(), input, emptyList()) }.exceptionOrNull()!!
         assertTrue(error.message!!.contains("OpenAI")); assertFalse(error.message!!.contains(openAiConnection().apiKey))
     }
 
     @Test fun masterGateBlocksBothProvidersAndCancelsAnActiveRequest() = runBlocking {
         master.value = false
         for (value in listOf(connection(), openAiConnection()))
-            assertTrue(runCatching { client.understand(value,input,false,emptyList()) }.exceptionOrNull() is QuickAiException)
+            assertTrue(runCatching { client.understand(value,input,emptyList()) }.exceptionOrNull() is QuickAiException)
         assertEquals(0,server.requestCount)
         master.value = true
         server.enqueue(MockResponse().setBody(geminiReply(result()).toString()).setBodyDelay(2,TimeUnit.SECONDS))
         var applied = false
-        val job = launch { client.understand(connection(),input,false,emptyList()); applied = true }
+        val job = launch { client.understand(connection(),input,emptyList()); applied = true }
         withContext(Dispatchers.IO) { assertNotNull(server.takeRequest(3,TimeUnit.SECONDS)) }
         master.value = false;job.join()
         assertTrue(job.isCancelled);assertFalse(applied)
@@ -234,9 +234,9 @@ class QuickAiTest {
                 File(context.noBackupFilesDir,name).writeBytes(cipher.iv + cipher.doFinal(legacy.toString().toByteArray()))
                 val loaded = store.load()!!
                 master.value = true;enqueueResult()
-                assertEquals("ready",client.understand(loaded,input,false,emptyList()).status)
+                assertEquals("ready",client.understand(loaded,input,emptyList()).status)
                 master.value = false
-                assertTrue(runCatching { client.understand(loaded,input,false,emptyList()) }.isFailure)
+                assertTrue(runCatching { client.understand(loaded,input,emptyList()) }.isFailure)
             }
             assertEquals(2,server.requestCount)
         } finally { store.clear();KeyStore.getInstance("AndroidKeyStore").apply { load(null);deleteEntry(alias) } }

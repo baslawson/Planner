@@ -121,7 +121,7 @@ class ColourBlindThemeUiTest {
                 click("Switch to Calendar view");await { find("Switch to Agenda view")!=null }
                 screenshot("calendar-${mode.name.lowercase()}")
                 click("Switch to Agenda view");await { find("Switch to Calendar view")!=null }
-                click("Quick entry");await { find("Paste multiple entries")!=null };screenshot("quick-entry-${mode.name.lowercase()}");click("Close")
+                click("Quick entry");await { find("Title (optional)")!=null };screenshot("quick-entry-${mode.name.lowercase()}");click("Close")
                 click("More options");click("Themes")
             }
             click("Use system setting");assertEquals(ThemeMode.SYSTEM,app.settings.themeMode.value)

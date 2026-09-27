@@ -191,17 +191,6 @@ class QuickTypingUiTest {
         click("Add event");if(find("Add anyway")!=null)click("Add anyway")
         await { data().items.any { it.title=="QA typing" } }
     }
-    @Test fun batchRowUsesSameCorrectionPreservationAndCompactEditor()=runBlocking {
-        start();click("Paste multiple entries");val raw="QA typed batch 03/04/2030 at 3"
-        setText("",raw);click("Review entries");click("Edit entry 1")
-        click(LocalDate.of(2030,4,3).fullLabel());click("3 PM")
-        setText(raw,raw.replace("QA typed batch","QA typed batch revised"))
-        assertNull(find("Add another"));click("Done");click("Add selected")
-        if(find("Add anyway")!=null)click("Add anyway")
-        await { data().items.any { it.title=="QA typed batch revised" } }
-        val item=data().items.single { it.title=="QA typed batch revised" }
-        assertEquals(LocalDate.of(2030,4,3),item.date);assertEquals(java.time.LocalTime.of(15,0),item.startTime)
-    }
     @Test fun shorthandTimeRangePreviewsAndSavesOffline() = runBlocking {
         val old = app.settings.aiFeaturesEnabled.value
         try {
@@ -230,23 +219,6 @@ class QuickTypingUiTest {
             assertEquals(java.time.LocalTime.of(15,0),saved.startTime)
         } finally { app.settings.setAiFeaturesEnabled(old) }
     }
-    @Test fun vagueTimeAndDateCorrectionUseExistingBatchReviewOffline() = runBlocking {
-        val old=app.settings.aiFeaturesEnabled.value
-        try {
-            app.settings.setAiFeaturesEnabled(false);start();click("Paste multiple entries")
-            setText("","QA natural dinner tomorrow evening\nQA corrected dentist Friday—actually Saturday at 3pm")
-            click("Review entries");click("Edit entry 1")
-            await { find("QA natural dinner")!=null };screenshot("vague-time-review")
-            click("Choose time");click("Set time");click("Done")
-            click("Close");click("Quick entry")
-            click("Add selected");if(find("Add anyway")!=null)click("Add anyway")
-            await { data().items.any { it.title=="QA natural dinner" } && data().items.any { it.title=="QA corrected dentist" } }
-            val dinner=data().items.single { it.title=="QA natural dinner" }
-            assertEquals(LocalDate.now().plusDays(1),dinner.date);assertEquals(java.time.LocalTime.of(9,0),dinner.startTime)
-            assertEquals(java.time.DayOfWeek.SATURDAY,data().items.single { it.title=="QA corrected dentist" }.date.dayOfWeek)
-        } finally { app.settings.setAiFeaturesEnabled(old) }
-    }
-
     @Test fun flexibleClockDurationAndTypoTapSaveOffline() = runBlocking {
         val old=app.settings.aiFeaturesEnabled.value
         try {
@@ -266,19 +238,4 @@ class QuickTypingUiTest {
             assertEquals(java.time.LocalTime.of(16,0),saved.startTime);assertEquals(90,saved.durationMinutes)
         } finally { app.settings.setAiFeaturesEnabled(old) }
     }
-    @Test fun flexibleBatchUsesSameOfflineParser() = runBlocking {
-        val old=app.settings.aiFeaturesEnabled.value
-        try {
-            app.settings.setAiFeaturesEnabled(false);start();click("Paste multiple entries")
-            setText("","QA flexible gym tomorrow 15h30 for two hours\nQA flexible call tomorrow 3 p.m. for a quarter of an hour")
-            click("Review entries");screenshot("flexible-batch");click("Add selected")
-            if(find("Add anyway")!=null)click("Add anyway")
-            await { data().items.any { it.title=="QA flexible gym" } && data().items.any { it.title=="QA flexible call" } }
-            val gym=data().items.single { it.title=="QA flexible gym" }
-            assertEquals(java.time.LocalTime.of(15,30),gym.startTime);assertEquals(120,gym.durationMinutes)
-            val call=data().items.single { it.title=="QA flexible call" }
-            assertEquals(java.time.LocalTime.of(15,0),call.startTime);assertEquals(15,call.durationMinutes)
-        } finally { app.settings.setAiFeaturesEnabled(old) }
-    }
-
 }

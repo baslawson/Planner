@@ -56,9 +56,9 @@ class QuickFlexibilityTest {
         assertEquals("17:00",input.edited(raw.replace("Study","Study maths")).timeOverride)
         assertNull(input.edited(raw.replace("4pm","5pm")).timeOverride)
         assertNull(input.edited(raw.replace("two hours","three hours")).durationText)
-        val rows = QuickBatch.review("$raw\nGym tomorrow 15h30 for a quarter of an hour",today,emptyList())
-        assertTrue(rows.all { it.input.suggestion().error == null })
-        assertEquals(15,rows[1].input.suggestion().durationMinutes)
+        val entries = listOf(raw, "Gym tomorrow 15h30 for a quarter of an hour").map { QuickInput(it, baseDate = today).suggestion() }
+        assertTrue(entries.all { it.error == null })
+        assertEquals(15,entries[1].durationMinutes)
     }
     @Test fun typoSuggestionsAreExplicitNarrowAndRespectProtectedText() {
         for (typo in listOf("tommorow","tomorow","tommorrow","tuesdayy","wedensday")) {
