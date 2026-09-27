@@ -2,6 +2,14 @@
 
 An offline-first Android planner built with Kotlin and Jetpack Compose.
 
+## Support Planner
+
+Enjoying Planner? Buy me a coffee to help support its development. Thank you!
+
+<a href="https://ko-fi.com/baslawson"><img src="docs/images/support-planner.svg" width="300" height="64" alt="☕ Buy me a coffee — support Planner on Ko-fi"></a>
+
+## Features
+
 - Agenda and calendar views for events, tasks and bills.
 - Offline natural-language Quick entry with editable previews.
 - Optional Gemini or OpenAI assistance using a personal API key, sent directly from the phone only when requested.
@@ -22,10 +30,6 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 | <img src="docs/images/quick-entry.png" width="280" alt="Offline Quick entry recognizing a date, time and duration from a sentence"> | <img src="docs/images/find-free-time.png" width="280" alt="Find free time showing available gaps between sample events"> |
 
 [Download the APK](https://github.com/baslawson/Planner/releases) (repository access required).
-
-## Support Planner
-
-If Planner makes your day a little easier, [☕ buy me a coffee](https://ko-fi.com/baslawson) to support its development. Thank you!
 
 ## Build and run
 
