@@ -35,7 +35,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Release tags match the app's version (tag `v0.1.6` is version 0.1.6), so Obtainium can tell when an update is available.
+Release tags match the app's version (tag `v0.0.1` is version 0.0.1), so Obtainium can tell when an update is available.
 
 ## Build and run
 

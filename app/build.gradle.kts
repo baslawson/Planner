@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.itinerary"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.6"
+        versionCode = 7
+        versionName = "0.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
