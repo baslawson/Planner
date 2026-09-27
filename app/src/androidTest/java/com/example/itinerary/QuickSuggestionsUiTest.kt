@@ -210,4 +210,20 @@ class QuickSuggestionsUiTest {
             await { find("Which date did you mean?")!=null };screenshot("numeric-ask");click("Close")
         } finally { ins.runOnMainSync { app.settings.setDateFormat(original) } }
     }
+
+    @Test fun fourDigit24HourTimesSaveAndPlainNumbersStayInTitles()=runBlocking {
+        start();setText("","QA shift tomorrow 0900-1700")
+        await { find("QA shift")!=null && enabled("Add event") };screenshot("four-digit-range")
+        click("Add event");await { data().items.any { it.title=="QA shift" } }
+        val shift=data().items.single { it.title=="QA shift" }
+        assertEquals(LocalDate.now().plusDays(1),shift.date);assertEquals(LocalTime.of(9,0),shift.startTime);assertEquals(480,shift.durationMinutes)
+        click("Quick entry");setText("","QA gym tomorrow 0600")
+        await { find("QA gym")!=null && enabled("Add event") };screenshot("four-digit-single")
+        click("Add event");await { data().items.any { it.title=="QA gym" } }
+        assertEquals(LocalTime.of(6,0),data().items.single { it.title=="QA gym" }.startTime)
+        click("Quick entry");setText("","QA buy 1500 screws tomorrow")
+        await { find("QA buy 1500 screws")!=null && enabled("Add event") };screenshot("four-digit-title")
+        click("Add event");await { data().items.any { it.title=="QA buy 1500 screws" } }
+        assertNull(data().items.single { it.title=="QA buy 1500 screws" }.startTime)
+    }
 }

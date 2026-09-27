@@ -56,6 +56,11 @@ More everyday wording:
   `Fri 3/10` picks whichever reading is a Friday.
 - `weds` and `thur` are recognised.
 
+Four-digit 24-hour times work where they read as times: with a leading zero (`0600`, `0000`), after
+`at`/`from`/`until` or a date (`tomorrow 1500`, `Friday 1930`), with `hrs`/`h` (`1800hrs`), or in a range
+(`0900-1700`, `2200-0600`). Other four-digit numbers stay in the title: `Buy 1500 screws`, `Tax return 2027`,
+`Meeting 1500` (write `at 1500` or `1500hrs`).
+
 Times such as `7:30` ask Morning or afternoon; `07:30`, `19:30` and `7:30pm` do not. Numeric dates such as `3/4`
 follow Settings → Date format when it is day-first or month-first (including the system setting); otherwise
 Quick entry asks which date you meant.

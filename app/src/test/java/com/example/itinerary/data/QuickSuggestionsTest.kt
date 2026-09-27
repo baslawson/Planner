@@ -175,4 +175,39 @@ class QuickSuggestionsTest {
         assertEquals(LocalDate.of(2026, 10, 7), friday.nextOccurrence(LocalDate.of(2026, 10, 6))!!.dueDate)
         assertEquals("Weekdays", QuickInput("Standup every weekday", task = true, baseDate = today).suggestion().quickTask().let { TaskRepeat.valueOf(it.repeat).label })
     }
+
+    @Test fun fourDigit24HourTimesWhereTheyReadAsTimes() {
+        for ((text, time) in listOf("Gym tomorrow 0600" to LocalTime.of(6, 0), "Night shift 0000" to LocalTime.MIDNIGHT,
+            "Meeting at 1500" to LocalTime.of(15, 0), "Meeting tomorrow 1500" to LocalTime.of(15, 0), "Dinner Friday 1930" to LocalTime.of(19, 30),
+            "Gym 1800hrs" to LocalTime.of(18, 0), "Gym 1800 hrs" to LocalTime.of(18, 0), "Gym 0600h" to LocalTime.of(6, 0),
+            "Meeting tomorrow 1500—actually 1600" to LocalTime.of(16, 0), "Meeting 0900, actually 1000" to LocalTime.of(10, 0))) {
+            val s = parse(text)
+            assertNull(text, s.error); assertEquals(text, time, s.time); assertFalse(text, s.ambiguousTime)
+            assertFalse(text, s.title.any(Char::isDigit)); assertFalse(text, s.title.contains("hrs"))
+        }
+        for ((text, minutes) in listOf("Shift 0900-1700" to 480, "Shift 0900 to 1700" to 480, "Shift from 1500 until 1730" to 150,
+            "Night shift 2200-0600" to 480, "Shift 1500–1700" to 120)) {
+            val s = parse(text)
+            assertNull(text, s.error); assertEquals(text, minutes, s.durationMinutes); assertEquals(text, text.substringBefore(" 0").substringBefore(" 1").substringBefore(" 2").substringBefore(" from"), s.title)
+        }
+        // Not time-like, or not a valid time: kept in the title.
+        for (text in listOf("Meeting 1500", "Tax return 2027", "Buy 1500 screws", "Flight QF1234 tomorrow", "Code 2460 tomorrow", "Pin 1575 at 0600")) {
+            val s = parse(text)
+            assertNull(text, s.error)
+            assertTrue(text, Regex("\\d{4}").containsMatchIn(s.title))
+        }
+        assertNull(parse("Meeting 1500").time); assertNull(parse("Tax return 2027").time)
+        assertEquals(LocalTime.of(6, 0), parse("Pin 1575 at 0600").time)
+        // Years inside dates are still years.
+        assertEquals(LocalDate.of(2027, 10, 5), parse("Dentist 5 October 2027 0900").date)
+        assertEquals(LocalTime.of(9, 0), parse("Dentist 5 October 2027 0900").time)
+        assertEquals(LocalDate.of(2027, 10, 5), parse("Dentist 2027-10-05 1500").date)
+        assertEquals(LocalTime.of(15, 0), parse("Dentist 2027-10-05 1500").time)
+        // Mixed styles and quoted text follow the existing rules.
+        assertNotNull(parse("Shift 0900-5pm").error)
+        assertEquals("Room 0600", parse("\"Room 0600\" tomorrow").title)
+        val kept = parse("Gym tomorrow 0600")
+        val phrase = kept.phrases.single { it.kind == QuickPhraseKind.TIME }
+        assertNull(QuickEntry.parse("Gym tomorrow 0600", today, listOf(phrase.start until phrase.end)).time)
+    }
 }

@@ -45,9 +45,12 @@ object QuickEntry {
     private const val relativeUnit = "(?:days?|weeks?|months?|years?)"
     private val dates = rx("\\b(?:on\\s+)?(?:(?:in\\s+$relativeCount\\s+$relativeUnit|$relativeCount\\s+$relativeUnit\\s+from\\s+today)|(?:the\\s+)?day\\s+after\\s+tomorrow|today|tomorrow|tmr|(?:(?:next|this)\\s+)?(?:$weekdays)|\\d{4}-\\d{2}-\\d{2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th))\\b")
     private const val meridiem = "(?:am|pm|a\\.m\\.?|p\\.m\\.?)"
-    private const val clock = "(?:noon|midnight|\\d{1,2}(?:[:.h]\\d{2})?(?:\\s*$meridiem)?)"
+    // 24-hour times written as four digits: 0600, 1500, 0000, optionally 1500hrs.
+    private const val hhmm = "(?:[01]\\d|2[0-3])[0-5]\\d"
+    private const val hoursSuffix = "(?:hrs?|hours?|h)"
+    private const val clock = "(?:$hhmm(?:\\s*$hoursSuffix)?|noon|midnight|\\d{1,2}(?:[:.h]\\d{2})?(?:\\s*$meridiem)?)"
     private val ranges = rx("\\b(?:(?:from|at)\\s+)?($clock)\\s*(?:[-–—]|to|until)\\s*($clock)(?![\\w])")
-    private val times = rx("\\b(?:at\\s+)?(?:noon|midnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2})(?![\\w])|\\bat\\s+\\d{1,2}\\b(?![:.h])")
+    private val times = rx("\\b(?:at\\s+)?(?:$hhmm(?:\\s*$hoursSuffix)?|noon|midnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2})(?![\\w])|\\bat\\s+\\d{1,2}\\b(?![:.h])")
     private const val amount = "(?:-?\\d+(?:\\.\\d+)?|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
     private const val minutes = "(?:minutes?|mins?|m)"
@@ -67,6 +70,7 @@ object QuickEntry {
     private val schedulingWords = rx("\\b(?:remind|notify|every)\\b")
     private val remindTo = rx("^\\s*(?:please\\s+)?remind\\s+me\\s+to\\b")
     private val bareWeekday = rx("^(?:on\\s+)?(?:$weekdays)$")
+    private val fourDigits = rx("(?<![\\w.:/])(\\d{4})(?=(?:$hoursSuffix)?\\b)(?![/.:]\\d)")
 
     // Short words that are also ordinary title words: "Buy sun cream", "Sat nav", "Midnight Mass".
     // They count as scheduling only beside other scheduling words, never before an ordinary word.
@@ -274,6 +278,19 @@ object QuickEntry {
         if (anchorName != null && dateChoices.isEmpty() && !fitsAnchor(date))
             return error("The start date doesn't match the $anchorName. Choose a matching date.")
 
+        // A four-digit number is a time only where it reads like one: a leading zero, after at/from/until or a date,
+        // before hrs or another range end. Otherwise it stays in the title: "Buy 1500 screws", "Tax return 2027".
+        fourDigits.findAll(remaining).toList().forEach { match ->
+            val value = match.groupValues[1]
+            val before = remaining.substring(0, match.range.first)
+            val after = remaining.substring(match.range.last + 1)
+            val timeLike = rx("^$hhmm$").matches(value) && (value.startsWith("0") ||
+                rx("(?:\\b(?:at|from|until|till|to|by|actually)\\s+|[-–—]\\s*)$").containsMatchIn(before) ||
+                rx("^\\s*$hoursSuffix\\b").containsMatchIn(after) ||
+                rx("^\\s*(?:[-–—]|to\\b|until\\b|till\\b|[,—–-]?\\s*actually\\s+(?:at\\s+)?)\\s*$hhmm\\b").containsMatchIn(after) ||
+                phrases.any { it.kind == QuickPhraseKind.DATE && it.end <= match.range.first && text.substring(it.end, match.range.first).matches(Regex("[\\s,]*")) })
+            if (!timeLike) mask(match.range, '\uE000')
+        }
         val lengths = durations.findAll(remaining).toList()
         if (lengths.size > 1) return error("Use one duration, such as for 1h 30m.")
         var duration = lengths.firstOrNull()?.let {
@@ -426,6 +443,7 @@ object QuickEntry {
     private fun normaliseClock(raw: String): String = raw.lowercase(Locale.ROOT)
         .replace(Regex("\\s+"), "").replace("a.m.", "am").replace("p.m.", "pm")
         .replace("a.m", "am").replace("p.m", "pm").replace('.', ':').replace(Regex("(?<=\\d)h(?=\\d)"), ":")
+        .replace(Regex("^(\\d{2})(\\d{2})$hoursSuffix?$"), "$1:$2")
 
     private fun readTime(raw: String): LocalTime? {
         val value = normaliseClock(raw)
