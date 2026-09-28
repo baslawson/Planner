@@ -64,7 +64,7 @@ class QuickSuggestionsTest {
     @Test fun extraWeekdaySpellingsAndVagueRangesNeedAChoice() {
         assertEquals(LocalDate.of(2026, 9, 30), parse("Gym weds 6pm").date); assertEquals("Gym", parse("Gym weds 6pm").title)
         assertEquals(LocalDate.of(2026, 10, 1), parse("Gym thur 6pm").date)
-        for (phrase in listOf("next week", "this month", "next year", "end of month", "the end of the week")) {
+        for (phrase in listOf("next week", "this month", "next year", "the end of the week")) {
             val s = parse("Review $phrase")
             assertNotNull(phrase, s.error)
             val p = s.phrases.single { it.kind == QuickPhraseKind.UNSUPPORTED }
@@ -79,7 +79,7 @@ class QuickSuggestionsTest {
         assertNull(park.error); assertEquals("Coffee in a park", park.title); assertEquals(LocalTime.of(10, 0), park.time)
         assertNull(parse("Team lunch in an office tomorrow").error)
         assertNull(parse("Lunch in a meeting room").error)
-        assertNotNull(parse("Call in 5 fortnights").error)
+        assertEquals(today.plusWeeks(10), parse("Call in 5 fortnights").date)
         assertNotNull(parse("Call in 90 seconds").error)
     }
 

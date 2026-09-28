@@ -61,7 +61,7 @@ class QuickFlexibilityTest {
         assertEquals(15,entries[1].durationMinutes)
     }
     @Test fun typoSuggestionsAreExplicitNarrowAndRespectProtectedText() {
-        for (typo in listOf("tommorow","tomorow","tommorrow","tuesdayy","wedensday")) {
+        for (typo in listOf("tomorrw","tuesdayy","wedensday")) {
             val raw = "Study $typo"
             val suggestion = quickCompletions(raw,raw.length,emptyList(),false).single()
             assertEquals(raw,parse(raw).title)
@@ -69,9 +69,12 @@ class QuickFlexibilityTest {
         }
         for (raw in listOf("Study tomorrow", "Study tomato", "Study someday", "Study \"tommorow"))
             assertTrue(raw,quickCompletions(raw,raw.length,emptyList(),false).isEmpty())
-        val raw = "Study tommorow at Cafe"
-        val option = quickCompletions(raw,14,emptyList(),false).single()
+        val raw = "Study tomorrw at Cafe"
+        val option = quickCompletions(raw,13,emptyList(),false).single()
         assertEquals("Study tomorrow at Cafe",option.apply(raw).first)
-        assertTrue(quickCompletions(raw,14,listOf(6..13),false).isEmpty())
+        assertTrue(quickCompletions(raw,13,listOf(6..12),false).isEmpty())
+        // Common spellings of tomorrow are understood outright, so there is nothing to suggest.
+        assertEquals(today.plusDays(1), parse("Study tommorow").date)
+        assertTrue(quickCompletions("Study tommorow",14,emptyList(),false).isEmpty())
     }
 }

@@ -16,7 +16,7 @@ class QuickEverydayTest {
             assertEquals(phrase,result.phrases.filter { it.kind==QuickPhraseKind.DATE }.single().let { raw.substring(it.start,it.end) })
         }
         assertEquals(today.plusMonths(2),parse("Dentist in two months").date)
-        assertNotNull(parse("Dentist in two fortnights").error)
+        assertEquals(today.plusWeeks(4),parse("Dentist in two fortnights").date)
         assertNotNull(parse("Dentist in two").error)
         assertEquals("Meet in two days",parse("\"Meet in two days\"").title)
     }

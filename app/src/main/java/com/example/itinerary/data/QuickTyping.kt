@@ -57,7 +57,7 @@ fun quickCompletions(text: String, cursor: Int, literals: List<IntRange>, task: 
     val word = Regex("\\b[A-Za-z]{2,}$").find(prefix) ?: return emptyList()
     if (literals.any { it.first < cursor && it.last >= word.range.first }) return emptyList()
     val candidates = listOf("Today", "Tomorrow", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    if (candidates.any { it.equals(word.value, ignoreCase = true) }) return emptyList()
+    if (candidates.any { it.equals(word.value, ignoreCase = true) } || word.value.lowercase(Locale.ROOT) in QuickEntry.tomorrowSpellings) return emptyList()
     val prefixMatches = candidates.filter { it.startsWith(word.value, ignoreCase = true) }
     // A narrow one-edit suggestion, including adjacent transpositions, never an automatic rewrite.
     val matches = prefixMatches.ifEmpty {
