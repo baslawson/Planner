@@ -85,7 +85,9 @@ class SeventhFeaturesUiTest {
         open();click("QA power bill");click("QA power bill")
         click("Save as template");setText("QA power bill","Power bill preset");click("Save template")
         await { data().templates.any { it.name=="Power bill preset" } }
-        click("Discard");click("Back");click("Add menu");click("Add event");click("Use template");click("Apply Power bill preset")
+        click("Discard") // a bill opens from the agenda, so Discard returns there
+        // Bill templates are offered only in the bill editor.
+        click("Add menu");click("Add task");click("Bill payment");click("Use template");click("Apply Power bill preset")
         setText("QA power bill","QA templated bill");setText("123.45","222.22")
         screenshot("template-applied")
         click("Save")
@@ -97,6 +99,7 @@ class SeventhFeaturesUiTest {
         click("Actions for QA templated bill");click("Skip this occurrence")
         await { data().items.count { it.title=="QA templated bill" && it.skipped }==1 }
         reveal { find(Bills.format(base+12345,"AUD"))!=null };screenshot("skipped-total")
+        click("Show completed tasks") // a skipped bill is hidden with the completed ones
         click("Actions for QA templated bill");click("Restore occurrence")
         await { data().items.none { it.title=="QA templated bill" && it.skipped } }
         reveal { find(Bills.format(base+34567,"AUD"))!=null }
@@ -125,7 +128,7 @@ class SeventhFeaturesUiTest {
         click("QA receipt");click("Read text");click("View text");click("Close");click("Save")
         await { data().attachments.single { it.itemId==item.id }.recognizedText.contains("ORCHID") }
         assertArrayEquals(original,file.readBytes())
-        click("Back");click("Search")
+        click("Switch to Agenda view");click("Search") // saved from the calendar, which has no Back button
         await { nodes().any { it.isEditable } };setText("","ORCHID")
         await { find("QA receipt")!=null && find("Matches document: Orchid receipt")!=null };screenshot("document-search")
         click("Back")
