@@ -35,12 +35,12 @@ class EventEnhancementsUiTest {
         setText(nodes().first { it.isEditable }, "QA copied event")
         click("All day") // All-day copies must not show a time collision.
         await { find("11:15") == null &&
-            nodes().none { it.text?.contains("Same start time as") == true } }
+            nodes().none { it.text?.contains("QA original event.") == true } } // no clash note
         screenshot("all-day-no-conflict")
         click("All day")
         await { find("11:15") != null }
         await {
-            if (nodes().any { it.text?.contains("Same start time as QA original event") == true }) true
+            if (nodes().any { it.text?.let { t -> t.startsWith("Conflicts with") && t.contains("QA original event") } == true }) true
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("duplicate-conflict")
@@ -57,7 +57,7 @@ class EventEnhancementsUiTest {
         click("Undo")
         await { snapshot().items.any { it.id == copy.id } }
         assertEquals(1, snapshot().attachments.count { it.itemId == copy.id })
-        click("Back")
+        click("Switch to Agenda view") // the calendar has no Back button
         click("Add menu");click("Add event")
         await { find("New event") != null }
         setText(nodes().first { it.isEditable }, "QA recurring event")
@@ -83,7 +83,7 @@ class EventEnhancementsUiTest {
         await { snapshot().items.none { it.seriesId == seriesId } }
         click("Undo")
         await { snapshot().items.count { it.seriesId == seriesId } == 3 }
-        click("Back")
+        click("Switch to Agenda view") // the calendar has no Back button
         screenshot("final-agenda")
     }
 
