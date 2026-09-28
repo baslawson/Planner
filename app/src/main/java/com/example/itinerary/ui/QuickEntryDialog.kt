@@ -247,11 +247,11 @@ fun QuickEntryEditor(
     }
     AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, 
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { HeadingText("Quick entry") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                modeControls()
-                if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
+        // The Event/Task switch sits with the heading, outside the scrolling part: in landscape the content opens
+        // scrolled to the focused field, which hid the switch above it.
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                HeadingText("Quick entry")
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     val green = MaterialTheme.colorScheme.primary
                     listOf(false to "Event", true to "Task").forEachIndexed { index, (isTask, label) ->
@@ -262,6 +262,12 @@ fun QuickEntryEditor(
                                 inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant, inactiveBorderColor = green.copy(alpha = 0.5f))) { Text(label) }
                     }
                 }
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                modeControls()
+                if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
                     label = { Text("Title") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
