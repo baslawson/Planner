@@ -630,7 +630,9 @@ object QuickEntry {
     }
 
     private fun roundUpToFive(time: LocalDateTime): LocalDateTime {
-        val minute = time.truncatedTo(ChronoUnit.MINUTES)
+        // A part-minute counts as the next minute, so 15:05:10 becomes 15:10 rather than 15:05 (before the time asked).
+        val whole = time.truncatedTo(ChronoUnit.MINUTES)
+        val minute = if (whole < time) whole.plusMinutes(1) else whole
         return minute.plusMinutes(((5 - minute.minute % 5) % 5).toLong())
     }
 

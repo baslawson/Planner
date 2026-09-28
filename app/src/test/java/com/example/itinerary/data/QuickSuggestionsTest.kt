@@ -122,6 +122,13 @@ class QuickSuggestionsTest {
         QuickEntry.parse("Remind me to call at 3pm tomorrow", today).let { assertTrue(it.taskHint && it.timed()) }
     }
 
+    @Test fun relativeTimesLandingOnAFiveMinuteMarkWithSecondsStillRoundUp() {
+        // 14:35:10 + 30 min = 15:05:10, which is after 15:05: the next five minutes is 15:10, never earlier than asked.
+        assertEquals(LocalTime.of(15, 10), parse("Call mum in 30 minutes", today.atTime(14, 35, 10)).time)
+        // On the minute exactly, 15:05 is already a five-minute mark.
+        assertEquals(LocalTime.of(15, 5), parse("Call mum in 30 minutes", today.atTime(14, 35)).time)
+    }
+
     @Test fun relativeTimesCountFromNowRoundedUp() {
         val now = today.atTime(14, 32, 10)
         for ((text, expected) in listOf("Call mum in 30 minutes" to LocalTime.of(15, 5), "Call mum in an hour" to LocalTime.of(15, 35),
