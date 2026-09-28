@@ -35,13 +35,13 @@ class FourEnhancementsUiTest {
         await { find("Edit event") != null }
         click("2 hours")
         await {
-            if (nodes().any { it.text?.contains("Overlaps with QA overlap") == true }) true
+            if (nodes().any { it.text?.let { t -> t.startsWith("Overlaps with") && t.contains("QA overlap") } == true }) true
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("duration-overlap")
         click("Save")
         await { snapshot().items.single { it.title == "QA duration" }.durationMinutes == 120 }
-        click("Back")
+        click("Switch to Agenda view") // saving from the calendar returns there
         await { find("AGENDA") != null }
         instrumentation.waitForIdleSync()
         click("Actions for QA duration")
