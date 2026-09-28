@@ -35,6 +35,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -52,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -76,11 +79,14 @@ fun MonthCalendar(
     onSelect: (LocalDate) -> Unit,
     onMonthChange: (YearMonth) -> Unit,
     modifier: Modifier = Modifier,
-) {
+    // Shorter rows let the whole month fit beside the day's events in landscape.
+    rowHeight: Dp = 48.dp,
+) = CompositionLocalProvider(LocalCalendarRowHeight provides rowHeight) {
     val firstDow = remember { WeekFields.of(Locale.getDefault()).firstDayOfWeek }
     val today = rememberCurrentDate()
 
-    Column(modifier.padding(horizontal = 8.dp).animateContentSize()) {
+    // Seven fixed columns: past the limit, two-digit days and weekday names no longer fit.
+    LimitTextScale { Column(modifier.padding(horizontal = 8.dp).animateContentSize()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = {
@@ -145,12 +151,13 @@ fun MonthCalendar(
                 onMonthChange = onMonthChange,
             )
         }
-    }
+    } }
 }
 
 // Months are pages of a vertical pager: swipe up for the next month, down for the previous one.
 // Page numbers count months from January 1900, which is far more range than a trip planner needs.
 private val PAGER_EPOCH: YearMonth = YearMonth.of(1900, 1)
+private val LocalCalendarRowHeight = compositionLocalOf { 48.dp }
 private const val PAGER_MONTHS = 12 * 400
 
 private fun pageOf(month: YearMonth): Int = ChronoUnit.MONTHS.between(PAGER_EPOCH, month).toInt()
@@ -195,7 +202,7 @@ private fun MonthPager(
     }
 
     // The pager is as tall as the current month needs (4 to 6 weeks), so short months don't leave a gap.
-    val height by animateDpAsState((48 * weeksIn(month, firstDow)).dp, label = "monthHeight")
+    val height by animateDpAsState(LocalCalendarRowHeight.current * weeksIn(month, firstDow), label = "monthHeight")
     VerticalPager(
         state = pagerState,
         modifier = Modifier.fillMaxWidth().height(height),
@@ -229,7 +236,7 @@ private fun WeekRow(
         for (i in 0 until 7) {
             val date = week.getOrNull(i)
             if (date == null) {
-                Spacer(Modifier.weight(1f).height(48.dp))
+                Spacer(Modifier.weight(1f).height(LocalCalendarRowHeight.current))
             } else {
                 DayCell(
                     date = date,
@@ -355,7 +362,7 @@ private fun DayCell(
 
     Box(
         modifier
-            .height(48.dp)
+            .height(LocalCalendarRowHeight.current)
             .clickable(onClick = onClick)
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center,

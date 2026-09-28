@@ -7,6 +7,11 @@ import com.example.itinerary.data.billTaskSummary
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -137,54 +142,71 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 )
             },
         ) { inner ->
-            // The calendar and day header stay put; only the event list below them scrolls.
-            Column(Modifier.fillMaxSize().padding(inner)) {
-                MonthCalendar(
-                    month = month,
-                    selected = selected,
-                    datesWithItems = datesWithItems,
-                    collapsed = calendarCollapsed,
-                    onSelect = vm::select,
-                    onMonthChange = vm::showMonth,
-                )
-                // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
-                val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
-                CalendarToggleBar(
-                    collapsed = calendarCollapsed,
-                    showToday = showToday,
-                    onToday = {
-                        vm.select(LocalDate.now())
-                        vm.showMonth(YearMonth.now())
-                    },
-                    onToggle = {
-                        // Opening the full month should land on the month of the day being viewed.
-                        if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
-                        vm.setCalendarCollapsed(!calendarCollapsed)
-                    },
-                )
-                DayHeader(date = selected)
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
-                    if (dayItems.isEmpty()) {
-                        item {
-                            Text(
-                                "Nothing planned for this day. Tap Add event to start.",
-                                modifier = Modifier.padding(horizontal = 20.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            // The calendar and day header stay put; only the event list scrolls. On a screen wider than it is tall
+            // (landscape) the month sits beside the day's events: stacked, the grid filled the screen and the events
+            // could not be reached, since swipes over the grid change the month.
+            BoxWithConstraints(Modifier.fillMaxSize().padding(inner)) {
+                val sideBySide = maxWidth > maxHeight
+                // Rows short enough for a whole month beside the list (title, weekdays and the toggle take ~150dp).
+                val rowHeight = if (sideBySide) ((maxHeight - 150.dp) / 6).coerceIn(36.dp, 48.dp) else 48.dp
+                val calendar: @Composable () -> Unit = {
+                    MonthCalendar(
+                        month = month,
+                        selected = selected,
+                        datesWithItems = datesWithItems,
+                        collapsed = calendarCollapsed,
+                        onSelect = vm::select,
+                        onMonthChange = vm::showMonth,
+                        rowHeight = rowHeight,
+                    )
+                    // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
+                    val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
+                    CalendarToggleBar(
+                        collapsed = calendarCollapsed,
+                        showToday = showToday,
+                        onToday = {
+                            vm.select(LocalDate.now())
+                            vm.showMonth(YearMonth.now())
+                        },
+                        onToggle = {
+                            // Opening the full month should land on the month of the day being viewed.
+                            if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
+                            vm.setCalendarCollapsed(!calendarCollapsed)
+                        },
+                    )
+                }
+                val dayList: @Composable ColumnScope.() -> Unit = {
+                    DayHeader(date = selected)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
+                        if (dayItems.isEmpty()) {
+                            item {
+                                Text(
+                                    "Nothing planned for this day. Tap Add event to start.",
+                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        items(dayItems, key = { it.id }) { item ->
+                            if (item.category == "Bills") BillTaskCard(item.billTaskSummary(), today, selection) { editing = item }
+                            else ItemRow(
+                                item = item,
+                                selection = selection,
+                                attachmentCount = attachmentsByItem[item.id]?.size ?: 0,
+                                today = today,
+                                displayedDate = selected,
+                                onMove = { vm.moveToTomorrow(item.id) },
+                                reminderCount = remindersByItem[item.id]?.size ?: 0
+                            ) { if (selection.active) selection.toggle(item.id) else editing = item }
                         }
                     }
-                    items(dayItems, key = { it.id }) { item ->
-                        if (item.category == "Bills") BillTaskCard(item.billTaskSummary(), today, selection) { editing = item }
-                        else ItemRow(
-                            item = item,
-                            selection = selection,
-                            attachmentCount = attachmentsByItem[item.id]?.size ?: 0,
-                            today = today,
-                            displayedDate = selected,
-                            onMove = { vm.moveToTomorrow(item.id) },
-                            reminderCount = remindersByItem[item.id]?.size ?: 0
-                        ) { if (selection.active) selection.toggle(item.id) else editing = item }
-                    }
+                }
+                if (sideBySide) Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) { calendar() }
+                    Column(Modifier.weight(1f).fillMaxHeight()) { dayList() }
+                } else Column(Modifier.fillMaxSize()) {
+                    calendar()
+                    dayList()
                 }
             }
         }
@@ -229,11 +251,13 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
     val accent = item.accentColor()
     TappableRow(onClick = onClick, onLongClick = { selection.toggle(item.id) },
         selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Text(
-            item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.width(76.dp),
-        )
+        LimitTextScale { // the time column has a fixed width
+            Text(
+                item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.width(76.dp),
+            )
+        }
         Box(
             Modifier
                 .width(4.dp)

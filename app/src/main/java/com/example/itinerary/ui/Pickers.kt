@@ -64,7 +64,7 @@ fun DateRangeDialog(
             ) { Text("Set dates") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    ) {
+    ) { LimitTextScale { // a 7-column grid of days
         DateRangePicker(
             state = state,
             modifier = Modifier.height(500.dp),
@@ -75,7 +75,7 @@ fun DateRangeDialog(
             // The pencil that switches to typing dates would take space from the heading.
             showModeToggle = false,
         )
-    }
+    } }
 }
 
 @Composable
@@ -135,14 +135,14 @@ fun SingleDateDialog(
             ) { Text("Set date") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    ) {
+    ) { LimitTextScale { // a 7-column grid of days
         DatePicker(
             state = state,
             title = { PickerTitle("Select date") },
             headline = { DateHeadline(state.selectedDateMillis?.toPickerDate()?.fullLabel() ?: "Pick a date") },
             showModeToggle = false,
         )
-    }
+    } }
 }
 
 // Material3 has no ready-made time picker dialog, and TimePicker is too wide for AlertDialog on narrow phones.

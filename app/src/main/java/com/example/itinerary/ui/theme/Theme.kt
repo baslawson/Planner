@@ -137,6 +137,8 @@ internal fun plannerHeadingColor(theme: AppTheme, colors: androidx.compose.mater
 
 val LocalColourBlindFriendly = compositionLocalOf { false }
 val LocalHighContrast = compositionLocalOf { false }
+// The app's own text size (Settings, 80–150 %), on top of the system font size; see LimitTextScale.
+val LocalTextSizePercent = compositionLocalOf { TextSize.DEFAULT_PERCENT }
 @Composable
 fun controlBorderWidth() = if (LocalHighContrast.current) 2.dp else 1.dp
 
@@ -220,7 +222,7 @@ fun ItineraryTheme(
     val heading = plannerHeadingColor(appTheme, colors, LocalHeadingColor.current)
     CompositionLocalProvider(LocalHighContrast provides highContrast,
         LocalColourBlindFriendly provides (appTheme == AppTheme.COLOUR_BLIND),
-        LocalHeadingColor provides heading) {
+        LocalHeadingColor provides heading, LocalTextSizePercent provides textSizePercent) {
         MaterialTheme(colorScheme = colors, typography = typography, content = content)
     }
 }
