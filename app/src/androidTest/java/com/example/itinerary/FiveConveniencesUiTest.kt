@@ -36,21 +36,21 @@ class FiveConveniencesUiTest {
         click("Set end time")
         await { find("End time") != null }
         screenshot("end-time-open")
-        fun setFocusedTime(expected: Int, value: String) {
-            await {
-                val field = nodes().firstOrNull { it.isEditable && it.isFocused && it.text?.toString()?.toIntOrNull() == expected }
-                field?.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
-                }) == true
-            }
+        // The end time is a clock dial: its numbers ("12 hours", "30 minutes") take a real tap, not typing.
+        fun tapDial(label: String) {
+            val bounds = android.graphics.Rect()
+            await { find(label)?.also { it.getBoundsInScreen(bounds) } != null && !bounds.isEmpty }
+            instrumentation.uiAutomation.executeShellCommand("input tap ${bounds.centerX()} ${bounds.centerY()}")
+                .use { java.io.FileInputStream(it.fileDescriptor).use { stream -> stream.readBytes() } }
+            Thread.sleep(500)
         }
-        click("11")
-        setFocusedTime(11, "12")
-        click("00")
-        setFocusedTime(0, "30")
+        tapDial("12 hours")
+        await { find("12 hours")?.text?.toString() == "12" } // the hour at the top of the dial
+        tapDial("30 minutes")
+        await { find("Ends same day · 2 h 30 min") != null }
         screenshot("end-time-picker")
         click("Set end time")
-        await { nodes().any { it.text?.contains("Until 12:30") == true } }
+        await { find("End time: 12:30") != null } // the editor's end-time button
         click("Add task")
         screenshot("checklist-before-check")
         click("Complete task 1")
@@ -78,7 +78,7 @@ class FiveConveniencesUiTest {
         click("Save")
         await { snapshot().items.any { it.title == "QA conveniences copy" } }
         assertTrue(snapshot().items.single { it.title == "QA conveniences copy" }.checklist.none { it.done })
-        click("Back")
+        click("Switch to Agenda view") // saving from the calendar returns there
         await { find("AGENDA") != null }
         instrumentation.waitForIdleSync()
         click("Actions for QA conveniences")
