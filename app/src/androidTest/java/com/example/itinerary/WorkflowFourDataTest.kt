@@ -36,8 +36,9 @@ class WorkflowFourDataTest {
             raw.execSQL("ALTER TABLE items DROP COLUMN bufferBeforeMinutes")
             raw.execSQL("ALTER TABLE items DROP COLUMN bufferAfterMinutes")
             raw.execSQL("ALTER TABLE tasks DROP COLUMN prerequisiteIds")
+            raw.execSQL("ALTER TABLE items DROP COLUMN endDate") // added in version 24
             raw.execSQL("DELETE FROM room_master_table");raw.version=22;raw.close()
-            db=Room.databaseBuilder(context,AppDatabase::class.java,name).addMigrations(MIGRATION_22_23).build()
+            db=Room.databaseBuilder(context,AppDatabase::class.java,name).addMigrations(MIGRATION_22_23, MIGRATION_23_24).build()
             assertEquals(event,db.itemDao().all().single());assertEquals(task,db.taskDao().all().single())
             val changed=event.copy(bufferBeforeMinutes=15,bufferAfterMinutes=20)
             db.itemDao().upsert(changed)

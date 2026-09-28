@@ -108,7 +108,7 @@ class TaskRemindersTest {
             old.execSQL("INSERT INTO tasks VALUES ('legacy', 'Keep task', '2026-09-26', 'HIGH', 'Keep notes', 0)")
             // Columns added after version 19, so the upgrade adds them again.
             listOf("paymentLink", "paymentReference", "bpayBillerCode", "bpayReference", "linkedTaskId",
-                "bufferBeforeMinutes", "bufferAfterMinutes").forEach {
+                "bufferBeforeMinutes", "bufferAfterMinutes", "endDate").forEach {
                 old.execSQL("ALTER TABLE items DROP COLUMN $it")
             }
             old.version = 19

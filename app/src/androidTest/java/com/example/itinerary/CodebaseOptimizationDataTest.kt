@@ -37,7 +37,9 @@ class CodebaseOptimizationDataTest {
         } finally { db.close(); dir.deleteRecursively() }
     }
     private fun assertNoWholeEventRead(queries: List<String>) {
-        assertFalse(queries.any { it.trim().matches(Regex("SELECT \\* FROM items(?: ORDER BY.*)?",RegexOption.IGNORE_CASE)) })
+        // Copy under the list's lock: background follow-up work can still be adding queries.
+        val seen = synchronized(queries) { queries.toList() }
+        assertFalse(seen.any { it.trim().matches(Regex("SELECT \\* FROM items(?: ORDER BY.*)?",RegexOption.IGNORE_CASE)) })
     }
 
     @Test fun saveDeleteAndReconcileAvoidWholeEventReadsAndDraftRetryIsIdempotent() = fixture { db,repo,queries,reconciled ->
