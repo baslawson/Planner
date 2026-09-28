@@ -7,6 +7,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.AndroidJUnitRunner
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
+import com.example.itinerary.data.AgendaRange
+import com.example.itinerary.data.AgendaType
 import com.example.itinerary.data.DataSnapshot
 import com.example.itinerary.data.EditorDraftStore
 import com.example.itinerary.data.QuickDraftStore
@@ -37,6 +39,8 @@ class PlannerTestRunner : AndroidJUnitRunner() {
  * Each test starts with no screen open, no unsaved draft and an empty database, so one test cannot leave an editor
  * that the next opens into ("Unfinished draft recovered") or entries that crowd its screens. The database is emptied
  * the way a backup restore replaces it, which also cancels reminder alarms and removes unused attachment files.
+ * What the agenda and calendar show goes back to a new install's defaults too; appearance settings (theme, font, date
+ * and time format) are left to the tests that change them.
  * Harness steps are left alone: their drafts and data must survive between steps.
  */
 class CleanStart : RunListener() {
@@ -54,6 +58,13 @@ class CleanStart : RunListener() {
         EditorDraftStore(context).clear()
         QuickDraftStore(context).clear()
         TaskDraftStore(context).clear("new")
-        runBlocking { (context.applicationContext as ItineraryApp).repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList())) }
+        val app = context.applicationContext as ItineraryApp
+        runBlocking { app.repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList())) }
+        with(app.settings) {
+            setAgendaTypes(AgendaType.entries.toSet()); setAgendaRange(AgendaRange.UPCOMING)
+            setShowBillsSummary(true); setBillsExpanded(true); setCalendarCollapsed(false)
+            setHiddenCategories(emptySet()); setSavedSearches(emptyList())
+            lastViewCalendar = false; lastCalendarDate = null; lastCalendarMonth = null
+        }
     }
 }

@@ -113,8 +113,7 @@ class BillTaskWorkflowUiTest {
         app.repository.setPaid(id, true)
         for (range in listOf(AgendaRange.TODAY, AgendaRange.THIS_WEEK, AgendaRange.UPCOMING)) {
             app.settings.setAgendaRange(range)
-            open()
-            setText("", title)
+            open() // the agenda has no text filter
             await { find(title) == null }
             click("Show completed tasks")
             reveal { find(title) != null }
@@ -172,8 +171,8 @@ class BillTaskWorkflowUiTest {
         val reminders = data().reminders.filter { it.itemId == before.id }
         val attachments = data().attachments.filter { it.itemId == before.id }
         app.settings.setAgendaRange(AgendaRange.TODAY)
-        open(); reveal { find(title) != null }; assertNotNull(find("Overdue"))
-        screenshot("overdue-bill-in-today")
+        // The Overdue label is at the foot of the card, which can start near the bottom of the screen.
+        open(); reveal { find(title) != null && find("Overdue") != null }; screenshot("overdue-bill-in-today")
         click(title); await { find("Edit bill task") != null }; click("Save")
         await { find("Edit bill task") == null }
         assertEquals(before, data().items.single { it.id == before.id }.copy(draftToken = before.draftToken))
