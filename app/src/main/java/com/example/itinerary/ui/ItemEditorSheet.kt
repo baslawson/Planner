@@ -287,6 +287,10 @@ fun ItemEditorSheet(
     var customColor by remember { mutableStateOf(values.customColor) }
     var pickingColor by remember { mutableStateOf(value = false) }
     var date by remember { mutableStateOf(values.date) }
+    // Last day of a multi-day event (all day, not a bill); kept while switching to a time so it can come back.
+    var endDate by remember { mutableStateOf(values.endDate) }
+    val spanEnd = endDate?.takeIf { time == null && !billTask && it > date }
+    var pickingRange by remember { mutableStateOf(value = false) }
     var pickingTime by remember { mutableStateOf(value = false) }
     var pickingDate by remember { mutableStateOf(value = false) }
     var addingCategory by remember { mutableStateOf(value = false) }
@@ -342,7 +346,7 @@ fun ItemEditorSheet(
         if (committed) null else JSONObject().put("token", draftToken).put("initial", DraftCodec.item(initial))
                     .put("existingAttachments", DraftCodec.attachments(existingAttachments))
                     .put("existingReminders", DraftCodec.reminders(existingReminders))
-                    .put("item", DraftCodec.item(values.copy(title = title, date = date, startTime = time,
+                    .put("item", DraftCodec.item(values.copy(title = title, date = date, endDate = spanEnd, startTime = time,
                         location = location, notes = notes, category = category, colorIndex = colorIndex,
                         paymentLink = paymentLink, paymentReference = paymentReference, bpayBillerCode = bpayBillerCode, bpayReference = bpayReference,
                         customColor = customColor, checklist = checklist, paid = paid, payments = payments, billAmountMinor = Bills.parse(billAmountText), billCurrency = billCurrency)))
@@ -400,7 +404,7 @@ fun ItemEditorSheet(
             billAmountMinor = if (category == "Bills" || payments.isNotEmpty()) Bills.parse(billAmountText) else null, billCurrency = billCurrency,
             seriesId = if (copy) null else initial.seriesId,
             repeatRule = if (copy) "NONE" else initial.repeatRule,
-            date = date, title = title.trim(), startTime = time,
+            date = date, endDate = spanEnd, title = title.trim(), startTime = time,
             durationMinutes = if (time == null) null else duration,
             bufferBeforeMinutes = if (time == null || billTask) 0 else before,
             bufferAfterMinutes = if (time == null || billTask) 0 else after,
@@ -412,7 +416,7 @@ fun ItemEditorSheet(
         val item = content.forDate(date)
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
         bpayBillerCode = item.bpayBillerCode; bpayReference = item.bpayReference
-        title = item.title; time = item.startTime; lastTimedTime = item.startTime ?: LocalTime.of(9, 0)
+        title = item.title; time = item.startTime; lastTimedTime = item.startTime ?: LocalTime.of(9, 0); endDate = item.endDate
         location = item.location; notes = item.notes; category = item.category; colorIndex = item.colorIndex
         beforeText = item.bufferBeforeMinutes.toString(); afterText = item.bufferAfterMinutes.toString()
         customColor = item.customColor; durationText = item.durationMinutes?.toString().orEmpty(); checklist = item.checklist
@@ -527,14 +531,15 @@ fun ItemEditorSheet(
             }
             // Saffron pill so the day being edited is easy to spot; tap it to pick another date.
             Text(
-                "${if (billTask) "Due " else ""}${date.dayLabel(LocalDateFormat.current)} ▾",
+                spanEnd?.let { "${spanLabel(date, it)} ▾" } ?: "${if (billTask) "Due " else ""}${date.dayLabel(LocalDateFormat.current)} ▾",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .background(MaterialTheme.colorScheme.secondaryContainer)
-                    .clickable(role = Role.Button, onClickLabel = if (billTask) "Change due date" else "Change date") { pickingDate = true }
+                    .clickable(role = Role.Button, onClickLabel = if (billTask) "Change due date" else if (spanEnd != null) "Change dates" else "Change date") {
+                        if (spanEnd != null) pickingRange = true else pickingDate = true }
                     .padding(horizontal = 16.dp, vertical = 6.dp),
             )
             OutlinedTextField(
@@ -635,6 +640,18 @@ fun ItemEditorSheet(
                 ) {
                     Text(if (billTask) "No due time" else "All day", style = MaterialTheme.typography.bodyLarge)
                     Switch(checked = allDay, onCheckedChange = null)
+                }
+                // An all-day event can span several days ("Trip, 3 Oct – 7 Oct"): on picks the dates, off makes it one day.
+                if (allDay && !billTask) Row(
+                    modifier = Modifier
+                        .toggleable(value = spanEnd != null, role = Role.Switch,
+                            onValueChange = { on -> if (on) pickingRange = true else endDate = null })
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("Multiple days", style = MaterialTheme.typography.bodyLarge)
+                    Switch(checked = spanEnd != null, onCheckedChange = null)
                 }
                 if (!allDay) {
                     ModeButton(
@@ -973,6 +990,19 @@ fun ItemEditorSheet(
             initial = date,
             onDismiss = { pickingDate = false },
             onConfirm = { date = it; pickingDate = false },
+        )
+    }
+    if (pickingRange) {
+        DateRangeDialog(
+            start = date,
+            end = spanEnd ?: date.plusDays(1),
+            onDismiss = { pickingRange = false },
+            onConfirm = { start, end ->
+                date = start
+                // One day chosen = a single-day event; longer than the limit is cut to it.
+                endDate = end.takeIf { it > start }?.let { minOf(it, start.plusDays((com.example.itinerary.data.MultiDay.MAX_DAYS - 1).toLong())) }
+                pickingRange = false
+            },
         )
     }
     if (pickingEndTime && time != null) {

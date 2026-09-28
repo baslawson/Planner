@@ -313,7 +313,8 @@ fun AgendaScreen(
                                 contentType = { "event" }) { entry ->
                                 AgendaEventCard(entry, today, selection,
                                     onMove = { vm.moveToTomorrow(entry.event.id) }) {
-                                    if (selection.active) selection.toggle(entry.event.id) else onOpenEvent(entry.event.date)
+                                    // A trip shown under Today opens the calendar on today, the day it was shown under.
+                                    if (selection.active) selection.toggle(entry.event.id) else onOpenEvent(if (entry.continuing) today else entry.event.date)
                                 }
                             }
                         }

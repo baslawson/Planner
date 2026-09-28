@@ -65,9 +65,11 @@ fun DateRangeDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     ) { LimitTextScale { // a 7-column grid of days
+        // At most 500 dp, less on a short (landscape) screen so the dialog's buttons stay on it; the months scroll.
+        val screen = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
         DateRangePicker(
             state = state,
-            modifier = Modifier.height(500.dp),
+            modifier = Modifier.height((screen - 160).coerceIn(280, 500).dp),
             // The built-in heading writes both dates out in full at a large size, which wraps badly in
             // monospace, so it is replaced with a compact one-line heading.
             title = { PickerTitle("Select dates") },
