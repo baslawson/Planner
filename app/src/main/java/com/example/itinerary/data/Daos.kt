@@ -45,8 +45,6 @@ interface TripDao {
     @Query("SELECT * FROM trips ORDER BY sortOrder, id")
     fun observeTrips(): Flow<List<Trip>>
 
-    @Query("UPDATE trips SET sortOrder = :order WHERE id = :id")
-    suspend fun setOrder(id: Long, order: Int)
 
     // New plans are placed above this, so they land at the top of the list.
     @Query("SELECT COALESCE(MIN(sortOrder), 0) FROM trips")
@@ -101,8 +99,6 @@ interface ItemDao {
     fun observeCategoryCounts(): Flow<List<CategoryCount>>
 
     // Null start times (all-day) sort first in SQLite.
-    @Query("SELECT * FROM items WHERE tripId = :tripId ORDER BY date, startTime")
-    fun observeForTrip(tripId: Long): Flow<List<ItineraryItem>>
 
     @Query("SELECT * FROM items")
     suspend fun all(): List<ItineraryItem>
@@ -110,8 +106,8 @@ interface ItemDao {
     @Query("SELECT * FROM items ORDER BY date, startTime, id")
     fun observeAll(): Flow<List<ItineraryItem>>
 
-    // Every event of every plan, for the summaries on "My plans". Same order as [observeForTrip], so the
-    // summary can take the next few without sorting again; null start times (all-day) sort first in SQLite.
+    // Every event of every plan, for the agenda and calendar, in date then time order; null start times (all-day)
+    // sort first in SQLite.
     @Query(
         "SELECT tripId, id, date, startTime, title, colorIndex, customColor, durationMinutes, location, checklist, category, paid, billAmountMinor, billCurrency, skipped, seriesId, payments, linkedTaskId FROM items " +
             "ORDER BY date, startTime, id",
@@ -146,11 +142,6 @@ interface ReminderDao {
     @Query("SELECT * FROM reminders ORDER BY id")
     fun observeAll(): Flow<List<Reminder>>
 
-    @Query(
-        "SELECT r.* FROM reminders r JOIN items i ON r.itemId = i.id " +
-            "WHERE i.tripId = :tripId ORDER BY r.id",
-    )
-    fun observeForTrip(tripId: Long): Flow<List<Reminder>>
 
     @Query("SELECT * FROM reminders WHERE itemId = :itemId ORDER BY id")
     suspend fun forItem(itemId: Long): List<Reminder>
@@ -178,11 +169,6 @@ interface AttachmentDao {
 
     @Query("SELECT * FROM attachments WHERE itemId = :id ORDER BY id")
     suspend fun forItem(id: Long): List<Attachment>
-    @Query(
-        "SELECT a.* FROM attachments a JOIN items i ON a.itemId = i.id " +
-            "WHERE i.tripId = :tripId ORDER BY a.id",
-    )
-    fun observeForTrip(tripId: Long): Flow<List<Attachment>>
 
     @Query("SELECT * FROM attachments")
     fun observeAll(): Flow<List<Attachment>>
@@ -199,8 +185,6 @@ interface AttachmentDao {
     suspend fun insertAll(attachments: List<Attachment>)
 
     // Rows go away with their item or trip via cascade, so files are looked up first.
-    @Query("SELECT fileName FROM attachments WHERE itemId = :itemId")
-    suspend fun fileNamesForItem(itemId: Long): List<String>
 
     @Query(
         "SELECT a.fileName FROM attachments a JOIN items i ON a.itemId = i.id WHERE i.tripId = :tripId",

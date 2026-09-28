@@ -151,12 +151,6 @@ data class EventSaveOptions(
     val paymentBaseline: PaymentState? = null,
 )
 
-fun sameTimeEvents(events: List<PlanEvent>, dates: List<LocalDate>, time: LocalTime?, excludedIds: Set<Long>): List<PlanEvent> {
-    if (time == null) return emptyList()
-    val days = dates.toHashSet()
-    return events.filter { it.id !in excludedIds && it.date in days && it.startTime == time }
-}
-
 fun millisUntilNextDay(now: java.time.ZonedDateTime): Long =
     java.time.Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(now.zone))
         .toMillis().coerceAtLeast(1)

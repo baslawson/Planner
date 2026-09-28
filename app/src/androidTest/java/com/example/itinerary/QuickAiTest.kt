@@ -143,7 +143,7 @@ class QuickAiTest {
         val store=QuickDraftStore(context)
         val original=runCatching { store.read() }.getOrNull()
         try {
-            val edited=input.copy(dateOverride="2031-02-03",timeOverride="16:00",durationText="45",countText="2",removeReminder=true).withAi(entry.copy(title="Corrected title"))
+            val edited=input.copy(dateOverride="2031-02-03",timeOverride="16:00",durationText="45",countText="2",removeReminder=true).copy(ai=entry.copy(title="Corrected title"),literals=emptyList())
             val draft=QuickDraft(edited)
             store.write(draft);assertEquals(draft,QuickDraftStore(context).read())
             val s=edited.suggestion();assertEquals(LocalDate.of(2031,2,3),s.date);assertEquals("16:00",s.time.toString())

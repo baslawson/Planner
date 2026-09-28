@@ -278,9 +278,6 @@ class Repository(
 
     val trips: Flow<List<Trip>> = tripDao.observeTrips()
     fun trip(id: Long): Flow<Trip?> = tripDao.observeTrip(id)
-    fun itemsFor(tripId: Long): Flow<List<ItineraryItem>> = itemDao.observeForTrip(tripId)
-    fun attachmentsFor(tripId: Long): Flow<List<Attachment>> = attachmentDao.observeForTrip(tripId)
-    fun remindersFor(tripId: Long): Flow<List<Reminder>> = reminderDao.observeForTrip(tripId)
 
     // Across every trip, for search.
     val allItems: Flow<List<ItineraryItem>> = itemDao.observeAll()
@@ -299,11 +296,6 @@ class Repository(
         // A brand-new plan goes to the top of the list.
         val toSave = if (trip.id == 0L) trip.copy(sortOrder = tripDao.minOrder() - 1) else trip
         tripDao.upsert(toSave)
-    }
-
-    // Saves the list order: position in [orderedIds] becomes each plan's sort order.
-    suspend fun reorderTrips(orderedIds: List<Long>) {
-        db.withTransaction { orderedIds.forEachIndexed { index, id -> tripDao.setOrder(id, index) } }
     }
 
     suspend fun deleteTrip(trip: Trip) = deleteTrips(listOf(trip))
@@ -440,24 +432,6 @@ class Repository(
         }
         payments.forEach(::recordPayment)
         afterCommit(removedFiles, cancelled.map { it.id } + scheduled.flatMap { it.second }.map { it.id }, cancelFirst = resetReminders)
-    }
-
-    // Makes the new plan [plan] (it goes to the top of the list) and puts [item] in it, with its [added] attachments and
-    // [addedReminders], all or nothing. Used by "Add quick event", where the event's own name is the plan's name.
-    suspend fun createPlanWithEvent(
-        plan: Trip,
-        item: ItineraryItem,
-        added: List<Attachment>,
-        addedReminders: List<Reminder>,
-    ) = changes.withLock {
-        val (saved, reminders) = db.withTransaction {
-            val tripId = tripDao.upsert(plan.copy(id = 0, sortOrder = tripDao.minOrder() - 1))
-            val itemId = itemDao.upsert(item.copy(id = 0, tripId = tripId))
-            added.forEach { attachmentDao.insert(it.copy(itemId = itemId)) }
-            addedReminders.forEach { reminderDao.insert(it.copy(itemId = itemId)) }
-            item.copy(id = itemId, tripId = tripId) to reminderDao.forItem(itemId)
-        }
-        afterCommit(reminderIds = reminders.map { it.id })
     }
 
     // Every event in [names], in any plan, becomes Other.

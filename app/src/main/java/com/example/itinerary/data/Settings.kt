@@ -94,7 +94,7 @@ data class SettingsSnapshot(
     // Show plans that start soon (or are under way) at the top of the list, and how many days ahead counts as soon.
     val upcomingOnTop: Boolean = true,
     val upcomingDays: Int = UpcomingPlans.DEFAULT_DAYS,
-    // How see-through the big + button on My plans is, in percent (0 = solid).
+    // How see-through the big + button on the agenda is, in percent (0 = solid).
     val addButtonSeeThrough: Int = AddButton.DEFAULT_SEE_THROUGH,
     // The colour of every heading in the app, as an opaque ARGB value.
     val headingColor: Int = HeadingColor.DEFAULT_ARGB,
@@ -113,7 +113,7 @@ object HeadingColor {
     const val DEFAULT_ARGB: Int = 0xFFFF5614.toInt()
 }
 
-// The big + button on My plans can be made see-through so the plans behind it show. It never goes fully invisible.
+// The big + button on the agenda can be made see-through so what is behind it shows. It never goes fully invisible.
 object AddButton {
     const val MIN_SEE_THROUGH = 0
     const val MAX_SEE_THROUGH = 80

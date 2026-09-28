@@ -30,16 +30,6 @@ class EventEnhancementsTest {
         assertThrows(IllegalArgumentException::class.java) { RepeatRule.DAILY.dates(date, 366) }
         assertThrows(IllegalArgumentException::class.java) { RepeatRule.DAILY.dates(date, 0) }
     }
-    @Test fun conflictsIgnoreSelfAndAllDayButIncludeOtherOwnersAndFutureOccurrences() {
-        val date = LocalDate.of(2027, 1, 1)
-        val event = PlanEvent(1, 1, date, LocalTime.NOON, "A", 0, null)
-        val other = event.copy(id = 2, tripId = 2)
-        val future = event.copy(id = 3, date = date.plusWeeks(1))
-        val all = listOf(event, other, future, event.copy(id = 4, startTime = null), event.copy(id = 5, startTime = LocalTime.MIDNIGHT))
-        assertEquals(listOf(other, future), sameTimeEvents(all, listOf(date, date.plusWeeks(1)), LocalTime.NOON, setOf(1)))
-        assertTrue(sameTimeEvents(all, listOf(date), null, emptySet()).isEmpty())
-        assertTrue(sameTimeEvents(all, listOf(date), LocalTime.NOON, setOf(1, 2)).isEmpty())
-    }
     @Test fun midnightDelayUsesLocalDayAndDaylightSaving() {
         val zone = ZoneId.of("Australia/Sydney")
         assertEquals(23 * 60 * 60 * 1000L, millisUntilNextDay(LocalDate.of(2026, 10, 4).atStartOfDay(zone)))

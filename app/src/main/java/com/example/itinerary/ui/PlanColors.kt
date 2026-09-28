@@ -55,15 +55,8 @@ fun planColor(index: Int): PlanColor = PLAN_COLORS[Math.floorMod(index, PLAN_COL
 // The colour an event is shown in: the one the user picked freely, else its palette entry.
 fun ItineraryItem.accentColor(): Color = customColor?.let { Color(it) } ?: planColor(colorIndex).color
 
-// The same for a plan on the "My plans" list.
-fun Trip.accentColor(): Color = customColor?.let { Color(it) } ?: planColor(colorIndex).color
-
-// And for an event as a plan card summarises it, which carries the same two colour columns (see PlanEvent).
+// The same for an event as the agenda lists it, which carries the same two colour columns (see PlanEvent).
 fun PlanEvent.accentColor(): Color = customColor?.let { Color(it) } ?: planColor(colorIndex).color
-
-// The palette colours these plans use, to give a new plan the least used one. Plans with a colour of their own don't
-// use up a palette colour.
-fun List<Trip>.usedPaletteColors(): List<Int> = filter { it.customColor == null }.map { it.colorIndex }
 
 // A colour adjusted for use as text: lightened on a dark theme and darkened on a light one, then pushed
 // further until it has enough contrast with the background (WCAG 4.5), so that even a very pale or a very dark

@@ -42,11 +42,6 @@ val LocalDateFormat = compositionLocalOf { DateFormatChoice.DEFAULT }
 fun LocalDate.shortLabel(): String =
     format(patternFormatter("d MMM"))
 
-// The day heading over a group of events on a plan card. Short enough for a narrow card but keeps the weekday,
-// which is what tells you at a glance whether something falls on a weekend.
-fun LocalDate.cardDayLabel(): String =
-    format(patternFormatter("EEE d MMM"))
-
 // A list may render the same date/time pattern hundreds of times. Formatters are immutable;
 // include the locale in the key so changing the phone language cannot reuse the wrong one.
 private val patternFormatters = ConcurrentHashMap<Pair<String, Locale>, DateTimeFormatter>()
@@ -76,13 +71,6 @@ fun LocalTime.label(timeFormat: TimeFormat, context: Context): String {
 
 fun YearMonth.label(): String =
     format(patternFormatter("MMMM yyyy"))
-
-fun Trip.dayCount(): Int = (ChronoUnit.DAYS.between(startDate, endDate) + 1).toInt()
-
-fun Trip.rangeLabel(): String {
-    val n = dayCount()
-    return "${startDate.shortLabel()} to ${endDate.fullLabel()}, $n ${if (n == 1) "day" else "days"}"
-}
 
 // Material date pickers speak UTC milliseconds. Converting via epoch days avoids time zone off-by-one bugs.
 fun LocalDate.toPickerMillis(): Long = toEpochDay() * 86_400_000L

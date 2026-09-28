@@ -56,8 +56,8 @@ import com.example.itinerary.reminders.openAppSettings
 import com.example.itinerary.reminders.sendTestNotification
 
 // The Settings page, full screen: a title bar with a back arrow, the settings in a scrolling column that shows when there
-// is more above or below (ScrollHints), and a big Save button pinned at the bottom. It is drawn over My plans (not in a
-// dialog window), so the pickers and confirmations still open on top of it; the system Back key closes it (TripsScreen).
+// is more above or below (ScrollHints), and a big Save button pinned at the bottom. It is drawn over the current screen
+// (not in a dialog window), so the pickers and confirmations still open on top of it; the system Back key closes it.
 // Changes apply immediately.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

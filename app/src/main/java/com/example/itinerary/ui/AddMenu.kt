@@ -72,8 +72,8 @@ private val AddButtonSize = 84.dp
 private fun addButtonFill(seeThroughPercent: Int): Color =
     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 1f - seeThroughPercent.coerceIn(0, 100) / 100f)
 
-// The big + button on its own: in Settings as a live sample, on the agenda to add an event ([label] is what a screen
-// reader says), and on Manage plans with a menu (see AddButtonWithMenu).
+// The big + button on its own: in Settings as a live sample, and on the agenda to add an event ([label] is what a
+// screen reader says).
 @Composable
 fun AddButtonSample(
     seeThroughPercent: Int,
@@ -100,104 +100,6 @@ fun AddButtonSample(
             contentDescription = if (open) "Close" else label,
             modifier = Modifier.size(38.dp),
         )
-    }
-}
-
-// The big + in the middle of the bottom edge and, when tapped, a card with the two things you can add. The card fades
-// and grows out of the button, the background dims, and the + turns into a ×. Tap the × or the dimmed background
-// (or the system Back key, handled by the caller) to close.
-@Composable
-fun AddButtonWithMenu(
-    seeThroughPercent: Int,
-    open: Boolean,
-    onOpenChange: (Boolean) -> Unit,
-    onNewPlan: () -> Unit,
-    onQuickEvent: () -> Unit,
-) {
-    Box(Modifier.fillMaxSize()) {
-        // Dims everything behind the card; tapping it closes the menu.
-        AnimatedVisibility(visible = open, enter = fadeIn(tween(160)), exit = fadeOut(tween(120))) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { onOpenChange(false) },
-                    ),
-            )
-        }
-        Column(
-            Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            AnimatedVisibility(
-                visible = open,
-                enter = fadeIn(tween(160)) + scaleIn(tween(200), initialScale = 0.8f, transformOrigin = TransformOrigin(0.5f, 1f)),
-                exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.9f, transformOrigin = TransformOrigin(0.5f, 1f)),
-            ) {
-                AddMenuCard(
-                    onNewPlan = { onOpenChange(false); onNewPlan() },
-                    onQuickEvent = { onOpenChange(false); onQuickEvent() },
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            AddButtonSample(seeThroughPercent = if (open) 0 else seeThroughPercent, open = open, onClick = { onOpenChange(!open) })
-        }
-    }
-}
-
-@Composable
-private fun AddMenuCard(onNewPlan: () -> Unit, onQuickEvent: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-        shadowElevation = 16.dp,
-        border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-        modifier = Modifier.padding(horizontal = 24.dp).fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(vertical = 8.dp)) {
-            AddMenuRow(
-                icon = Icons.Filled.DateRange,
-                badge = MaterialTheme.colorScheme.primary,
-                title = "Add new plan",
-                subtitle = "Dates, colour and events for a trip",
-                onClick = onNewPlan,
-            )
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            AddMenuRow(
-                icon = Icons.Filled.Star,
-                badge = MaterialTheme.colorScheme.secondary,
-                title = "Add new event",
-                subtitle = "Creates a new plan with one event",
-                onClick = onQuickEvent,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AddMenuRow(icon: ImageVector, badge: Color, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(48.dp).clip(CircleShape).background(badge),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.surface, modifier = Modifier.size(26.dp))
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

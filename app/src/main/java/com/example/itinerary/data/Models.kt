@@ -15,9 +15,9 @@ data class Trip(
     val destination: String,
     val startDate: LocalDate,
     val endDate: LocalDate,
-    // Position in the "My plans" list; lower comes first. Set by dragging or the move-to menu items.
+    // Position in the former "My plans" list; lower comes first. Kept so existing data and backups stay the same.
     @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
-    // Which entry of the plan colour palette (see PlanColors) this plan is shown in on the "My plans" list.
+    // Which entry of the plan colour palette (see PlanColors) this plan used on the former "My plans" list.
     @ColumnInfo(defaultValue = "0") val colorIndex: Int = 0,
     // A colour the user picked freely (opaque ARGB). When set it is used instead of the palette entry.
     val customColor: Int? = null,

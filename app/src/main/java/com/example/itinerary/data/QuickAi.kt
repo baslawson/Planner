@@ -65,4 +65,4 @@ data class QuickAiResult(val status: String, val message: String, val entries: L
 }
 
 /** Explicit field corrections win over a new AI baseline. */
-fun QuickInput.withAi(entry: QuickAiEntry) = copy(ai = entry, literals = emptyList())
+

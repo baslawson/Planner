@@ -207,12 +207,6 @@ class TripsViewModel(
     val trips: StateFlow<List<Trip>?> = repo.trips
         .stateInWhileVisible(viewModelScope, null)
 
-    // The events each plan card is made of, keyed by plan id and still in date then time order. Grouped here
-    // rather than on the screen so it happens once per database change instead of once per recomposition.
-    val eventsByPlan: StateFlow<Map<Long, List<PlanEvent>>> = repo.planEvents
-        .map { events -> events.groupBy { it.tripId } }
-        .stateInWhileVisible(viewModelScope, emptyMap())
-
     // Every event of every plan, for the agenda; null until the database has answered, like [trips].
     val agendaEvents: StateFlow<List<PlanEvent>?> = repo.planEvents
         .stateInWhileVisible(viewModelScope, null)
@@ -242,11 +236,6 @@ class TripsViewModel(
 
     fun setTimeFormat(format: TimeFormat) = settings.setTimeFormat(format)
 
-    // Plans that start soon can be shown at the top of the list (see UpcomingPlans); this is display only.
-    val upcomingOnTop: StateFlow<Boolean> = settings.upcomingOnTop
-
-    fun setUpcomingOnTop(enabled: Boolean) = settings.setUpcomingOnTop(enabled)
-
     // How see-through the big + button is, in percent.
     val addButtonSeeThrough: StateFlow<Int> = settings.addButtonSeeThrough
 
@@ -272,14 +261,6 @@ class TripsViewModel(
 
     fun setTextSizePercent(percent: Int) = settings.setTextSizePercent(percent)
 
-    val upcomingDays: StateFlow<Int> = settings.upcomingDays
-
-    fun setUpcomingDays(days: Int) = settings.setUpcomingDays(days)
-
-    fun reorder(orderedIds: List<Long>) {
-        viewModelScope.launch { repo.reorderTrips(orderedIds) }
-    }
-
     // What the event form (used by "Add quick event") needs.
     private val categories = CategoryState(repo, settings, viewModelScope)
     val categoryCounts: StateFlow<Map<String, Int>> = categories.counts
@@ -288,62 +269,4 @@ class TripsViewModel(
     fun removeCategories(names: Set<String>) = categories.remove(names)
 
     fun showCategory(name: String) = categories.show(name)
-
-    // "Add quick event": the event's name becomes a new one-day plan on the event's day, which holds the event.
-    // The plan takes the plan colour the fewest plans use, like the New plan dialog; it can be edited afterwards.
-    fun createQuickEvent(
-        item: ItineraryItem,
-        added: List<Attachment>,
-        addedReminders: List<Reminder>,
-        onCreated: (String) -> Unit,
-    ) {
-        val plan = Trip(
-            name = item.title,
-            destination = "",
-            startDate = item.date,
-            endDate = item.date,
-            colorIndex = PlanColors.next(trips.value.orEmpty().usedPaletteColors()),
-        )
-        viewModelScope.launch {
-            repo.createPlanWithEvent(plan, item, added, addedReminders)
-            onCreated(plan.name)
-        }
-    }
-
-    fun moveToTop(id: Long) = reorder(listOf(id) + trips.value.orEmpty().map { it.id }.filter { it != id })
-
-    fun moveToBottom(id: Long) = reorder(trips.value.orEmpty().map { it.id }.filter { it != id } + id)
-
-    fun save(trip: Trip) {
-        viewModelScope.launch { repo.saveTrip(trip) }
-    }
-
-    fun delete(trip: Trip) {
-        viewModelScope.launch { repo.deleteTrip(trip) }
-    }
-
-    private val _deletingPlans = MutableStateFlow(false)
-    val deletingPlans = _deletingPlans.asStateFlow()
-    private val _planDeletionError = MutableStateFlow<String?>(null)
-    val planDeletionError = _planDeletionError.asStateFlow()
-
-    fun clearPlanDeletionError() { _planDeletionError.value = null }
-
-    fun deletePlans(plans: List<Trip>, onDeleted: () -> Unit) {
-        if (_deletingPlans.value || plans.isEmpty()) return
-        _deletingPlans.value = true
-        _planDeletionError.value = null
-        viewModelScope.launch {
-            try {
-                repo.deleteTrips(plans)
-                onDeleted()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                _planDeletionError.value = "Couldn't finish deleting the selected plans. Check Manage plans before trying again."
-            } finally {
-                _deletingPlans.value = false
-            }
-        }
-    }
 }
