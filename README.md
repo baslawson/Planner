@@ -35,7 +35,9 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Release tags match the app's version (tag `v0.0.1` is version 0.0.1), so Obtainium can tell when an update is available.
+Release tags match the app's version (tag `v0.0.2` is version 0.0.2), so Obtainium can tell when an update is available.
+
+From 0.0.2 the app ID is `io.github.baslawson.planner` and releases are signed with a dedicated release key. Earlier builds (`com.example.itinerary`) are a separate app: export a backup from the old app, restore it in the new one, then uninstall the old one.
 
 ## Build and run
 
@@ -52,7 +54,9 @@ From a terminal (use `gradlew.bat` on Windows):
 
 Set `ANDROID_HOME` to your Android SDK directory or let Android Studio create the ignored `local.properties` file. The first build requires internet access to download Gradle, the JDK and dependencies.
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Downloadable builds can also be attached to this repository's GitHub Releases. Debug signing keys are local to each developer; builds signed with different keys cannot update an existing installation in place.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. It installs as "Planner debug" (`io.github.baslawson.planner.debug`), next to the released app rather than over it. Debug signing keys are local to each developer; builds signed with different keys cannot update an existing installation in place.
+
+`:app:assembleRelease` signs with the key named in a git-ignored `keystore.properties` in the project root (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Without that file the release APK is left unsigned.
 
 ## Quick entry
 
