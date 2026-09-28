@@ -105,7 +105,8 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
 @Composable
 fun TaskTypeDialog(onTask: () -> Unit, onBill: () -> Unit, onScan: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add task") },
-        text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        // In landscape the last choice is below the visible part: show "More below", as the Themes dialog does.
+        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth()) { Column(Modifier.fillMaxWidth().padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("What would you like to add?", style = MaterialTheme.typography.bodyMedium)
             TaskTypeChoice("To-do task", "Make room for a little win", R.drawable.action_task,
@@ -117,7 +118,7 @@ fun TaskTypeDialog(onTask: () -> Unit, onBill: () -> Unit, onScan: () -> Unit, o
             TaskTypeChoice("Scan bill", "Snap it. Add it. Sorted.", R.drawable.action_camera,
                 MaterialTheme.colorScheme.primaryContainer,
                         MaterialTheme.colorScheme.primary, onScan)
-        } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
