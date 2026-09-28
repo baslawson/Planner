@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,7 +12,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.itinerary"
+        // Permanent: Android treats a different ID as a different app. The Kotlin package
+        // (namespace) is internal and deliberately still com.example.itinerary.
+        applicationId = "io.github.baslawson.planner"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 35
         versionCode = 8
@@ -18,8 +22,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
+    // without that file a release build is simply left unsigned.
+    val keystoreFile = rootProject.file("keystore.properties")
+    if (keystoreFile.exists()) {
+        val keystore = Properties().apply { keystoreFile.inputStream().use { load(it) } }
+        signingConfigs.create("release") {
+            storeFile = file(keystore.getProperty("storeFile"))
+            storePassword = keystore.getProperty("storePassword")
+            keyAlias = keystore.getProperty("keyAlias")
+            keyPassword = keystore.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        // Debug builds install alongside the release app instead of replacing it.
+        debug { applicationIdSuffix = ".debug" }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

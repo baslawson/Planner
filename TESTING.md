@@ -88,7 +88,11 @@ Copy-Item $src $dst -Force
 Expect exactly two warnings, both `VIBRATOR_SERVICE` deprecations in `AlarmService.kt`. Anything else is new.
 
 To confirm the running app is the binary you think it is, compare `md5sum` on the device
-(`adb shell pm path com.example.itinerary`) against the local file.
+(`adb shell pm path io.github.baslawson.planner.debug`) against the local file.
+
+**Package names.** Debug builds are `io.github.baslawson.planner.debug` ("Planner debug"); release builds are
+`io.github.baslawson.planner`. Only debug builds allow `run-as`. Builds before the ID change were
+`com.example.itinerary`, a separate app as far as Android is concerned — its data does not carry over by itself.
 
 ### Screenshot
 Read `exec-out screencap` as a **raw byte stream**. Letting PowerShell redirect it into a file corrupts the PNG, and
@@ -118,10 +122,10 @@ Clean up afterwards with `adb shell rm -f /sdcard/ui.xml` as its own command.
 
 ### Back up and restore app data — do this before ANY test that saves
 ```
-& $adb -s emulator-5554 shell am force-stop com.example.itinerary
-& $adb -s emulator-5554 shell run-as com.example.itinerary mkdir -p files/bk
+& $adb -s emulator-5554 shell am force-stop io.github.baslawson.planner.debug
+& $adb -s emulator-5554 shell run-as io.github.baslawson.planner.debug mkdir -p files/bk
 # copy all three: itinerary.db, itinerary.db-wal, itinerary.db-shm
-& $adb -s emulator-5554 shell run-as com.example.itinerary cp databases/itinerary.db files/bk/itinerary.db
+& $adb -s emulator-5554 shell run-as io.github.baslawson.planner.debug cp databases/itinerary.db files/bk/itinerary.db
 ```
 Restore by copying back the other way, then remove the folder
 (`find files/bk -type f -delete`, then `rmdir files/bk`).
