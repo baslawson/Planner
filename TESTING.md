@@ -133,6 +133,11 @@ Restore by copying back the other way, then remove the folder
 Skipping this means the database cannot be returned byte-for-byte, which happened once and had to be admitted in the
 write-up. Deleting test data through the app afterwards restores the *contents* but not the file.
 
+Check permissions as well as contents afterwards (`run-as … ls -la databases files shared_prefs`). Folders and files
+created through `run-as` (mkdir, cp from `/data/local/tmp`, tar) can come out world-writable (`drwxrwxrwx`, `-rw-r--r--`)
+and hashes do not show that. The app's own modes are 771 for `databases`, `files`, `shared_prefs`; 700 for folders
+inside `files`; 660 for database and preference files; 600 for other files. Set them with `chmod` if they differ.
+
 ### Check for crashes
 ```
 & $adb -s emulator-5554 shell logcat -d -b crash | Select-String 'itinerary'
