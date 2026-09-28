@@ -7,9 +7,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.AndroidJUnitRunner
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
+import com.example.itinerary.data.DataSnapshot
 import com.example.itinerary.data.EditorDraftStore
 import com.example.itinerary.data.QuickDraftStore
 import com.example.itinerary.data.TaskDraftStore
+import kotlinx.coroutines.runBlocking
 import org.junit.runner.Description
 import org.junit.runner.notification.RunListener
 
@@ -32,8 +34,10 @@ class PlannerTestRunner : AndroidJUnitRunner() {
 }
 
 /**
- * Each test starts with no screen open and no unsaved draft, so one failing test cannot leave an editor that the next
- * test opens into ("Unfinished draft recovered"). Harness steps are left alone: their drafts must survive between steps.
+ * Each test starts with no screen open, no unsaved draft and an empty database, so one test cannot leave an editor
+ * that the next opens into ("Unfinished draft recovered") or entries that crowd its screens. The database is emptied
+ * the way a backup restore replaces it, which also cancels reminder alarms and removes unused attachment files.
+ * Harness steps are left alone: their drafts and data must survive between steps.
  */
 class CleanStart : RunListener() {
     override fun testStarted(description: Description) {
@@ -50,5 +54,6 @@ class CleanStart : RunListener() {
         EditorDraftStore(context).clear()
         QuickDraftStore(context).clear()
         TaskDraftStore(context).clear("new")
+        runBlocking { (context.applicationContext as ItineraryApp).repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList())) }
     }
 }
