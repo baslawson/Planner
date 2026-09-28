@@ -95,7 +95,7 @@ class TodayWidgetTest {
     private fun nodes(): List<AccessibilityNodeInfo> {
         val all = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) { all.add(node); for (i in 0 until node.childCount) node.getChild(i)?.let(::visit) }
-        instrumentation.uiAutomation.rootInActiveWindow?.let(::visit)
+        instrumentation.uiAutomation.freshRoot?.let(::visit)
         return all
     }
     private fun find(text: String) = nodes().firstOrNull { it.text?.toString() == text }

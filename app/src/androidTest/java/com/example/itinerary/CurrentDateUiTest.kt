@@ -36,7 +36,7 @@ class CurrentDateUiTest {
             fun awaitDate(text: String) {
                 val deadline = SystemClock.elapsedRealtime() + 7000
                 while (SystemClock.elapsedRealtime() < deadline) {
-                    if (contains(instrumentation.uiAutomation.rootInActiveWindow, text)) return
+                    if (contains(instrumentation.uiAutomation.freshRoot, text)) return
                     Thread.sleep(50)
                 }
                 fail("Never displayed $text")

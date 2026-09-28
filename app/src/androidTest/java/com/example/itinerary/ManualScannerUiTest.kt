@@ -114,7 +114,7 @@ class ManualScannerUiTest {
             result.add(node)
             for (i in 0 until node.childCount) node.getChild(i)?.let(::visit)
         }
-        instrumentation.uiAutomation.rootInActiveWindow?.let(::visit)
+        instrumentation.uiAutomation.freshRoot?.let(::visit)
         return result
     }
     private fun find(text: String) = nodes().firstOrNull { it.isVisibleToUser &&

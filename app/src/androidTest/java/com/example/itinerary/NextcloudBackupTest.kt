@@ -315,7 +315,7 @@ class NextcloudBackupTest {
                     if (node.className?.toString() == "android.widget.EditText") fields.add(node)
                     for (i in 0 until node.childCount) node.getChild(i)?.let { collect(it) }
                 }
-                instrumentation.uiAutomation.rootInActiveWindow?.let { collect(it) }
+                instrumentation.uiAutomation.freshRoot?.let { collect(it) }
                 fields.size == 3
             }
             assertTrue("First-use server, username and password must be blank", fields.all { it.text.isNullOrEmpty() })
@@ -475,7 +475,7 @@ class NextcloudBackupTest {
             for (i in 0 until node.childCount) node.getChild(i)?.let { find(it) }?.let { return it }
             return null
         }
-        return instrumentation.uiAutomation.rootInActiveWindow?.let { find(it) }
+        return instrumentation.uiAutomation.freshRoot?.let { find(it) }
     }
 
     private fun editFolder(value: String) {
@@ -485,7 +485,7 @@ class NextcloudBackupTest {
                 if (node.isScrollable) node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                 for (i in 0 until node.childCount) node.getChild(i)?.let { scrollBack(it) }
             }
-            instrumentation.uiAutomation.rootInActiveWindow?.let { scrollBack(it) }
+            instrumentation.uiAutomation.freshRoot?.let { scrollBack(it) }
             folderField()?.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
             }) == true
@@ -496,7 +496,7 @@ class NextcloudBackupTest {
     private fun clickText(text: String) {
         var clicked = false
         await {
-            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val root = instrumentation.uiAutomation.freshRoot
             fun find(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
                 if (n.text?.toString() == text && n.isVisibleToUser) return n
                 for (i in 0 until n.childCount) n.getChild(i)?.let { find(it) }?.let { return it }

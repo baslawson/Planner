@@ -24,7 +24,7 @@ class PlannerConveniencesUiTest {
     private fun nodes():List<AccessibilityNodeInfo> {
         val result=mutableListOf<AccessibilityNodeInfo>()
         fun visit(n:AccessibilityNodeInfo) { result+=n;for(i in 0 until n.childCount)n.getChild(i)?.let(::visit) }
-        ins.uiAutomation.rootInActiveWindow?.let(::visit);return result
+        ins.uiAutomation.freshRoot?.let(::visit);return result
     }
     private fun find(text:String)=nodes().firstOrNull { it.isVisibleToUser && (it.text?.toString()==text || it.contentDescription?.toString()==text) }
     private fun screenshot(name:String) {

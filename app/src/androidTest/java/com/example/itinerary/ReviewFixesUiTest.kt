@@ -33,7 +33,7 @@ class ReviewFixesUiTest {
     private fun awaitText(text: String): AccessibilityNodeInfo {
         val deadline = SystemClock.elapsedRealtime() + 10000
         while (SystemClock.elapsedRealtime() < deadline) {
-            find(ins.uiAutomation.rootInActiveWindow, text)?.let { return it }
+            find(ins.uiAutomation.freshRoot, text)?.let { return it }
             Thread.sleep(50)
         }
         error("Never displayed $text")

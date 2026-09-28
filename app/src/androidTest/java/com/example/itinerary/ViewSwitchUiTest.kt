@@ -22,14 +22,13 @@ class ViewSwitchUiTest {
     private val prefix = "QA switch "
 
     private fun nodes(): List<AccessibilityNodeInfo> {
-        if (android.os.Build.VERSION.SDK_INT >= 33) ins.uiAutomation.clearCache()
         val out = mutableListOf<AccessibilityNodeInfo>()
         fun walk(n: AccessibilityNodeInfo?) {
             if (n == null) return
             out += n
             repeat(n.childCount) { walk(n.getChild(it)) }
         }
-        walk(ins.uiAutomation.rootInActiveWindow)
+        walk(ins.uiAutomation.freshRoot)
         return out
     }
     private fun find(label: String) = nodes().firstOrNull {

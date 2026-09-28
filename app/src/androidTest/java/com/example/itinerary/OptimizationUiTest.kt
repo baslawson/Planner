@@ -73,8 +73,8 @@ class OptimizationUiTest {
                 return (0 until node.childCount).any { contains(node.getChild(it)) }
             }
             val deadline = SystemClock.elapsedRealtime() + 10000
-            while (SystemClock.elapsedRealtime() < deadline && !contains(ins.uiAutomation.rootInActiveWindow)) Thread.sleep(100)
-            assertTrue(contains(ins.uiAutomation.rootInActiveWindow))
+            while (SystemClock.elapsedRealtime() < deadline && !contains(ins.uiAutomation.freshRoot)) Thread.sleep(100)
+            assertTrue(contains(ins.uiAutomation.freshRoot))
         } finally { ins.runOnMainSync { activity.finish() } }
     }
 
@@ -124,10 +124,9 @@ class OptimizationUiTest {
                 return null
             }
             await {
-                if (android.os.Build.VERSION.SDK_INT >= 33) ins.uiAutomation.clearCache()
-                find(ins.uiAutomation.rootInActiveWindow) != null
+                find(ins.uiAutomation.freshRoot) != null
             }
-            val field = find(ins.uiAutomation.rootInActiveWindow) ?: error("Title field missing")
+            val field = find(ins.uiAutomation.freshRoot) ?: error("Title field missing")
             assertTrue(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "Durable changed title")
             }))

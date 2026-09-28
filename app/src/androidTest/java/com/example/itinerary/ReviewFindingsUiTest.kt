@@ -31,7 +31,7 @@ class ReviewFindingsUiTest {
     private fun nodes(): List<AccessibilityNodeInfo> {
         val result = mutableListOf<AccessibilityNodeInfo>()
         fun walk(node: AccessibilityNodeInfo) { result += node; for (i in 0 until node.childCount) node.getChild(i)?.let(::walk) }
-        ins.uiAutomation.rootInActiveWindow?.let(::walk)
+        ins.uiAutomation.freshRoot?.let(::walk)
         return result
     }
     private fun await(message: String, condition: () -> Boolean) {

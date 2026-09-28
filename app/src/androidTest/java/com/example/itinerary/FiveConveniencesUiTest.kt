@@ -90,7 +90,7 @@ class FiveConveniencesUiTest {
         screenshot("move-undone")
         click("Actions for QA conveniences")
         click("Share event")
-        await { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.let { it != instrumentation.targetContext.packageName && it != "com.google.android.inputmethod.latin" } == true }
+        await { instrumentation.uiAutomation.freshRoot?.packageName?.toString()?.let { it != instrumentation.targetContext.packageName && it != "com.google.android.inputmethod.latin" } == true }
         screenshot("share-sheet")
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         await { find("AGENDA") != null }
@@ -102,7 +102,7 @@ class FiveConveniencesUiTest {
             result.add(node)
             for (i in 0 until node.childCount) node.getChild(i)?.let(::visit)
         }
-        instrumentation.uiAutomation.rootInActiveWindow?.let(::visit)
+        instrumentation.uiAutomation.freshRoot?.let(::visit)
         return result
     }
     private fun find(text: String) = nodes().firstOrNull { it.isVisibleToUser &&

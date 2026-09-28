@@ -23,7 +23,7 @@ class TasksUiTest {
     private fun nodes():List<AccessibilityNodeInfo> {
         val result=mutableListOf<AccessibilityNodeInfo>()
         fun visit(n:AccessibilityNodeInfo) { result+=n;for(i in 0 until n.childCount)n.getChild(i)?.let(::visit) }
-        ins.uiAutomation.rootInActiveWindow?.let(::visit);return result
+        ins.uiAutomation.freshRoot?.let(::visit);return result
     }
     private fun find(text:String)=nodes().firstOrNull { it.isVisibleToUser && (it.text?.toString()==text || it.contentDescription?.toString()==text) }
     private fun screenshot(name:String) {
@@ -153,8 +153,7 @@ class TasksUiTest {
         screenshot("task-priority-order");assertTrue("high $h should be above low $l",h.top<l.top)
         click("Upcoming");reveal { find("QA task view overdue")!=null }
         assertEquals(today.minusDays(2),data().tasks.single { it.id==overdue.id }.dueDate)
-        // Other tests' tasks without a due date share this group, so its count varies. The label's "Collapse"/"Expand"
-        // can lag in this test's accessibility cache after a tap (the screen itself updates), so check the cards instead.
+        // Find the heading whatever its count, and check the fold by the cards themselves.
         fun anytimeHeading()=nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Anytime tasks (")==true }?.text?.toString()
         reveal { find("QA task view anytime")!=null && anytimeHeading()!=null };click(anytimeHeading()!!)
         await { find("QA task view anytime")==null };screenshot("anytime-collapsed")

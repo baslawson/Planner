@@ -21,10 +21,9 @@ class SixTaskFeaturesUiTest {
     private val app get()=context.applicationContext as ItineraryApp
     private fun data()=runBlocking { app.repository.snapshot() }
     private fun nodes():List<AccessibilityNodeInfo> {
-        if (android.os.Build.VERSION.SDK_INT >= 33) ins.uiAutomation.clearCache()
         val result=mutableListOf<AccessibilityNodeInfo>()
         fun visit(n:AccessibilityNodeInfo) { result+=n;for(i in 0 until n.childCount)n.getChild(i)?.let(::visit) }
-        ins.uiAutomation.rootInActiveWindow?.let(::visit);return result
+        ins.uiAutomation.freshRoot?.let(::visit);return result
     }
     private fun find(text:String)=nodes().firstOrNull { it.isVisibleToUser && (it.text?.toString()==text || it.contentDescription?.toString()==text) }
     private fun screenshot(name:String) {

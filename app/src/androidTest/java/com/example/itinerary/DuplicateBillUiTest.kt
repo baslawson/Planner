@@ -32,10 +32,10 @@ class DuplicateBillUiTest {
         }
         fail("Timed out waiting for duplicate-bill UI")
     }
-    private fun visible(text: String) = find(ins.uiAutomation.rootInActiveWindow, text) != null
+    private fun visible(text: String) = find(ins.uiAutomation.freshRoot, text) != null
     private fun click(text: String) {
         await { visible(text) }
-        var node = find(ins.uiAutomation.rootInActiveWindow, text)
+        var node = find(ins.uiAutomation.freshRoot, text)
         while (node != null && !node.isClickable) node = node.parent
         assertTrue(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
     }

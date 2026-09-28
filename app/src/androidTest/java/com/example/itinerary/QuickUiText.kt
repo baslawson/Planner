@@ -8,6 +8,17 @@ import android.view.accessibility.AccessibilityNodeInfo
  * (an AI clarification answer when one is asked, otherwise When), or else the When box, whose text is then replaced
  * (an empty field may report null or its placeholder). Typing a whole entry into Title would never be read as a date.
  */
+/**
+ * The active window's accessibility tree, read fresh from the app. The test's accessibility cache is not reliably
+ * updated for Compose screens: without clearing it, a folded list's cards or a toggled label ("Collapse") could stay
+ * in the tree for seconds after the screen changed. clearCache() exists from API 34.
+ */
+internal val android.app.UiAutomation.freshRoot: AccessibilityNodeInfo?
+    get() {
+        if (android.os.Build.VERSION.SDK_INT >= 34) clearCache()
+        return rootInActiveWindow
+    }
+
 internal fun pickEditable(nodes: List<AccessibilityNodeInfo>, old: String): AccessibilityNodeInfo? {
     val visible = nodes.filter { it.isVisibleToUser && it.isEditable }
     val quickEntry = nodes.any { it.isVisibleToUser && it.text?.toString() == "Quick entry" && !it.isClickable }
