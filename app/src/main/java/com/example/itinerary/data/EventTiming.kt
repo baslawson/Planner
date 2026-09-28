@@ -26,9 +26,11 @@ fun overlappingEvents(events: List<ItineraryItem>, dates: List<LocalDate>, time:
     }
 }
 
-// Include overnight events that extend into this day, but not ones ending exactly at midnight.
+// Include overnight events that extend into this day, but not ones ending exactly at midnight, and every day of a
+// multi-day all-day event.
 fun eventsOnDay(events: List<ItineraryItem>, day: LocalDate): List<ItineraryItem> = events.filter {
-    it.date == day || it.category != "Bills" && it.date < day && it.startTime != null && it.durationMinutes != null &&
+    it.date == day || it.endDate != null && it.covers(day) ||
+        it.category != "Bills" && it.date < day && it.startTime != null && it.durationMinutes != null &&
         it.date.atTime(it.startTime).plusMinutes(it.durationMinutes.toLong()) > day.atStartOfDay()
 }.sortedWith(compareBy<ItineraryItem> { it.startTime != null }.thenBy { it.date }.thenBy { it.startTime }.thenBy { it.id })
 

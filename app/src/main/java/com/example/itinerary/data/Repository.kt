@@ -337,6 +337,7 @@ class Repository(
         require(item.payments.none { !it.reversed } || item.billAmountMinor != null)
         require(item.bufferBeforeMinutes in 0..1440 && item.bufferAfterMinutes in 0..1440)
         require(item.durationMinutes == null || item.startTime != null && item.durationMinutes in 1..1440)
+        MultiDay.validate(item)
         val cancelled = mutableListOf<Reminder>()
         val resetReminders = mutableSetOf<Long>()
         val removedFiles = mutableListOf<String>()
@@ -365,7 +366,7 @@ class Repository(
                 item.id == 0L || original?.seriesId == null && options.repeat != RepeatRule.NONE -> {
                     val dates = options.repeat.dates(item.date, options.count)
                     val series = if (dates.size > 1) UUID.randomUUID().toString() else null
-                    dates.mapIndexed { index, date -> item.copy(id = if (index == 0) item.id else 0, tripId = owner, date = date, seriesId = series,
+                    dates.mapIndexed { index, date -> item.startingOn(date).copy(id = if (index == 0) item.id else 0, tripId = owner, seriesId = series,
                         paid = index == 0 && item.paid, payments = if (index == 0) item.payments else emptyList(), skipped = false,
                         repeatRule = if (series == null) "NONE" else options.repeat.name) }
                 }
@@ -374,7 +375,7 @@ class Repository(
                     val dates = if (options.changeRepeat && options.repeat != RepeatRule.NONE)
                         options.repeat.dates(members.first().date.plusDays(shift), members.size) else members.map { it.date.plusDays(shift) }
                     members.mapIndexed { index, old ->
-                        item.copy(id = old.id, tripId = old.tripId, date = dates[index], paid = if (old.id == item.id) item.paid else old.paid,
+                        item.startingOn(dates[index]).copy(id = old.id, tripId = old.tripId, paid = if (old.id == item.id) item.paid else old.paid,
                             payments = if (old.id == item.id) item.payments else old.payments, skipped = old.skipped,
                             seriesId = if (options.changeRepeat && options.repeat == RepeatRule.NONE) null else old.seriesId,
                             repeatRule = if (options.changeRepeat) options.repeat.name else old.repeatRule)

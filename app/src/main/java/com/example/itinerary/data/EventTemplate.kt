@@ -19,12 +19,14 @@ interface TemplateDao {
 }
 
 data class TemplateContent(val item: ItineraryItem, val reminders: List<Reminder>, val repeat: RepeatRule, val count: Int) {
-    fun forDate(date: LocalDate): ItineraryItem = item.copy(id = 0, tripId = 0, date = date, paid = false, payments = emptyList(), skipped = false,
+    // A multi-day template keeps its length on the new start date.
+    fun forDate(date: LocalDate): ItineraryItem = item.startingOn(date).copy(id = 0, tripId = 0, paid = false, payments = emptyList(), skipped = false,
         linkedTaskId = null, seriesId = null, repeatRule = "NONE", draftToken = null, checklist = item.checklist.map { it.copy(done = false) })
     fun validate() {
         require(item.title.isNotBlank()); ChecklistCodec.validate(item.checklist); Bills.validate(item.billAmountMinor, item.billCurrency)
         require(item.bufferBeforeMinutes in 0..1440 && item.bufferAfterMinutes in 0..1440)
         require(item.durationMinutes == null || item.startTime != null && item.durationMinutes in 1..1440)
+        MultiDay.validate(item)
         require(count in 1..365 && (repeat == RepeatRule.NONE || count >= 2))
         require(reminders.all { it.amount >= 0 })
     }

@@ -32,6 +32,7 @@ data class PlanEvent(
     val seriesId: String? = null,
     val payments: List<BillPayment> = emptyList(),
     val linkedTaskId: String? = null,
+    val endDate: LocalDate? = null,
 )
 
 @Dao
@@ -79,8 +80,9 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE id IN (:ids) ORDER BY id")
     suspend fun byIds(ids: List<Long>): List<ItineraryItem>
 
-    // Valid durations are at most 24 hours; only yesterday can carry into today.
-    @Query("SELECT * FROM items WHERE date IN (:day, :previousDay) AND skipped = 0")
+    // Timed durations are at most 24 hours, so only yesterday's can carry into today; multi-day all-day events can
+    // have started any day before and run to their end date.
+    @Query("SELECT * FROM items WHERE (date IN (:day, :previousDay) OR date < :day AND endDate >= :day) AND skipped = 0")
     suspend fun dayCandidates(day: LocalDate, previousDay: LocalDate): List<ItineraryItem>
 
     @Query("SELECT * FROM items WHERE seriesId = :seriesId ORDER BY date, id")
@@ -92,7 +94,9 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE id = :id")
     suspend fun byId(id: Long): ItineraryItem?
 
-    @Query("UPDATE items SET date = :date WHERE id = :id")
+    // A multi-day event keeps its length: the end date moves by the same number of days (SET reads the old row).
+    @Query("UPDATE items SET date = :date, endDate = CASE WHEN endDate IS NULL THEN NULL " +
+        "ELSE date(endDate, printf('%+d days', CAST(julianday(:date) - julianday(date) AS INTEGER))) END WHERE id = :id")
     suspend fun moveDate(id: Long, date: LocalDate)
 
     @Query("SELECT category, COUNT(*) AS count FROM items GROUP BY category")
@@ -109,7 +113,7 @@ interface ItemDao {
     // Every event of every plan, for the agenda and calendar, in date then time order; null start times (all-day)
     // sort first in SQLite.
     @Query(
-        "SELECT tripId, id, date, startTime, title, colorIndex, customColor, durationMinutes, location, checklist, category, paid, billAmountMinor, billCurrency, skipped, seriesId, payments, linkedTaskId FROM items " +
+        "SELECT tripId, id, date, startTime, title, colorIndex, customColor, durationMinutes, location, checklist, category, paid, billAmountMinor, billCurrency, skipped, seriesId, payments, linkedTaskId, endDate FROM items " +
             "ORDER BY date, startTime, id",
     )
     fun observePlanEvents(): Flow<List<PlanEvent>>

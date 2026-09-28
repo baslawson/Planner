@@ -214,6 +214,7 @@ class BackupManager(
                 .put("payments", JSONArray(Payments.encode(it.payments)))
                 .put("bufferBeforeMinutes", it.bufferBeforeMinutes).put("bufferAfterMinutes", it.bufferAfterMinutes)
                 .put("durationMinutes", it.durationMinutes ?: JSONObject.NULL)
+                .put("endDate", it.endDate?.toString() ?: JSONObject.NULL)
                 .put("checklist", JSONArray(ChecklistCodec.encode(it.checklist)))
                 .put("title", it.title).put("location", it.location).put("notes", it.notes)
                 .put("category", it.category).put("colorIndex", it.colorIndex)
@@ -300,9 +301,11 @@ class BackupManager(
                 checklist = if (it.isNull("checklist")) emptyList() else ChecklistCodec.decode(it.getJSONArray("checklist").toString()),
                 seriesId = if (it.isNull("seriesId")) null else it.getString("seriesId").takeIf(String::isNotBlank),
                 repeatRule = it.optString("repeatRule", "NONE").takeIf { rule -> RepeatRule.parse(rule) != null } ?: "NONE",
+                // Format 16: the last day of a multi-day all-day event (absent or null = one day).
+                endDate = if (!it.has("endDate") || it.isNull("endDate")) null else LocalDate.parse(it.getString("endDate")),
             )
         }
-        items.forEach { Payments.validate(it) }
+        items.forEach { Payments.validate(it); MultiDay.validate(it) }
         val reminders = root.getJSONArray("reminders").objects().map {
             Reminder(
                 id = it.getLong("id"),
@@ -406,7 +409,8 @@ class BackupManager(
         private val HEX_COLOR = Regex("#[0-9A-Fa-f]{6}")
         private const val FORMAT = "planner-backup"
         // 2: categories are plain text. 3: attachments can be links. Older files are still read; an older app refuses newer ones.
-        const val FORMAT_VERSION = 15
+        // 16: events may carry an endDate (multi-day). An older app refuses the file rather than dropping end dates.
+        const val FORMAT_VERSION = 16
         private const val DATA_ENTRY = "data.json"
         private const val ATTACHMENTS_DIR = "attachments"
         private const val STAGING_FILE = "import-staging.zip"

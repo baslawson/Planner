@@ -91,6 +91,8 @@ data class ItineraryItem(
     @ColumnInfo(defaultValue = "''") val bpayReference: String = "",
     val draftToken: String? = null, // receipt for a draft save interrupted after commit
     @ColumnInfo(defaultValue = "'[]'") val payments: List<BillPayment> = emptyList(),
+    // Last day of an all-day event that spans several days (inclusive); null = one day. See MultiDay.
+    val endDate: LocalDate? = null,
 )
 
 enum class ReminderUnit(val minutes: Long, val singular: String, val plural: String) {

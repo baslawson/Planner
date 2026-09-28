@@ -31,6 +31,7 @@ object DraftCodec {
         put("customColor", item.customColor); put("seriesId", item.seriesId); put("repeatRule", item.repeatRule)
         put("bufferBeforeMinutes", item.bufferBeforeMinutes); put("bufferAfterMinutes", item.bufferAfterMinutes)
         put("duration", item.durationMinutes); put("checklist", ChecklistCodec.encode(item.checklist)); put("billAmountMinor", item.billAmountMinor); put("billCurrency", item.billCurrency); put("skipped", item.skipped); put("paid", item.paid); put("draftToken", item.draftToken)
+        put("endDate", item.endDate?.toString())
     }
     fun item(json: JSONObject): ItineraryItem = ItineraryItem(
         paymentLink = json.optString("paymentLink", ""), paymentReference = json.optString("paymentReference", ""),
@@ -50,7 +51,8 @@ object DraftCodec {
             val entry = entries.getJSONObject(i)
             ChecklistEntry(entry.getString("id"), entry.getString("text"), entry.getBoolean("done"))
         } }, billAmountMinor = if (json.has("billAmountMinor")) json.getLong("billAmountMinor") else null,
-        billCurrency = json.optString("billCurrency", "AUD"), skipped = json.optBoolean("skipped"), paid = json.optBoolean("paid"), draftToken = json.optString("draftToken").takeIf { it.isNotEmpty() })
+        billCurrency = json.optString("billCurrency", "AUD"), skipped = json.optBoolean("skipped"), paid = json.optBoolean("paid"), draftToken = json.optString("draftToken").takeIf { it.isNotEmpty() },
+        endDate = json.optString("endDate").takeIf { it.isNotEmpty() && it != "null" }?.let(LocalDate::parse))
     fun attachments(values: List<Attachment>): JSONArray = JSONArray().apply { values.forEach { a -> put(JSONObject()
         .put("id", a.id).put("itemId", a.itemId).put("name", a.name).put("fileName", a.fileName)
         .put("mimeType", a.mimeType).put("url", a.url).put("recognizedText", a.recognizedText).put("textStatus", a.textStatus)) } }
