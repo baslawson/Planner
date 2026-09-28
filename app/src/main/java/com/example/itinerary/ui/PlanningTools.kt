@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -164,7 +165,11 @@ fun FreeTimeDialog(events: List<ItineraryItem>, onDismiss: () -> Unit, onChoose:
                     Row { Checkbox(weekdays, { weekdays = it; searched = false }); Text("Weekdays only", Modifier.padding(top = 12.dp)) }
                     Row { Checkbox(allDay, { allDay = it; searched = false }); Text("All-day events block the day", Modifier.weight(1f).padding(top = 12.dp)) }
                     Text("Saved travel and preparation buffers also block time.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(unknown, { unknown = it; searched = false }, label = { Text("Minutes for events with no end time") }, singleLine = true)
+                    // A heading rather than a floating label: once a floating label wraps at large text it rises into the note above.
+                    Text("Minutes for untimed events", style = MaterialTheme.typography.labelLarge)
+                    OutlinedTextField(unknown, { unknown = it; searched = false },
+                        modifier = Modifier.semantics { contentDescription = "Minutes for untimed events" },
+                        supportingText = { Text("How long to count an event that has no end time.") }, singleLine = true)
                     if (!valid) Text("Choose valid hours, durations and a range of up to one year.", color = MaterialTheme.colorScheme.error)
                     Button(enabled = valid, onClick = {
                         focus.clearFocus(); keyboard?.hide()
