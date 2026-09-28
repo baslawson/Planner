@@ -120,6 +120,11 @@ class PlannerConveniencesUiTest {
     }
 
     @Test fun monthlyForecastShowsRemainingBalancesAndCalendarFileCanBeSaved()=runBlocking {
+        // The exported file lands in shared Downloads: start without it, so the read-back is this run's, and remove it after.
+        val exported="/sdcard/Download/Planner-QA-conveniences.ics"
+        fun removeExport()=ins.uiAutomation.executeShellCommand("rm -f $exported").use { java.io.FileInputStream(it.fileDescriptor).use { s -> s.readBytes() } }
+        removeExport()
+        try {
         app.settings.setAgendaRange(AgendaRange.ALL)
         app.settings.setBillsExpanded(true)
         app.settings.setShowBillsSummary(true)
@@ -143,7 +148,7 @@ class PlannerConveniencesUiTest {
         await { find("AGENDA")!=null }
         var text=""
         await {
-            val fd=ins.uiAutomation.executeShellCommand("cat /sdcard/Download/Planner-QA-conveniences.ics")
+            val fd=ins.uiAutomation.executeShellCommand("cat $exported")
             text=android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
             text.contains("END:VCALENDAR")
         }
@@ -155,6 +160,7 @@ class PlannerConveniencesUiTest {
         await { nodes().any { it.isEditable && it.text?.toString()?.endsWith(".ics")==true } }
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         await { find("AGENDA")!=null };assertEquals(before,data().items.single { it.id==item.id })
+        } finally { removeExport() }
     }
 
     @Test fun backupReminderPreferenceAndDeferralSurviveStoreReloadAndSuccessHidesPrompt()=runBlocking {
