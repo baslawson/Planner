@@ -29,7 +29,10 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         ambiguous -> timePrompt ?: "Morning or afternoon? Choose a time below, or type am or pm."
         else -> null
     }
-    return copy(date = dateOverride?.takeIf { it.isNotEmpty() }?.let(LocalDate::parse) ?: date,
+    val newDate = dateOverride?.takeIf { it.isNotEmpty() }?.let(LocalDate::parse) ?: date
+    return copy(date = newDate,
+        // A multi-day entry keeps its length when its start date is changed.
+        endDate = endDate?.let { newDate.plusDays(java.time.temporal.ChronoUnit.DAYS.between(date, it)) },
         dateSpecified = dateOverride?.isNotEmpty() ?: dateSpecified,
         time = if (timeOverride != null) timeOverride.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) else time,
         dateChoices = dates, ambiguousTime = ambiguous, error = problem)

@@ -30,6 +30,8 @@ data class QuickEntrySuggestion(
     val taskHint: Boolean = false,
     /** The reminder came from "remind me to", not from an explicit "… before". */
     val reminderImplied: Boolean = false,
+    /** Last day of a multi-day entry ("3–7 Oct", "for 5 days"); null = one day. */
+    val endDate: LocalDate? = null,
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -96,6 +98,14 @@ object QuickEntry {
     private val monthlyWeekdays = rx("\\b(?:(?:on|every|each)\\s+)?(?:the\\s+)?($weekOfMonth)\\s+($weekdays)\\s+of\\s+(?:every|each)\\s+month\\b|\\bevery\\s+($weekOfMonth)\\s+($weekdays)\\b(?!\\s+of\\b)")
     private val repeatCounts = rx("\\bfor\\s+(\\d+)\\s+(?:times?|occurrences?)\\b")
     // With a repeat, "for 10 weeks" says how long it runs. Without one it stays title text: Holiday for 2 weeks.
+    // Multi-day entries. A date range: "3 Oct – 7 Oct", "3–7 Oct", "Oct 3–7", "from Friday to Sunday". A weekday range
+    // needs a word (to/until/through), so "Mon-Fri" keeps meaning a weekday repeat. "for 5 days" is a length only
+    // without a repeat; with one it stays an occurrence count.
+    private const val rangeJoin = "\\s*(?:[-–—]|to|until|till|through|thru)\\s*"
+    private val dateRanges = rx("\\b(?:from\\s+)?(?:the\\s+)?($dayNumber)(?:\\s+(?:of\\s+)?($months))?(?:\\s+(\\d{4}))?$rangeJoin(?:the\\s+)?($dayNumber)\\s+(?:of\\s+)?($months)(?:\\s+(\\d{4}))?\\b" +
+        "|\\b(?:from\\s+)?($months)\\s+($dayNumber)$rangeJoin(?:($months)\\s+)?($dayNumber)(?:,?\\s+(\\d{4}))?\\b" +
+        "|\\b(?:from\\s+)?((?:next\\s+|this\\s+)?(?:$weekdays))\\s+(?:to|until|till|through|thru)\\s+($weekdays)\\b")
+    private val spanDays = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?)\\b")
     private val repeatPeriods = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?|fortnights?|months?|years?)\\b")
     private const val reminderSpan = "$span|(?:$amount|half(?:\\s+an?)?)\\s*(?:days?|weeks?)|the\\s+(?:day|week)"
     private val reminders = rx("\\b(?:and\\s+)?(?:remind|notify)\\s+me\\s+($reminderSpan)\\s+before\\b")
@@ -235,6 +245,37 @@ object QuickEntry {
         }
         val allDayMatches = allDay.findAll(remaining).toList()
         allDayMatches.forEach { consume(it.range, QuickPhraseKind.TIME) }
+        // A date range, read before times (so "3–7" in "3–7 Oct" isn't 3 to 7 o'clock) and before weekday repeats.
+        var rangeStart: LocalDate? = null
+        var rangeEnd: LocalDate? = null
+        val rangeMatches = dateRanges.findAll(remaining).toList()
+        if (rangeMatches.size > 1) return error("Use one date range.")
+        rangeMatches.firstOrNull()?.let { match ->
+            val g = match.groupValues
+            fun day(v: String) = v.takeWhile { it.isDigit() }
+            val (start, end) = when {
+                g[4].isNotEmpty() -> { // 3 Oct – 7 Oct, 3–7 Oct
+                    val startMonth = g[2].ifEmpty { g[5] }
+                    parseDate(("${day(g[1])} $startMonth${g[3].let { if (it.isEmpty()) g[6].let { y -> if (y.isEmpty()) "" else " $y" } else " $it" }}").lowercase(Locale.ROOT), today) to
+                        parseDate(("${day(g[4])} ${g[5]}${if (g[6].isEmpty()) "" else " ${g[6]}"}").lowercase(Locale.ROOT), today)
+                }
+                g[7].isNotEmpty() -> // Oct 3–7, Oct 3 – Nov 2
+                    parseDate(("${day(g[8])} ${g[7]}${if (g[11].isEmpty()) "" else " ${g[11]}"}").lowercase(Locale.ROOT), today) to
+                        parseDate(("${day(g[10])} ${g[9].ifEmpty { g[7] }}${if (g[11].isEmpty()) "" else " ${g[11]}"}").lowercase(Locale.ROOT), today)
+                else -> { // from Friday to Sunday
+                    val first = parseDate(g[12].lowercase(Locale.ROOT), today)
+                    first to first?.with(TemporalAdjusters.nextOrSame(weekdayOf(g[13])))
+                }
+            }
+            if (start == null || end == null) return error("That date isn't valid.")
+            // "28 Dec – 3 Jan" without years ends in the next year.
+            val last = if (end < start && !Regex("\\d{4}").containsMatchIn(match.value)) end.plusYears(1) else end
+            if (last <= start) return error("End the date range after it starts.")
+            if (java.time.temporal.ChronoUnit.DAYS.between(start, last) >= MultiDay.MAX_DAYS)
+                return error("A date range can cover at most ${MultiDay.MAX_DAYS} days.")
+            rangeStart = start; rangeEnd = last
+            consume(match.range, QuickPhraseKind.DATE)
+        }
         var repeat = RepeatRule.NONE
         var repeatDay: DayOfWeek? = null
         var monthDay: Int? = null
@@ -316,6 +357,19 @@ object QuickEntry {
                 consume(match.range, QuickPhraseKind.REPEAT)
             }
         }
+        var spanLength: Long? = null
+        if (repeat == RepeatRule.NONE) spanDays.findAll(remaining).toList().let { spans ->
+            if (spans.size > 1) return error("Use one length.")
+            spans.firstOrNull()?.let { match ->
+                val count = readAmount(match.groupValues[1].lowercase(Locale.ROOT))
+                val days = if (match.groupValues[2].lowercase(Locale.ROOT).startsWith("d")) count else count * 7
+                if (!days.isFinite() || days % 1 != 0.0 || days < 1 || days > MultiDay.MAX_DAYS)
+                    return error("An entry can cover 1–${MultiDay.MAX_DAYS} days.")
+                if (rangeStart != null) return error("Use a date range or a length, not both.")
+                spanLength = days.toLong()
+                consume(match.range, QuickPhraseKind.DATE)
+            }
+        }
         // "in 30 minutes" counts from now, rounded up to the next five minutes.
         val relativeMatches = relativeTimes.findAll(remaining).toList()
         if (relativeMatches.size > 1) return error("Use one time.")
@@ -367,6 +421,8 @@ object QuickEntry {
         }
         if (relative && (ds.isNotEmpty() || numeric.isNotEmpty() || impliedToday))
             return error("Use one date or time: ‘in …’ already says when.")
+        if (rangeStart != null && (ds.isNotEmpty() || numeric.isNotEmpty() || relative || impliedToday))
+            return error("Use one date. A date range already says when.")
         // Repeats anchored to a weekday, to weekdays or to a day of the month start on a matching date.
         val anchorName = when {
             repeatDay != null -> "repeating weekday"
@@ -379,6 +435,7 @@ object QuickEntry {
         fun fitsAnchor(d: LocalDate) = (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay)
         var date = relativeAt?.toLocalDate() ?: if (impliedToday) today else
             generateSequence(today) { it.plusDays(1) }.take(400).firstOrNull(::fitsAnchor) ?: today
+        rangeStart?.let { date = it }
         var dateChoices = emptyList<LocalDate>()
         if (ds.isNotEmpty()) {
             date = parseDate(ds.single().value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").removePrefix("on ").removePrefix("by "), today)
@@ -579,7 +636,8 @@ object QuickEntry {
             .replace(Regex("(?<=^|\\s)[,;]+(?=\\s|$)"), " ").replace(Regex("[\\s,;]+$"), "")
             .trim().replace(Regex("\\s+"), " ")
         if (taskHint) title = title.replaceFirstChar { it.titlecase(Locale.ROOT) }
-        val dateSpecified = impliedToday || ds.isNotEmpty() || numeric.isNotEmpty() || repeat != RepeatRule.NONE || relative || holiday
+        val dateSpecified = impliedToday || ds.isNotEmpty() || numeric.isNotEmpty() || repeat != RepeatRule.NONE || relative || holiday || rangeStart != null
+        val endDate = rangeEnd ?: spanLength?.takeIf { it > 1 }?.let { date.plusDays(it - 1) }
         // "Remind me to …" with a when: remind at the time, or at the usual 09:00 on the day.
         val reminderImplied = taskHint && reminderMinutes == null && (dateSpecified || time != null || ambiguous)
         val clarification = when {
@@ -592,7 +650,7 @@ object QuickEntry {
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null, timePrompt,
-            taskHint, reminderImplied)
+            taskHint, reminderImplied, endDate)
     }
 
     private fun spanMinutes(value: String): Double = when {

@@ -326,7 +326,7 @@ fun QuickEntryEditor(
                                 color = if (suggestion.title.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
                             FlowRow {
                                 SummaryButton({ Icon(Icons.Filled.DateRange, contentDescription = null, Modifier.size(18.dp)) }, kind = if (task) "Due date" else "Date", enabled = !busy, onClick = { keyboard?.hide(); pickingDate = true },
-                                    label = if (suggestion.dateChoices.isNotEmpty()) "Choose date" else if (task && !suggestion.dateSpecified) "No due date" else if (showDetails) suggestion.date.dayLabel(LocalDateFormat.current) else when (suggestion.date) {
+                                    label = if (suggestion.endDate != null && !task) spanLabel(suggestion.date, suggestion.endDate) else if (suggestion.dateChoices.isNotEmpty()) "Choose date" else if (task && !suggestion.dateSpecified) "No due date" else if (showDetails) suggestion.date.dayLabel(LocalDateFormat.current) else when (suggestion.date) {
                                         LocalDate.now() -> "Today"
                                         LocalDate.now().plusDays(1) -> "Tomorrow"
                                         else -> suggestion.date.fullLabel()

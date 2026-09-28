@@ -71,8 +71,8 @@ class QuickWordingTest {
         assertEquals(5, ok("Cleaner every fortnight for 10 weeks").repeatCount)
         assertEquals(6, ok("Rent monthly for six months").repeatCount)
         assertEquals(3, ok("Checkup yearly for 3 years").repeatCount)
-        // Without a repeat it is ordinary title text, as before.
-        assertEquals("Holiday for 2 weeks", ok("Holiday for 2 weeks").title)
+        // Without a repeat it is now the length of an all-day entry over several days (see QuickMultiDayTest).
+        ok("Holiday for 2 weeks").let { assertEquals("Holiday", it.title); assertEquals(it.date.plusDays(13), it.endDate) }
         assertNotNull(parse("Tennis every Thursday for 1 week").error)
     }
 

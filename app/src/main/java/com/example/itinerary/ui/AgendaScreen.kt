@@ -342,7 +342,7 @@ fun AgendaScreen(
         }
 
         fun quickEvent(suggestion: com.example.itinerary.data.QuickEntrySuggestion) = ItineraryItem(
-            tripId = 0L, title = suggestion.title, date = suggestion.date, startTime = suggestion.time,
+            tripId = 0L, title = suggestion.title, date = suggestion.date, endDate = suggestion.endDate, startTime = suggestion.time,
             durationMinutes = suggestion.durationMinutes, location = suggestion.location, repeatRule = suggestion.repeat.name,
             colorIndex = PlanColors.next(events.filter { it.date == suggestion.date && it.customColor == null }.map { it.colorIndex }, PlanColors.EVENT_COUNT),
         )

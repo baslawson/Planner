@@ -55,6 +55,8 @@ fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String
     val reminder = reminderMinutes?.let { reminderTrigger(date, if (task) null else time, it.toLong(), now.zone) }
     return when {
         task && (time != null || ambiguousTime || durationMinutes != null) -> "Tasks use due dates. Choose Event for a time or duration."
+        task && endDate != null -> "Tasks use one due date. Choose Event for several days."
+        endDate != null && (time != null || durationMinutes != null) -> "An entry over several days is all day. Remove the time, or add each day separately."
         error != null -> error
         title.isBlank() -> "Add a title."
         durationMinutes != null && durationMinutes !in 1..1440 -> "Choose a duration from 1 to 1440 minutes."
