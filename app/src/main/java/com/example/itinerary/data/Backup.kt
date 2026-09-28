@@ -402,16 +402,16 @@ class BackupManager(
     private fun parseHexColor(text: String): Int? =
         if (HEX_COLOR.matches(text)) (0xFF000000L or text.removePrefix("#").toLong(16)).toInt() else null
 
-    private companion object {
-        val HEX_COLOR = Regex("#[0-9A-Fa-f]{6}")
-        const val FORMAT = "planner-backup"
+    companion object {
+        private val HEX_COLOR = Regex("#[0-9A-Fa-f]{6}")
+        private const val FORMAT = "planner-backup"
         // 2: categories are plain text. 3: attachments can be links. Older files are still read; an older app refuses newer ones.
         const val FORMAT_VERSION = 15
-        const val DATA_ENTRY = "data.json"
-        const val ATTACHMENTS_DIR = "attachments"
-        const val STAGING_FILE = "import-staging.zip"
+        private const val DATA_ENTRY = "data.json"
+        private const val ATTACHMENTS_DIR = "attachments"
+        private const val STAGING_FILE = "import-staging.zip"
 
         // Attachment file names become paths inside the app's storage, so nothing but plain names is allowed.
-        val SAFE_FILE_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+        private val SAFE_FILE_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
     }
 }

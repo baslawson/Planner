@@ -46,6 +46,7 @@ class CodebaseOptimizationUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     val action=if(forward)AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
                     // The event list comes after the month pager; scrolling the first container
                     // changes calendar months instead of revealing an off-screen event.
@@ -70,18 +71,19 @@ class CodebaseOptimizationUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open(action:String?=null) {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).setAction(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Agenda")!=null || find("Discard")!=null
+                null -> find("AGENDA")!=null || find("Discard")!=null
                 else -> find("Discard")!=null
             }
         }

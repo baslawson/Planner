@@ -80,8 +80,8 @@ class QuickTypingUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -136,14 +136,15 @@ class QuickTypingUiTest {
         await { nodes().any { it.isEditable && it.text?.toString()=="QA suggested tomorrow " } }
         setText("QA suggested tomorrow ","QA suggested tomorrow 3pm remind me")
         click("30 minutes before")
-        await { find("Reminder: 30 minutes before")!=null };screenshot("compact-preview")
+        await { find("Reminder, 30 minutes before")!=null };screenshot("compact-preview")
         assertNull(find("Occurrences"));assertNull(find("Remove reminder"))
         click("Add event");if(find("Add anyway")!=null)click("Add anyway")
         await { data().items.any { it.title=="QA suggested" } }
         val item=data().items.single { it.title=="QA suggested" }
         assertEquals(30L,data().reminders.single { it.itemId==item.id }.offsetMinutes)
     }
-    @Test fun titleEditsKeepDateTimeRepeatAndReminderCorrectionsAcrossRecreation()=runBlocking {
+    @Test fun titleEditsKeepDateTimeRepeatAndReminderCorrectionsAcrossRecreation()=withDateFormat(app,ins,com.example.itinerary.data.DateFormatChoice.ISO) { titleEditsKeepCorrections() }
+    private fun titleEditsKeepCorrections()=runBlocking {
         start()
         val raw="QA retained 03/04/2030 at 3 every week remind me 30 minutes before for 3 occurrences"
         setText("",raw);click(LocalDate.of(2030,4,3).fullLabel());click("3 PM")
@@ -162,10 +163,10 @@ class QuickTypingUiTest {
     }
     @Test fun durationChipUsesPersistedCorrectionAndSurvivesTitleEdit()=runBlocking {
         start();val raw="QA duration chip tomorrow 3pm for 1h";setText("",raw)
-        click("60 min");await { find("Minutes (1–1440)")!=null };click("45 min");click("Set duration")
+        click("Duration, for 60 min");await { find("Minutes (1–1440)")!=null };click("45 min");click("Set duration")
         setText(raw,raw.replace("QA duration chip","QA adjusted duration"))
         click("Close");click("Quick entry")
-        await { find("45 min")!=null };screenshot("duration-correction")
+        await { find("Duration, for 45 min")!=null };screenshot("duration-correction")
         click("Add event");if(find("Add anyway")!=null)click("Add anyway")
         await { data().items.any { it.title=="QA adjusted duration" } }
         assertEquals(45,data().items.single { it.title=="QA adjusted duration" }.durationMinutes)
@@ -196,7 +197,7 @@ class QuickTypingUiTest {
         try {
             app.settings.setAiFeaturesEnabled(false)
             start();setText("","QA range dentist tomorrow 3-4pm")
-            await { find("60 min")!=null };screenshot("shorthand-range")
+            await { find("Duration, for 60 min")!=null };screenshot("shorthand-range")
             assertNull(find("Understand with AI"))
             click("Add event");if(find("Add anyway")!=null)click("Add anyway")
             await { data().items.any { it.title=="QA range dentist" } }
@@ -223,13 +224,14 @@ class QuickTypingUiTest {
         val old=app.settings.aiFeaturesEnabled.value
         try {
             app.settings.setAiFeaturesEnabled(false);start()
-            setText("","QA flexible tommorow")
+            // "tommorow" is now read as tomorrow outright; "tomorrw" is still only offered as a suggestion.
+            setText("","QA flexible tomorrw")
             await { find("Tomorrow")!=null };screenshot("typo-suggestion")
-            assertTrue(nodes().any { it.isEditable && it.text?.toString()=="QA flexible tommorow" })
+            assertTrue(nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrw" })
             click("Tomorrow")
             await { nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrow " } }
             setText("QA flexible tomorrow ","QA flexible tomorrow 3.30pm—actually 4 p.m. for an hour and a half")
-            await { find("90 min")!=null };screenshot("flexible-preview")
+            await { find("Duration, for 90 min")!=null };screenshot("flexible-preview")
             assertNull(find("Understand with AI"));click("Add event")
             if(find("Add anyway")!=null)click("Add anyway")
             await { data().items.any { it.title=="QA flexible" } }

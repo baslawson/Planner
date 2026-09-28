@@ -87,7 +87,7 @@ class SeventhFeaturesTest {
         backup.export(uri)
         ZipFile(File(uri.path!!)).use { archive ->
             val json=JSONObject(archive.getInputStream(archive.getEntry("data.json")).bufferedReader().readText())
-            assertEquals(8,json.getInt("formatVersion"));assertEquals(1,json.getJSONArray("templates").length())
+            assertEquals(com.example.itinerary.data.BackupManager.FORMAT_VERSION,json.getInt("formatVersion"));assertEquals(1,json.getJSONArray("templates").length())
         }
         repo.replaceAll(DataSnapshot(emptyList(),emptyList(),emptyList(),emptyList()))
         backup.restore(backup.stage(uri));assertEquals(before,repo.snapshot())

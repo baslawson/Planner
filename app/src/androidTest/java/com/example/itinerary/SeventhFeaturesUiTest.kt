@@ -46,6 +46,7 @@ class SeventhFeaturesUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     val action=if(forward)AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
                     if(nodes().lastOrNull { it.isScrollable && !it.isEditable }?.performAction(action)!=true)forward=!forward
                     Thread.sleep(350)
@@ -62,15 +63,16 @@ class SeventhFeaturesUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open() {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
     }
 
     @Test fun saveApplyTemplateEnterAmountSkipRestoreAndPayUpdateMonthlyTotals()=runBlocking {

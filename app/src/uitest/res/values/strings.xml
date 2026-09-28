@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The instrumented-test build sits next to the others; the name tells them apart in the launcher. -->
+    <string name="app_name">Planner test</string>
+</resources>

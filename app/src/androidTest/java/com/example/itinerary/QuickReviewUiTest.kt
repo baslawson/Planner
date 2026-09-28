@@ -47,6 +47,7 @@ class QuickReviewUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     // Gesture targets the foreground surface, never the Agenda or a nested text field's semantics.
                     if (tries % 20 == 0) forward = !forward
                     val metrics = context.resources.displayMetrics
@@ -81,8 +82,8 @@ class QuickReviewUiTest {
         if (text.startsWith("Add ") && find("Check before adding") != null) click("Add anyway")
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -118,7 +119,8 @@ class QuickReviewUiTest {
         data().tasks.filter { it.id !in originalTasks }.forEach { app.repository.deleteTask(it.id) }
         app.repository.pendingDeletions.value.filter { it.token !in originalPending }.forEach { app.repository.finishDeletion(it.token) }
     }
-    @Test fun dateAndTimeClarificationButtonsPreserveTheTitle()=runBlocking {
+    @Test fun dateAndTimeClarificationButtonsPreserveTheTitle()=withDateFormat(app,ins,com.example.itinerary.data.DateFormatChoice.ISO) { clarificationButtons() }
+    private fun clarificationButtons()=runBlocking {
         start();setText("","QA clarified 03/04/2027 at 3")
         await { find("Which date did you mean?")!=null };screenshot("date-choices")
         val date=LocalDate.of(2027,4,3)
@@ -149,7 +151,7 @@ class QuickReviewUiTest {
         val date=LocalDate.now().plusDays(2)
         val before=data().items.size
         start();setText("","QA repeat direct $date 3pm every week remind me 30 minutes before for 3 occurrences")
-        reveal { find("Reminder: 30 minutes before")!=null };screenshot("repeat-reminder-preview")
+        reveal { find("Reminder, 30 minutes before")!=null };screenshot("repeat-reminder-preview")
         assertEquals(before,data().items.size)
         click("Add 3 events");await { data().items.count { it.title=="QA repeat direct" }==3 }
         val saved=data().items.filter { it.title=="QA repeat direct" }.sortedBy { it.date }

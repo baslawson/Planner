@@ -10,6 +10,7 @@ import java.io.File
 /** Opt-in setup for manually checking the normal app after process death. No network requests.
  * Requires preserved emulator data; the caller must restore it after the check.
  */
+@HarnessStage
 class NextcloudPathColdStartTest {
     @Test fun prepare() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("preparePathEvidence") == "true")

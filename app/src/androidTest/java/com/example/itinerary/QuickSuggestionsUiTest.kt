@@ -47,6 +47,7 @@ class QuickSuggestionsUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     // Gesture targets the foreground surface, never the Agenda or a nested text field's semantics.
                     if (tries % 20 == 0) forward = !forward
                     val metrics = context.resources.displayMetrics
@@ -81,8 +82,8 @@ class QuickSuggestionsUiTest {
         if (text.startsWith("Add ") && find("Check before adding") != null) click("Add anyway")
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -141,7 +142,7 @@ class QuickSuggestionsUiTest {
         val reminder=data().reminders.single { it.itemId==event.id }
         assertEquals(0,reminder.amount)
         // A type chosen by hand is not overridden by later typing.
-        click("Quick entry");click("Event");setText("","Remind me to QA stay event tomorrow")
+        click("Quick entry");click("Task");click("Event");setText("","Remind me to QA stay event tomorrow") // Event chosen by hand
         await { find("QA stay event")!=null };assertTrue(selected("Event"));assertFalse(selected("Task"))
         click("Close")
     }

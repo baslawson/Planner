@@ -30,7 +30,7 @@ class EventMigrationTest {
         old.version = 12
         old.close()
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, file.absolutePath)
-            .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21).build()
+            .addMigrations(*ALL_MIGRATIONS).build()
         try {
             val event = upgraded.itemDao().all().single()
             assertEquals(11L, event.id)
@@ -52,7 +52,7 @@ class EventMigrationTest {
             assertTrue(event.payments.isEmpty())
             assertTrue(upgraded.deletedDao().all().isEmpty())
             assertTrue(upgraded.taskDao().all().isEmpty())
-            assertEquals(21, upgraded.openHelper.readableDatabase.version)
+            assertEquals(ALL_MIGRATIONS.last().endVersion, upgraded.openHelper.readableDatabase.version)
         } finally {
             upgraded.close()
             SQLiteDatabase.deleteDatabase(file)

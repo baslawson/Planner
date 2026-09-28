@@ -41,6 +41,7 @@ class SixTaskFeaturesUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     fun positions()=nodes().map { n ->
                         val r=android.graphics.Rect();n.getBoundsInScreen(r);"${n.text}:$r"
                     }
@@ -78,8 +79,8 @@ class SixTaskFeaturesUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -127,7 +128,7 @@ class SixTaskFeaturesUiTest {
         click("Never"); click("Weekly")
         click("Add task"); field("Task 1", "Pack documents")
         screenshot("repeat-checklist-editor")
-        back(); await { find("Agenda")!=null }
+        back(); await { find("AGENDA")!=null }
         click("Add menu"); click("Add task"); click("To-do task")
         click("Resume draft"); reveal { find("Pack documents")!=null }
         click("Save")
@@ -231,7 +232,7 @@ class SixTaskFeaturesUiTest {
         val file=data().tasks.single { it.title=="QA six attachments" }.attachments.single()
         assertTrue(app.attachmentStore.fileFor(file.fileName).length()>0)
     }
-    @Test fun prepareProcessDeathDraft() = runBlocking {
+    @HarnessStage @Test fun prepareProcessDeathDraft() = runBlocking {
         fresh();click("Add menu");click("Add task");click("To-do task")
         field("Task title","QA six cold draft")
         click("Never");click("Days after completion")
@@ -241,7 +242,7 @@ class SixTaskFeaturesUiTest {
         await { TaskDraftStore(context).read("new")?.optString("title")=="QA six cold draft" }
         screenshot("draft-before-kill")
     }
-    @Test fun resumeProcessDeathDraft() = runBlocking {
+    @HarnessStage @Test fun resumeProcessDeathDraft() = runBlocking {
         open();click("Add menu");click("Add task");click("To-do task");click("Resume draft")
         reveal { find("QA six cold draft")!=null };reveal { find("Keep this step")!=null }
         screenshot("draft-after-kill");click("Save")
@@ -285,18 +286,18 @@ class SixTaskFeaturesUiTest {
         val attachment=data().tasks.single { it.title=="QA six document" }.attachments.single()
         assertEquals("QA document bytes for task attachment\n",app.attachmentStore.fileFor(attachment.fileName).readText())
     }
-    @Test fun prepareExistingTaskDraft() = runBlocking {
+    @HarnessStage @Test fun prepareExistingTaskDraft() = runBlocking {
         cleanFixture("QA six edit")
         val task=PlannerTask(title="QA six edit original",notes="Saved notes")
         app.repository.saveTask(task)
         fresh();click("QA six edit original")
         field("Task title","QA six edit recovered")
         field("Notes (optional)","Recovered edited notes")
-        back();await { find("Agenda")!=null }
+        back();await { find("AGENDA")!=null }
         assertEquals(task,data().tasks.single { it.id==task.id })
         assertNotNull(TaskDraftStore(context).read(task.id))
     }
-    @Test fun resumeExistingTaskDraft() = runBlocking {
+    @HarnessStage @Test fun resumeExistingTaskDraft() = runBlocking {
         open();click("QA six edit original");click("Resume draft")
         reveal { find("QA six edit recovered")!=null };reveal { find("Recovered edited notes")!=null }
         click("Save")

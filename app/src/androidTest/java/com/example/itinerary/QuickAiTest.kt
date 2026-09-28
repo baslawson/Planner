@@ -58,7 +58,7 @@ class QuickAiTest {
         val request=server.takeRequest();assertEquals(connection().apiKey,request.getHeader("x-goog-api-key"));assertNull(request.getHeader("Authorization"))
         assertEquals("/v1beta/models/gemini-test:generateContent",request.path)
         val raw=request.body.readUtf8();assertFalse(raw.contains(connection().apiKey));val body=geminiContext(raw)
-        assertEquals(setOf("text","reference_date","timezone","mode","single_kind","answers"),body.keys().asSequence().toSet())
+        assertEquals(setOf("text","reference_date","timezone","single_kind","answers"),body.keys().asSequence().toSet())
         assertEquals("2030-01-01",body.getString("reference_date"))
         assertEquals(source,body.getString("text"))
     }

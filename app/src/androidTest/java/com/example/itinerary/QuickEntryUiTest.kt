@@ -46,6 +46,7 @@ class QuickEntryUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     // Gesture targets the foreground surface, never the Agenda or a nested text field's semantics.
                     if (tries % 20 == 0) forward = !forward
                     val metrics = context.resources.displayMetrics
@@ -80,8 +81,8 @@ class QuickEntryUiTest {
         if (text.startsWith("Add ") && find("Check before adding") != null) click("Add anyway")
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -161,8 +162,9 @@ class QuickEntryUiTest {
     }
     @Test fun taskMoreDetailsAndExampleReuseExistingFlows()=runBlocking {
         start();click("Task");click("Call plumber tmr")
-        await { nodes().any { it.isEditable && it.text?.toString()=="Call plumber tmr" } }
-        setText("Call plumber tmr","QA detailed task tmr");click("More options");click("Open in full editor")
+        // The example fills the Title box and the Due box separately.
+        await { nodes().any { it.isEditable && it.text?.toString()=="Call plumber" } && nodes().any { it.isEditable && it.text?.toString()=="tmr" } }
+        setText("Call plumber","QA detailed task");click("More options");click("Open in full editor")
         reveal { find("Save task")!=null || find("Save")!=null };screenshot("task-more-details")
         click(if(find("Save task")!=null) "Save task" else "Save")
         await { data().tasks.any { it.title=="QA detailed task" } }
@@ -214,6 +216,9 @@ class QuickEntryUiTest {
     }
     @Test fun unclearNumericDateRequiresCorrectionBeforeSave()=runBlocking {
         val before=data().items.size
+        withDateFormat(app,ins,DateFormatChoice.ISO) { unclearNumericDate(before) }
+    }
+    private fun unclearNumericDate(before:Int)=runBlocking {
         start();setText("","QA clear date 03/04")
         await { find("Which date did you mean?")!=null }
         assertEquals(before,data().items.size);screenshot("ambiguous-date")

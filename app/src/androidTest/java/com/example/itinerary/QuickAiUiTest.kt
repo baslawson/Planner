@@ -80,8 +80,8 @@ class QuickAiUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
@@ -156,7 +156,7 @@ class QuickAiUiTest {
         response(listOf(entry(raw)));click("Understand with AI")
         await { find("Entry title")!=null };screenshot("single-ai-preview")
         assertTrue(data().items.none { it.title=="QA AI gym" })
-        setText("QA AI gym","QA corrected AI gym");click("60 min");click("45 min");click("Set duration")
+        setText("QA AI gym","QA corrected AI gym");click("Duration, for 60 min");click("45 min");click("Set duration")
         click("Close");click("Quick entry")
         await { find("QA corrected AI gym")!=null };click("Add event")
         if(find("Add anyway")!=null)click("Add anyway")

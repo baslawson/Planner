@@ -106,13 +106,15 @@ class TaskRemindersTest {
             old.execSQL("DROP TABLE tasks")
             old.execSQL("CREATE TABLE tasks (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, dueDate TEXT, priority TEXT NOT NULL, notes TEXT NOT NULL, done INTEGER NOT NULL)")
             old.execSQL("INSERT INTO tasks VALUES ('legacy', 'Keep task', '2026-09-26', 'HIGH', 'Keep notes', 0)")
-            listOf("paymentLink", "paymentReference", "bpayBillerCode", "bpayReference").forEach {
+            // Columns added after version 19, so the upgrade adds them again.
+            listOf("paymentLink", "paymentReference", "bpayBillerCode", "bpayReference", "linkedTaskId",
+                "bufferBeforeMinutes", "bufferAfterMinutes").forEach {
                 old.execSQL("ALTER TABLE items DROP COLUMN $it")
             }
             old.version = 19
         }
         fun open() = Room.databaseBuilder(context, AppDatabase::class.java, file.absolutePath)
-            .addMigrations(MIGRATION_19_20, MIGRATION_20_21).build()
+            .addMigrations(*ALL_MIGRATIONS).build()
         db = open()
         try {
             val migrated = db.taskDao().all().single()

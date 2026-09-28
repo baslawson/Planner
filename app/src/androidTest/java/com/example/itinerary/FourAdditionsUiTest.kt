@@ -47,6 +47,7 @@ class FourAdditionsUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     val before=nodes().map { it.text?.toString() }
                     val bounds=android.graphics.Rect()
                     nodes().firstOrNull { it.isScrollable && !it.isEditable }?.getBoundsInScreen(bounds)
@@ -79,18 +80,19 @@ class FourAdditionsUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open() {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
     }
 
-    @Test fun stage1RecordPartialPaymentAndDelete()=runBlocking {
+    @HarnessStage @Test fun stage1RecordPartialPaymentAndDelete()=runBlocking {
         EditorDraftStore(context).clear()
         data().items.filter { it.title == "QA cold recovery bill" }.forEach { app.repository.deleteWithUndo(it) }
         data().deleted.filter { it.label == "QA cold recovery bill" }.forEach { app.repository.permanentlyDelete(it.id) }
@@ -119,7 +121,7 @@ class FourAdditionsUiTest {
         assertTrue(data().items.none { it.id==item.id })
         ins.runOnMainSync { activity.finish() }
     }
-    @Test fun stage2RestoreThroughSettingsAfterForceStop()=runBlocking {
+    @HarnessStage @Test fun stage2RestoreThroughSettingsAfterForceStop()=runBlocking {
         assertTrue(data().items.none { it.title=="QA cold recovery bill" })
         assertTrue(data().deleted.any { it.label=="QA cold recovery bill" })
         open();click("Settings");click("Recently deleted")

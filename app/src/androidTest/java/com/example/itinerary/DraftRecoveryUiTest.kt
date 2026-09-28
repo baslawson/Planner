@@ -47,6 +47,7 @@ class DraftRecoveryUiTest {
             while(node!=null && !node.isClickable) node=node.parent
             if(node!=null && node.isEnabled) node.performAction(AccessibilityNodeInfo.ACTION_CLICK) else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(instrumentation) // a swipe across the keyboard would type words
                     val action=if(forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
                     if(nodes().lastOrNull { it.isScrollable && !it.isEditable }?.performAction(action)!=true) forward=!forward
                     Thread.sleep(350)
@@ -74,7 +75,7 @@ class DraftRecoveryUiTest {
         click("Scan document")
     }
     // Deterministic camera boundary for the prepare stage, while exercising the real editor and scanner.
-    @Test fun prepareWithCapturedPage() {
+    @HarnessStage @Test fun prepareWithCapturedPage() {
         val monitor=object:Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent: Intent?): Instrumentation.ActivityResult? {
                 if(intent?.action!=MediaStore.ACTION_IMAGE_CAPTURE) return null
@@ -99,7 +100,7 @@ class DraftRecoveryUiTest {
             screenshot("before-process-death")
         } finally { instrumentation.removeMonitor(monitor) }
     }
-    @Test fun recoverScanSaveRepeatAndMarkBillPaid() = runBlocking {
+    @HarnessStage @Test fun recoverScanSaveRepeatAndMarkBillPaid() = runBlocking {
         assertNotNull(EditorDraftStore(context).read())
         instrumentation.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         await { find("Cropped page preview")!=null }

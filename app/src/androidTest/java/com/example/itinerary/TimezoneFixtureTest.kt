@@ -12,6 +12,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 /** Opt-in fixture for an external system-timezone test. Caller backs up/restores app data. */
+@HarnessStage
 class TimezoneFixtureTest {
     @Test fun fixture(): Unit = runBlocking {
         val phase = InstrumentationRegistry.getArguments().getString("timezoneFixture")

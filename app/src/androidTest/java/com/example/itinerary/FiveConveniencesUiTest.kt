@@ -79,7 +79,7 @@ class FiveConveniencesUiTest {
         await { snapshot().items.any { it.title == "QA conveniences copy" } }
         assertTrue(snapshot().items.single { it.title == "QA conveniences copy" }.checklist.none { it.done })
         click("Back")
-        await { find("Agenda") != null }
+        await { find("AGENDA") != null }
         instrumentation.waitForIdleSync()
         click("Actions for QA conveniences")
         click("Move to tomorrow")
@@ -93,7 +93,7 @@ class FiveConveniencesUiTest {
         await { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.let { it != instrumentation.targetContext.packageName && it != "com.google.android.inputmethod.latin" } == true }
         screenshot("share-sheet")
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-        await { find("Agenda") != null }
+        await { find("AGENDA") != null }
     }
 
     private fun nodes(): List<AccessibilityNodeInfo> {

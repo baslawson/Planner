@@ -60,7 +60,7 @@ class AutoCropUiTest {
             instrumentation.runOnMainSync { activity.setContent { MaterialTheme {
                 ManualDocumentScanner(false,store,onDismiss={},onComplete={ output.set(it) })
             } } }
-            await { nodes().any { it.text?.toString()=="Auto crop ready. Adjust the corners if needed." } }
+            await { nodes().any { it.text?.toString()?.contains("Edges detected")==true } } // "Page 1 of 1 · Edges detected"
             await { nodes().any { it.contentDescription?.toString()=="Document crop. Adjust the four page corners." } }
             val crop=nodes().first { it.contentDescription?.toString()=="Document crop. Adjust the four page corners." }
             val action=crop.actionList.first { it.label?.toString()=="Move top left corner right" }

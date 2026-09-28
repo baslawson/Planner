@@ -15,7 +15,13 @@ class TaskReminderDeliveryTest {
     @Test fun realAlarmsDeliverDistinctNotificationsAndCompletionCancelsThem() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as ItineraryApp
+        // The test app is installed fresh for each run, so allow its notifications here.
+        if (android.os.Build.VERSION.SDK_INT >= 33) InstrumentationRegistry.getInstrumentation().uiAutomation
+            .grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
         assertTrue("Enable notifications before running this delivery test", notificationsEnabled(context))
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("appops set ${context.packageName} SCHEDULE_EXACT_ALARM allow").close()
+        Thread.sleep(500)
         assertTrue("Exact alarm permission is required for this bounded test", app.reminderScheduler.canScheduleExact())
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val prefix = "qa-task-reminder-${System.currentTimeMillis()}-"

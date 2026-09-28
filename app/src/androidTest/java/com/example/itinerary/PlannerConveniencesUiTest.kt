@@ -41,6 +41,7 @@ class PlannerConveniencesUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     val before=nodes().map { it.text?.toString() }
                     val bounds=android.graphics.Rect()
                     nodes().firstOrNull { it.isScrollable && !it.isEditable }?.getBoundsInScreen(bounds)
@@ -73,15 +74,16 @@ class PlannerConveniencesUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open() {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
     }
 
 
@@ -138,7 +140,7 @@ class PlannerConveniencesUiTest {
         screenshot("calendar-save-picker")
         val save=nodes().first { it.isVisibleToUser && it.text?.toString().equals("Save",true) }
         assertTrue(save.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
         var text=""
         await {
             val fd=ins.uiAutomation.executeShellCommand("cat /sdcard/Download/Planner-QA-conveniences.ics")
@@ -152,7 +154,7 @@ class PlannerConveniencesUiTest {
         click("Actions for QA forecast export");click("Export to calendar (.ics)")
         await { nodes().any { it.isEditable && it.text?.toString()?.endsWith(".ics")==true } }
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-        await { find("Agenda")!=null };assertEquals(before,data().items.single { it.id==item.id })
+        await { find("AGENDA")!=null };assertEquals(before,data().items.single { it.id==item.id })
     }
 
     @Test fun backupReminderPreferenceAndDeferralSurviveStoreReloadAndSuccessHidesPrompt()=runBlocking {

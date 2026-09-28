@@ -42,7 +42,7 @@ class FourEnhancementsUiTest {
         click("Save")
         await { snapshot().items.single { it.title == "QA duration" }.durationMinutes == 120 }
         click("Back")
-        await { find("Agenda") != null }
+        await { find("AGENDA") != null }
         instrumentation.waitForIdleSync()
         click("Actions for QA duration")
         screenshot("move-menu")

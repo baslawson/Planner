@@ -40,6 +40,7 @@ class TaskRepeatOptionsUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     fun positions()=nodes().map { n ->
                         val r=android.graphics.Rect();n.getBoundsInScreen(r);"${n.text}:$r"
                     }
@@ -77,15 +78,16 @@ class TaskRepeatOptionsUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open() {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
     }
 
 
@@ -126,10 +128,16 @@ class TaskRepeatOptionsUiTest {
             field("Task title","QA repeat options $label")
             click("Choose due date");click("Set date")
             click("Never")
-            for (option in listOf("Never","Daily","Weekly","Fortnightly","Monthly","Yearly","Days after completion")) {
+            // The list is longer than the menu, so later choices need a scroll inside it.
+            fun scrollMenu(forward:Boolean) { nodes().lastOrNull { it.isScrollable && it.isVisibleToUser }
+                ?.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);Thread.sleep(300) }
+            for (option in listOf("Never","Daily","Weekly","Fortnightly","Monthly","Yearly","Every few days…","Every few weeks…",
+                "On chosen weekdays…","Monthly on a weekday (e.g. first Monday)…","Days after completion")) {
+                repeat(3) { if (find(option)==null) scrollMenu(true) }
                 assertNotNull("Missing repeat choice $option",find(option))
             }
             screenshot("task-repeat-dropdown")
+            repeat(3) { scrollMenu(false) }
             click(label);click("Save")
             await { data().tasks.any { it.title=="QA repeat options $label" } }
             val original=data().tasks.single { it.title=="QA repeat options $label" }

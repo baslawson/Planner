@@ -195,7 +195,7 @@ class EventEnhancementsRepositoryTest {
         assertTrue(repo.pendingDeletions.value.isEmpty())
         assertEquals("original ticket bytes", store.fileFor("ticket.txt").readText())
         val json = ZipFile(zip).use { archive -> JSONObject(archive.getInputStream(archive.getEntry("data.json")).bufferedReader().readText()) }
-        assertEquals(13, json.getInt("formatVersion"))
+        assertEquals(com.example.itinerary.data.BackupManager.FORMAT_VERSION, json.getInt("formatVersion"))
         json.put("formatVersion", 3)
         val items = json.getJSONArray("items")
         for (i in 0 until items.length()) { items.getJSONObject(i).remove("seriesId"); items.getJSONObject(i).remove("repeatRule") }

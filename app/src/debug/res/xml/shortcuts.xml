@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug copy of src/main/res/xml/shortcuts.xml: shortcuts need the literal package name, which differs in debug builds. Keep the two in step. -->
+<!-- Debug copy of src/main/res/xml/shortcuts.xml: shortcuts need the literal package name, which differs in debug builds. Keep all three copies (main, debug, uitest) in step. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut android:shortcutId="add_event" android:enabled="true" android:icon="@drawable/shortcut_event" android:shortcutShortLabel="@string/shortcut_add_event">
         <intent android:action="com.example.itinerary.ADD_EVENT" android:targetPackage="io.github.baslawson.planner.debug" android:targetClass="com.example.itinerary.MainActivity" />

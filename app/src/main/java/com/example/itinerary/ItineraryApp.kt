@@ -47,7 +47,7 @@ class ItineraryApp : Application() {
 
     val repository: Repository by lazy {
         val db = Room.databaseBuilder(this, AppDatabase::class.java, "itinerary.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, com.example.itinerary.data.MIGRATION_17_18, com.example.itinerary.data.MIGRATION_18_19, com.example.itinerary.data.MIGRATION_19_20, com.example.itinerary.data.MIGRATION_20_21, com.example.itinerary.data.MIGRATION_21_22, com.example.itinerary.data.MIGRATION_22_23)
+            .addMigrations(*com.example.itinerary.data.ALL_MIGRATIONS)
             .build()
         Repository(db, attachmentStore, reminderScheduler) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) }
     }

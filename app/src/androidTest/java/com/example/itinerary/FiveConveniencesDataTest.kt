@@ -121,7 +121,7 @@ class FiveConveniencesDataTest {
         val file = File(dir,"source.zip")
         backup.export(Uri.fromFile(file))
         val json = java.util.zip.ZipFile(file).use { zip -> org.json.JSONObject(zip.getInputStream(zip.getEntry("data.json")).reader().readText()) }
-        assertEquals(9,json.getInt("formatVersion"))
+        assertEquals(com.example.itinerary.data.BackupManager.FORMAT_VERSION,json.getInt("formatVersion"))
         json.put("formatVersion",5)
         json.getJSONArray("items").getJSONObject(0).remove("checklist")
         fun write(): File {

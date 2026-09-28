@@ -19,7 +19,9 @@ android {
         targetSdk = 35
         versionCode = 9
         versionName = "0.0.2"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.example.itinerary.PlannerTestRunner"
+        // Steps that need an outside action between them are run one at a time, not in the full suite.
+        testInstrumentationRunnerArguments["notAnnotation"] = "com.example.itinerary.HarnessStage"
     }
 
     // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
@@ -38,17 +40,38 @@ android {
     buildTypes {
         // Debug builds install alongside the release app instead of replacing it.
         debug { applicationIdSuffix = ".debug" }
+        // The instrumented tests clear and rewrite the app's database, so they run against their own app
+        // ("Planner test") and can never touch the data in Planner debug.
+        create("uitest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uitest"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
         }
     }
+    testBuildType = "uitest"
+    // Grant the runtime permissions (notifications, camera) when the test app is installed, so no system prompt
+    // covers the screens the UI tests look at.
+    installation { installOptions += listOf("-g") }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+}
+
+// testBuildType (above) would also move the JVM unit tests to the uitest build; keep them on debug, where the
+// documented command `:app:testDebugUnitTest` expects them.
+androidComponents {
+    beforeVariants { variant ->
+        (variant as? com.android.build.api.variant.HasHostTestsBuilder)
+            ?.hostTests?.get(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE)
+            ?.enable = variant.buildType == "debug"
+    }
 }
 
 composeCompiler {
@@ -77,6 +100,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    "uitestImplementation"(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

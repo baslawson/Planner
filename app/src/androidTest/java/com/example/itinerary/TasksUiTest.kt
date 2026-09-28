@@ -40,6 +40,7 @@ class TasksUiTest {
         await {
             if(test())true else {
                 if(++tries>5) {
+                    hideQuickTestKeyboard(ins) // a swipe across the keyboard would type words
                     fun positions()=nodes().map { n ->
                         val r=android.graphics.Rect();n.getBoundsInScreen(r);"${n.text}:$r"
                     }
@@ -78,15 +79,16 @@ class TasksUiTest {
         };Thread.sleep(350)
     }
     private fun setText(old:String,value:String) {
-        reveal { nodes().any { it.isVisibleToUser && it.isEditable && it.text?.toString()==old } }
-        val node=nodes().first { it.isVisibleToUser && it.isEditable && it.text?.toString()==old }
+        reveal { pickEditable(nodes(),old)!=null }
+        val node=pickEditable(nodes(),old)!!
         assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
         }));Thread.sleep(350)
     }
     private fun open() {
+        app.settings.lastViewCalendar=false // open() expects the agenda
         ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Agenda")!=null }
+        await { find("AGENDA")!=null }
     }
 
 
@@ -161,7 +163,7 @@ class TasksUiTest {
         assertTrue(data().items.none { it.title.startsWith("QA task view") })
         back()
     }
-    @Test fun prepareColdRecoveryFixtures()=runBlocking {
+    @HarnessStage @Test fun prepareColdRecoveryFixtures()=runBlocking {
         cleanFixture("QA task cold")
         val done=PlannerTask(title="QA task cold done",dueDate=LocalDate.now().minusDays(2),priority=TaskPriority.HIGH,notes="Retain completed notes",done=true)
         val anytime=PlannerTask(title="QA task cold anytime",priority=TaskPriority.LOW,notes="Retain undated notes")
