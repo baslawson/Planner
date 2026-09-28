@@ -168,6 +168,34 @@ file — check that pid is dead first) and `multiinstance.lock` from the AVD fol
 
 ---
 
+### Instrumented UI tests
+They run against a separate test app, "Planner test" (`io.github.baslawson.planner.uitest`, build type `uitest`), so
+they never touch the data in Planner debug. Full run (about 16 minutes; Gradle installs the test app, runs every
+class except harness steps, and uninstalls it afterwards):
+
+```
+./gradlew :app:connectedUitestAndroidTest
+```
+
+Report: `app/build/reports/androidTests/connected/uitest/index.html`. One class or method:
+`adb shell am instrument -w -r -e class com.example.itinerary.<Class>[#method] -e notAnnotation
+com.example.itinerary.HarnessStage io.github.baslawson.planner.uitest.test/com.example.itinerary.PlannerTestRunner`
+(install both uitest APKs with `-g` first).
+
+- Before every test the runner (`PlannerTestRunner`, listener `CleanStart`) closes all screens, clears drafts, empties
+  the database and puts the agenda view settings back to new-install defaults. A test creates the data it needs.
+- `@HarnessStage` marks a step of a multi-step check (for example: leave a draft, `am force-stop`, then recover it).
+  These are excluded from normal runs; run the steps one by one with `am instrument -e class …#method` and without
+  `notAnnotation`.
+- Read the screen through `uiAutomation.freshRoot` (androidTest `QuickUiText.kt`), never `rootInActiveWindow`
+  directly: without clearing the accessibility cache, a Compose screen's old labels and cards stay in the tree for
+  seconds after they have gone from the screen.
+- Wait for a scrolling list to settle before comparing positions, and prefer checking an effect (cards shown or
+  hidden) over a toggled label.
+- The system camera can show its shutter while still starting and ignore a press: press with a real tap and retry
+  until the photo is taken.
+- Anything a test writes to shared storage (Downloads) must be removed by the test afterwards.
+
 ## Finishing up
 
 - [ ] Test data deleted through the app, and the database restored from your backup.
