@@ -113,12 +113,12 @@ class BillConveniencesUiTest {
         await { find("1 paid · 1 unpaid · 1 skipped")!=null && find("Overdue")!=null }
         screenshot("bill-history");click("Close")
         click("Search");setText("","QA history bill")
-        await { find("Overdue")!=null };screenshot("overdue-search")
+        reveal { find("Overdue")!=null };screenshot("overdue-search") // below the card's amount, under the keyboard
         click("Back")
         context.startActivity(Intent(context,MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .setAction("com.example.itinerary.widget.OPEN_DATE").putExtra("widget_date",members.last().date.toString()))
-        await { find("Calendar")!=null && find("Overdue")!=null };screenshot("overdue-calendar")
+        await { find("CALENDAR")!=null && find("Overdue")!=null };screenshot("overdue-calendar")
     }
 
     @Test fun realNotificationAndRingingAlarmCanPayOneBillAndUndo()=runBlocking {

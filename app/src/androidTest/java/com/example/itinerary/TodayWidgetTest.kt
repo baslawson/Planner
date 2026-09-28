@@ -82,7 +82,7 @@ class TodayWidgetTest {
             while (click != null && !click.isClickable) click = click.parent
             assertTrue(click?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
             instrumentation.runOnMainSync { (hostedView?.parent as? ViewGroup)?.removeView(hostedView) }
-            await { find("Calendar") != null }
+            await { find("CALENDAR") != null }
             screenshot("widget-opened-calendar")
             runBlocking { repo.deleteItem(saved) }
         } finally {

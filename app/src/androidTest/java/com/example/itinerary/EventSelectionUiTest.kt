@@ -112,34 +112,38 @@ class EventSelectionUiTest {
         val repeat = data().items.first { it.title=="QA select repeat" }
         app.repository.saveItem(repeat.copy(skipped=true))
         app.repository.saveItem(ItineraryItem(tripId=0, date=day.minusDays(1), startTime=java.time.LocalTime.of(23,30), durationMinutes=120, title="QA select overnight"))
+        app.repository.saveItem(ItineraryItem(tripId=0, date=day.plusDays(10), startTime=null, title="QA select later"))
         val before = data()
-        open();setText("", "QA select")
+        open() // the agenda has no text filter
+        click("Show completed tasks") // a paid bill is a completed task, hidden by default
         longTouch("QA select overnight")
         click("QA select paid");await { find("2 selected")!=null }
-        click("Delete");await { find("Delete 2 events?")!=null };screenshot("confirmation")
+        click("Delete");await { find("Delete 2 items?")!=null };screenshot("confirmation")
         assertEquals(before,data())
-        click("Keep events");assertEquals(before,data())
+        click("Keep items");assertEquals(before,data())
         click("Cancel");await { find("Add menu")!=null }
         longTouch("QA select paid")
         click("QA select timed");await { find("2 selected")!=null };screenshot("agenda-selection")
-        click("Delete");click("Delete 2 events")
+        click("Delete");click("Delete 2 items")
         val deletedIds=before.items.filter { it.title in setOf("QA select paid","QA select timed") }.map { it.id }.toSet()
         await { data().items.none { it.id in deletedIds } }
         assertEquals(before.items.filterNot { it.id in deletedIds },data().items)
         click("Undo");await { data()==before }
-        // Filter changes must not leave invisible events selected.
-        longTouch("QA select overnight");setText("QA select","QA select timed")
+        // Filter changes must not leave invisible events selected: narrowing the range to Today hides "later".
+        reveal { find("QA select later")!=null };longTouch("QA select later");await { find("1 selected")!=null }
+        click("Today")
         await { find("1 selected")==null };assertNull(find("Delete"))
-        click("QA select timed");await { find("Calendar")!=null }
+        click("QA select timed");await { find("CALENDAR")!=null }
         longTouch("QA select paid");click("QA select repeat");await { find("2 selected")!=null }
-        screenshot("calendar-selection");click("Delete");click("Keep events")
+        screenshot("calendar-selection");click("Delete");click("Keep items")
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         await { find("1 selected")==null && find("2 selected")==null }
         // Plain tap still opens the editor after leaving selection mode.
         click("QA select timed");await { find("Discard")!=null };click("Discard")
         click("Search");await { find("Search events and tasks")!=null };setText("", "QA select")
+        click("Show completed tasks") // the paid bill, as on the agenda
         longTouch("QA select overnight");click("QA select paid");await { find("2 selected")!=null }
-        screenshot("search-selection");click("Delete");click("Keep events");click("Cancel")
+        screenshot("search-selection");click("Delete");click("Keep items");click("Cancel")
         assertEquals(before,data())
     }
 }

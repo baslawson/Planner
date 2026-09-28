@@ -123,7 +123,7 @@ class CodebaseOptimizationUiTest {
         screenshot("agenda-undo")
         click("All");longTouch("QA optimization future");click("Today")
         await { find("1 selected")==null }
-        click("QA optimization alpha");await { find("Calendar")!=null }
+        click("QA optimization alpha");await { find("CALENDAR")!=null }
         longTouch("QA optimization alpha");click("QA optimization beta")
         await { find("2 selected")!=null }
         click("Delete");click("Keep events");click("Cancel")
