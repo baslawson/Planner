@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -155,50 +156,56 @@ fun SearchScreen(
                         .padding(horizontal = 16.dp)
                         .focusRequester(focusRequester),
                 )
-                SavedSearchControls(query, categories, showCompleted) { saved ->
-                    query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
-                }
-                // The categories work as tags: pick one or more to narrow the search.
-                Row(
-                    Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    categoryChips.forEach { category ->
-                        FilterChip(
-                            selected = category in categories,
-                            onClick = {
-                                categories = if (category in categories) categories - category else categories + category
-                            },
-                            label = { Text(category) },
-                        )
+                // Only the search box stays put; the controls under it scroll away with the results, so a short
+                // screen (landscape, large text) still shows what was found.
+                val grouped = remember(visibleOutcome) { groupResults(visibleOutcome) }
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    item(key = "search-controls") { Column {
+                        SavedSearchControls(query, categories, showCompleted) { saved ->
+                            query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
+                        }
+                        // The categories work as tags: pick one or more to narrow the search.
+                        Row(
+                            Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            categoryChips.forEach { category ->
+                                FilterChip(
+                                    selected = category in categories,
+                                    onClick = {
+                                        categories = if (category in categories) categories - category else categories + category
+                                    },
+                                    label = { Text(category) },
+                                )
+                            }
+                        }
+                        if (tasks.any { it.done } || (categoryCounts["Bills"] ?: 0) > 0) FilterChip(selected = showCompleted, enabled = !selection.active,
+                            onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") }, modifier = Modifier.padding(horizontal = 16.dp))
+                        if (outcome.dateLabels.isNotEmpty()) {
+                            Text(
+                                "Date: " + outcome.dateLabels.joinToString(" or "),
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } }
+                    when {
+                        searching && outcome === SearchOutcome.LOADING -> item(key = "hint") { Hint("Searching…") }
+                        outcome.invalidDates.isNotEmpty() -> item(key = "hint") { Hint(
+                            (if (outcome.invalidDates.size == 1) "Invalid date: " else "Invalid dates: ") +
+                                outcome.invalidDates.joinToString(", ") + ". Check the year, month and day.",
+                            isError = true,
+                        ) }
+                        !searching -> item(key = "hint") { Hint(
+                            "Search tasks, event titles, places, notes, attachment names and recognised document text. " +
+                                "Try words like tomorrow, next friday or 12 june, or pick a category above.",
+                        ) }
+                        visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> item(key = "hint") { Hint("Nothing found. Try fewer words or check the spelling.") }
+                        else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
                     }
-                }
-                if (tasks.any { it.done } || (categoryCounts["Bills"] ?: 0) > 0) FilterChip(selected = showCompleted, enabled = !selection.active,
-                    onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") }, modifier = Modifier.padding(horizontal = 16.dp))
-                if (outcome.dateLabels.isNotEmpty()) {
-                    Text(
-                        "Date: " + outcome.dateLabels.joinToString(" or "),
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                when {
-                    searching && outcome === SearchOutcome.LOADING -> Hint("Searching…")
-                    outcome.invalidDates.isNotEmpty() -> Hint(
-                        (if (outcome.invalidDates.size == 1) "Invalid date: " else "Invalid dates: ") +
-                            outcome.invalidDates.joinToString(", ") + ". Check the year, month and day.",
-                        isError = true,
-                    )
-                    !searching -> Hint(
-                        "Search tasks, event titles, places, notes, attachment names and recognised document text. " +
-                            "Try words like tomorrow, next friday or 12 june, or pick a category above.",
-                    )
-                    visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> Hint("Nothing found. Try fewer words or check the spelling.")
-                    else -> Results(visibleOutcome, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
                 }
             }
         }
@@ -218,46 +225,47 @@ private fun Hint(text: String, isError: Boolean = false) {
     )
 }
 
-@Composable
-private fun Results(outcome: SearchOutcome, selection: EventSelection, onOpenResult: (LocalDate) -> Unit,
-    taskHits: List<com.example.itinerary.data.PlannerTask>, today: LocalDate, onBill: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
-    val dayGroups = remember(outcome) {
-        outcome.hits.filter { it.item.category != "Bills" }.groupBy { it.item.date }.toSortedMap().mapValues { (_, hits) ->
-            hits.sortedWith(compareBy<SearchHit> { it.item.startTime != null }
-                .thenBy { it.item.startTime }.thenBy { it.item.id })
-        }
-    }
-    val billHits = outcome.hits.filter { it.item.category == "Bills" }.sortedBy { it.item.date }
-    val count = outcome.hits.size + taskHits.size
+private class GroupedResults(val dayGroups: Map<LocalDate, List<SearchHit>>, val billHits: List<SearchHit>)
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Text(
-                if (count == 1) "1 result" else "$count results",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun groupResults(outcome: SearchOutcome) = GroupedResults(
+    outcome.hits.filter { it.item.category != "Bills" }.groupBy { it.item.date }.toSortedMap().mapValues { (_, hits) ->
+        hits.sortedWith(compareBy<SearchHit> { it.item.startTime != null }
+            .thenBy { it.item.startTime }.thenBy { it.item.id })
+    },
+    outcome.hits.filter { it.item.category == "Bills" }.sortedBy { it.item.date },
+)
+
+private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResults, selection: EventSelection, onOpenResult: (LocalDate) -> Unit,
+    taskHits: List<com.example.itinerary.data.PlannerTask>, today: LocalDate, onBill: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
+    val dayGroups = grouped.dayGroups
+    val billHits = grouped.billHits
+    val count = outcome.hits.size + taskHits.size
+    item(key = "count") {
+        Text(
+            if (count == 1) "1 result" else "$count results",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (taskHits.isNotEmpty() || billHits.isNotEmpty()) {
+        item(key = "tasks-heading") { HeadingText("Tasks", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium) }
+        billHits.forEach { hit -> item(key = "bill-${hit.item.id}") {
+            BillTaskCard(hit.item.billTaskSummary(), today, selection, hit.documentName) { onBill(hit.item.id) }
+        } }
+        taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, enabled = !selection.active) { onTask(task) } } }
+    }
+    dayGroups.forEach { (date, hits) ->
+        item(key = "day-$date") {
+            HeadingText(
+                date.dayLabel(LocalDateFormat.current),
+                modifier = Modifier.padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.titleMedium,
             )
         }
-        if (taskHits.isNotEmpty() || billHits.isNotEmpty()) {
-            item(key = "tasks-heading") { HeadingText("Tasks", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium) }
-            billHits.forEach { hit -> item(key = "bill-${hit.item.id}") {
-                BillTaskCard(hit.item.billTaskSummary(), today, selection, hit.documentName) { onBill(hit.item.id) }
-            } }
-            taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, enabled = !selection.active) { onTask(task) } } }
-        }
-        dayGroups.forEach { (date, hits) ->
-            item(key = "day-$date") {
-                HeadingText(
-                    date.dayLabel(LocalDateFormat.current),
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 4.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            hits.forEach { hit ->
-                item(key = "item-${hit.item.id}") {
-                    HitRow(hit, outcome.tokens, selection) { if (selection.active) selection.toggle(hit.item.id) else onOpenResult(hit.item.date) }
-                }
+        hits.forEach { hit ->
+            item(key = "item-${hit.item.id}") {
+                HitRow(hit, outcome.tokens, selection) { if (selection.active) selection.toggle(hit.item.id) else onOpenResult(hit.item.date) }
             }
         }
     }
