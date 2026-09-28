@@ -64,7 +64,7 @@ object Tasks {
         require(task.id.isNotBlank() && task.id.length <= 100)
         require(task.title.isNotBlank() && task.title.length <= 500)
         require(task.notes.length <= 20_000)
-        require(task.repeat in TaskRepeat.entries.map { it.name })
+        require(TaskRepeat.valid(task.repeat))
         require(task.repeatDays in 1..3650 && task.repeatAnchorDay in 0..31)
         require(task.nextTaskId == null || task.nextTaskId.isNotBlank() && task.nextTaskId.length <= 100 && task.nextTaskId != task.id)
         require(task.prerequisiteIds.size <= 100 && task.prerequisiteIds.distinct().size == task.prerequisiteIds.size)

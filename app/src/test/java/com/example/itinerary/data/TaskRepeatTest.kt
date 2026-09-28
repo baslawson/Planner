@@ -11,7 +11,10 @@ class TaskRepeatTest {
         val zone = ZoneId.of("Australia/Perth")
         for (rule in TaskRepeat.entries.filter { it != TaskRepeat.NONE }) {
             for (reminderDay in listOf(today.minusDays(40), today.plusDays(40))) {
-                val task = PlannerTask(title = "Undated", repeat = rule.name, repeatDays = 3,
+                // The newer kinds carry their value: every 3 days, Mondays and Thursdays, the first Monday.
+                val stored = mapOf("EVERY_N_DAYS" to "EVERY_N_DAYS:3", "EVERY_N_WEEKS" to "EVERY_N_WEEKS:3",
+                    "DAYS_OF_WEEK" to "DAYS_OF_WEEK:MON,THU", "MONTHLY_WEEKDAY" to "MONTHLY_WEEKDAY:1,MON")[rule.name] ?: rule.name
+                val task = PlannerTask(title = "Undated", repeat = stored, repeatDays = 3,
                     reminderAt = reminderDay.atTime(9, 15).atZone(zone).toInstant().toEpochMilli())
                 val next = task.nextOccurrence(today, zone)!!
                 assertEquals(rule.name, next.dueDate!!.atTime(9, 15).atZone(zone).toInstant().toEpochMilli(), next.reminderAt)

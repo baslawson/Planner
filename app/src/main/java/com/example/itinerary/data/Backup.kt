@@ -299,7 +299,7 @@ class BackupManager(
                     else it.getInt("durationMinutes").also { n -> require(n in 1..1440) },
                 checklist = if (it.isNull("checklist")) emptyList() else ChecklistCodec.decode(it.getJSONArray("checklist").toString()),
                 seriesId = if (it.isNull("seriesId")) null else it.getString("seriesId").takeIf(String::isNotBlank),
-                repeatRule = it.optString("repeatRule", "NONE").takeIf { rule -> RepeatRule.entries.any { r -> r.name == rule } } ?: "NONE",
+                repeatRule = it.optString("repeatRule", "NONE").takeIf { rule -> RepeatRule.parse(rule) != null } ?: "NONE",
             )
         }
         items.forEach { Payments.validate(it) }

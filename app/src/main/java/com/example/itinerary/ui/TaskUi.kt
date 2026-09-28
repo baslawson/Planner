@@ -68,8 +68,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, onEdi
                         Text("${task.priority.label} priority", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelMedium)
                     }
                 }
-                if (task.repeat != "NONE") Text("Repeat: ${TaskRepeat.valueOf(task.repeat).label}" +
-                    if (task.repeat == "AFTER_COMPLETION") " (${task.repeatDays})" else "", style = MaterialTheme.typography.bodySmall)
+                if (task.repeat != "NONE") Text("Repeat: ${TaskRepeat.label(task.repeat, task.repeatDays)}", style = MaterialTheme.typography.bodySmall)
                 if (task.checklist.isNotEmpty()) Text(checklistProgress(task.checklist), style = MaterialTheme.typography.bodySmall)
                 if (task.attachments.isNotEmpty()) Text("${task.attachments.size} attachment(s)", style = MaterialTheme.typography.bodySmall)
                 val due = task.dueDate
@@ -239,8 +238,15 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     Text(date?.let { LocalDate.parse(it).dayLabel(LocalDateFormat.current) } ?: "Choose due date")
                 }
                 if (date != null) TextButton(enabled = !busy, onClick = { date = null }) { Text("Remove due date") }
-                SettingsDropdown(label = "Repeat", current = TaskRepeat.valueOf(repeat).label, options = TaskRepeat.entries.toList(),
-                    onSelect = { if (!busy) repeat = it.name }, entry = { Text(it.label) })
+                val repeatKind = TaskRepeat.of(repeat)
+                SettingsDropdown(label = "Repeat", current = if (repeatKind.detailed) RepeatRule.parse(repeat)?.label ?: repeatKind.label else repeatKind.label,
+                    options = TaskRepeat.entries.toList(), onSelect = { kind ->
+                        if (!busy && kind != repeatKind) repeat = if (kind.detailed)
+                            RepeatRule.Kind.valueOf(kind.name).startingRule(date?.let(LocalDate::parse) ?: LocalDate.now()).name else kind.name
+                    }, entry = { Text(if (it.detailed) RepeatRule.Kind.valueOf(it.name).choiceLabel() else it.label) })
+                if (repeatKind.detailed) RepeatRule.parse(repeat, complete = false)?.let { rule ->
+                    RepeatDetails(rule, enabled = !busy) { repeat = it.name }
+                }
                 if (repeat == TaskRepeat.AFTER_COMPLETION.name) OutlinedTextField(repeatDays,
                     onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) repeatDays = it }, enabled = !busy,
                     label = { Text("Days after completion (1–3650)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -307,7 +313,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     if (!creating) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
                     OutlinedButton(enabled = !busy, onClick = ::discard) { Text("Discard") }
                     Spacer(Modifier.width(12.dp))
-                    Button(enabled = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } &&
+                    Button(enabled = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
                         (repeat != TaskRepeat.AFTER_COMPLETION.name || repeatDays.toIntOrNull() in 1..3650), onClick = {
                         if (reminderAt != null && reminderAt != initial.reminderAt && reminderAt!! <= System.currentTimeMillis()) {
                             error = "Choose a future reminder date and time."

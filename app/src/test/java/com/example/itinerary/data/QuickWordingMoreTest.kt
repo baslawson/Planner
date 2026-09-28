@@ -134,8 +134,8 @@ class QuickWordingMoreTest {
         ok("Christmas Day every year").let { assertEquals(RepeatRule.YEARLY, it.repeat); assertEquals(LocalDate.of(2026, 12, 25), it.date) }
     }
 
-    @Test fun firstWeekdayOfTheMonthIsNotSavedWrongly() {
-        assertNotNull(parse("Board meeting first Monday of every month").error)
+    @Test fun firstWeekdayOfTheMonthIsARepeat() {
+        assertEquals(RepeatRule.monthlyOn(1, DayOfWeek.MONDAY), ok("Board meeting first Monday of every month").repeat)
     }
 
     @Test fun numberBeforeAPartOfTheDay() {

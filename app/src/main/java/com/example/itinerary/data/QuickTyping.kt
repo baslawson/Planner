@@ -23,7 +23,8 @@ fun QuickInput.edited(value: String): QuickInput {
     }
     fun changed(kind: QuickPhraseKind) = signature(kind, true) != signature(kind, false)
     fun anchors(old: Boolean) = signature(QuickPhraseKind.REPEAT, old)
-        .filter { Regex("every\\s+(?:other\\s+)?(?:mon|tue|wed|thu|fri|sat|sun|weekday)|weekdays|(?:mon|tues|wednes|thurs|fri|satur|sun)days|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        // Any repeat tied to a weekday or a day of the month: every Friday, Mon Wed Fri, first Monday of every month, 1st of every month.
+        .filter { Regex("\\b(?:mon|tue|wed|thu|fri|sat|sun)(?!th)|weekday|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE).containsMatchIn(it) }
     return copy(text = value, literals = moved, ai = null,
         dateOverride = dateOverride.takeUnless { changed(QuickPhraseKind.DATE) || anchors(true) != anchors(false) },
         timeOverride = timeOverride.takeUnless { changed(QuickPhraseKind.TIME) },

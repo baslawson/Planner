@@ -24,7 +24,8 @@ class QuickEntryReviewTest {
         val phrase = QuickEntry.parse(text, today).phrases.single()
         val literal = QuickEntry.parse(text, today, listOf(phrase.start until phrase.end))
         assertEquals(text, literal.title);assertEquals(RepeatRule.NONE, literal.repeat)
-        for (unsupported in listOf("every other month", "every other weekend", "every two months", "every 3 weeks")) {
+        assertEquals(RepeatRule.everyWeeks(3), QuickEntry.parse("Green Bin every 3 weeks", today).repeat)
+        for (unsupported in listOf("every other month", "every other weekend", "every two months")) {
             assertNotNull(unsupported, QuickEntry.parse("Green Bin $unsupported", today).error)
         }
     }
@@ -85,7 +86,7 @@ class QuickEntryReviewTest {
         assertEquals(RepeatRule.NONE,quoted.repeat);assertNull(quoted.reminderMinutes)
     }
     @Test fun invalidReminderAndRepeatPhrasesAreNotSilentlySaved() {
-        for(text in listOf("Gym every", "Gym every 3 days", "Gym remind me", "Gym remind me -2 minutes before",
+        for(text in listOf("Gym every", "Gym every 400 days", "Gym remind me", "Gym remind me -2 minutes before",
             "Gym remind me 0.5 minutes before", "Gym every Monday for 1 occurrence", "Gym every Monday for 366 times",
             "Gym every Monday every Tuesday", "Gym every Monday tomorrow 2026-10-01",
             "Gym remind me 5 minutes before remind me 1 hour before")) assertNotNull(text,QuickEntry.parse(text,today).error)

@@ -155,7 +155,7 @@ fun ItemEditorSheet(
     var viewingDuplicate by remember { mutableStateOf<Long?>(null) }
     var readingText by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var repeat by remember { mutableStateOf(draft?.optString("repeat")?.let(RepeatRule::valueOf) ?: RepeatRule.entries.find { it.name == initial.repeatRule } ?: RepeatRule.NONE) }
+    var repeat by remember { mutableStateOf(draft?.optString("repeat")?.let { RepeatRule.parse(it, complete = false) } ?: RepeatRule.parse(initial.repeatRule) ?: RepeatRule.NONE) }
     var repeatCount by remember { mutableStateOf(draft?.optString("count") ?: initialRepeatCount.toString()) }
     var entireSeries by remember { mutableStateOf(draft?.optBoolean("entireSeries") ?: false) }
     var deleting by remember { mutableStateOf(false) }
@@ -369,8 +369,8 @@ fun ItemEditorSheet(
     val count = repeatCount.toIntOrNull()
     val creatingSeries = isNew || initial.seriesId == null
     val changeRepeat = !isNew && entireSeries && repeat.name != initial.repeatRule
-    val validRepeat = !creatingSeries || repeat == RepeatRule.NONE || count != null && count in 2..365
-    val plannedDates = remember(date, repeat, count, isNew, entireSeries, allEvents) {
+    val validRepeat = repeat.valid && (!creatingSeries || repeat == RepeatRule.NONE || count != null && count in 2..365)
+    val plannedDates = remember(date, repeat, count, isNew, entireSeries, allEvents) { runCatching {
         when {
             creatingSeries -> repeat.dates(date, count?.coerceIn(1, 365) ?: 1)
             entireSeries -> {
@@ -382,7 +382,7 @@ fun ItemEditorSheet(
             }
             else -> listOf(date)
         }
-    }
+    }.getOrDefault(listOf(date)) }
     val clashes = remember(allEvents, plannedDates, time, duration, before, after, isNew, entireSeries) {
         val excluded = if (isNew) emptySet() else if (entireSeries && initial.seriesId != null) {
             allEvents.filter { it.seriesId == initial.seriesId }.mapTo(HashSet()) { it.id }
@@ -518,7 +518,7 @@ fun ItemEditorSheet(
             if (recovered != null) Text("Unfinished draft recovered. Save to keep your changes.")
             if (duplicating) Text("Edit this copy, then Save to add it. The original is kept.")
             if (!isNew && initial.seriesId != null) {
-                Text("${RepeatRule.entries.find { it.name == initial.repeatRule }?.label ?: "Repeating"} series")
+                Text("${RepeatRule.parse(initial.repeatRule)?.label ?: "Repeating"} series")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = !entireSeries, onClick = { entireSeries = false }, label = { Text(if (billTask) "This bill" else "This event") })
                     FilterChip(selected = entireSeries, onClick = { entireSeries = true }, label = { Text("Entire series") })
@@ -681,10 +681,11 @@ fun ItemEditorSheet(
                 SettingsDropdown(
                     label = "Repeat",
                     current = repeat.label,
-                    options = RepeatRule.entries,
-                    onSelect = { repeat = it },
-                    entry = { Text(it.label) },
+                    options = repeatChoices(date),
+                    onSelect = { repeat = if (it.kind == repeat.kind) repeat else it },
+                    entry = { Text(if (it.kind in RepeatRule.customKinds) it.kind.choiceLabel() else it.label) },
                 )
+                RepeatDetails(repeat, enabled = !busy) { repeat = it }
                 if (repeat != RepeatRule.NONE && creatingSeries) {
                     OutlinedTextField(
                         value = repeatCount,

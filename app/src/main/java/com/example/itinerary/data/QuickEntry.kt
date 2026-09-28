@@ -88,7 +88,12 @@ object QuickEntry {
     private val quote = Regex("\"[^\"]*\"")
     private val at = rx(atWord)
     private const val pluralWeekdays = "mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays"
-    private val repeats = rx("\\b(?:(?:every|each)\\s+weekdays?|on\\s+weekdays|every\\s+other\\s+(?:$weekdays)|(?:on\\s+)?(?:$pluralWeekdays)|every\\s+(?:$weekdays|day|week|(?:2|two|other)\\s+weeks?|fortnight|month|year)|daily|weekly|fortnightly|monthly|yearly|weekdays)\\b")
+    private val repeats = rx("\\b(?:(?:every|each)\\s+weekdays?|on\\s+weekdays|every\\s+other\\s+day|every\\s+$relativeCount\\s+(?:days|weeks)|every\\s+other\\s+(?:$weekdays)|(?:on\\s+)?(?:$pluralWeekdays)|every\\s+(?:$weekdays|day|week|(?:2|two|other)\\s+weeks?|fortnight|month|year)|daily|weekly|fortnightly|monthly|yearly|weekdays)\\b")
+    // Two or more weekdays: "every Mon, Wed and Fri", "Mon Wed Fri", "Tue/Thu", "Mondays and Thursdays".
+    private val weekdayLists = rx("\\b(?:(?:every|each|on)\\s+)?(?:$pluralWeekdays|$weekdays)\\b(?:\\s*(?:,|/|&|\\band\\b)?\\s*(?:and\\s+)?(?:$pluralWeekdays|$weekdays)\\b)+")
+    private const val weekOfMonth = "first|second|third|fourth|last|1st|2nd|3rd|4th"
+    // "first Monday of every month", "every last Friday". "every 2nd Tuesday" could be fortnightly, so it asks.
+    private val monthlyWeekdays = rx("\\b(?:(?:on|every|each)\\s+)?(?:the\\s+)?($weekOfMonth)\\s+($weekdays)\\s+of\\s+(?:every|each)\\s+month\\b|\\bevery\\s+($weekOfMonth)\\s+($weekdays)\\b(?!\\s+of\\b)")
     private val repeatCounts = rx("\\bfor\\s+(\\d+)\\s+(?:times?|occurrences?)\\b")
     // With a repeat, "for 10 weeks" says how long it runs. Without one it stays title text: Holiday for 2 weeks.
     private val repeatPeriods = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?|fortnights?|months?|years?)\\b")
@@ -119,7 +124,7 @@ object QuickEntry {
         "tonight", "morning", "afternoon", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all") +
         weekdays.split('|') + months.split('|') + tomorrowSpellings).toSet()
 
-    private val unsupported = rx("\\b(?:every\\s+(?:weekends?|other\\s+(?!weeks?\\b|(?:$weekdays)\\b)\\w+|[3-9]\\s+weeks?)|(?:first|second|third|fourth|last|1st|2nd|3rd|4th)\\s+(?:$weekdays)\\s+of\\s+(?:every|each|the)\\s+month|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|this|next)\\s+(?:morning|afternoon|evening|night|weekend)|(?:this|next)\\s+(?:week|month|year)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|tonight|in\\s+the\\s+(?:morning|afternoon|evening))\\b")
+    private val unsupported = rx("\\b(?:every\\s+(?:weekends?|other\\s+(?!weeks?\\b|day\\b|(?:$weekdays)\\b)\\w+)|(?:first|second|third|fourth|last|1st|2nd|3rd|4th)\\s+(?:$weekdays)\\s+of\\s+the\\s+month|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|this|next)\\s+(?:morning|afternoon|evening|night|weekend)|(?:this|next)\\s+(?:week|month|year)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|tonight|in\\s+the\\s+(?:morning|afternoon|evening))\\b")
     private val vagueTimes = rx("(?:morning|afternoon|evening|night|tonight|breakfast|lunch|dinner|work)$")
     // A part of the day that also settles am/pm for a clock time beside it: tomorrow morning at 7.
     private val dayPeriods = mapOf(
@@ -239,11 +244,45 @@ object QuickEntry {
             repeat = RepeatRule.MONTHLY
             consume(match.range, QuickPhraseKind.REPEAT)
         }
+        // Rules with a weekday of the month or several weekdays go first, before their weekdays read as dates.
+        val monthlyWeekdayMatches = monthlyWeekdays.findAll(remaining).toList()
+        monthlyWeekdayMatches.firstOrNull()?.let { match ->
+            val week = (match.groups[1] ?: match.groups[3])!!.value.lowercase(Locale.ROOT)
+            val day = weekdayOf((match.groups[2] ?: match.groups[4])!!.value)
+            if (match.groups[3] != null && week in setOf("second", "2nd"))
+                return error("‘${match.value.trim()}’ could mean every other ${dayName(day)} or the $week ${dayName(day)} of every month. Type one of those.")
+            repeat = RepeatRule.monthlyOn(when (week) { "first", "1st" -> 1; "second", "2nd" -> 2; "third", "3rd" -> 3; "fourth", "4th" -> 4; else -> RepeatRule.LAST }, day)
+            consume(match.range, QuickPhraseKind.REPEAT)
+        }
+        // Only clearly a repeat: with every/each/on, plural days, separators, or three or more days.
+        // Two bare weekdays side by side ("Friday Saturday") are more likely a slip, and still ask.
+        val weekdayListMatches = weekdayLists.findAll(remaining).filter { match ->
+            rx("^(?:every|each|on)\\b|(?:$pluralWeekdays)\\b|[,/&]|\\band\\b").containsMatchIn(match.value) ||
+                rx("\\b(?:$weekdays)\\b").findAll(match.value).count() >= 3
+        }.toList()
+        weekdayListMatches.firstOrNull()?.let { match ->
+            val days = rx("\\b(?:$pluralWeekdays|$weekdays)\\b").findAll(match.value).map { weekdayOf(it.value) }.toSet()
+            repeat = if (days.size == 1) { repeatDay = days.single(); RepeatRule.WEEKLY } else RepeatRule.onDays(days)
+            consume(match.range, QuickPhraseKind.REPEAT)
+        }
         val repeatMatches = repeats.findAll(remaining).toList()
-        if (repeatMatches.size + monthDayMatches.size > 1) return error("Use one repeat rule. Adjust it in More details.")
+        if (repeatMatches.size + monthDayMatches.size + monthlyWeekdayMatches.size + weekdayListMatches.size > 1)
+            return error("Use one repeat rule. Adjust it in More details.")
         repeatMatches.firstOrNull()?.let { match ->
             val rule = match.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").removePrefix("every ").removePrefix("on ")
-            repeat = if ("weekday" in rule) RepeatRule.WEEKDAYS else when (rule) {
+            // "other day", "3 days", "six weeks": every few days or weeks.
+            val interval = if (rule == "other day") 2 to "days" else rx("^($relativeCount) (days|weeks)$").matchEntire(rule)?.let { readAmount(it.groupValues[1]).toInt() to it.groupValues[2] }
+            repeat = if (interval != null) {
+                val (n, unit) = interval
+                val limit = if (unit == "days") 1..365 else 1..52
+                if (n !in limit) return error("Repeat every 1 to ${limit.last} $unit.")
+                when {
+                    unit == "days" -> if (n == 1) RepeatRule.DAILY else RepeatRule.everyDays(n)
+                    n == 1 -> RepeatRule.WEEKLY
+                    n == 2 -> RepeatRule.FORTNIGHTLY
+                    else -> RepeatRule.everyWeeks(n)
+                }
+            } else if ("weekday" in rule) RepeatRule.WEEKDAYS else when (rule) {
                 "day", "daily" -> RepeatRule.DAILY
                 "week", "weekly" -> RepeatRule.WEEKLY
                 "2 week", "2 weeks", "two week", "two weeks", "other week", "other weeks", "fortnight", "fortnightly" -> RepeatRule.FORTNIGHTLY
@@ -332,13 +371,14 @@ object QuickEntry {
         val anchorName = when {
             repeatDay != null -> "repeating weekday"
             repeat == RepeatRule.WEEKDAYS -> "weekday repeat"
+            repeat.kind == RepeatRule.Kind.DAYS_OF_WEEK -> "repeating weekdays"
+            repeat.kind == RepeatRule.Kind.MONTHLY_WEEKDAY -> "repeating weekday of the month"
             monthDay != null -> "repeating day of the month"
             else -> null
         }
-        fun fitsAnchor(d: LocalDate) = (repeatDay == null || d.dayOfWeek == repeatDay) &&
-            (repeat != RepeatRule.WEEKDAYS || d.dayOfWeek.value <= 5) && (monthDay == null || d.dayOfMonth == monthDay)
+        fun fitsAnchor(d: LocalDate) = (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay)
         var date = relativeAt?.toLocalDate() ?: if (impliedToday) today else
-            generateSequence(today) { it.plusDays(1) }.take(366).firstOrNull(::fitsAnchor) ?: today
+            generateSequence(today) { it.plusDays(1) }.take(400).firstOrNull(::fitsAnchor) ?: today
         var dateChoices = emptyList<LocalDate>()
         if (ds.isNotEmpty()) {
             date = parseDate(ds.single().value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").removePrefix("on ").removePrefix("by "), today)

@@ -39,7 +39,7 @@ Tasks use due dates; switch to Event for a time, or keep the words literally.
   (`Christmas lunch`, `Call on Christmas`), and never before shopping, costumes, prep, planning, decorations,
   cards, gifts or presents, which usually happen before the day. Another typed date always wins.
 
-Other unsupported schedules, such as every weekend, every other day, next week on its own or the end of the week,
+Other unsupported schedules, such as every weekend, every other month, next week on its own or the end of the week,
 still need a specific date, a supported repeat or literal text.
 
 **Title box (optional).** Words typed in Title are always the title and are never read as a date or time, so
@@ -92,6 +92,13 @@ More everyday wording:
   time later than the event means the day before. It needs the event's time.
 - `Remind me tomorrow to call Bob`, `Remind me in 2 hours to check the oven` — the when can come before "to".
 - `Yoga Tuesdays 6pm` — every Tuesday. `Team lunch every other Friday` — fortnightly on Fridays.
+- `Swim every other day`, `Water plants every 3 days`, `Haircut every six weeks` — every few days (2–365) or weeks
+  (2–52). Two weeks is still fortnightly.
+- `Gym every Mon, Wed and Fri 6am`, `Gym Mon Wed Fri`, `Tue/Thu`, `Mondays and Thursdays` — on the chosen weekdays.
+  Two bare weekdays side by side (`Friday Saturday`) still ask, since that is more often a slip.
+- `Board meeting first Monday of every month`, `Book club last Friday of each month`, `every first Monday` — a weekday
+  of the month (first to fourth, or last). `every 2nd Tuesday` asks whether you meant every other Tuesday or the 2nd
+  Tuesday of every month.
 - `Dentist Friday 2 October 3pm` — the weekday is checked against the date; a mismatch asks you to correct it.
   `Fri 3/10` picks whichever reading is a Friday.
 - `weds` and `thur` are recognised.
