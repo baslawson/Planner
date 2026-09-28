@@ -705,7 +705,7 @@ fun ItemEditorSheet(
             }
             if (changeRepeat) Text(if (repeat == RepeatRule.NONE)
                 "All saved occurrences will become separate ${if (billTask) "bills" else "events"}. Their dates are kept."
-                else "Keeps all ${plannedDates.size} saved occurrences and spaces them ${repeat.label.lowercase()} from ${plannedDates.firstOrNull()?.dayLabel(LocalDateFormat.current).orEmpty()}.")
+                else "Keeps all ${plannedDates.size} saved occurrences and spaces them ${repeat.label.replaceFirstChar { it.lowercase() }} from ${plannedDates.firstOrNull()?.dayLabel(LocalDateFormat.current).orEmpty()}.")
             if (category != "Bills" && payments.isNotEmpty()) {
                 Text("Payment history", style = MaterialTheme.typography.titleMedium)
                 Text("Recorded payments are kept when you change the category.", style = MaterialTheme.typography.bodySmall)
