@@ -815,12 +815,15 @@ fun ItemEditorSheet(
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            Row(
+            // Wraps at large text: every button keeps its full size, and Save moves to its own line on the right
+            // rather than being squeezed ("Sa|ve") or pushed off the screen.
+            FlowRow(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
                     .padding(bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (!isNew) {
                     DangerButton(enabled = !busy && !readingText, onClick = { if (initial.seriesId != null || billTask) deleting = true else delete(false) }) { Text("Delete") }
@@ -829,7 +832,6 @@ fun ItemEditorSheet(
                 OutlinedButton(
                     enabled = !busy && !readingText,
                     onClick = ::discard,
-                    modifier = Modifier.padding(end = 8.dp)
                 ) {
                     Text("Discard")
                 }

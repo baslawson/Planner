@@ -23,6 +23,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MonthlyBills(events: List<PlanEvent>, today: LocalDate) {
     val settings = (LocalContext.current.applicationContext as ItineraryApp).settings
@@ -53,7 +54,8 @@ fun MonthlyBills(events: List<PlanEvent>, today: LocalDate) {
                 if (summary.withoutAmount > 0) Text("${summary.withoutAmount} unpaid ${if (summary.withoutAmount == 1) "bill has" else "bills have"} no amount yet")
                 TextButton(onClick = { forecastOpen = true }) { Text("View monthly bill forecast") }
                 Text("Bill tasks · paid and skipped bills excluded", style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                // Wraps at large text instead of squeezing the last button to nothing.
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = { month = month.minusMonths(1) }) { Text("Previous month") }
                     TextButton(onClick = { month = YearMonth.from(today) }) { Text("This month") }
                     TextButton(onClick = { month = month.plusMonths(1) }) { Text("Next month") }

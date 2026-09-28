@@ -16,6 +16,7 @@ import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.*
 import java.time.LocalDate
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: Boolean, onOpen: (SavedSearch) -> Unit) {
     val settings = (LocalContext.current.applicationContext as ItineraryApp).settings
@@ -26,7 +27,7 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
     var error by remember { mutableStateOf<String?>(null) }
     fun update(values: List<SavedSearch>) = try { settings.setSavedSearches(values); true }
         catch (e: Exception) { error = e.message ?: "Couldn't save searches."; false }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(enabled = query.isNotBlank() || categories.isNotEmpty(), onClick = { name = ""; naming = true; error = null }) { Text("Save search") }
         TextButton(onClick = { choosing = true; error = null }) { Text("Saved searches (${saved.size})") }
     }
