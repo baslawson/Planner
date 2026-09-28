@@ -60,7 +60,9 @@ class OptimizationUiTest {
     }
 
     /** Run only after the editor test and an external force-stop with a confirmed missing PID. */
-    @Test fun recoverDurableDraftAfterProcessDeath() {
+    // Second step: only meaningful after unrelatedEditorUpdates… has left its draft and the app process was then
+    // killed from outside, so it runs on its own with the harness (am instrument -e class …#recoverDurableDraftAfterProcessDeath).
+    @HarnessStage @Test fun recoverDurableDraftAfterProcessDeath() {
         val ins = InstrumentationRegistry.getInstrumentation()
         assertEquals("Durable changed title", EditorDraftStore(ins.targetContext).read()!!
             .getJSONObject("item").getString("title"))
