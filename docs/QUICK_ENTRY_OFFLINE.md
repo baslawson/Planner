@@ -28,7 +28,16 @@ Tasks use due dates; switch to Event for a time, or keep the words literally.
 
 - `Meeting next week Tuesday` or `Tuesday next week` — the same as next Tuesday.
 - `Mow lawn this weekend` — this Saturday (today, on a Saturday or Sunday).
-- `Rent due end of month` (also `by the end of the month`) — the last day of this month.
+- `Rent due end of month` (also `by the end of the month`, `last day of the month`) — the last day of this month.
+- `Dentist 3rd of next month`.
+- `Meeting Friday week` or `a week on Friday` — the Friday after the coming one. `Dentist week after next Tuesday`.
+- `Submit report by Friday` — "by" is not left in the title.
+- `Meeting now` — today, now (rounded up to five minutes). "now" counts only at the end: `Now TV` stays a title.
+- `Conference all day Friday` — no time.
+- Named days set the date and stay in the title: Christmas Eve, Christmas Day, Boxing Day, New Year's Eve,
+  New Year's Day, Valentine's Day, Halloween (`Halloween party`). Plain Christmas only with on or a meal
+  (`Christmas lunch`, `Call on Christmas`), and never before shopping, costumes, prep, planning, decorations,
+  cards, gifts or presents, which usually happen before the day. Another typed date always wins.
 
 Other unsupported schedules, such as every weekend, every other day, next week on its own or the end of the week,
 still need a specific date, a supported repeat or literal text.
@@ -49,6 +58,10 @@ More flexible offline wording:
 - `Call tomorrow 15h30 for a quarter of an hour`
 - `Meeting Friday at 3pm—actually 4pm`
 - `Tea half past 3`, `Meeting quarter to 5pm`, `Train 5 past 7pm`, `Call ten to 12pm`, `Meeting at 3 o'clock`
+- `Lunch midday`, `Party 8pm til midnight`, `Meeting around 3pm` (also about, approx, `~3pm`, `3pm-ish`, `7ish`)
+- `Call 3 in the afternoon`, `Movie 8 tonight`
+- `Call 3p tomorrow`, `3:30p`, `Meeting 15.30 Friday` — these short forms count as times only right beside a date or
+  after at/from/until/by, so `Meeting room 6a`, `Version 2.10` and `$12.50` stay in the title.
 - `Meeting @ 3pm`, `Dinner 7pm @ Nandos` — `@` on its own works like at; an email address such as bob@example.com
   stays in the title.
 
@@ -74,7 +87,11 @@ More everyday wording:
   to Monday.
 - `Tennis 7pm every Thursday for 10 weeks` — with a repeat, `for 10 weeks` (days, weeks, fortnights, months, years)
   sets how many times it repeats. Without a repeat it stays in the title: `Holiday for 2 weeks`.
-- `Flight Friday 6am remind me the day before` (also `the week before`).
+- `Flight Friday 6am remind me the day before` (also `the week before`, `1 hour and 30 minutes before`).
+- `Dentist tomorrow 3pm remind me at 9am` — reminded at 9am on the day; `at 8pm the day before` also works. A reminder
+  time later than the event means the day before. It needs the event's time.
+- `Remind me tomorrow to call Bob`, `Remind me in 2 hours to check the oven` — the when can come before "to".
+- `Yoga Tuesdays 6pm` — every Tuesday. `Team lunch every other Friday` — fortnightly on Fridays.
 - `Dentist Friday 2 October 3pm` — the weekday is checked against the date; a mismatch asks you to correct it.
   `Fri 3/10` picks whichever reading is a Friday.
 - `weds` and `thur` are recognised.
@@ -84,7 +101,7 @@ Four-digit 24-hour times work where they read as times: with a leading zero (`06
 (`0900-1700`, `2200-0600`). Other four-digit numbers stay in the title: `Buy 1500 screws`, `Tax return 2027`,
 `Meeting 1500` (write `at 1500` or `1500hrs`).
 
-Times such as `7:30` ask Morning or afternoon; `07:30`, `19:30` and `7:30pm` do not. Numeric dates such as `3/4`
+Times such as `7:30` ask Morning or afternoon; `07:30`, `19:30` and `7:30pm` do not. Dates also work as `3.10.2026`, `3/10/26` (two-digit years are this century) and `2026/10/03`. Numeric dates such as `3/4`
 follow Settings → Date format when it is day-first or month-first (including the system setting); otherwise
 Quick entry asks which date you meant.
 
