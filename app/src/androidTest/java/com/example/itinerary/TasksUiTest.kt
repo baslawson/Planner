@@ -142,16 +142,23 @@ class TasksUiTest {
         val completed=PlannerTask(title="QA task view completed",done=true)
         listOf(low,high,overdue,anytime,completed).forEach { app.repository.saveTask(it) }
         app.settings.setAgendaRange(AgendaRange.TODAY)
-        open();setText("","QA task view")
+        open() // the agenda has no text filter; reveal scrolls to each task
         reveal { find("QA task view overdue")!=null };screenshot("overdue-task-today")
         reveal { find("QA task view high")!=null && find("QA task view low")!=null }
-        val h=android.graphics.Rect();val l=android.graphics.Rect()
-        find("QA task view high")!!.getBoundsInScreen(h);find("QA task view low")!!.getBoundsInScreen(l)
-        assertTrue(h.top<l.top);screenshot("task-priority-order")
+        // Measure only once the list has stopped moving after the last swipe, with both cards fully in view.
+        fun rects()=listOf("QA task view high","QA task view low").map { t -> android.graphics.Rect().also { r -> find(t)?.getBoundsInScreen(r) } }
+        var settled=rects()
+        await { val a=rects();Thread.sleep(400);settled=rects();a==settled && settled.all { it.height()>20 } }
+        val (h,l)=settled
+        screenshot("task-priority-order");assertTrue("high $h should be above low $l",h.top<l.top)
         click("Upcoming");reveal { find("QA task view overdue")!=null }
         assertEquals(today.minusDays(2),data().tasks.single { it.id==overdue.id }.dueDate)
-        reveal { find("Anytime tasks (1) · Collapse")!=null };click("Anytime tasks (1) · Collapse")
-        await { find("QA task view anytime")==null && find("Anytime tasks (1) · Expand")!=null };click("Anytime tasks (1) · Expand");reveal { find("QA task view anytime")!=null }
+        // Other tests' tasks without a due date share this group, so its count varies. The label's "Collapse"/"Expand"
+        // can lag in this test's accessibility cache after a tap (the screen itself updates), so check the cards instead.
+        fun anytimeHeading()=nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Anytime tasks (")==true }?.text?.toString()
+        reveal { find("QA task view anytime")!=null && anytimeHeading()!=null };click(anytimeHeading()!!)
+        await { find("QA task view anytime")==null };screenshot("anytime-collapsed")
+        click(anytimeHeading()!!);reveal { find("QA task view anytime")!=null }
         click("Search");setText("","Unicorn wrench")
         reveal { find("QA task view anytime")!=null };screenshot("task-search")
         click("QA task view anytime");setText("QA task view anytime","QA task view renamed");click("Save")

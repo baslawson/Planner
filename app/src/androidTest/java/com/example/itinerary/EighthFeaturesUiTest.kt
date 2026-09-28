@@ -80,7 +80,7 @@ class EighthFeaturesUiTest {
         ins.startActivitySync(Intent(context,MainActivity::class.java).setAction(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await {
             when(action) {
-                EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
+                EntryShortcuts.SCAN -> nodes().any { it.isVisibleToUser && (it.contentDescription?.toString()=="Shutter" || it.viewIdResourceName?.endsWith(":id/shutter_button")==true) }
                 null -> find("AGENDA")!=null || find("Discard")!=null
                 else -> find("Discard")!=null
             }
@@ -110,15 +110,17 @@ class EighthFeaturesUiTest {
     @Test fun weekFilterUsesRealSavedEvents()=runBlocking {
         EditorDraftStore(context).clear()
         val date=LocalDate.now()
+        app.repository.saveItem(ItineraryItem(tripId=0,date=date,startTime=null,title="QA weekly event"))
         app.repository.saveItem(ItineraryItem(tripId=0,date=date,startTime=null,title="QA weekly bill",category="Bills",billAmountMinor=12345))
         app.repository.saveItem(ItineraryItem(tripId=0,date=date,startTime=null,title="QA paid bill",category="Bills",billAmountMinor=6789,billCurrency="USD",paid=true))
         app.repository.saveItem(ItineraryItem(tripId=0,date=date.minusDays(2),startTime=null,title="QA earlier tasks",checklist=listOf(ChecklistEntry(text="QA unfinished task"))))
         app.repository.saveItem(ItineraryItem(tripId=0,date=date.with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SUNDAY)).plusDays(1),startTime=null,title="QA next week"))
         open()
-        click("This week");setText("", "QA")
+        click("This week")
         await { app.settings.agendaRange.value == AgendaRange.THIS_WEEK && find("QA weekly bill")!=null }
         assertNull(find("QA earlier tasks"));assertNull(find("QA next week"));screenshot("week-filter")
-        click("QA weekly bill");await { find("Calendar")!=null };screenshot("week-event-navigation")
+        // A bill opens its editor; an event opens the calendar.
+        click("QA weekly event");await { find("CALENDAR")!=null };screenshot("week-event-navigation")
     }
 
     @Test fun launcherActionsOpenEditorsAndProtectExistingDraft()=runBlocking {
@@ -129,8 +131,9 @@ class EighthFeaturesUiTest {
         open(EntryShortcuts.ADD_BILL)
         reveal { find("3 days before")!=null };screenshot("shortcut-bill")
         click("Discard");assertEquals(count,data().items.size)
-        open(EntryShortcuts.SCAN);await { find("How would you like to save the scan?")!=null };screenshot("shortcut-scan")
-        click("Cancel");click("Discard")
+        open(EntryShortcuts.SCAN);screenshot("shortcut-scan")
+        ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        await { find("Take page")!=null };click("Cancel");click("Discard")
         open(EntryShortcuts.ADD_EVENT);setText("","QA protected draft")
         await { EditorDraftStore(context).read()?.getJSONObject("item")?.getString("title")=="QA protected draft" }
         open(EntryShortcuts.ADD_BILL)
@@ -185,7 +188,7 @@ class EighthFeaturesUiTest {
         await { find("Add menu")!=null };assertNull(find("Add bill"))
         click("Add event");await { find("New event")!=null };click("Discard")
         click("Add bill");reveal { find("3 days before")!=null };click("Discard")
-        click("Quick entry");click("Cancel")
+        click("Quick entry");click("Close")
         assertEquals(before.items,data().items);assertEquals(before.reminders,data().reminders)
         assertNull(EditorDraftStore(context).read())
     }
