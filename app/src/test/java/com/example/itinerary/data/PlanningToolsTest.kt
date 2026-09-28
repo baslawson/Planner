@@ -49,9 +49,10 @@ class PlanningToolsTest {
         assertEquals(LocalTime.of(17,0), zoned.item.startTime)
     }
     @Test fun exclusiveAllDayEndAndFloatingTime() {
-        val days = CalendarImport.parse(ics("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260930"))
-        assertEquals(listOf(day, day.plusDays(1)), days.map { it.item.date })
-        assertTrue(days.all { it.item.startTime == null })
+        // The end is exclusive: 28–30 Sep in the file is one event covering 28 and 29 Sep.
+        val trip = CalendarImport.parse(ics("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260930")).single().item
+        assertEquals(day, trip.date); assertEquals(day.plusDays(1), trip.endDate); assertNull(trip.startTime)
+        assertNull(CalendarImport.parse(ics("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260929")).single().item.endDate)
         assertEquals(LocalTime.of(10,0), CalendarImport.parse(ics("DTSTART:20260928T100000"), ZoneOffset.UTC).single().item.startTime)
     }
     @Test fun rejectUnsupportedOrBrokenInvitations() {

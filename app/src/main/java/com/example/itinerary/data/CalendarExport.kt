@@ -16,7 +16,8 @@ object CalendarExport {
         val time = item.startTime
         if (time == null) {
             lines += "DTSTART;VALUE=DATE:${item.date.format(DateTimeFormatter.BASIC_ISO_DATE)}"
-            lines += "DTEND;VALUE=DATE:${item.date.plusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)}"
+            // The end is exclusive: the day after the last day (a multi-day event's end date).
+            lines += "DTEND;VALUE=DATE:${item.lastDay.plusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)}"
         } else {
             val start = item.date.atTime(time).atZone(zone)
             lines += "DTSTART:${timestamp.format(start)}"

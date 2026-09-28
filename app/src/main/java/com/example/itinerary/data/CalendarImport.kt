@@ -91,10 +91,10 @@ object CalendarImport {
                     first.plusDays(match.groupValues[1].toLong() * if (match.groupValues[2] == "W") 7 else 1)
                 } else first.plusDays(1)
                 val days = java.time.temporal.ChronoUnit.DAYS.between(first, last)
-                require(days in 1..100) { "All-day appointments must last 1–100 days." }
-                if (days > 1) warnings += "Multi-day invitation split into $days daily entries; review and save each separately."
-                (0 until days).map { offset -> Invitation(ItineraryItem(tripId = 0, date = first.plusDays(offset), startTime = null,
-                    title = title, notes = notes, location = location), warnings) }
+                require(days in 1..MultiDay.MAX_DAYS) { "All-day appointments must last 1–${MultiDay.MAX_DAYS} days." }
+                // One event, however many days it covers (the end in the file is exclusive).
+                listOf(Invitation(ItineraryItem(tripId = 0, date = first, startTime = null, title = title, notes = notes,
+                    location = location, endDate = first.plusDays(days - 1).takeIf { days > 1 }), warnings))
             } else {
                 val begin = time(start, zone)
                 val finish = end?.let { time(it, zone) } ?: duration?.let { begin.plus(Duration.parse(it.value)) }
