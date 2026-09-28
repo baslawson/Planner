@@ -223,8 +223,18 @@ class SixTaskFeaturesUiTest {
         fun cameraButton(id: String) = nodes().firstOrNull { it.isVisibleToUser && it.viewIdResourceName?.endsWith(":id/$id")==true }
         await { find("Shutter")!=null || cameraButton("shutter_button")!=null }
         screenshot("task-camera")
-        (find("Shutter") ?: cameraButton("shutter_button"))!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        await { find("Done")!=null || cameraButton("done_button")!=null }
+        // The camera shows its shutter while still starting and ignores a press then, so press until it has taken one.
+        await {
+            if (find("Done")!=null || cameraButton("done_button")!=null) true
+            else {
+                // A real tap, as a person would press it: the camera app does not always act on an accessibility click.
+                (find("Shutter") ?: cameraButton("shutter_button"))?.takeIf { it.isEnabled }?.let { shutter ->
+                    val r=android.graphics.Rect();shutter.getBoundsInScreen(r)
+                    ins.uiAutomation.executeShellCommand("input tap ${r.centerX()} ${r.centerY()}").use { java.io.FileInputStream(it.fileDescriptor).use { s -> s.readBytes() } }
+                }
+                Thread.sleep(1500);false
+            }
+        }
         (find("Done") ?: cameraButton("done_button"))!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         reveal { find("Task photo.jpg")!=null };screenshot("task-photo-attached");click("Save")
         await { data().tasks.any { it.title=="QA six attachments" } }
