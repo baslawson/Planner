@@ -133,6 +133,9 @@ class DraftRecoveryUiTest {
         assertTrue(until in before+3_600_000..System.currentTimeMillis()+3_600_000)
     }
     @Test fun notificationActionsAndPaymentCancelPostedReminder() = runBlocking {
+        // Its own paid bill with a reminder: the harness steps that also make one are not part of a normal run.
+        app.repository.saveItem(ItineraryItem(tripId=0,date=LocalDate.now().plusDays(10),startTime=null,title="QA recovered bill",
+            category="Bills",billAmountMinor=5000,paid=true),addedReminders=listOf(Reminder(itemId=0,amount=3,unit=ReminderUnit.DAYS)))
         val bill=snapshot().items.first { it.title=="QA recovered bill" && it.paid }
         app.repository.setPaid(bill.id,false)
         val reminder=snapshot().reminders.first { it.itemId==bill.id }
