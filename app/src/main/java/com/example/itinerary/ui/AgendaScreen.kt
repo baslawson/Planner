@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -81,7 +82,7 @@ import com.example.itinerary.data.PlanColors
 import java.time.LocalDate
 
 // Events grouped by day. Opening an event shows the shared calendar on its date.
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AgendaScreen(
     vm: TripsViewModel,
@@ -202,11 +203,18 @@ fun AgendaScreen(
             when {
                 loadedEvents == null -> Box(Modifier.fillMaxSize().padding(inner))
                 else -> Column(Modifier.fillMaxSize().padding(inner)) {
+                    LazyColumn(
+                        Modifier.fillMaxSize(), state = listState,
+                        contentPadding = PaddingValues(bottom = 144.dp),
+                    ) {
+                        // The range chips and type tabs scroll away with the list, so large text and landscape keep
+                        // room for the entries; only the AGENDA bar stays.
+                        item(key = "filters") { Column {
                     AgendaFilterBar(
                         range = range,
                         onRange = vm::setAgendaRange,
                     )
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AgendaType.entries.forEach { option ->
                             val selected = option in types
@@ -252,15 +260,12 @@ fun AgendaScreen(
                     if (backupStatus.failed) com.example.itinerary.ui.MatrixTextButton(onClick = { showSettings = true }) {
                         Text("Last backup failed or was interrupted · View backup status", color = MaterialTheme.colorScheme.error)
                     }
-                    LazyColumn(
-                        Modifier.fillMaxSize(), state = listState,
-                        contentPadding = PaddingValues(bottom = 144.dp),
-                    ) {
+                        } }
                         if (!backupStatus.failed && backupStatus.outcome != "RUNNING" && backupReminder.due(backupStatus.lastSuccess, today)) item(key = "backup-reminder") {
                             androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(if (backupStatus.lastSuccess == null) "Keep your events and tasks safe with a backup" else "It's time to back up your events and tasks")
-                                    Row {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         com.example.itinerary.ui.MatrixTextButton(onClick = { showSettings = true }) { Text("Backup settings") }
                                         com.example.itinerary.ui.MatrixTextButton(onClick = { backupStore.remindNextWeek(today) }) { Text("Remind me in a week") }
                                     }
@@ -389,12 +394,16 @@ fun AgendaScreen(
 
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AgendaFilterBar(range: AgendaRange, onRange: (AgendaRange) -> Unit) {
     val green = MaterialTheme.colorScheme.primary
-    Row(
+    // Equal shares of the width when they fit; at large text whole chips move to a second line instead of
+    // splitting words ("Upcom|ing").
+    FlowRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         AgendaRange.entries.forEach { option ->
             val selected = option == range
@@ -444,11 +453,13 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
     val accent = event.accentColor()
     TappableRow(onClick = onClick, onLongClick = { selection.toggle(event.id) },
         selected = (event.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Text(
-            event.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.width(76.dp),
-        )
+        LimitTextScale { // the time column has a fixed width
+            Text(
+                event.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.width(76.dp),
+            )
+        }
         Box(
             Modifier
                 .width(4.dp)
