@@ -277,13 +277,22 @@ class SixTaskFeaturesUiTest {
         assertTrue(manager.activeNotifications.none { it.tag=="task:${task.id}" })
     }
     @Test fun taskDocumentImportCopiesBytes() = runBlocking {
-        fresh();click("Add menu");click("Add task");click("To-do task")
-        field("Task title","QA six document")
-        click("Attach file");click("QA-six-document.txt")
-        reveal { find("QA-six-document.txt")!=null && find("Save")!=null };screenshot("task-document-attached");click("Save")
-        await { data().tasks.any { it.title=="QA six document" } }
-        val attachment=data().tasks.single { it.title=="QA six document" }.attachments.single()
-        assertEquals("QA document bytes for task attachment\n",app.attachmentStore.fileFor(attachment.fileName).readText())
+        // The document the system picker offers, put in Downloads for this test and removed afterwards.
+        val resolver=context.contentResolver
+        val document=resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME,"QA-six-document.txt")
+            put(android.provider.MediaStore.Downloads.MIME_TYPE,"text/plain")
+        })!!
+        try {
+            resolver.openOutputStream(document)!!.use { it.write("QA document bytes for task attachment\n".toByteArray()) }
+            fresh();click("Add menu");click("Add task");click("To-do task")
+            field("Task title","QA six document")
+            click("Attach file");click("QA-six-document.txt")
+            reveal { find("QA-six-document.txt")!=null && find("Save")!=null };screenshot("task-document-attached");click("Save")
+            await { data().tasks.any { it.title=="QA six document" } }
+            val attachment=data().tasks.single { it.title=="QA six document" }.attachments.single()
+            assertEquals("QA document bytes for task attachment\n",app.attachmentStore.fileFor(attachment.fileName).readText())
+        } finally { resolver.delete(document,null,null) }
     }
     @HarnessStage @Test fun prepareExistingTaskDraft() = runBlocking {
         cleanFixture("QA six edit")
