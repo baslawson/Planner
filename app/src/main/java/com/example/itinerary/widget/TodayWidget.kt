@@ -17,6 +17,8 @@ import com.example.itinerary.MainActivity
 import com.example.itinerary.R
 import com.example.itinerary.data.PlannerTask
 import com.example.itinerary.data.ItineraryItem
+import com.example.itinerary.data.dayCount
+import com.example.itinerary.data.dayNumber
 import com.example.itinerary.data.TimeFormat
 import com.example.itinerary.data.eventsOnDay
 import com.example.itinerary.ui.durationLabel
@@ -137,7 +139,8 @@ class TodayWidget : AppWidgetProvider() {
                         val finish = event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong())
                         "–${finish.toLocalTime().label(format, context)}${if (finish.toLocalDate() > event.date) " (+1 day)" else ""} · ${durationLabel(event.durationMinutes)}"
                     } else ""
-                    val carried = if (event.date < today) " · From yesterday" else ""
+                    val carried = if (event.endDate != null) " · Day ${event.dayNumber(today)} of ${event.dayCount}"
+                        else if (event.date < today) " · From yesterday" else ""
                     addView(R.id.widget_rows, RemoteViews(context.packageName, R.layout.widget_event).apply {
                         setTextViewText(R.id.widget_event_title, event.title)
                         setTextViewText(R.id.widget_event_time, "$time$end$carried")

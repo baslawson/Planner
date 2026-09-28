@@ -146,7 +146,7 @@ fun AgendaScreen(
     val dates = remember(eventsByDate, datedTasks, billsByDate) { (eventsByDate.keys + datedTasks.keys + billsByDate.keys).sorted() }
 
     val selectable = remember(days, shownBills) {
-        days.flatMap { it.entries }.map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
+        days.flatMap { it.entries }.distinctBy { it.event.id }.map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
     val selection = rememberEventSelection(selectable)
@@ -308,7 +308,9 @@ fun AgendaScreen(
                             items(datedTasks[date].orEmpty(), key = { "task-${it.id}" }, contentType = { "task" }) { task ->
                                 TaskCard(task, today, enabled = !selection.active) { creatingTask = false; editingTaskId = task.id }
                             }
-                            items(eventsByDate[date]?.entries.orEmpty(), key = { it.event.id }, contentType = { "event" }) { entry ->
+                            // A trip under way appears twice (its first day and Today), so its Today card needs its own key.
+                            items(eventsByDate[date]?.entries.orEmpty(), key = { if (it.continuing) "under-way-${it.event.id}" else it.event.id },
+                                contentType = { "event" }) { entry ->
                                 AgendaEventCard(entry, today, selection,
                                     onMove = { vm.moveToTomorrow(entry.event.id) }) {
                                     if (selection.active) selection.toggle(entry.event.id) else onOpenEvent(entry.event.date)
@@ -483,6 +485,8 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
                 eventEndLabel(event.date, event.startTime, event.durationMinutes, LocalTimeFormat.current, LocalContext.current),
                 style = MaterialTheme.typography.bodySmall,
             )
+            event.endDate?.let { end -> Text(spanLabel(event.date, end, if (entry.continuing) today else event.date),
+                style = MaterialTheme.typography.bodySmall) }
         }
         val context = LocalContext.current
         val format = LocalTimeFormat.current

@@ -83,6 +83,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
         buildSet {
             allItems.forEach { event ->
                 add(event.date)
+                // Every day of a multi-day event gets a dot.
+                event.endDate?.let { end -> generateSequence(event.date.plusDays(1)) { it.plusDays(1) }.takeWhile { it <= end }.forEach(::add) }
                 if (event.category != "Bills" && event.startTime != null && event.durationMinutes != null &&
                     event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong()) > event.date.plusDays(1).atStartOfDay()) add(event.date.plusDays(1))
             }
@@ -281,6 +283,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
                 eventEndLabel(item.date, item.startTime, item.durationMinutes, LocalTimeFormat.current, LocalContext.current, displayedDate),
                 style = MaterialTheme.typography.bodySmall,
             )
+            item.endDate?.let { end -> Text(spanLabel(item.date, end, displayedDate), style = MaterialTheme.typography.bodySmall) }
             if (item.location.isNotBlank()) {
                 Text(
                     item.location,

@@ -14,7 +14,8 @@ object FreeTime {
         require(end > start)
         val busy = events.filter { !it.skipped && it.category != "Bills" }.mapNotNull {
             if (it.startTime == null) {
-                if (blockAllDay) FreeWindow(it.date.atStartOfDay(), it.date.plusDays(1).atStartOfDay()) else null
+                // A multi-day event blocks every day it covers.
+                if (blockAllDay) FreeWindow(it.date.atStartOfDay(), it.lastDay.plusDays(1).atStartOfDay()) else null
             } else {
                 val begin = it.date.atTime(it.startTime)
                 FreeWindow(begin.minusMinutes(it.bufferBeforeMinutes.toLong()), begin.plusMinutes((it.durationMinutes ?: unknownMinutes).toLong() + it.bufferAfterMinutes))

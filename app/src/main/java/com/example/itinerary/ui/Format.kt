@@ -42,6 +42,13 @@ val LocalDateFormat = compositionLocalOf { DateFormatChoice.DEFAULT }
 fun LocalDate.shortLabel(): String =
     format(patternFormatter("d MMM"))
 
+// A multi-day event: "3 Oct – 7 Oct · 5 days" on its first day, "Day 3 of 5 · until 7 Oct" on a later one.
+fun spanLabel(start: LocalDate, end: LocalDate, displayedDate: LocalDate = start): String {
+    val days = java.time.temporal.ChronoUnit.DAYS.between(start, end).toInt() + 1
+    return if (displayedDate > start) "Day ${java.time.temporal.ChronoUnit.DAYS.between(start, displayedDate) + 1} of $days · until ${end.shortLabel()}"
+    else "${start.shortLabel()} – ${end.shortLabel()} · $days days"
+}
+
 // A list may render the same date/time pattern hundreds of times. Formatters are immutable;
 // include the locale in the key so changing the phone language cannot reuse the wrong one.
 private val patternFormatters = ConcurrentHashMap<Pair<String, Locale>, DateTimeFormatter>()

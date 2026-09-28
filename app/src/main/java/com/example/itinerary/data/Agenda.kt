@@ -12,8 +12,9 @@ enum class AgendaRange(val label: String) {
     ALL("All"),
 }
 
-// One event card on the agenda.
-data class AgendaEntry(val event: PlanEvent)
+// One event card on the agenda. [continuing] marks a multi-day event shown again under Today while it is under way
+// ("Day 3 of 5"); it is listed in full under its first day.
+data class AgendaEntry(val event: PlanEvent, val continuing: Boolean = false)
 
 // One day on the agenda: its date and every event on it, in order.
 data class AgendaDay(val date: LocalDate, val entries: List<AgendaEntry>)
@@ -36,7 +37,7 @@ object Agenda {
     ): List<AgendaDay> {
         val needle = Search.normalize(text.trim())
         val weekEnd = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
-        return events.asSequence()
+        val listed = events.asSequence()
             .filter { it.category != "Bills" }
             .filter { event ->
                 val continuesToday = event.date < today && event.startTime != null && event.durationMinutes != null &&
@@ -54,8 +55,15 @@ object Agenda {
             }
             .sortedWith(order)
             .map { AgendaEntry(it) }
-            .groupBy { it.event.date }
-            .map { (date, entries) -> AgendaDay(date, entries) }
+            .toList()
+        // A multi-day event that started before today and is still under way also shows under Today, first.
+        val underWay = events.filter { event ->
+            event.category != "Bills" && event.endDate != null && event.date < today && event.covers(today) &&
+                (needle.isEmpty() || Search.normalize(event.title).contains(needle))
+        }.sortedWith(order).map { AgendaEntry(it, continuing = true) }
+        val byDay = listed.groupBy { it.event.date }.toMutableMap()
+        if (underWay.isNotEmpty()) byDay[today] = underWay + byDay[today].orEmpty()
+        return byDay.toSortedMap().map { (date, entries) -> AgendaDay(date, entries) }
     }
 
 }

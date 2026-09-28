@@ -121,7 +121,9 @@ object Search {
                 checkCancelled()
                 val item = document.item
                 if (categories.isNotEmpty() && item.category !in categories && !("Tasks" in categories && item.category == "Bills")) return@mapNotNull null
-                if (parsed.dates.isNotEmpty() && parsed.dates.none { it.test(item.date) }) return@mapNotNull null
+                // A multi-day event matches a date on any day it covers.
+                if (parsed.dates.isNotEmpty() && parsed.dates.none { filter ->
+                        generateSequence(item.date) { it.plusDays(1) }.takeWhile { it <= item.lastDay }.any { day -> filter.test(day) } }) return@mapNotNull null
                 val score = score(parsed.words, document) ?: return@mapNotNull null
                 val matchingDocument = document.attachments.firstOrNull { attachment ->
                     parsed.words.any { token -> attachment.words.any { word -> matchesWord(word, token) } }
