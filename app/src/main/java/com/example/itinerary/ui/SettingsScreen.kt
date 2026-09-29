@@ -76,8 +76,8 @@ fun SettingsScreen(
     onHeadingColor: (Int) -> Unit,
     scrollBarColor: Int,
     onScrollBarColor: (Int) -> Unit,
-    scrollBarBrightness: Int,
-    onScrollBarBrightness: (Int) -> Unit,
+    scrollBarSeeThrough: Int,
+    onScrollBarSeeThrough: (Int) -> Unit,
     addButtonSeeThrough: Int,
     onAddButtonSeeThrough: (Int) -> Unit,
     onExport: () -> Unit,
@@ -157,7 +157,7 @@ fun SettingsScreen(
                     DateFormatSettingsSection(dateFormat, onDateFormat)
                     FontSettingsSection(appFont, onAppFont, textSizePercent, onTextSizePercent)
                     HeadingColorSettingsSection(headingColor, onHeadingColor)
-                    ScrollBarSettingsSection(scrollBarColor, scrollBarBrightness, onScrollBarColor, onScrollBarBrightness)
+                    ScrollBarSettingsSection(scrollBarColor, scrollBarSeeThrough, onScrollBarColor, onScrollBarSeeThrough)
                     AddButtonSettingsSection(addButtonSeeThrough, onAddButtonSeeThrough)
                     SettingsHeading("Home screen")
                     Text("See today’s events and due tasks, and complete tasks from your home screen.", style = MaterialTheme.typography.bodySmall)

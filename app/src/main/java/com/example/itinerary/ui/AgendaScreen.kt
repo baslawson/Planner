@@ -195,13 +195,7 @@ fun AgendaScreen(
             when {
                 loadedEvents == null -> Box(Modifier.fillMaxSize().padding(inner))
                 else -> Column(Modifier.fillMaxSize().padding(inner)) {
-                    LazyScrollHints(listState, Modifier.fillMaxSize()) { LazyColumn(
-                        Modifier.fillMaxSize(), state = listState,
-                        contentPadding = PaddingValues(bottom = 144.dp),
-                    ) {
-                        // The range chips and type tabs scroll away with the list, so large text and landscape keep
-                        // room for the entries; only the AGENDA bar stays.
-                        item(key = "filters") { Column {
+                    // The range chips and type tabs stay put; only what is below them scrolls.
                     AgendaFilterBar(
                         range = range,
                         onRange = vm::setAgendaRange,
@@ -249,10 +243,15 @@ fun AgendaScreen(
                             }
                         }
                     }
-                    if (backupStatus.failed) com.example.itinerary.ui.MatrixTextButton(onClick = { showSettings = true }) {
-                        Text("Last backup failed or was interrupted · View backup status", color = MaterialTheme.colorScheme.error)
-                    }
-                        } }
+                    LazyScrollHints(listState, Modifier.fillMaxSize()) { LazyColumn(
+                        Modifier.fillMaxSize(), state = listState,
+                        contentPadding = PaddingValues(bottom = 144.dp),
+                    ) {
+                        if (backupStatus.failed) item(key = "backup-failed") {
+                            com.example.itinerary.ui.MatrixTextButton(onClick = { showSettings = true }) {
+                                Text("Last backup failed or was interrupted · View backup status", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                         if (!backupStatus.failed && backupStatus.outcome != "RUNNING" && backupReminder.due(backupStatus.lastSuccess, today)) item(key = "backup-reminder") {
                             androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                                 Column(Modifier.padding(12.dp)) {

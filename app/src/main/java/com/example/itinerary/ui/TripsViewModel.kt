@@ -246,8 +246,8 @@ class TripsViewModel(
 
     val scrollBarColor: StateFlow<Int> = settings.scrollBarColor
     fun setScrollBarColor(argb: Int) = settings.setScrollBarColor(argb)
-    val scrollBarBrightness: StateFlow<Int> = settings.scrollBarBrightness
-    fun setScrollBarBrightness(percent: Int) = settings.setScrollBarBrightness(percent)
+    val scrollBarSeeThrough: StateFlow<Int> = settings.scrollBarSeeThrough
+    fun setScrollBarSeeThrough(percent: Int) = settings.setScrollBarSeeThrough(percent)
 
     // The typeface used for all text.
     val appFont: StateFlow<AppFont> = settings.appFont

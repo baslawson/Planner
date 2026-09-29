@@ -39,26 +39,26 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.ScrollBar
 
-// The scroll bar the user chose: its colour exactly as picked and its brightness in percent. Provided once at the top
+// The scroll bar the user chose: its colour exactly as picked and how see-through it is, in percent. Provided once at the top
 // of the app; scrollBarColor() gives what is actually drawn.
 @Immutable
-data class ScrollBarStyle(val color: Color, val brightnessPercent: Int)
+data class ScrollBarStyle(val color: Color, val seeThroughPercent: Int)
 
-val LocalScrollBar = compositionLocalOf { ScrollBarStyle(Color(ScrollBar.DEFAULT_ARGB), ScrollBar.DEFAULT_BRIGHTNESS) }
+val LocalScrollBar = compositionLocalOf { ScrollBarStyle(Color(ScrollBar.DEFAULT_ARGB), ScrollBar.DEFAULT_SEE_THROUGH) }
 
 // The colour the bar is drawn in: darkened on the light theme when needed, by the same rule as headings, then
-// dimmed by the brightness setting.
+// made see-through by the transparency setting.
 @Composable
 fun scrollBarColor(style: ScrollBarStyle = LocalScrollBar.current): Color =
-    readableHeading(style.color).copy(alpha = style.brightnessPercent / 100f)
+    readableHeading(style.color).copy(alpha = 1f - style.seeThroughPercent / 100f)
 
 // The ready-made colours are the heading ones, with the default green first (tapping it resets the colour).
 private val SCROLL_BAR_SWATCHES = HEADING_SWATCHES.sortedByDescending { it.color.toArgb() == ScrollBar.DEFAULT_ARGB }
 
-// The Settings block for the scroll bar: colour swatches plus one of one's own, a dimmer slider and a sample bar.
+// The Settings block for the scroll bar: colour swatches plus one of one's own, a transparency slider and a sample bar.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ScrollBarSettingsSection(argb: Int, brightnessPercent: Int, onColorChange: (Int) -> Unit, onBrightnessChange: (Int) -> Unit) {
+fun ScrollBarSettingsSection(argb: Int, seeThroughPercent: Int, onColorChange: (Int) -> Unit, onSeeThroughChange: (Int) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }
     val current = Color(argb)
     val rgb = argb and 0xFFFFFF
@@ -99,13 +99,13 @@ fun ScrollBarSettingsSection(argb: Int, brightnessPercent: Int, onColorChange: (
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Slider(
-                value = brightnessPercent.toFloat(),
-                onValueChange = { onBrightnessChange(it.toInt()) },
-                valueRange = ScrollBar.MIN_BRIGHTNESS.toFloat()..ScrollBar.MAX_BRIGHTNESS.toFloat(),
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Scroll bar brightness" },
+                value = seeThroughPercent.toFloat(),
+                onValueChange = { onSeeThroughChange(it.toInt()) },
+                valueRange = ScrollBar.MIN_SEE_THROUGH.toFloat()..ScrollBar.MAX_SEE_THROUGH.toFloat(),
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Scroll bar transparency" },
             )
             Text(
-                if (brightnessPercent >= ScrollBar.MAX_BRIGHTNESS) "Full brightness" else "$brightnessPercent% bright",
+                if (seeThroughPercent == 0) "Solid" else "$seeThroughPercent% see-through",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -117,7 +117,7 @@ fun ScrollBarSettingsSection(argb: Int, brightnessPercent: Int, onColorChange: (
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.background),
         ) {
-            val bar = scrollBarColor(ScrollBarStyle(current, brightnessPercent))
+            val bar = scrollBarColor(ScrollBarStyle(current, seeThroughPercent))
             Box(
                 Modifier
                     .align(Alignment.TopEnd)

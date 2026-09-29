@@ -105,9 +105,9 @@ data class SettingsSnapshot(
     val agendaRange: AgendaRange = AgendaRange.UPCOMING,
     val appTheme: AppTheme = AppTheme.MATRIX,
     val savedSearches: List<SavedSearch> = emptyList(),
-    // The scroll bar's colour (opaque ARGB) and brightness in percent (see ScrollBar).
+    // The scroll bar's colour (opaque ARGB) and how see-through it is, in percent (see ScrollBar).
     val scrollBarColor: Int = ScrollBar.DEFAULT_ARGB,
-    val scrollBarBrightness: Int = ScrollBar.DEFAULT_BRIGHTNESS,
+    val scrollBarSeeThrough: Int = ScrollBar.DEFAULT_SEE_THROUGH,
 )
 
 // Headings (screen titles, section headings, day headers, dialog titles) share one colour the user can change.
@@ -116,13 +116,14 @@ object HeadingColor {
     const val DEFAULT_ARGB: Int = 0xFFFF5614.toInt()
 }
 
-// The scroll bar shown on every scrollable screen: its colour and how bright it is (100 = full, lower = dimmer).
+// The scroll bar shown on every scrollable screen: its colour and how see-through it is (0 = solid).
+// It never disappears completely, as with the Add button.
 object ScrollBar {
     // Matrix green (#00FF41).
     const val DEFAULT_ARGB: Int = 0xFF00FF41.toInt()
-    const val MIN_BRIGHTNESS = 20
-    const val MAX_BRIGHTNESS = 100
-    const val DEFAULT_BRIGHTNESS = 100
+    const val MIN_SEE_THROUGH = 0
+    const val MAX_SEE_THROUGH = 80
+    const val DEFAULT_SEE_THROUGH = 0
 }
 
 // The big + button on the agenda can be made see-through so what is behind it shows. It never goes fully invisible.
@@ -287,13 +288,13 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _scrollBarColor.value = clean
     }
 
-    private val _scrollBarBrightness = MutableStateFlow(
-        prefs.getInt(KEY_SCROLL_BAR_BRIGHTNESS, ScrollBar.DEFAULT_BRIGHTNESS).coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS))
-    val scrollBarBrightness: StateFlow<Int> = _scrollBarBrightness.asStateFlow()
-    fun setScrollBarBrightness(percent: Int) {
-        val clean = percent.coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS)
-        prefs.edit { putInt(KEY_SCROLL_BAR_BRIGHTNESS, clean) }
-        _scrollBarBrightness.value = clean
+    private val _scrollBarSeeThrough = MutableStateFlow(
+        prefs.getInt(KEY_SCROLL_BAR_SEE_THROUGH, ScrollBar.DEFAULT_SEE_THROUGH).coerceIn(ScrollBar.MIN_SEE_THROUGH, ScrollBar.MAX_SEE_THROUGH))
+    val scrollBarSeeThrough: StateFlow<Int> = _scrollBarSeeThrough.asStateFlow()
+    fun setScrollBarSeeThrough(percent: Int) {
+        val clean = percent.coerceIn(ScrollBar.MIN_SEE_THROUGH, ScrollBar.MAX_SEE_THROUGH)
+        prefs.edit { putInt(KEY_SCROLL_BAR_SEE_THROUGH, clean) }
+        _scrollBarSeeThrough.value = clean
     }
 
     private val _appFont = MutableStateFlow(
@@ -368,7 +369,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _appTheme.value,
         _savedSearches.value,
         _scrollBarColor.value,
-        _scrollBarBrightness.value,
+        _scrollBarSeeThrough.value,
     )
 
     fun applySnapshot(settings: SettingsSnapshot) {
@@ -383,7 +384,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         setAddButtonSeeThrough(settings.addButtonSeeThrough)
         setHeadingColor(settings.headingColor)
         setScrollBarColor(settings.scrollBarColor)
-        setScrollBarBrightness(settings.scrollBarBrightness)
+        setScrollBarSeeThrough(settings.scrollBarSeeThrough)
         setAppFont(settings.appFont)
         setTextSizePercent(settings.textSizePercent)
         setDateFormat(settings.dateFormat)
@@ -408,7 +409,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_ADD_BUTTON_SEE_THROUGH = "add_button_see_through"
         const val KEY_HEADING_COLOR = "heading_color"
         const val KEY_SCROLL_BAR_COLOR = "scroll_bar_color"
-        const val KEY_SCROLL_BAR_BRIGHTNESS = "scroll_bar_brightness"
+        const val KEY_SCROLL_BAR_SEE_THROUGH = "scroll_bar_see_through"
         const val KEY_APP_FONT = "app_font"
         const val KEY_TEXT_SIZE = "text_size_percent"
         const val KEY_DATE_FORMAT = "date_format"

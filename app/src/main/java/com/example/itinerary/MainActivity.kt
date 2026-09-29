@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
 
             val headingColor by settings.headingColor.collectAsStateWithLifecycle()
             val scrollBarColor by settings.scrollBarColor.collectAsStateWithLifecycle()
-            val scrollBarBrightness by settings.scrollBarBrightness.collectAsStateWithLifecycle()
+            val scrollBarSeeThrough by settings.scrollBarSeeThrough.collectAsStateWithLifecycle()
             val dateFormat by settings.dateFormat.collectAsStateWithLifecycle()
             val appFont by settings.appFont.collectAsStateWithLifecycle()
             val textSizePercent by settings.textSizePercent.collectAsStateWithLifecycle()
@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
                 LocalTimeFormat provides resolvedTimeFormat,
                 LocalDateFormat provides dateFormat,
                 LocalHeadingColor provides ComposeColor(headingColor),
-                LocalScrollBar provides ScrollBarStyle(ComposeColor(scrollBarColor), scrollBarBrightness),
+                LocalScrollBar provides ScrollBarStyle(ComposeColor(scrollBarColor), scrollBarSeeThrough),
             ) {
                 ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN }) }
             }

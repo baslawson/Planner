@@ -189,7 +189,7 @@ class BackupManager(
                 .put("addButtonSeeThrough", settings.addButtonSeeThrough)
                 .put("headingColor", String.format("#%06X", settings.headingColor and 0xFFFFFF))
                 .put("scrollBarColor", String.format("#%06X", settings.scrollBarColor and 0xFFFFFF))
-                .put("scrollBarBrightness", settings.scrollBarBrightness)
+                .put("scrollBarSeeThrough", settings.scrollBarSeeThrough)
                 .put("font", settings.appFont.name)
                 .put("textSize", settings.textSizePercent)
                 .put("dateFormat", settings.dateFormat.name)
@@ -381,8 +381,8 @@ class BackupManager(
             headingColor = settingsJson?.optString("headingColor")?.let(::parseHexColor) ?: HeadingColor.DEFAULT_ARGB,
             // Optional (older backups have none): missing or unreadable values get the defaults.
             scrollBarColor = settingsJson?.optString("scrollBarColor")?.let(::parseHexColor) ?: ScrollBar.DEFAULT_ARGB,
-            scrollBarBrightness = (settingsJson?.optInt("scrollBarBrightness", ScrollBar.DEFAULT_BRIGHTNESS) ?: ScrollBar.DEFAULT_BRIGHTNESS)
-                .coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS),
+            scrollBarSeeThrough = (settingsJson?.optInt("scrollBarSeeThrough", ScrollBar.DEFAULT_SEE_THROUGH) ?: ScrollBar.DEFAULT_SEE_THROUGH)
+                .coerceIn(ScrollBar.MIN_SEE_THROUGH, ScrollBar.MAX_SEE_THROUGH),
             // Optional; a missing or unknown font gets the default.
             appFont = runCatching { AppFont.valueOf(settingsJson?.optString("font").orEmpty()) }.getOrDefault(AppFont.DEFAULT),
             // Optional; a missing value gets 100 percent.

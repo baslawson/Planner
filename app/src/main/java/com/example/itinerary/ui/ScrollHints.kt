@@ -18,7 +18,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.dp
 
 // Scroll bar: a thin bar along the right edge of anything that scrolls, always showing while there is more than fits,
-// so it is clear there is more and where you are. Its colour and brightness come from Settings (LocalScrollBar).
+// so it is clear there is more and where you are. Its colour and transparency come from Settings (LocalScrollBar).
 // Nothing is drawn when everything fits.
 
 // A scrolling column with the bar. [fitContent]: only as tall as the content (up to the space available), for a short
