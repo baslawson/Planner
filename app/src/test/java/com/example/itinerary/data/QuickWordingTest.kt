@@ -131,7 +131,7 @@ class QuickWordingTest {
         val saturday = LocalDate.of(2026, 10, 3)
         assertEquals(saturday, QuickEntry.parse("Mow lawn this weekend", saturday).date)
         assertEquals(saturday.plusDays(1), QuickEntry.parse("Mow lawn this weekend", saturday.plusDays(1)).date)
-        assertNotNull(parse("Mow lawn every weekend").error)
+        assertEquals(RepeatRule.onDays(setOf(java.time.DayOfWeek.SATURDAY, java.time.DayOfWeek.SUNDAY)), ok("Mow lawn every weekend").repeat) // a repeat since round 6
     }
 
     @Test fun endOfTheMonth() {
