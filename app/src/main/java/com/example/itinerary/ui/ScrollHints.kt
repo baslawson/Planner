@@ -45,8 +45,11 @@ import kotlinx.coroutines.launch
 // A scrolling column that makes it obvious when there is more to see. Where there is more content off screen, that
 // edge gets a soft fade and a small pill ("More below" / "More above") that scrolls a screenful when tapped, and a thin
 // scroll bar along the right edge shows where you are in the page. All of it goes away when there is nothing more.
+// [fitContent]: only as tall as the content (up to the space available), for a short dialog; otherwise it fills the
+// height it is given, as a full screen does.
 @Composable
-fun ScrollHints(state: ScrollState, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun ScrollHints(state: ScrollState, modifier: Modifier = Modifier, fitContent: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
     val scope = rememberCoroutineScope()
     var viewport by remember { mutableIntStateOf(0) }
     val background = MaterialTheme.colorScheme.background
@@ -74,7 +77,7 @@ fun ScrollHints(state: ScrollState, modifier: Modifier = Modifier, content: @Com
                 }
             },
     ) {
-        Column(Modifier.fillMaxSize().verticalScroll(state), content = content)
+        Column((if (fitContent) Modifier.fillMaxWidth() else Modifier.fillMaxSize()).verticalScroll(state), content = content)
         if (state.canScrollBackward) {
             Fade(atTop = true, background = background)
             HintPill(up = true, onClick = { scrollScreenful(-1) })
