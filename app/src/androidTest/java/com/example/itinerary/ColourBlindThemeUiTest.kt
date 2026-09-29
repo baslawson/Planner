@@ -108,7 +108,7 @@ class ColourBlindThemeUiTest {
             app.settings.lastViewCalendar=false
             app.settings.setAppTheme(AppTheme.MATRIX);app.settings.setThemeMode(ThemeMode.DARK)
             open();click("More options");click("Themes")
-            await { find("More below")!=null };screenshot("theme-list-top")
+            await { scrollableIn(nodes())?.canScroll(true)==true };screenshot("theme-list-top")
             click("Colour-blind friendly")
             await { app.settings.appTheme.value==AppTheme.COLOUR_BLIND && find("✓ Colour-blind friendly")!=null }
             screenshot("selected-dark-preview")

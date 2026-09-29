@@ -144,9 +144,7 @@ class SeventhFeaturesUiTest {
         await(120000) {
             if (nodes().any { it.isVisibleToUser && it.text?.toString()?.contains("Last successful backup:")==true } && find("The last File backup failed. Please retry.")!=null) true
             else {
-                var hint=find("More below") ?: find("More above")
-                while(hint!=null && !hint.isClickable)hint=hint.parent
-                hint?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                scrollStep(nodes(), true)
                 Thread.sleep(3000)
                 ins.uiAutomation.waitForIdle(1500,10000)
                 ins.uiAutomation.freshRoot?.refresh()

@@ -39,3 +39,27 @@ internal fun <T> withDateFormat(app: ItineraryApp, ins: android.app.Instrumentat
     ins.runOnMainSync { app.settings.setDateFormat(choice) }
     try { return block() } finally { ins.runOnMainSync { app.settings.setDateFormat(original) } }
 }
+
+/**
+ * The scrolling area on screen (the last visible scrollable node: a dialog's or screen's own list), and scrolling it.
+ * The scroll bar is drawn only, so tests read and move the scroll position through accessibility instead.
+ */
+internal fun scrollableIn(nodes: List<AccessibilityNodeInfo>): AccessibilityNodeInfo? =
+    nodes.lastOrNull { it.isScrollable && it.isVisibleToUser }
+
+/** Whether this area can scroll further down ([forward]) or up. */
+internal fun AccessibilityNodeInfo.canScroll(forward: Boolean): Boolean {
+    val action = if (forward) AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD
+        else AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD
+    return actionList.any { it.id == action.id }
+}
+
+/** Scrolls the area on screen one step down ([forward]) or up; false when it could not. */
+internal fun scrollStep(nodes: List<AccessibilityNodeInfo>, forward: Boolean): Boolean =
+    scrollableIn(nodes)?.performAction(
+        if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) == true
+
+/** Scrolls the area on screen all the way up, a step at a time. */
+internal fun scrollToTop(nodes: () -> List<AccessibilityNodeInfo>) {
+    repeat(20) { if (!scrollStep(nodes(), false)) return; Thread.sleep(400) }
+}

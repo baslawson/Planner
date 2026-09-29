@@ -108,7 +108,7 @@ fun FreeTimeDialog(events: List<ItineraryItem>, onDismiss: () -> Unit, onChoose:
     var searchRun by remember { mutableIntStateOf(0) }
     var scrolledRun by remember { mutableIntStateOf(0) }
     var resultsTop by remember { mutableStateOf<Int?>(null) }
-    val hintClearance = with(LocalDensity.current) { 64.dp.roundToPx() }
+    val headroom = with(LocalDensity.current) { 16.dp.roundToPx() }
     LaunchedEffect(resultsTop, restoringScroll) {
         val position = restoringScroll
         if (resultsTop != null && position != null) {
@@ -120,9 +120,9 @@ fun FreeTimeDialog(events: List<ItineraryItem>, onDismiss: () -> Unit, onChoose:
     LaunchedEffect(searchRun, resultsTop, searched) {
         val top = resultsTop
         if (searched && top != null && searchRun > scrolledRun) {
-            // Results must be measured before scrolling; leave space for the More above hint.
+            // Results must be measured before scrolling; leave a little room above them.
             withFrameNanos { }
-            scroll.animateScrollTo((top - hintClearance).coerceAtLeast(0))
+            scroll.animateScrollTo((top - headroom).coerceAtLeast(0))
             scrolledRun = searchRun
         }
     }

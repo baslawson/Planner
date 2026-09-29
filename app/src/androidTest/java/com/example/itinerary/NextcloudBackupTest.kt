@@ -118,6 +118,8 @@ class NextcloudBackupTest {
         settings.setTimeFormat(TimeFormat.HOUR_24)
         settings.setHiddenCategories(setOf("Flight"))
         settings.setTextSizePercent(120)
+        settings.setScrollBarColor(0xFF5CC8FF.toInt())
+        settings.setScrollBarBrightness(45)
         val expected = repo.snapshot()
         val expectedSettings = settings.snapshot()
         val saved = service.connect(account.server.toString(), account.username, account.password)
@@ -133,6 +135,8 @@ class NextcloudBackupTest {
         }
         repo.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
         settings.setThemeMode(ThemeMode.LIGHT)
+        settings.setScrollBarColor(0xFFFF6FB5.toInt())
+        settings.setScrollBarBrightness(100)
         File(context.filesDir, "attachments/test-ticket.pdf").delete()
         val staged = service.stage(saved, listing.single())
         assertTrue(repo.snapshot().trips.isEmpty()) // Staging never restores before confirmation.

@@ -195,7 +195,7 @@ fun AgendaScreen(
             when {
                 loadedEvents == null -> Box(Modifier.fillMaxSize().padding(inner))
                 else -> Column(Modifier.fillMaxSize().padding(inner)) {
-                    LazyColumn(
+                    LazyScrollHints(listState, Modifier.fillMaxSize()) { LazyColumn(
                         Modifier.fillMaxSize(), state = listState,
                         contentPadding = PaddingValues(bottom = 144.dp),
                     ) {
@@ -310,7 +310,7 @@ fun AgendaScreen(
                                 }
                             }
                         }
-                    }
+                    } }
                 }
             }
         }

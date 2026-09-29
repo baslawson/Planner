@@ -103,7 +103,7 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
 @Composable
 fun TaskTypeDialog(onTask: () -> Unit, onBill: () -> Unit, onScan: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add task") },
-        // In landscape the last choice is below the visible part: show "More below", as the Themes dialog does.
+        // In landscape the last choice is below the visible part: it scrolls, with the scroll bar, as the Themes dialog does.
         text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth().padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("What would you like to add?", style = MaterialTheme.typography.bodyMedium)

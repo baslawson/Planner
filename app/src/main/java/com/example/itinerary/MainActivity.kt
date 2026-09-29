@@ -27,6 +27,8 @@ import com.example.itinerary.reminders.AlarmService
 import com.example.itinerary.ui.AppNav
 import com.example.itinerary.ui.LocalDateFormat
 import com.example.itinerary.ui.LocalHeadingColor
+import com.example.itinerary.ui.LocalScrollBar
+import com.example.itinerary.ui.ScrollBarStyle
 import com.example.itinerary.ui.LocalTimeFormat
 import com.example.itinerary.ui.is24Hour
 import com.example.itinerary.ui.theme.ItineraryTheme
@@ -121,6 +123,8 @@ class MainActivity : ComponentActivity() {
             val resolvedTimeFormat = if (use24Hour) TimeFormat.HOUR_24 else TimeFormat.HOUR_12
 
             val headingColor by settings.headingColor.collectAsStateWithLifecycle()
+            val scrollBarColor by settings.scrollBarColor.collectAsStateWithLifecycle()
+            val scrollBarBrightness by settings.scrollBarBrightness.collectAsStateWithLifecycle()
             val dateFormat by settings.dateFormat.collectAsStateWithLifecycle()
             val appFont by settings.appFont.collectAsStateWithLifecycle()
             val textSizePercent by settings.textSizePercent.collectAsStateWithLifecycle()
@@ -129,6 +133,7 @@ class MainActivity : ComponentActivity() {
                 LocalTimeFormat provides resolvedTimeFormat,
                 LocalDateFormat provides dateFormat,
                 LocalHeadingColor provides ComposeColor(headingColor),
+                LocalScrollBar provides ScrollBarStyle(ComposeColor(scrollBarColor), scrollBarBrightness),
             ) {
                 ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN }) }
             }

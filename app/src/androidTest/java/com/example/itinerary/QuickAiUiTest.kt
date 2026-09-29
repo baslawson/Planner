@@ -204,10 +204,11 @@ class QuickAiUiTest {
     }
     @Test fun personalKeySetupUsesOnlyMasterSwitchAndCanReplaceKeyWithoutSending() {
         start();setText("","QA private text tomorrow");click("AI provider: Gemini")
-        await { find("More below")!=null };assertNull(find("More above"));screenshot("ai-settings-scroll-top")
-        click("More below");await { find("More above")!=null }
+        await { scrollableIn(nodes())?.canScroll(true)==true };assertFalse(scrollableIn(nodes())!!.canScroll(false))
+        screenshot("ai-settings-scroll-top")
+        assertTrue(scrollStep(nodes(), true));await { scrollableIn(nodes())?.canScroll(false)==true }
         screenshot("ai-settings-scroll-down")
-        click("More above");await { find("More below")!=null };click("Done")
+        scrollToTop { nodes() };await { scrollableIn(nodes())?.canScroll(false)==false };click("Done")
         app.quickAiConnectionStore.clear();start();setText("","QA private text tomorrow")
         click("Set up AI assistance");setText("","test-key-"+"c".repeat(35))
         click("Save AI settings");await { app.quickAiConnectionStore.load()!=null }

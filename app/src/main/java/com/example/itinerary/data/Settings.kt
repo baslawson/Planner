@@ -105,12 +105,24 @@ data class SettingsSnapshot(
     val agendaRange: AgendaRange = AgendaRange.UPCOMING,
     val appTheme: AppTheme = AppTheme.MATRIX,
     val savedSearches: List<SavedSearch> = emptyList(),
+    // The scroll bar's colour (opaque ARGB) and brightness in percent (see ScrollBar).
+    val scrollBarColor: Int = ScrollBar.DEFAULT_ARGB,
+    val scrollBarBrightness: Int = ScrollBar.DEFAULT_BRIGHTNESS,
 )
 
 // Headings (screen titles, section headings, day headers, dialog titles) share one colour the user can change.
 object HeadingColor {
     // Red orange (#FF5614).
     const val DEFAULT_ARGB: Int = 0xFFFF5614.toInt()
+}
+
+// The scroll bar shown on every scrollable screen: its colour and how bright it is (100 = full, lower = dimmer).
+object ScrollBar {
+    // Matrix green (#00FF41).
+    const val DEFAULT_ARGB: Int = 0xFF00FF41.toInt()
+    const val MIN_BRIGHTNESS = 20
+    const val MAX_BRIGHTNESS = 100
+    const val DEFAULT_BRIGHTNESS = 100
 }
 
 // The big + button on the agenda can be made see-through so what is behind it shows. It never goes fully invisible.
@@ -267,6 +279,23 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _headingColor.value = clean
     }
 
+    private val _scrollBarColor = MutableStateFlow(prefs.getInt(KEY_SCROLL_BAR_COLOR, ScrollBar.DEFAULT_ARGB) or OPAQUE)
+    val scrollBarColor: StateFlow<Int> = _scrollBarColor.asStateFlow()
+    fun setScrollBarColor(argb: Int) {
+        val clean = argb or OPAQUE
+        prefs.edit { putInt(KEY_SCROLL_BAR_COLOR, clean) }
+        _scrollBarColor.value = clean
+    }
+
+    private val _scrollBarBrightness = MutableStateFlow(
+        prefs.getInt(KEY_SCROLL_BAR_BRIGHTNESS, ScrollBar.DEFAULT_BRIGHTNESS).coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS))
+    val scrollBarBrightness: StateFlow<Int> = _scrollBarBrightness.asStateFlow()
+    fun setScrollBarBrightness(percent: Int) {
+        val clean = percent.coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS)
+        prefs.edit { putInt(KEY_SCROLL_BAR_BRIGHTNESS, clean) }
+        _scrollBarBrightness.value = clean
+    }
+
     private val _appFont = MutableStateFlow(
         runCatching { AppFont.valueOf(prefs.getString(KEY_APP_FONT, null).orEmpty()) }.getOrDefault(AppFont.DEFAULT),
     )
@@ -338,6 +367,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _agendaRange.value,
         _appTheme.value,
         _savedSearches.value,
+        _scrollBarColor.value,
+        _scrollBarBrightness.value,
     )
 
     fun applySnapshot(settings: SettingsSnapshot) {
@@ -351,6 +382,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         setUpcomingDays(settings.upcomingDays)
         setAddButtonSeeThrough(settings.addButtonSeeThrough)
         setHeadingColor(settings.headingColor)
+        setScrollBarColor(settings.scrollBarColor)
+        setScrollBarBrightness(settings.scrollBarBrightness)
         setAppFont(settings.appFont)
         setTextSizePercent(settings.textSizePercent)
         setDateFormat(settings.dateFormat)
@@ -374,6 +407,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_UPCOMING_DAYS = "upcoming_days"
         const val KEY_ADD_BUTTON_SEE_THROUGH = "add_button_see_through"
         const val KEY_HEADING_COLOR = "heading_color"
+        const val KEY_SCROLL_BAR_COLOR = "scroll_bar_color"
+        const val KEY_SCROLL_BAR_BRIGHTNESS = "scroll_bar_brightness"
         const val KEY_APP_FONT = "app_font"
         const val KEY_TEXT_SIZE = "text_size_percent"
         const val KEY_DATE_FORMAT = "date_format"

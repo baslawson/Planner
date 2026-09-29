@@ -71,10 +71,10 @@ fun HeadingText(
     )
 }
 
-private class HeadingSwatch(val name: String, val color: Color)
+internal class HeadingSwatch(val name: String, val color: Color)
 
 // The ready-made choices; the first is the default (tapping it resets the colour).
-private val HEADING_SWATCHES = listOf(
+internal val HEADING_SWATCHES = listOf(
     HeadingSwatch("Red orange", Color(HeadingColor.DEFAULT_ARGB)),
     HeadingSwatch("Teal", Color(0xFF7FD3CB)),
     HeadingSwatch("Sky blue", Color(0xFF5CC8FF)),
@@ -85,7 +85,7 @@ private val HEADING_SWATCHES = listOf(
 )
 
 // Rainbow used on the "pick your own" swatch until a colour of one's own is chosen.
-private val HEADING_RAINBOW = Brush.sweepGradient(
+internal val HEADING_RAINBOW = Brush.sweepGradient(
     listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red),
 )
 

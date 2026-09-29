@@ -24,6 +24,8 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
     val timeFormat by vm.timeFormat.collectAsStateWithLifecycle()
     val addButtonSeeThrough by vm.addButtonSeeThrough.collectAsStateWithLifecycle()
     val headingColor by vm.headingColor.collectAsStateWithLifecycle()
+    val scrollBarColor by vm.scrollBarColor.collectAsStateWithLifecycle()
+    val scrollBarBrightness by vm.scrollBarBrightness.collectAsStateWithLifecycle()
     val dateFormat by vm.dateFormat.collectAsStateWithLifecycle()
     val appFont by vm.appFont.collectAsStateWithLifecycle()
     val textSizePercent by vm.textSizePercent.collectAsStateWithLifecycle()
@@ -65,6 +67,10 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
             onTextSizePercent = vm::setTextSizePercent,
             headingColor = headingColor,
             onHeadingColor = vm::setHeadingColor,
+            scrollBarColor = scrollBarColor,
+            onScrollBarColor = vm::setScrollBarColor,
+            scrollBarBrightness = scrollBarBrightness,
+            onScrollBarBrightness = vm::setScrollBarBrightness,
             addButtonSeeThrough = addButtonSeeThrough,
             onAddButtonSeeThrough = vm::setAddButtonSeeThrough,
             onExport = { exportLauncher.launch("Planner-backup-${LocalDate.now()}.zip") },

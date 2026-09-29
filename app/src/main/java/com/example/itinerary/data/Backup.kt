@@ -188,6 +188,8 @@ class BackupManager(
                 .put("upcomingDays", settings.upcomingDays)
                 .put("addButtonSeeThrough", settings.addButtonSeeThrough)
                 .put("headingColor", String.format("#%06X", settings.headingColor and 0xFFFFFF))
+                .put("scrollBarColor", String.format("#%06X", settings.scrollBarColor and 0xFFFFFF))
+                .put("scrollBarBrightness", settings.scrollBarBrightness)
                 .put("font", settings.appFont.name)
                 .put("textSize", settings.textSizePercent)
                 .put("dateFormat", settings.dateFormat.name)
@@ -377,6 +379,10 @@ class BackupManager(
                 .coerceIn(AddButton.MIN_SEE_THROUGH, AddButton.MAX_SEE_THROUGH),
             // Optional too; a missing or unreadable colour gets the default (red orange).
             headingColor = settingsJson?.optString("headingColor")?.let(::parseHexColor) ?: HeadingColor.DEFAULT_ARGB,
+            // Optional (older backups have none): missing or unreadable values get the defaults.
+            scrollBarColor = settingsJson?.optString("scrollBarColor")?.let(::parseHexColor) ?: ScrollBar.DEFAULT_ARGB,
+            scrollBarBrightness = (settingsJson?.optInt("scrollBarBrightness", ScrollBar.DEFAULT_BRIGHTNESS) ?: ScrollBar.DEFAULT_BRIGHTNESS)
+                .coerceIn(ScrollBar.MIN_BRIGHTNESS, ScrollBar.MAX_BRIGHTNESS),
             // Optional; a missing or unknown font gets the default.
             appFont = runCatching { AppFont.valueOf(settingsJson?.optString("font").orEmpty()) }.getOrDefault(AppFont.DEFAULT),
             // Optional; a missing value gets 100 percent.

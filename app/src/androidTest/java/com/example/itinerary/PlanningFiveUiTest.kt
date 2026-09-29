@@ -214,7 +214,7 @@ class PlanningFiveUiTest {
             assertNotNull(find("Find free time"));assertNotNull(find("Back"))
             screenshot("results-visible-after-search")
             assertNull(chosen)
-            click("More above")
+            scrollToTop { nodes() }
             click("Find gaps")
             await { resultHeading()!=null };screenshot("repeat-search-visible")
             // The last visible gap, on a later day: today's first gap starts "now" and the clock can pass it.

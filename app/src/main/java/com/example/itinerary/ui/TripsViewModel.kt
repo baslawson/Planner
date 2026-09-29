@@ -244,6 +244,11 @@ class TripsViewModel(
 
     fun setHeadingColor(argb: Int) = settings.setHeadingColor(argb)
 
+    val scrollBarColor: StateFlow<Int> = settings.scrollBarColor
+    fun setScrollBarColor(argb: Int) = settings.setScrollBarColor(argb)
+    val scrollBarBrightness: StateFlow<Int> = settings.scrollBarBrightness
+    fun setScrollBarBrightness(percent: Int) = settings.setScrollBarBrightness(percent)
+
     // The typeface used for all text.
     val appFont: StateFlow<AppFont> = settings.appFont
 

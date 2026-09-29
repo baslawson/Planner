@@ -55,8 +55,8 @@ import com.example.itinerary.reminders.AlarmService
 import com.example.itinerary.reminders.openAppSettings
 import com.example.itinerary.reminders.sendTestNotification
 
-// The Settings page, full screen: a title bar with a back arrow, the settings in a scrolling column that shows when there
-// is more above or below (ScrollHints), and a big Save button pinned at the bottom. It is drawn over the current screen
+// The Settings page, full screen: a title bar with a back arrow, the settings in a scrolling column with a scroll bar
+// (ScrollHints), and a big Save button pinned at the bottom. It is drawn over the current screen
 // (not in a dialog window), so the pickers and confirmations still open on top of it; the system Back key closes it.
 // Changes apply immediately.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +74,10 @@ fun SettingsScreen(
     onTextSizePercent: (Int) -> Unit,
     headingColor: Int,
     onHeadingColor: (Int) -> Unit,
+    scrollBarColor: Int,
+    onScrollBarColor: (Int) -> Unit,
+    scrollBarBrightness: Int,
+    onScrollBarBrightness: (Int) -> Unit,
     addButtonSeeThrough: Int,
     onAddButtonSeeThrough: (Int) -> Unit,
     onExport: () -> Unit,
@@ -153,6 +157,7 @@ fun SettingsScreen(
                     DateFormatSettingsSection(dateFormat, onDateFormat)
                     FontSettingsSection(appFont, onAppFont, textSizePercent, onTextSizePercent)
                     HeadingColorSettingsSection(headingColor, onHeadingColor)
+                    ScrollBarSettingsSection(scrollBarColor, scrollBarBrightness, onScrollBarColor, onScrollBarBrightness)
                     AddButtonSettingsSection(addButtonSeeThrough, onAddButtonSeeThrough)
                     SettingsHeading("Home screen")
                     Text("See today’s events and due tasks, and complete tasks from your home screen.", style = MaterialTheme.typography.bodySmall)

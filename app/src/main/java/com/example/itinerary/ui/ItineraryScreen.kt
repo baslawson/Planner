@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -173,7 +172,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
                     DayHeader(date = selected)
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 96.dp)) {
+                    LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 96.dp)) {
                         if (dayItems.isEmpty()) {
                             item {
                                 Text(
@@ -195,10 +194,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                                 reminderCount = remindersByItem[item.id]?.size ?: 0
                             ) { if (selection.active) selection.toggle(item.id) else editing = item }
                         }
-                    }
+                    } }
                 }
                 if (sideBySide) Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) { calendar() }
+                    ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxHeight()) { calendar() }
                     Column(Modifier.weight(1f).fillMaxHeight()) { dayList() }
                 } else Column(Modifier.fillMaxSize()) {
                     calendar()
