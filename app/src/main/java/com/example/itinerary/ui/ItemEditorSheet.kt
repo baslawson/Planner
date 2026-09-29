@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -48,7 +47,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
 import com.example.itinerary.data.DraftCodec
@@ -853,54 +851,46 @@ fun ItemEditorSheet(
         }
     }
 
-    if (duplicateBills.isNotEmpty()) AlertDialog(
+    if (duplicateBills.isNotEmpty()) PlannerDialog("Possible duplicate bill",
         onDismissRequest = { if (!busy) duplicateBills = emptyList() },
-        title = { Text("Possible duplicate bill") },
-        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 360.dp), fitContent = true) { Column(Modifier.fillMaxWidth()) {
-            Text("A bill with the same title, amount and due date already exists:")
-            duplicateBills.forEach { bill ->
-                Text("${bill.title} · ${Bills.format(bill.billAmountMinor!!, bill.billCurrency)} · ${bill.date.fullLabel()}")
-                TextButton(enabled = !busy, onClick = { viewingDuplicate = bill.id }) { Text("Open existing bill") }
-            }
-        } } },
-        dismissButton = { TextButton(enabled = !busy, onClick = { duplicateBills = emptyList() }) { Text("Go back") } },
-        confirmButton = { TextButton(enabled = !busy, onClick = { save(allowDuplicate = true) }) { Text("Save anyway") } },
-    )
+        primary = DialogAction("Save anyway", enabled = !busy) { save(allowDuplicate = true) },
+        dismiss = DialogAction("Go back", enabled = !busy) { duplicateBills = emptyList() },
+    ) {
+        Text("A bill with the same title, amount and due date already exists:")
+        duplicateBills.forEach { bill ->
+            Text("${bill.title} · ${Bills.format(bill.billAmountMinor!!, bill.billCurrency)} · ${bill.date.fullLabel()}")
+            TextButton(enabled = !busy, onClick = { viewingDuplicate = bill.id }) { Text("Open existing bill") }
+        }
+    }
 
     viewingDuplicate?.let { ExistingBillDialog(it) { viewingDuplicate = null } }
 
     textPreview?.let { attachment ->
-        AlertDialog(onDismissRequest = { textPreview = null }, title = { Text("Recognised text") },
-            text = { Column {
-                Text("Recognition can make mistakes. Check the original document.", style = MaterialTheme.typography.bodySmall)
-                androidx.compose.foundation.text.selection.SelectionContainer {
-                    ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 400.dp), fitContent = true) { Text(attachment.recognizedText) }
-                }
-            } }, confirmButton = { TextButton(onClick = { textPreview = null }) { Text("Close") } })
+        PlannerDialog("Recognised text", { textPreview = null }, dismiss = DialogAction("Close") { textPreview = null }) {
+            Text("Recognition can make mistakes. Check the original document.", style = MaterialTheme.typography.bodySmall)
+            androidx.compose.foundation.text.selection.SelectionContainer { Text(attachment.recognizedText) }
+        }
     }
     if (deleting) {
-        AlertDialog(
+        PlannerDialog(if (billTask) { if (initial.seriesId == null) "Delete bill?" else "Delete repeating bill?" } else "Delete repeating event?",
             onDismissRequest = { deleting = false },
-            title = { HeadingText(if (billTask) { if (initial.seriesId == null) "Delete bill?" else "Delete repeating bill?" } else "Delete repeating event?") },
-            text = { Text(if (initial.seriesId == null) "This bill, its payment history and attachments will be kept in Recently deleted for 30 days." else "Delete just this occurrence or every remaining entry in this series? An Undo action will be available afterwards.") },
-            confirmButton = {
-                Column {
-                    DangerButton(onClick = { delete(false) }) { Text(if (initial.seriesId == null) "Delete bill" else if (billTask) "This bill" else "This event") }
-                    if (initial.seriesId != null) DangerButton(onClick = { delete(true) }) { Text("Entire series") }
-                }
-            },
-            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
-        )
+            primary = DialogAction(if (initial.seriesId == null) "Delete bill" else if (billTask) "This bill" else "This event", danger = true) { delete(false) },
+            dismiss = DialogAction("Cancel") { deleting = false },
+            // The whole series is the bigger step, so it is the quieter (red text) button beside Cancel.
+            extra = if (initial.seriesId != null) listOf(DialogAction("Entire series", danger = true) { delete(true) }) else emptyList(),
+        ) {
+            Text(if (initial.seriesId == null) "This bill, its payment history and attachments will be kept in Recently deleted for 30 days." else "Delete just this occurrence or every remaining entry in this series? An Undo action will be available afterwards.")
+        }
     }
 
     if (scannedBillSuggestion != null && !billReviewRequested && billSuggestion == null) {
-        AlertDialog(
+        PlannerDialog("Read details from this scan?",
             onDismissRequest = { billReviewFiles = emptyList() },
-            title = { HeadingText("Read details from this scan?") },
-            text = { Text("Review suggested bill details before applying them. Your scan stays attached either way.") },
-            confirmButton = { TextButton(onClick = { billReviewRequested = true }) { Text("Read details") } },
-            dismissButton = { TextButton(onClick = { billReviewFiles = emptyList() }) { Text("Not now") } },
-        )
+            primary = DialogAction("Read details") { billReviewRequested = true },
+            dismiss = DialogAction("Not now") { billReviewFiles = emptyList() },
+        ) {
+            Text("Review suggested bill details before applying them. Your scan stays attached either way.")
+        }
     }
     (billSuggestion ?: scannedBillSuggestion?.takeIf { billReviewRequested })?.let { attachment ->
         BillSuggestionDialog(attachment, title, billAmountText, billCurrency,

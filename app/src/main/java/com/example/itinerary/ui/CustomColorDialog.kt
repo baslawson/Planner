@@ -1,6 +1,4 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
-import com.example.itinerary.ui.MatrixButton as Button
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -16,11 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -98,11 +94,12 @@ fun CustomColorDialog(
         hex = TextFieldValue(hexOf(colorOf(h, s, b)).drop(1), TextRange(6))
     }
 
-    AlertDialog(
+    PlannerDialog("Pick a colour",
         onDismissRequest = onDismiss,
-        title = { HeadingText("Pick a colour") },
-        text = {
-            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth()) {
+        primary = DialogAction("Use this colour") { onConfirm(color) },
+        dismiss = DialogAction("Cancel", onClick = onDismiss),
+    ) {
+            Column(Modifier.fillMaxWidth()) {
                 // A heading, or an event, as it will look in the app.
                 val shape = RoundedCornerShape(12.dp)
                 Row(
@@ -180,11 +177,8 @@ fun CustomColorDialog(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
-            } }
-        },
-        confirmButton = { Button(onClick = { onConfirm(color) }) { Text("Use this colour") } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            }
+    }
 }
 
 // A slider whose bar is drawn in the colours it covers, with a white round handle that shows on any of them.

@@ -42,21 +42,21 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
     val affected = options.filter { it.first in selected }.sumOf { it.second }
 
     if (confirming) {
-        AlertDialog(
+        PlannerDialog(if (selected.size == 1) "Remove ${selected.first()}?" else "Remove ${selected.size} categories?",
             onDismissRequest = { confirming = false },
-            title = { HeadingText(if (selected.size == 1) "Remove ${selected.first()}?" else "Remove ${selected.size} categories?") },
-            text = {
-                Text("$affected ${if (affected == 1) "event" else "events"} will become Other. This can't be undone.")
-            },
-            confirmButton = { DangerButton(onClick = { onRemove(selected) }) { Text("Remove") } },
-            dismissButton = { OutlinedButton(onClick = { confirming = false }) { Text("Keep") } },
-        )
+            primary = DialogAction("Remove", danger = true) { onRemove(selected) },
+            dismiss = DialogAction("Keep") { confirming = false },
+        ) {
+            Text("$affected ${if (affected == 1) "event" else "events"} will become Other. This can't be undone.")
+        }
     } else {
-        AlertDialog(
+        PlannerDialog("Remove categories",
             onDismissRequest = onDismiss,
-            title = { HeadingText("Remove categories") },
-            text = {
-                ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth()) {
+            primary = DialogAction("Remove", enabled = selected.isNotEmpty(), danger = true) {
+                if (affected > 0) confirming = true else onRemove(selected)
+            },
+            dismiss = DialogAction("Cancel", onClick = onDismiss),
+        ) {
                     Text(
                         "Tick the categories to remove. Events using them become Other.",
                         style = MaterialTheme.typography.bodySmall,
@@ -85,16 +85,7 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
                             )
                         }
                     }
-                } }
-            },
-            confirmButton = {
-                DangerButton(
-                    enabled = selected.isNotEmpty(),
-                    onClick = { if (affected > 0) confirming = true else onRemove(selected) },
-                ) { Text("Remove") }
-            },
-            dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
-        )
+        }
     }
 }
 
@@ -107,10 +98,11 @@ fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: 
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
-    AlertDialog(
+    PlannerDialog("Your own category",
         onDismissRequest = onDismiss,
-        title = { HeadingText("Your own category") },
-        text = {
+        primary = DialogAction("Add", enabled = name != null) { onConfirm(name!!) },
+        dismiss = DialogAction("Cancel", onClick = onDismiss),
+    ) {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it.replace('\n', ' ').take(Categories.MAX_LENGTH) },
@@ -120,8 +112,5 @@ fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: 
                 keyboardActions = KeyboardActions(onDone = { name?.let(onConfirm) }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
             )
-        },
-        confirmButton = { Button(enabled = name != null, onClick = { onConfirm(name!!) }) { Text("Add") } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    }
 }

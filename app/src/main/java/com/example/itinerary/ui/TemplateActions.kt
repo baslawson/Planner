@@ -3,10 +3,8 @@ import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,13 +34,8 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
         if (isNew) OutlinedButton(enabled = canApply, onClick = { choosing = true; error = null }) { Text("Use template") }
         TextButton(enabled = enabled, onClick = { name = title.take(80); saving = true; error = null }) { Text("Save as template") }
     }
-    if (saving) AlertDialog(onDismissRequest = { if (!busy) saving = false }, title = { Text(if (billTask) "Save bill template" else "Save event template") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = name, onValueChange = { name = it.take(80) }, label = { Text("Template name") }, singleLine = true)
-            Text("Saves details, checklist, amount, repeats and reminders. Dates, paid status and attachments aren't copied.")
-            if (templates.any { it.name.equals(name.trim(), true) }) Text("The template with this name will be replaced.")
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(enabled = !busy && name.isNotBlank(), onClick = {
+    if (saving) PlannerDialog(if (billTask) "Save bill template" else "Save event template", onDismissRequest = { if (!busy) saving = false },
+        primary = DialogAction("Save template", enabled = !busy && name.isNotBlank()) {
             busy = true
             scope.launch {
                 try { repo.saveTemplate(name, content()); saving = false }
@@ -50,9 +43,15 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                 catch (_: Exception) { error = "Couldn't save this template. Please try again." }
                 finally { busy = false }
             }
-        }) { Text("Save template") } }, dismissButton = { TextButton(enabled = !busy, onClick = { saving = false }) { Text("Cancel") } })
-    if (choosing && deleting == null) AlertDialog(onDismissRequest = { choosing = false }, title = { Text(if (billTask) "Bill templates" else "Event templates") },
-        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 420.dp), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        },
+        dismiss = DialogAction("Cancel", enabled = !busy) { saving = false }) {
+            OutlinedTextField(value = name, onValueChange = { name = it.take(80) }, label = { Text("Template name") }, singleLine = true)
+            Text("Saves details, checklist, amount, repeats and reminders. Dates, paid status and attachments aren't copied.")
+            if (templates.any { it.name.equals(name.trim(), true) }) Text("The template with this name will be replaced.")
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+    if (choosing && deleting == null) PlannerDialog(if (billTask) "Bill templates" else "Event templates", onDismissRequest = { choosing = false },
+        dismiss = DialogAction("Close") { choosing = false }) {
             Text("Applying replaces details and reminders. Your chosen date and attachments stay.")
             if (matchingTemplates.isEmpty()) Text("No templates yet. Fill in the details and choose Save as template.")
             matchingTemplates.forEach { template ->
@@ -68,10 +67,9 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } })
-    deleting?.let { template -> AlertDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("Delete ${template.name}?") },
-        text = { Text("Entries made from this template are kept.") },
-        confirmButton = { DangerButton(enabled = !busy, onClick = {
+    }
+    deleting?.let { template -> PlannerDialog("Delete ${template.name}?", onDismissRequest = { if (!busy) deleting = null },
+        primary = DialogAction("Delete template", enabled = !busy, danger = true) {
             busy = true
             scope.launch {
                 try { repo.deleteTemplate(template); deleting = null }
@@ -79,5 +77,6 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                 catch (_: Exception) { error = "Couldn't delete this template."; deleting = null }
                 finally { busy = false }
             }
-        }) { Text("Delete template") } }, dismissButton = { TextButton(enabled = !busy, onClick = { deleting = null }) { Text("Cancel") } }) }
+        },
+        dismiss = DialogAction("Cancel", enabled = !busy) { deleting = null }) { Text("Entries made from this template are kept.") } }
 }

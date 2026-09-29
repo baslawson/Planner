@@ -2,12 +2,9 @@ package com.example.itinerary.ui
 import com.example.itinerary.ui.MatrixTextButton as TextButton
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.*
 
@@ -18,8 +15,7 @@ fun ExistingBillDialog(id: Long, onDismiss: () -> Unit) {
     var details by remember(id) { mutableStateOf<Triple<ItineraryItem, List<Attachment>, List<Reminder>>?>(null) }
     var loading by remember(id) { mutableStateOf(true) }
     LaunchedEffect(id) { try { details = app.repository.eventDetails(id) } catch (_: Exception) { details = null } finally { loading = false } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Existing bill") }, text = {
-        ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    PlannerDialog("Existing bill", onDismissRequest = onDismiss, dismiss = DialogAction("Back to draft", onClick = onDismiss)) {
             if (loading) Text("Loading…") else if (details == null) Text("This bill is no longer available.")
             details?.let { (item, attachments, reminders) ->
                 Text(item.title, style = MaterialTheme.typography.titleMedium)
@@ -36,6 +32,5 @@ fun ExistingBillDialog(id: Long, onDismiss: () -> Unit) {
                 if (reminders.isNotEmpty()) Text("${reminders.size} saved reminder(s)")
             }
             Text("Your unfinished bill is kept. Close this view to return to it.", style = MaterialTheme.typography.bodySmall)
-        } }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Back to draft") } })
+    }
 }

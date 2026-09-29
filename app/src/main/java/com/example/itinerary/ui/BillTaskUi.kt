@@ -1,11 +1,9 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -84,8 +82,7 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
         catch (_: Exception) { failure = "Couldn't open this bill. Close and try again." }
     }
     if (failure != null) {
-        AlertDialog(onDismissRequest = onDismiss, title = { Text("Bill payment") }, text = { Text(failure!!) },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+        PlannerDialog("Bill payment", onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) { Text(failure!!) }
     } else details?.let { (bill, attachments, reminders) ->
         key(id) { ItemEditorSheet(initial = bill, existingAttachments = attachments, existingReminders = reminders,
             categoryCounts = emptyMap(), hiddenCategories = emptySet(), onRemoveCategories = {}, onShowCategory = {},
@@ -95,17 +92,16 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
             }, onDelete = { item, entireSeries -> repo.deleteWithUndo(item, entireSeries) }) }
     } ?: run {
         BackHandler(onBack = onDismiss)
-        AlertDialog(onDismissRequest = onDismiss, title = { Text("Opening bill…") },
-            text = { CircularProgressIndicator() }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        PlannerDialog("Opening bill…", onDismiss, dismiss = DialogAction("Cancel", onClick = onDismiss)) { CircularProgressIndicator() }
     }
 }
 
 @Composable
 fun TaskTypeDialog(onTask: () -> Unit, onBill: () -> Unit, onScan: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add task") },
-        // In landscape the last choice is below the visible part: it scrolls, with the scroll bar, as the Themes dialog does.
-        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth().padding(end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // In landscape the last choice is below the visible part: it scrolls, with the scroll bar, as the Themes dialog does.
+    PlannerDialog("Add task", onDismiss, dismiss = DialogAction("Cancel", onClick = onDismiss)) {
+        // Room on the right for the scroll bar, and the choices a little further apart than plain text.
+        Column(Modifier.fillMaxWidth().padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("What would you like to add?", style = MaterialTheme.typography.bodyMedium)
             TaskTypeChoice("To-do task", "Make room for a little win", R.drawable.action_task,
                 MaterialTheme.colorScheme.primaryContainer,
@@ -116,7 +112,8 @@ fun TaskTypeDialog(onTask: () -> Unit, onBill: () -> Unit, onScan: () -> Unit, o
             TaskTypeChoice("Scan bill", "Snap it. Add it. Sorted.", R.drawable.action_camera,
                 MaterialTheme.colorScheme.primaryContainer,
                         MaterialTheme.colorScheme.primary, onScan)
-        } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        }
+    }
 }
 
 @Composable

@@ -259,10 +259,11 @@ fun ManualDocumentScanner(pdf: Boolean, store: AttachmentStore, onDismiss: () ->
                 }
             }
         }
-        if (confirmDiscard) AlertDialog(onDismissRequest = { confirmDiscard = false }, title = { Text("Discard scan?") },
-            text = { Text("These scanned pages haven't been attached yet.") },
-            confirmButton = { TextButton(onClick = ::completeDismiss) { Text("Discard") } },
-            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep scanning") } })
+        if (confirmDiscard) PlannerDialog("Discard scan?", onDismissRequest = { confirmDiscard = false },
+            primary = DialogAction("Discard", danger = true, onClick = ::completeDismiss),
+            dismiss = DialogAction("Keep scanning") { confirmDiscard = false }) {
+            Text("These scanned pages haven't been attached yet.")
+        }
     }
 }
 

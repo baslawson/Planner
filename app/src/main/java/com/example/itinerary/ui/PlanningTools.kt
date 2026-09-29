@@ -241,8 +241,8 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::read) }
     LaunchedEffect(initialUri) { if (initialUri != null) read(initialUri) }
-    if (selected == null) AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Import calendar invitation") }, text = {
-        ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (selected == null) PlannerDialog("Import calendar invitation", onDismissRequest = { if (!busy) onDismiss() },
+        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss)) {
             Text("Choose an .ics file, then review each appointment in the event editor. Nothing is added until you save.")
             Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text("Choose calendar file") }
             if (busy) CircularProgressIndicator()
@@ -260,8 +260,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                     else error = "Finish or discard your current event draft before importing another appointment."
                 }) { Text("Review ${item.title}") }
             }
-        } }
-    }, confirmButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } })
+    }
     selected?.let { NewPlanningEventEditor(it) { selected = null } }
 }
 
@@ -286,17 +285,17 @@ fun ScheduleTaskDialog(task: PlannerTask, onDismiss: () -> Unit) {
     var minutes by rememberSaveable { mutableStateOf("60") }
     var picker by remember { mutableStateOf<String?>(null) }
     var event by remember { mutableStateOf<ItineraryItem?>(null) }
-    if (event == null) AlertDialog(onDismissRequest = onDismiss, title = { Text("Schedule time for ${task.title}") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (event == null) PlannerDialog("Schedule time for ${task.title}", onDismissRequest = onDismiss,
+        primary = DialogAction("Review time block", enabled = minutes.toIntOrNull() in 1..1440) {
+            event = ItineraryItem(tripId = 0, date = LocalDate.parse(date), startTime = LocalTime.parse(time), title = task.title,
+                durationMinutes = minutes.toInt(), linkedTaskId = task.id)
+        },
+        dismiss = DialogAction("Cancel", onClick = onDismiss)) {
             Text("Creates a calendar block linked to this saved task. The task’s due date and completion stay separate.")
             TextButton(onClick = { picker = "date" }) { Text(LocalDate.parse(date).dayLabel(LocalDateFormat.current)) }
             TextButton(onClick = { picker = "time" }) { Text(LocalTime.parse(time).label(LocalTimeFormat.current, LocalContext.current)) }
             OutlinedTextField(minutes, { minutes = it }, label = { Text("Duration in minutes (1–1440)") }, singleLine = true)
-        }
-    }, confirmButton = { Button(enabled = minutes.toIntOrNull() in 1..1440, onClick = {
-        event = ItineraryItem(tripId = 0, date = LocalDate.parse(date), startTime = LocalTime.parse(time), title = task.title,
-            durationMinutes = minutes.toInt(), linkedTaskId = task.id)
-    }) { Text("Review time block") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }
     if (picker == "date") SingleDateDialog(LocalDate.parse(date), { picker = null }, { date = it.toString(); picker = null })
     if (picker == "time") TimePickerDialog(LocalTime.parse(time), { picker = null }, { time = it.toString(); picker = null })
     event?.let { NewPlanningEventEditor(it, onDismiss = { event = null; onDismiss() }) }

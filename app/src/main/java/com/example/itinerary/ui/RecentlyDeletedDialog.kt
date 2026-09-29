@@ -27,8 +27,8 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
         busy = true; error = null
         scope.launch { try { block() } catch (_: Exception) { error = "Couldn't complete that action. Please try again." } finally { busy = false } }
     }
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Recently deleted") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    PlannerDialog("Recently deleted", { if (!busy) onDismiss() },
+        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss), scroll = null) {
             Text("Tasks, events and their attachments can be restored for 30 days after deletion.")
             if (shown.isEmpty()) Text("No recently deleted events or tasks.")
             LazyScrollHints(Modifier.heightIn(max = 380.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) {
@@ -45,10 +45,10 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
                 }
             } }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        }
-    }, confirmButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } })
-    deleting?.let { entry -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete forever?") },
-        text = { Text("${entry.label} cannot be restored afterward.") },
-        confirmButton = { DangerButton(onClick = { deleting = null; action { repo.permanentlyDelete(entry.id) } }) { Text("Delete forever") } },
-        dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } }) }
+    }
+    deleting?.let { entry -> PlannerDialog("Delete forever?", { deleting = null },
+        primary = DialogAction("Delete forever", danger = true) { deleting = null; action { repo.permanentlyDelete(entry.id) } },
+        dismiss = DialogAction("Cancel") { deleting = null }) {
+        Text("${entry.label} cannot be restored afterward.")
+    } }
 }

@@ -96,16 +96,17 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val repo = (context.applicationContext as ItineraryApp).repository
     if (decision == "ask") {
-        AlertDialog(onDismissRequest = onDismiss, title = { Text("Unfinished task") },
-            text = { Text("Resume your saved draft for ${recovered?.optString("title").orEmpty().ifBlank { "this task" }}?") },
-            confirmButton = { TextButton(onClick = { decision = "resume" }) { Text("Resume draft") } },
-            dismissButton = { TextButton(onClick = {
+        PlannerDialog("Unfinished task", onDismissRequest = onDismiss,
+            primary = DialogAction("Resume draft") { decision = "resume" },
+            dismiss = DialogAction("Discard draft", danger = true) {
                 store.clear(draftKey)
                 val files = DraftCodec.attachments(recovered?.optJSONArray("attachments")).map { it.fileName } +
                     listOfNotNull(recovered?.optString("pendingPhoto")?.takeIf { it.isNotBlank() })
                 scope.launch { repo.releaseTaskFiles(files) }
                 decision = "fresh"
-            }) { Text("Discard draft") } })
+            }) {
+            Text("Resume your saved draft for ${recovered?.optString("title").orEmpty().ifBlank { "this task" }}?")
+        }
     } else {
         // On recreation, use the latest durable state, including unsaved attachment imports.
         val draft = remember(draftKey, decision) {
@@ -342,8 +343,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         })
     duplicate?.let { TaskEditor(it, true) { duplicate = null } }
     if (schedule) ScheduleTaskDialog(initial) { schedule = false }
-    if (confirmingDelete) AlertDialog(onDismissRequest = { confirmingDelete = false }, title = { Text("Delete task?") },
-        text = { Text("${initial.title} will be kept in Recently deleted for 30 days.") },
-        confirmButton = { DangerButton(enabled = !busy, onClick = { confirmingDelete = false; action { repo.deleteTask(initial.id) } }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("Keep task") } })
+    if (confirmingDelete) PlannerDialog("Delete task?", onDismissRequest = { confirmingDelete = false },
+        primary = DialogAction("Delete", enabled = !busy, danger = true) { confirmingDelete = false; action { repo.deleteTask(initial.id) } },
+        dismiss = DialogAction("Keep task") { confirmingDelete = false }) {
+        Text("${initial.title} will be kept in Recently deleted for 30 days.")
+    }
 }

@@ -81,8 +81,8 @@ fun QuickEntryDialog(
         return try { answer.await() } finally { permission = null; warnings = emptyList() }
     }
     if (loadFailed) {
-        AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = onDismiss, title = { Text("Quick entry draft") }, text = { Text(error.orEmpty()) },
-            confirmButton = { TextButton(onClick = { discard = true }) { Text("Discard draft") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+        PlannerDialog("Quick entry draft", onDismiss, primary = DialogAction("Discard draft", danger = true) { discard = true },
+            dismiss = DialogAction("Close", onClick = onDismiss)) { Text(error.orEmpty()) }
     } else key(generation) {
         QuickEntryEditor(draft.single.baseDate, onDismiss = onDismiss,
             onAdd = { suggestion, task, token ->
@@ -102,18 +102,20 @@ fun QuickEntryDialog(
             initial = draft.single, inputBlocked = error != null, onInput = { input -> update(QuickDraft(input)) },
             modeControls = { if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error) })
     }
-    if (permission != null) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { permission?.complete(false) }, title = { Text("Check before adding") },
-        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("This entry may duplicate or overlap your plans. You can go back to edit it.")
-            warnings.forEach { Text(it) }
-        } } }, confirmButton = { TextButton(onClick = { permission?.complete(true) }) { Text("Add anyway") } },
-        dismissButton = { TextButton(onClick = { permission?.complete(false) }) { Text("Go back") } })
-    if (discard) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { discard = false }, title = { Text("Discard quick entry draft?") },
-        text = { Text("Unfinished text will be removed. Entries already saved stay in your planner.") },
-        confirmButton = { TextButton(onClick = {
+    if (permission != null) PlannerDialog("Check before adding", { permission?.complete(false) },
+        primary = DialogAction("Add anyway") { permission?.complete(true) },
+        dismiss = DialogAction("Go back") { permission?.complete(false) }) {
+        Text("This entry may duplicate or overlap your plans. You can go back to edit it.")
+        warnings.forEach { Text(it) }
+    }
+    if (discard) PlannerDialog("Discard quick entry draft?", { discard = false },
+        primary = DialogAction("Discard", danger = true) {
             try { store.clear(); generation++; draft = QuickDraft(QuickInput(baseDate = today)); loadFailed = false; error = null; discard = false }
             catch (_: Exception) { error = "Couldn't discard the draft. Try again."; discard = false }
-        }) { Text("Discard") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep draft") } })
+        },
+        dismiss = DialogAction("Keep draft") { discard = false }) {
+        Text("Unfinished text will be removed. Entries already saved stay in your planner.")
+    }
 }
 
 internal class QuickSaveCancelled : Exception()
@@ -243,13 +245,17 @@ fun QuickEntryEditor(
             result.addStyle(SpanStyle(color = colors.getValue(phrase.kind), fontWeight = FontWeight.Bold), phrase.start, phrase.end) }
         TransformedText(result.toAnnotatedString(), OffsetMapping.Identity)
     }
-    AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, 
+    val canAdd = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback)
+    PlannerDialog(
+        title = "Quick entry",
         onDismissRequest = { if (!busy) onDismiss() },
+        primary = DialogAction(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event",
+            enabled = canAdd) { add() },
+        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss),
+        extra = if (onContinue != null) listOf(DialogAction("Add another", enabled = canAdd) { add(true) }) else emptyList(),
         // The Event/Task switch sits with the heading, outside the scrolling part: in landscape the content opens
         // scrolled to the focused field, which hid the switch above it.
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                HeadingText("Quick entry")
+        header = {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     val green = MaterialTheme.colorScheme.primary
                     listOf(false to "Event", true to "Task").forEachIndexed { index, (isTask, label) ->
@@ -260,10 +266,8 @@ fun QuickEntryEditor(
                                 inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant, inactiveBorderColor = green.copy(alpha = 0.5f))) { Text(label) }
                     }
                 }
-            }
         },
-        text = {
-            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    ) {
                 modeControls()
                 if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
@@ -400,34 +404,23 @@ fun QuickEntryEditor(
                     if (showDetails && onDiscard != null) TextButton(enabled = !busy, onClick = onDiscard) { Text("Discard draft") }
                 }
                 if (saveError != null) Text(saveError!!, color = MaterialTheme.colorScheme.error)
-            } }
-        },
-        // Three buttons do not fit one row at phone width: the main action gets its own full-width row.
-        confirmButton = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MatrixQuietButton(enabled = !busy, onClick = onDismiss) { Text("Close") }
-                if (onContinue != null) MatrixQuietButton(enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add(true) }) { Text("Add another") }
-            }
-            MatrixPrimaryButton(modifier = Modifier.fillMaxWidth(), enabled = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback), onClick = { add() }) { Text(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event") }
-        } },
-    )
+    }
     selectedPhrase?.let { phrase ->
-        AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { selectedPhrase = null }, title = { Text(text.substring(phrase.start, phrase.end).trim()) },
-            text = { Text("Keep these words in the title instead of using them as ${phrase.kind.label.lowercase()} details.") },
-            confirmButton = { TextButton(onClick = { clearCorrection(phrase.kind); literalOffsets += intArrayOf(phrase.start, phrase.end); selectedPhrase = null }) { Text("Keep in title") } },
-            dismissButton = { TextButton(onClick = { selectedPhrase = null }) { Text("Cancel") } })
+        PlannerDialog(text.substring(phrase.start, phrase.end).trim(), { selectedPhrase = null },
+            primary = DialogAction("Keep in title") { clearCorrection(phrase.kind); literalOffsets += intArrayOf(phrase.start, phrase.end); selectedPhrase = null },
+            dismiss = DialogAction("Cancel") { selectedPhrase = null }) {
+            Text("Keep these words in the title instead of using them as ${phrase.kind.label.lowercase()} details.")
+        }
     }
     if (pickingDuration) {
         var minutes by rememberSaveable { mutableStateOf((suggestion.durationMinutes ?: 30).toString()) }
-        AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp,
-            onDismissRequest = { pickingDuration = false }, title = { Text("Duration") },
-            text = { Column {
+        PlannerDialog("Duration", { pickingDuration = false },
+            primary = DialogAction("Set duration", enabled = minutes.toIntOrNull() in 1..1440) { durationText = minutes; pickingDuration = false },
+            dismiss = DialogAction("Cancel") { pickingDuration = false }) {
                 OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(4) }, label = { Text("Minutes (1–1440)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 FlowRow { listOf(30, 45, 60).forEach { n -> TextButton(onClick = { minutes = n.toString() }) { Text("$n min") } } }
                 TextButton(onClick = { durationText = ""; pickingDuration = false }) { Text("No duration") }
-            } },
-            confirmButton = { TextButton(enabled = minutes.toIntOrNull() in 1..1440, onClick = { durationText = minutes; pickingDuration = false }) { Text("Set duration") } },
-            dismissButton = { TextButton(onClick = { pickingDuration = false }) { Text("Cancel") } })
+        }
     }
     if (pickingDate) SingleDateDialog(suggestion.date, onDismiss = { pickingDate = false }, onConfirm = { dateOverride = it.toString(); pickingDate = false })
     if (pickingTime) TimePickerDialog(suggestion.time ?: LocalTime.of(9, 0), onDismiss = { pickingTime = false }, onConfirm = { timeOverride = it.toString(); pickingTime = false })

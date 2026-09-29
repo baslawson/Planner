@@ -1,5 +1,4 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixTextButton as TextButton
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,9 +18,8 @@ fun BillHistoryDialog(id: Long, onDismiss: () -> Unit) {
     val loaded by repo.allItems.collectAsStateWithLifecycle(initialValue = null)
     val history = remember(loaded, id) { billHistory(loaded.orEmpty(), id) }
     val today = rememberCurrentDate()
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Bill history") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // The list brings its own scroll bar, so the dialog itself does not scroll.
+    PlannerDialog("Bill history", onDismiss, dismiss = DialogAction("Close", onClick = onDismiss), scroll = null) {
                 Text("Saved occurrences in this series. Dates are due dates, not payment dates.")
                 if (loaded == null) Text("Loading…")
                 else if (history.isEmpty()) Text("This bill is no longer available.")
@@ -40,8 +38,7 @@ fun BillHistoryDialog(id: Long, onDismiss: () -> Unit) {
                         }
                     } }
                 }
-            }
-        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+    }
 }
 
 @Composable

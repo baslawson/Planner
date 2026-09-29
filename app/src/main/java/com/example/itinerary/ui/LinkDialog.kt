@@ -39,11 +39,11 @@ fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: String) 
         onConfirm(name.trim().ifEmpty { Links.defaultName(address) }, address)
     }
 
-    AlertDialog(
+    PlannerDialog("Add a link",
         onDismissRequest = onDismiss,
-        title = { HeadingText("Add a link") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        primary = DialogAction("Add", enabled = url != null, onClick = ::confirm),
+        dismiss = DialogAction("Cancel", onClick = onDismiss),
+    ) {
                 OutlinedTextField(
                     value = link,
                     onValueChange = { link = it.replace('\n', ' ').take(Links.MAX_URL_LENGTH) },
@@ -64,9 +64,5 @@ fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: String) 
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )
-            }
-        },
-        confirmButton = { Button(enabled = url != null, onClick = ::confirm) { Text("Add") } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    }
 }

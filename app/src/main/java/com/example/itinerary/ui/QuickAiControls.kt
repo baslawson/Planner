@@ -4,7 +4,6 @@ import com.example.itinerary.ui.MatrixTextButton as TextButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,9 +65,9 @@ fun QuickAiSetup(onDismiss: () -> Unit) {
             finally { loading = false }
         }
     }
-    AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp,
-        onDismissRequest = { job?.cancel(); onDismiss() }, title = { HeadingText("AI assistance") }, text = {
-            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth()) {
+    PlannerDialog("AI assistance", onDismissRequest = { job?.cancel(); onDismiss() },
+        dismiss = DialogAction("Done") { job?.cancel(); onDismiss() }) {
+                // Room on the right for the scroll bar.
                 Column(Modifier.fillMaxWidth().padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         QuickAiProvider.entries.forEach { choice ->
@@ -113,8 +112,7 @@ fun QuickAiSetup(onDismiss: () -> Unit) {
                     if (loading) Text("Updating…")
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
-            }
-        }, confirmButton = { TextButton(onClick = { job?.cancel(); onDismiss() }) { Text("Done") } })
+    }
 }
 
 /** Snapshot includes all manual corrections; editing/mode changes invalidate both answers and responses. */

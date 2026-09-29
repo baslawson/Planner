@@ -3,7 +3,6 @@ import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -41,10 +40,11 @@ fun PaymentsSection(amount: Long?, currency: String, paid: Boolean, payments: Li
         }
     }
     if (payments.isNotEmpty()) Text("Marking the bill unpaid reverses its recorded payments. History is kept.", style = MaterialTheme.typography.bodySmall)
-    reverse?.let { payment -> AlertDialog(onDismissRequest = { reverse = null }, title = { Text("Reverse payment?") },
-        text = { Text("${Bills.format(payment.amount, currency)} will be added back to the balance when you save the bill.") },
-        confirmButton = { TextButton(onClick = { onChange(payments.map { if (it.id == payment.id) it.copy(reversed = true) else it }); reverse = null }) { Text("Reverse payment") } },
-        dismissButton = { TextButton(onClick = { reverse = null }) { Text("Cancel") } }) }
+    reverse?.let { payment -> PlannerDialog("Reverse payment?", { reverse = null },
+        primary = DialogAction("Reverse payment", danger = true) { onChange(payments.map { if (it.id == payment.id) it.copy(reversed = true) else it }); reverse = null },
+        dismiss = DialogAction("Cancel") { reverse = null }) {
+        Text("${Bills.format(payment.amount, currency)} will be added back to the balance when you save the bill.")
+    } }
     if (adding) {
         var input by rememberSaveable { mutableStateOf("") }
         var note by rememberSaveable { mutableStateOf("") }
@@ -52,18 +52,18 @@ fun PaymentsSection(amount: Long?, currency: String, paid: Boolean, payments: Li
         var picking by remember { mutableStateOf(false) }
         val parsed = Bills.parse(input)
         val valid = parsed != null && parsed > 0 && remaining != null && parsed <= remaining
-        AlertDialog(onDismissRequest = { adding = false }, title = { Text("Record payment") }, text = {
-            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        PlannerDialog("Record payment", { adding = false },
+            primary = DialogAction("Add payment", enabled = valid) {
+                onChange(payments + BillPayment(amount = parsed!!, date = LocalDate.parse(date), note = note.trim())); adding = false
+            },
+            dismiss = DialogAction("Cancel") { adding = false }) {
                 Text("Remaining: ${remaining?.let { Bills.format(it, currency) }.orEmpty()}")
                 OutlinedTextField(input, { input = it.take(16) }, label = { Text("Payment amount") }, singleLine = true,
                     isError = input.isNotBlank() && !valid)
                 TextButton(onClick = { picking = true }) { Text(LocalDate.parse(date).fullLabel()) }
                 OutlinedTextField(note, { note = it.take(200) }, label = { Text("Payment note (optional)") })
                 Text("Applied when you save the bill.", style = MaterialTheme.typography.bodySmall)
-            } }
-        }, confirmButton = { TextButton(enabled = valid, onClick = {
-            onChange(payments + BillPayment(amount = parsed!!, date = LocalDate.parse(date), note = note.trim())); adding = false
-        }) { Text("Add payment") } }, dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } })
+        }
         if (picking) SingleDateDialog(LocalDate.parse(date), { picking = false }, { date = it.toString(); picking = false })
     }
 }

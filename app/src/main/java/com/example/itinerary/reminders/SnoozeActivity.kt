@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.lifecycleScope
@@ -16,6 +15,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.example.itinerary.data.ThemeMode
 import com.example.itinerary.ItineraryApp
+import com.example.itinerary.ui.DialogAction
+import com.example.itinerary.ui.PlannerDialog
 import com.example.itinerary.ui.theme.ItineraryTheme
 import kotlinx.coroutines.launch
 
@@ -41,9 +42,8 @@ class SnoozeActivity : ComponentActivity() {
                 ThemeMode.LIGHT -> false
             }
             ItineraryTheme(appTheme = appTheme, darkTheme = dark, font = font, textSizePercent = size) {
-                AlertDialog(onDismissRequest = { if (!busy) finish() },
-                    title = { Text("Snooze reminder") },
-                    text = { Column {
+                PlannerDialog("Snooze reminder", onDismissRequest = { if (!busy) finish() },
+                    dismiss = DialogAction("Cancel", enabled = !busy) { finish() }) {
                         SnoozeChoice.entries.forEach { choice ->
                             TextButton(enabled = !busy, onClick = {
                                 busy = true
@@ -62,8 +62,7 @@ class SnoozeActivity : ComponentActivity() {
                                 }
                             }) { Text(choice.label) }
                         }
-                    } },
-                    confirmButton = { TextButton(enabled = !busy, onClick = { finish() }) { Text("Cancel") } })
+                }
             }
         }
     }

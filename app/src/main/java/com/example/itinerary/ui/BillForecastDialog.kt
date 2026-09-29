@@ -1,5 +1,4 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixTextButton as TextButton
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,8 +15,8 @@ import java.time.format.DateTimeFormatter
 fun BillForecastDialog(events: List<PlanEvent>, month: YearMonth, today: LocalDate, onDismiss: () -> Unit) {
     val format = LocalDateFormat.current
     val summary = Bills.summary(events, month)
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Bill forecast · ${month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))}") },
-        text = { LazyScrollHints { hintState -> LazyColumn(state = hintState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    PlannerDialog("Bill forecast · ${month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))}", onDismiss,
+        dismiss = DialogAction("Done", onClick = onDismiss), scroll = null) { LazyScrollHints { hintState -> LazyColumn(state = hintState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Text("Remaining unpaid this month", style = MaterialTheme.typography.titleMedium)
                 summary.totals.forEach { (currency, amount) -> Text(Bills.format(amount, currency)) }
@@ -32,5 +31,5 @@ fun BillForecastDialog(events: List<PlanEvent>, month: YearMonth, today: LocalDa
                     Text(Payments.remaining(bill.billAmountMinor, bill.paid, bill.payments)?.let { Bills.format(it, bill.billCurrency) } ?: "Amount not entered")
                 }
             }
-        } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } })
+        } } }
 }

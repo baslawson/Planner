@@ -3,7 +3,6 @@ import com.example.itinerary.ui.MatrixIconButton as IconButton
 import com.example.itinerary.ui.MatrixAssistChip as AssistChip
 import com.example.itinerary.ui.MatrixFilterChip as FilterChip
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
-import com.example.itinerary.ui.MatrixButton as Button
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -127,10 +125,11 @@ private fun CustomReminderDialog(onDismiss: () -> Unit, onConfirm: (Int, Reminde
     var unit by remember { mutableStateOf(ReminderUnit.HOURS) }
     val amount = amountText.toIntOrNull()
 
-    AlertDialog(
+    PlannerDialog("Custom reminder",
         onDismissRequest = onDismiss,
-        title = { HeadingText("Custom reminder") },
-        text = {
+        primary = DialogAction("Add reminder", enabled = amount != null && amount >= 1) { onConfirm(amount!!, unit) },
+        dismiss = DialogAction("Cancel", onClick = onDismiss),
+    ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = amountText,
@@ -150,13 +149,5 @@ private fun CustomReminderDialog(onDismiss: () -> Unit, onConfirm: (Int, Reminde
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                enabled = amount != null && amount >= 1,
-                onClick = { onConfirm(amount!!, unit) },
-            ) { Text("Add reminder") }
-        },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    }
 }

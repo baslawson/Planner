@@ -67,10 +67,25 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
     if (confirming && (chosen.isNotEmpty() || selection.busy)) {
         val noun = if (chosen.all { it.bill }) "bill" else if (chosen.any { it.bill }) "item" else "event"
         val label = if (chosen.size == 1) "1 $noun" else "${chosen.size} ${noun}s"
-        AlertDialog(
+        PlannerDialog("Delete $label?",
             onDismissRequest = { if (!selection.busy) confirming = false },
-            title = { HeadingText("Delete $label?") },
-            text = {
+            primary = DialogAction(if (selection.busy) "Deleting…" else "Delete $label", enabled = !selection.busy, danger = true) {
+                val ids = chosen.mapTo(hashSetOf()) { it.id }
+                selection.busy = true
+                scope.launch {
+                    try {
+                        onDelete(ids)
+                        selection.ids = emptyList()
+                        confirming = false
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = "Couldn't delete the selected ${noun}s. Please try again." }
+                    finally { selection.busy = false }
+                }
+            },
+            dismiss = DialogAction("Keep ${noun}s", enabled = !selection.busy) { confirming = false },
+            // The list of chosen entries scrolls on its own.
+            scroll = null,
+        ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Delete the selected ${noun}s, including their reminders and attachments? For repeating entries, only the selected occurrences will be deleted.")
                     LazyScrollHints(Modifier.heightIn(max = 240.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) {
@@ -83,24 +98,7 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
                     } }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
-            },
-            confirmButton = {
-                DangerButton(enabled = !selection.busy, onClick = {
-                    val ids = chosen.mapTo(hashSetOf()) { it.id }
-                    selection.busy = true
-                    scope.launch {
-                        try {
-                            onDelete(ids)
-                            selection.ids = emptyList()
-                            confirming = false
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { error = "Couldn't delete the selected ${noun}s. Please try again." }
-                        finally { selection.busy = false }
-                    }
-                }) { Text(if (selection.busy) "Deleting…" else "Delete $label") }
-            },
-            dismissButton = { OutlinedButton(onClick = { confirming = false }, enabled = !selection.busy) { Text("Keep ${noun}s") } },
-        )
+        }
     } else if (!selection.active && !selection.busy) {
         LaunchedEffect(Unit) { confirming = false }
     }

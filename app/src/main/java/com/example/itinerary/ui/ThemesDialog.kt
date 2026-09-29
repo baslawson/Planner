@@ -3,7 +3,6 @@ package com.example.itinerary.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
@@ -32,8 +31,7 @@ fun ThemesDialog(onDismiss: () -> Unit) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    AlertDialog(onDismissRequest = onDismiss, title = { HeadingText("Themes") }, text = {
-        ScrollHints(rememberScrollState(), Modifier.fillMaxWidth()) {
+    PlannerDialog("Themes", onDismiss, dismiss = DialogAction("Done", onClick = onDismiss)) {
             Column(Modifier.fillMaxWidth().padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     AppTheme.entries.forEach { theme ->
@@ -72,6 +70,5 @@ fun ThemesDialog(onDismiss: () -> Unit) {
                     }
                 }
             }
-        }
-    }, confirmButton = { MatrixTextButton(onClick = onDismiss) { Text("Done") } })
+    }
 }

@@ -31,19 +31,19 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
         TextButton(enabled = query.isNotBlank() || categories.isNotEmpty(), onClick = { name = ""; naming = true; error = null }) { Text("Save search") }
         TextButton(onClick = { choosing = true; error = null }) { Text("Saved searches (${saved.size})") }
     }
-    if (naming) AlertDialog(onDismissRequest = { naming = false }, title = { Text("Save search") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (naming) PlannerDialog("Save search", onDismissRequest = { naming = false },
+        primary = DialogAction(if (saved.any { it.name.equals(name.trim(), true) }) "Replace" else "Save", enabled = name.isNotBlank()) {
+            val value = SavedSearch(name.trim(), query, categories, showCompleted)
+            if (update(saved.filterNot { it.name.equals(value.name, true) } + value)) naming = false
+        },
+        dismiss = DialogAction("Cancel") { naming = false }) {
             OutlinedTextField(name, { name = it.take(80) }, label = { Text("Search name") }, singleLine = true)
             Text("Keeps your query, categories and completed filter. Relative dates update each time you open it.")
             if (saved.any { it.name.equals(name.trim(), true) }) Text("This replaces the saved search with this name.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = {
-            val value = SavedSearch(name.trim(), query, categories, showCompleted)
-            if (update(saved.filterNot { it.name.equals(value.name, true) } + value)) naming = false
-        }) { Text(if (saved.any { it.name.equals(name.trim(), true) }) "Replace" else "Save") } },
-        dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } })
-    if (choosing) AlertDialog(onDismissRequest = { choosing = false }, title = { Text("Saved searches") },
-        text = { Column {
+    }
+    if (choosing) PlannerDialog("Saved searches", onDismissRequest = { choosing = false },
+        dismiss = DialogAction("Close") { choosing = false }, scroll = null) {
             if (saved.isEmpty()) Text("Set a search and filters, then choose Save search.")
             LazyScrollHints(Modifier.heightIn(max = 380.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) { items(saved, key = { it.name }) { value ->
                 Row(Modifier.fillMaxWidth()) {
@@ -52,7 +52,7 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
                 }
             } } }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } })
+    }
 }
 
 @Composable
@@ -81,8 +81,8 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
                     PlannerTask(id = taskId, prerequisiteIds = ids + candidate.id)) }.isSuccess }
                 .sortedWith(Tasks.order)
         }
-        AlertDialog(onDismissRequest = { choosing = false }, title = { Text("Choose prerequisite") },
-            text = { Column {
+        PlannerDialog("Choose prerequisite", onDismissRequest = { choosing = false },
+            dismiss = DialogAction("Cancel") { choosing = false }, scroll = null) {
                 OutlinedTextField(query, { query = it }, label = { Text("Find task") }, singleLine = true)
                 if (choices.isEmpty()) Text("No matching tasks. Tasks that would create a loop are excluded.")
                 LazyScrollHints(Modifier.heightIn(max = 340.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) { items(choices, key = { it.id }) { candidate ->
@@ -90,7 +90,7 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
                         Text(candidate.title + if (candidate.done) " · Completed" else "")
                     }
                 } } }
-            } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Cancel") } })
+        }
     }
     opening?.let { id ->
         val task = tasks.find { it.id == id }
@@ -112,16 +112,14 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
         if (check.getOrThrow()) error = "You have an unfinished $value. Close this share, then resume or discard that draft before sharing again."
         else destination = value
     }
-    if (destination.isEmpty()) AlertDialog(onDismissRequest = onDismiss, title = { Text("Add to Planner") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
+        primary = DialogAction("Add task", enabled = content.isSuccess) { choose("task") },
+        dismiss = DialogAction("Cancel", onClick = onDismiss),
+        extra = listOf(DialogAction("Add event", enabled = content.isSuccess) { choose("event") })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
             Text("Choose where to put this text, then review and save.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(enabled = content.isSuccess, onClick = { choose("task") }) { Text("Add task") } },
-        dismissButton = { Row {
-            TextButton(enabled = content.isSuccess, onClick = { choose("event") }) { Text("Add event") }
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        } })
+    }
     content.getOrNull()?.let { shared ->
         if (destination == "task") PlanningOverlay(onDismiss) {
             TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss)

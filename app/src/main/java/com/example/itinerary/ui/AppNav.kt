@@ -75,9 +75,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         val widgetTasks by app.repository.tasks.collectAsStateWithLifecycle(initialValue = null)
         val task = widgetTasks?.find { it.id == widgetTaskId }
         if (task != null) PlanningOverlay(onWidgetTaskOpened) { TaskEditor(task, false, onWidgetTaskOpened) }
-        else if (widgetTasks != null) AlertDialog(onDismissRequest = onWidgetTaskOpened,
-            title = { Text("Task unavailable") }, text = { Text("This task may have been deleted.") },
-            confirmButton = { TextButton(onClick = onWidgetTaskOpened) { Text("Close") } })
+        else if (widgetTasks != null) PlannerDialog("Task unavailable", onDismissRequest = onWidgetTaskOpened,
+            dismiss = DialogAction("Close", onClick = onWidgetTaskOpened)) { Text("This task may have been deleted.") }
     }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(nav) {
