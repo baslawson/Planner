@@ -128,7 +128,9 @@ class FreeTimeReturnUiTest {
         if (calendar) { click("Switch to Calendar view");await { find("Switch to Agenda view")!=null } }
         click("More options");click("Find free time")
         setText("60","45");hideQuickTestKeyboard(ins);click("Find gaps")
-        fun gapNode() = nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.contains("–")==true && it.text?.toString()?.contains(" · ")==true }
+        // The last visible gap, on a later day: today's first gap starts "now", and the clock could pass it between the
+        // two visits below, which the app then rightly refuses as a start in the past.
+        fun gapNode() = nodes().lastOrNull { it.isVisibleToUser && it.text?.toString()?.contains("–")==true && it.text?.toString()?.contains(" · ")==true }
         await { gapNode()!=null }
         val gap=gapNode()!!.text.toString()
         val summary=nodes().first { it.isVisibleToUser && it.text?.toString()?.matches(Regex("[0-9]+ available gaps?"))==true }.text.toString()
