@@ -25,6 +25,10 @@ class NextcloudAccount private constructor(
     val filesRoot: HttpUrl get() = server.newBuilder()
         .addPathSegments("remote.php/dav/files")
         .addPathSegment(username).addPathSegment("").build()
+    // The CalDAV calendar home on the same login (Nextcloud's calendars live beside the files).
+    val calendarsRoot: HttpUrl get() = server.newBuilder()
+        .addPathSegments("remote.php/dav/calendars")
+        .addPathSegment(username).addPathSegment("").build()
     val folder: HttpUrl get() = filesRoot.newBuilder().apply {
         folderPath.split('/').forEach { addPathSegment(it) }
         addPathSegment("")

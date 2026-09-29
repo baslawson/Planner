@@ -40,6 +40,8 @@ class StagedBackup internal constructor(
     val exportedOn: LocalDate?,
     // Attachments the backup lists but whose file is not inside it; these are left out.
     val missingFiles: Int,
+    // Ticked Nextcloud calendars; null for a backup made before calendar sync, which leaves the current ones alone.
+    internal val calendars: List<CalendarChoice>? = null,
 ) {
     val plans: Int get() = data.trips.size
     val tasks: Int get() = data.tasks.size
@@ -57,6 +59,8 @@ class BackupManager(
     private val repo: Repository,
     private val store: AttachmentStore,
     private val settings: SettingsRepository,
+    // Which Nextcloud calendars are ticked goes into backups; their events and the login never do.
+    private val calendars: CalendarSync? = null,
 ) {
     val status = BackupStatusStore(context)
     suspend fun export(uri: Uri, trackStatus: Boolean = true) {
@@ -68,7 +72,7 @@ class BackupManager(
         val attachments = snapshot.attachments.filter { it.url != null || store.fileFor(it.fileName).exists() }
         val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || store.fileFor(it.fileName).exists() }
         val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { store.fileFor(it.fileName).exists() })
-        val json = toJson(saved, settings.snapshot())
+        val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty())
         try {
             val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
             ZipOutputStream(out.buffered()).use { zip ->
@@ -114,6 +118,7 @@ class BackupManager(
                     settings = parsed.settings,
                     exportedOn = parsed.exportedOn,
                     missingFiles = parsed.data.storedAttachments.size - saved.storedAttachments.size,
+                    calendars = parsed.calendars,
                 )
             }
         } catch (e: Exception) {
@@ -150,6 +155,7 @@ class BackupManager(
             throw BackupException("Couldn't restore the backup. Nothing was changed.")
         }
         settings.applySnapshot(staged.settings)
+        staged.calendars?.let { calendars?.restoreChoices(it) }
         staged.file.delete()
     }
 
@@ -157,7 +163,7 @@ class BackupManager(
         staged.file.delete()
     }
 
-    private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?)
+    private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?, val calendars: List<CalendarChoice>?)
 
     private fun notABackup() = BackupException("That file isn't a Planner backup.")
 
@@ -169,7 +175,12 @@ class BackupManager(
     private fun filterTaskAttachments(tasks: List<PlannerTask>, keep: (Attachment) -> Boolean) =
         tasks.map { it.copy(attachments = it.attachments.filter(keep)) }
 
-    private fun toJson(data: DataSnapshot, settings: SettingsSnapshot): String = JSONObject().apply {
+    private fun toJson(data: DataSnapshot, settings: SettingsSnapshot, calendars: List<CalendarChoice>): String = JSONObject().apply {
+        // Optional (older app versions ignore it): the ticked Nextcloud calendars, without events or passwords.
+        put("calendars", calendars.toJson {
+            JSONObject().put("account", it.account).put("href", it.href).put("name", it.name)
+                .put("color", it.color?.let { c -> String.format("#%06X", c and 0xFFFFFF) } ?: JSONObject.NULL)
+        })
         put("tasks", TaskCodec.encode(data.tasks))
         put("format", FORMAT)
         put("formatVersion", FORMAT_VERSION)
@@ -404,7 +415,13 @@ class BackupManager(
                 it.getString("label"), payload)
         }
         require(deleted.map { it.id }.distinct().size == deleted.size)
-        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, TaskCodec.decode(if (version >= 10 || root.has("tasks")) root.getJSONArray("tasks") else JSONArray())), settings, exportedOn)
+        // Optional: backups from before calendar sync have none. A calendar entry that doesn't make sense is left out.
+        val calendars = root.optJSONArray("calendars")?.objects()?.mapNotNull {
+            val account = it.optString("account"); val href = it.optString("href"); val name = it.optString("name")
+            if (account.isBlank() || !href.startsWith("/") || name.isBlank() || account.length > 2000 || href.length > 2000) return@mapNotNull null
+            CalendarChoice(account, href, name.take(200), if (it.isNull("color")) null else parseHexColor(it.optString("color")))
+        }
+        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, TaskCodec.decode(if (version >= 10 || root.has("tasks")) root.getJSONArray("tasks") else JSONArray())), settings, exportedOn, calendars)
     }
 
     // "#RRGGBB" to an opaque ARGB int, or null if it isn't that.

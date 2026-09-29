@@ -24,8 +24,12 @@ import javax.net.ssl.SSLException
 
 data class NextcloudBackup(val name: String, val size: Long?, val modified: String?, val etag: String?)
 
+// A calendar in the account's calendar home. [href] is its path on the server; [ctag] changes whenever its events do.
+data class RemoteCalendar(val href: String, val name: String, val color: Int?, val ctag: String?)
+
 // Blocking transport; callers run on IO. TLS verification stays enabled, redirects are never followed
-// with credentials. Backups are confined to the selected folder under this account's Files root.
+// with credentials. Backups are confined to the selected folder under this account's Files root; calendar sync only
+// reads (PROPFIND and REPORT) inside the account's calendar home and never changes anything on the server.
 class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(20, TimeUnit.SECONDS)
@@ -107,44 +111,98 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     private data class Entry(val url: HttpUrl, val collection: Boolean, val size: Long?, val modified: String?, val etag: String?)
 
-    private fun properties(account: NextcloudAccount, url: HttpUrl, depth: String, missingIsEmpty: Boolean = false): List<Entry> {
-        request(account, "PROPFIND", url, PROPERTIES.toRequestBody("application/xml; charset=utf-8".toMediaType()),
+    private fun properties(account: NextcloudAccount, url: HttpUrl, depth: String, missingIsEmpty: Boolean = false): List<Entry> =
+        multistatus(account, "PROPFIND", url, PROPERTIES, depth, missingIsEmpty = missingIsEmpty,
+            tooLarge = "The backup folder is too large to list. Move older backups to another folder.",
+            invalid = "The server returned an invalid file list. Check that this is your Nextcloud address.",
+            empty = "The server returned an empty file list.").map { (resolved, prop) ->
+            Entry(resolved, prop("resourcetype")?.children("collection")?.isNotEmpty() == true,
+                prop("getcontentlength")?.textContent?.toLongOrNull()?.takeIf { it >= 0 },
+                prop("getlastmodified")?.textContent, prop("getetag")?.textContent)
+        }
+
+    // Every calendar in the account's calendar home that can hold events. Inbox, outbox, trash bin and subscriptions
+    // aren't calendars of this kind, so they are left out.
+    fun calendars(account: NextcloudAccount): List<RemoteCalendar> {
+        val home = account.calendarsRoot
+        return multistatus(account, "PROPFIND", home, CALENDAR_PROPERTIES, "1", calendar = true,
+            tooLarge = "Nextcloud listed too many calendars to read.",
+            invalid = "The server returned an invalid calendar list. Check that this is your Nextcloud address.",
+            empty = "The server returned an empty calendar list.").mapNotNull { (resolved, prop) ->
+            val path = resolved.encodedPath
+            if (!path.startsWith(home.encodedPath) || path.trimEnd('/') == home.encodedPath.trimEnd('/')) return@mapNotNull null
+            if (prop("resourcetype")?.children("calendar", CALDAV)?.isNotEmpty() != true) return@mapNotNull null
+            val components = prop("supported-calendar-component-set", CALDAV)?.children("comp", CALDAV).orEmpty()
+            if (components.isNotEmpty() && components.none { it.attributes["name"].equals("VEVENT", ignoreCase = true) }) return@mapNotNull null
+            val name = prop("displayname")?.textContent?.trim()?.takeIf { it.isNotEmpty() }
+                ?: resolved.pathSegments.lastOrNull { it.isNotEmpty() } ?: return@mapNotNull null
+            RemoteCalendar(path.let { if (it.endsWith('/')) it else "$it/" }, name.take(200),
+                prop("calendar-color", APPLE_ICAL)?.textContent?.let(::parseColor),
+                (prop("getctag", CALENDARSERVER) ?: prop("sync-token"))?.textContent?.trim()?.takeIf { it.isNotEmpty() })
+        }.distinctBy { it.href }
+    }
+
+    // The raw iCalendar text of every event in [calendar] between [from] and [until], with repeats expanded by the
+    // server into single dates.
+    fun calendarEvents(account: NextcloudAccount, calendar: String, from: Instant, until: Instant): List<String> {
+        val home = account.calendarsRoot
+        val url = account.server.newBuilder().encodedPath(calendar).build()
+        require(url.encodedPath.startsWith(home.encodedPath) && url.encodedPath != home.encodedPath &&
+            url.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
+        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        val range = "start=\"${stamp.format(from)}\" end=\"${stamp.format(until)}\""
+        val query = """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
+            """<d:prop><d:getetag/><c:calendar-data><c:expand $range/></c:calendar-data></d:prop>""" +
+            """<c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range $range/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>"""
+        return multistatus(account, "REPORT", url, query, "1", calendar = true, limit = 16 * 1024 * 1024,
+            tooLarge = "This calendar has too many events to download.",
+            invalid = "The server returned an invalid calendar. Try again later.",
+            empty = "The server returned an empty calendar.").mapNotNull { (_, prop) ->
+            prop("calendar-data", CALDAV)?.textContent?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    // One WebDAV request answered with a multistatus: each response's address (on this server only) with a lookup for
+    // the properties the server returned with status 200.
+    private fun multistatus(account: NextcloudAccount, method: String, url: HttpUrl, body: String, depth: String,
+                            tooLarge: String, invalid: String, empty: String, missingIsEmpty: Boolean = false,
+                            calendar: Boolean = false, limit: Int = 2 * 1024 * 1024): List<Pair<HttpUrl, (String, String) -> XmlNode?>> {
+        request(account, method, url, body.toRequestBody("application/xml; charset=utf-8".toMediaType()),
             mapOf("Depth" to depth)).use { response ->
             if (response.code == 404 && missingIsEmpty) return emptyList()
-            if (response.code != 207) fail(response.code)
-            val body = response.body ?: throw BackupException("The server returned an empty file list.")
-            val bytes = body.byteStream().use { it.readBytesLimited(2 * 1024 * 1024) }
+            if (response.code != 207) fail(response.code, calendar)
+            val responseBody = response.body ?: throw BackupException(empty)
+            val bytes = responseBody.byteStream().use { it.readBytesLimited(limit, tooLarge) }
             try {
                 val root = parseXml(bytes)
                 if (root.namespaceURI != DAV || root.localName != "multistatus") throw IOException("Unexpected XML")
                 return root.children("response").mapNotNull { item ->
                     val href = item.children("href").firstOrNull()?.textContent ?: return@mapNotNull null
-                    val resolved = url.resolve(href) ?: return@mapNotNull null
+                    val resolved = url.resolve(href.trim()) ?: return@mapNotNull null
                     if (resolved.scheme != url.scheme || resolved.host != url.host || resolved.port != url.port ||
                         resolved.username.isNotEmpty() || resolved.password.isNotEmpty() ||
                         resolved.query != null || resolved.fragment != null) return@mapNotNull null
                     val props = item.children("propstat").filter {
                         it.children("status").firstOrNull()?.textContent?.trim()?.split(Regex("\\s+"))?.getOrNull(1) == "200"
                     }.flatMap { it.children("prop") }
-                    fun prop(name: String): XmlNode? = props.firstNotNullOfOrNull { it.children(name).firstOrNull() }
                     if (props.isEmpty()) return@mapNotNull null
-                    Entry(resolved, prop("resourcetype")?.children("collection")?.isNotEmpty() == true,
-                        prop("getcontentlength")?.textContent?.toLongOrNull()?.takeIf { it >= 0 },
-                        prop("getlastmodified")?.textContent, prop("getetag")?.textContent)
+                    resolved to { name: String, namespace: String -> props.firstNotNullOfOrNull { it.children(name, namespace).firstOrNull() } }
                 }
             } catch (e: BackupException) {
                 throw e
             } catch (_: Exception) {
-                throw BackupException("The server returned an invalid file list. Check that this is your Nextcloud address.")
+                throw BackupException(invalid)
             }
         }
     }
 
-    private class XmlNode(val namespaceURI: String?, val localName: String) {
+    private operator fun ((String, String) -> XmlNode?).invoke(name: String): XmlNode? = this(name, DAV)
+
+    private class XmlNode(val namespaceURI: String?, val localName: String, val attributes: Map<String, String> = emptyMap()) {
         val nodes = mutableListOf<XmlNode>()
         val text = StringBuilder()
         val textContent: String get() = text.toString()
-        fun children(name: String) = nodes.filter { it.namespaceURI == DAV && it.localName == name }
+        fun children(name: String, namespace: String = DAV) = nodes.filter { it.namespaceURI == namespace && it.localName == name }
     }
 
     private fun parseXml(bytes: ByteArray): XmlNode {
@@ -162,7 +220,8 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
                 XmlPullParser.DOCDECL -> throw IOException("DTD not allowed")
                 XmlPullParser.START_TAG -> {
                     if (stack.size >= 32) throw IOException("XML nesting limit")
-                    val node = XmlNode(parser.namespace, parser.name)
+                    val node = XmlNode(parser.namespace, parser.name,
+                        (0 until parser.attributeCount).associate { parser.getAttributeName(it) to parser.getAttributeValue(it) })
                     if (stack.isEmpty()) {
                         if (root != null) throw IOException("Multiple roots")
                         root = node
@@ -180,13 +239,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         return root ?: throw IOException("Empty XML")
     }
 
-    private fun java.io.InputStream.readBytesLimited(limit: Int): ByteArray {
+    private fun java.io.InputStream.readBytesLimited(limit: Int, tooLarge: String): ByteArray {
         val output = java.io.ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         while (true) {
             val n = read(buffer)
             if (n == -1) break
-            if (output.size() + n > limit) throw BackupException("The backup folder is too large to list. Move older backups to another folder.")
+            if (output.size() + n > limit) throw BackupException(tooLarge)
             output.write(buffer, 0, n)
         }
         return output.toByteArray()
@@ -209,7 +268,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    private fun fail(code: Int): Nothing = throw BackupException(when (code) {
+    private fun fail(code: Int, calendar: Boolean = false): Nothing = throw BackupException(if (calendar) when (code) {
+        401 -> "Nextcloud rejected the login. Check your username and app password."
+        403 -> "Nextcloud denied access to your calendars."
+        404 -> "The calendar wasn't found on Nextcloud. It may have been deleted."
+        in 300..399 -> "Nextcloud redirected the request. Enter its final HTTPS address."
+        else -> "Nextcloud couldn't send the calendars (HTTP $code). Try again later."
+    } else when (code) {
         401 -> "Nextcloud rejected the login. Check your username and app password."
         403 -> "Nextcloud denied access. Check this account's file permissions."
         404 -> "The Nextcloud folder or backup wasn't found. Check the address and username, or refresh the backup list."
@@ -222,8 +287,16 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         else -> "Nextcloud couldn't complete the request (HTTP $code). Try again."
     })
 
+    // "#RRGGBB" or "#RRGGBBAA" (Nextcloud's calendar colours) as an opaque ARGB int.
+    private fun parseColor(text: String): Int? = Regex("#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?").matchEntire(text.trim())
+        ?.let { (0xFF000000L or it.groupValues[1].toLong(16)).toInt() }
+
     companion object {
         private const val DAV = "DAV:"
+        private const val CALDAV = "urn:ietf:params:xml:ns:caldav"
+        private const val APPLE_ICAL = "http://apple.com/ns/ical/"
+        private const val CALENDARSERVER = "http://calendarserver.org/ns/"
+        private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/></d:prop></d:propfind>"""
         private val EMPTY = ByteArray(0).toRequestBody(null)
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
         private fun validName(name: String) = name.startsWith("Planner-backup-") && name.endsWith(".zip") &&

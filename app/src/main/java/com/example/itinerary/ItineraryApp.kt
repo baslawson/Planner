@@ -6,6 +6,8 @@ import androidx.room.Room
 import com.example.itinerary.data.AppDatabase
 import com.example.itinerary.data.AttachmentStore
 import com.example.itinerary.data.BackupManager
+import com.example.itinerary.data.CalendarSync
+import com.example.itinerary.data.NextcloudAccountStore
 import com.example.itinerary.data.NextcloudBackups
 import com.example.itinerary.data.Repository
 import com.example.itinerary.data.SettingsRepository
@@ -29,16 +31,28 @@ class ItineraryApp : Application() {
 
     val reminderScheduler: ReminderScheduler by lazy { ReminderScheduler(this) }
 
-    val repository: Repository by lazy {
-        val db = Room.databaseBuilder(this, AppDatabase::class.java, "itinerary.db")
+    // Internal so instrumented tests can put outside-calendar events in place without a server.
+    internal val database: AppDatabase by lazy {
+        Room.databaseBuilder(this, AppDatabase::class.java, "itinerary.db")
             .addMigrations(*com.example.itinerary.data.ALL_MIGRATIONS)
             .build()
-        Repository(db, attachmentStore, reminderScheduler) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) }
+    }
+
+    val repository: Repository by lazy {
+        Repository(database, attachmentStore, reminderScheduler) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) }
+    }
+
+    // Work that must finish even when the screen that started it closes or rotates (calendar sync).
+    val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    // Nextcloud calendars shown read-only beside Planner's own events; uses the backup login.
+    val calendarSync: CalendarSync by lazy {
+        CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) })
     }
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }
 
-    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings) }
+    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync) }
 
     val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup) }
 

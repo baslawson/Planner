@@ -31,6 +31,7 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
     val textSizePercent by vm.textSizePercent.collectAsStateWithLifecycle()
     var showNextcloud by rememberSaveable { mutableStateOf(false) }
     var showDeleted by rememberSaveable { mutableStateOf(false) }
+    var showCalendars by rememberSaveable { mutableStateOf(false) }
     val cloud by vm.cloud.collectAsStateWithLifecycle()
     LaunchedEffect(showNextcloud) { if (showNextcloud) vm.loadNextcloud() }
 
@@ -78,8 +79,11 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
             onNextcloud = { showNextcloud = true },
             onDismiss = onDismiss,
             onRecentlyDeleted = { showDeleted = true },
+            onCalendars = { showCalendars = true },
         )
     }
+    // Before the Nextcloud pop-up, so "Connect Nextcloud" opens the login on top of it.
+    if (showCalendars) CalendarsDialog(nextcloudOpen = showNextcloud, onConnect = { showNextcloud = true }, onDismiss = { showCalendars = false })
     if (showNextcloud) {
         NextcloudDialog(
             state = cloud,

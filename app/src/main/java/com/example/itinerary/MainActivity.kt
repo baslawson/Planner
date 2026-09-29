@@ -79,6 +79,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             (application as ItineraryApp).repository.rescheduleAllReminders()
         }
+        // Ticked Nextcloud calendars, at most every 15 minutes; does nothing without a login or a ticked calendar.
+        (application as ItineraryApp).let { app -> app.appScope.launch { app.calendarSync.syncIfDue() } }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

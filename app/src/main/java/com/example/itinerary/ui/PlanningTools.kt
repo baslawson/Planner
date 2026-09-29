@@ -32,6 +32,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
+import com.example.itinerary.data.busyItem
 import com.example.itinerary.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -74,8 +75,11 @@ fun PlanningToolDialogs(state: PlanningToolsState, onEvent: (ItineraryItem) -> U
     LaunchedEffect(state.freeTime, state.editingFreeTimeEvent) {
         if (!state.freeTime && !state.editingFreeTimeEvent) searchState.removeState("free-time")
     }
+    // Ticked Nextcloud calendars count as busy too; a timed event longer than a day for its real length.
+    val outside = LocalOutsideEvents.current
     if (state.freeTime && events != null) searchState.SaveableStateProvider("free-time") {
-        FreeTimeDialog(events.orEmpty(), onDismiss = { state.freeTime = false }, onChoose = {
+        val busy = remember(events, outside) { events.orEmpty() + outside.values.map { it.event.busyItem(it.color) } }
+        FreeTimeDialog(busy, onDismiss = { state.freeTime = false }, onChoose = {
             state.editFreeTimeEvent(); onEvent(it)
         })
     }

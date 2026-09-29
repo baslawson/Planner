@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.Categories
 import com.example.itinerary.data.Search
 import com.example.itinerary.data.SearchHit
+import com.example.itinerary.data.OutsideCalendars
 import com.example.itinerary.data.SearchOutcome
 import java.time.LocalDate
 import androidx.compose.runtime.key
@@ -117,7 +118,7 @@ fun SearchScreen(
     val searching = query.isNotBlank() || categories.isNotEmpty()
 
     val selectable = remember(searching, visibleOutcome) {
-        if (searching && visibleOutcome.invalidDates.isEmpty()) visibleOutcome.hits.map { SelectableEvent(it.item.id, it.item.title, it.item.date, bill = it.item.category == "Bills") } else emptyList()
+        if (searching && visibleOutcome.invalidDates.isEmpty()) visibleOutcome.hits.filterNot { OutsideCalendars.isOutside(it.item.id) }.map { SelectableEvent(it.item.id, it.item.title, it.item.date, bill = it.item.category == "Bills") } else emptyList()
     }
     val selection = rememberEventSelection(selectable, prune = outcome !== SearchOutcome.LOADING)
 
@@ -265,7 +266,10 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
         }
         hits.forEach { hit ->
             item(key = "item-${hit.item.id}") {
-                HitRow(hit, outcome.tokens, selection) { if (selection.active) selection.toggle(hit.item.id) else onOpenResult(hit.item.date) }
+                HitRow(hit, outcome.tokens, selection) {
+                    if (selection.active) { if (!OutsideCalendars.isOutside(hit.item.id)) selection.toggle(hit.item.id) }
+                    else onOpenResult(hit.item.date)
+                }
             }
         }
     }
@@ -277,7 +281,8 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
     val item = hit.item
     // Same colours as in the plan's day list, so an event looks the same everywhere.
     val accent = item.accentColor()
-    TappableRow(onClick = onClick, onLongClick = { selection.toggle(item.id) },
+    val outside = LocalOutsideEvents.current[item.id]
+    TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
         selected = (item.id in selection.ids).takeIf { selection.active }, arrow = !selection.active, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
             item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
@@ -312,13 +317,14 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (item.category != "Bills") Text(
+            if (outside != null) OutsideEventLabel(outside)
+            else if (item.category != "Bills") Text(
                 item.category,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
+        if (selection.active && outside == null) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
     }
 }
 

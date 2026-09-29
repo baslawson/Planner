@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.ItineraryItem
+import com.example.itinerary.data.OutsideCalendars
+import com.example.itinerary.data.plannerCopy
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -60,6 +62,9 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val hiddenCategories by vm.hiddenCategories.collectAsStateWithLifecycle()
     val addButtonSeeThrough by vm.addButtonSeeThrough.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ItineraryItem?>(null) }
+    // An event from a Nextcloud calendar, shown read-only (see OutsideEventDialog).
+    var viewingOutside by remember { mutableStateOf<com.example.itinerary.data.OutsideInfo?>(null) }
+    val outsideEvents = LocalOutsideEvents.current
     // A new event from the big +; it starts on the selected day.
     val newEvent = remember { NewEventState() }
     val overlayMenu = remember { OverlayMenuState() }
@@ -69,7 +74,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val attachmentsByItem = remember(allAttachments) { allAttachments.groupBy { it.itemId } }
     val remindersByItem = remember(allReminders) { allReminders.groupBy { it.itemId } }
     val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
-    val selectable = remember(dayItems) { dayItems.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
+    // Outside events can't be deleted from Planner, so they can't be selected either.
+    val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
     val selection = rememberEventSelection(selectable)
     val datesWithItems = remember(allItems) {
         buildSet {
@@ -177,8 +183,16 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                                 today = today,
                                 displayedDate = selected,
                                 onMove = { vm.moveToTomorrow(item.id) },
-                                reminderCount = remindersByItem[item.id]?.size ?: 0
-                            ) { if (selection.active) selection.toggle(item.id) else editing = item }
+                                reminderCount = remindersByItem[item.id]?.size ?: 0,
+                                outside = outsideEvents[item.id],
+                            ) {
+                                val outside = outsideEvents[item.id]
+                                when {
+                                    outside != null -> if (!selection.active) viewingOutside = outside
+                                    selection.active -> selection.toggle(item.id)
+                                    else -> editing = item
+                                }
+                            }
                         }
                     } }
                 }
@@ -206,6 +220,13 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             saveEvent = vm::saveItem,
             onEventSaved = ::follow,
         )
+    }
+
+    viewingOutside?.let { info ->
+        OutsideEventDialog(info, onDismiss = { viewingOutside = null }, onCopy = {
+            viewingOutside = null
+            editing = info.event.plannerCopy()
+        })
     }
 
     editing?.let { current ->
@@ -238,10 +259,10 @@ private fun DayHeader(date: LocalDate) {
 }
 
 @Composable
-private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCount: Int, reminderCount: Int, today: LocalDate, displayedDate: LocalDate, onMove: suspend () -> Unit, onClick: () -> Unit) {
+private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCount: Int, reminderCount: Int, today: LocalDate, displayedDate: LocalDate, onMove: suspend () -> Unit, outside: com.example.itinerary.data.OutsideInfo? = null, onClick: () -> Unit) {
     // The event's own colour: the bar as it is, the title in a shade that reads well on the current theme.
     val accent = item.accentColor()
-    TappableRow(onClick = onClick, onLongClick = { selection.toggle(item.id) },
+    TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
         selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
@@ -260,6 +281,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(androidx.compose.ui.text.AnnotatedString(item.title), readableOnSurface(accent), item.category == "Bills")
+            outside?.let { OutsideEventLabel(it) }
             if (item.skipped) Text("Skipped · reminders paused", style = MaterialTheme.typography.labelMedium)
             if (item.category == "Bills" && item.billAmountMinor != null) Text(com.example.itinerary.data.Bills.format(item.billAmountMinor, item.billCurrency), style = MaterialTheme.typography.bodyMedium)
             if (item.category == "Bills") {
@@ -304,7 +326,9 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         }
         val context = LocalContext.current
         val format = LocalTimeFormat.current
-        if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
+        // An outside event has nothing to select and none of these actions: they would change it.
+        if (outside != null) Unit
+        else if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(item.id, item.title, item.date, today, onMove,
             billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
             repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped,

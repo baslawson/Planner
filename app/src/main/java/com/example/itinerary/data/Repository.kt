@@ -52,6 +52,10 @@ class Repository(
             .sortedWith(compareBy<PlannerTask> { it.dueDate }.then(Tasks.order))
 
     private val changes = Mutex()
+
+    // Events from other calendars are shown with negative ids and belong to their calendar, not to Planner.
+    private fun requirePlannerEvent(id: Long) = require(!OutsideCalendars.isOutside(id)) { OutsideCalendars.READ_ONLY }
+    private fun requirePlannerEvents(ids: Collection<Long>) = ids.forEach(::requirePlannerEvent)
     private val _pendingPayments = MutableStateFlow<List<PendingPayment>>(emptyList())
     val pendingPayments = _pendingPayments.asStateFlow()
     // Snackbar dismissal must not invalidate a still-visible notification Undo action.
@@ -331,6 +335,8 @@ class Repository(
         removedReminders: List<Reminder> = emptyList(),
         options: EventSaveOptions = EventSaveOptions(),
     ) = changes.withLock {
+        requirePlannerEvent(item.id)
+        require(item.tripId != OutsideCalendars.TRIP_ID) { OutsideCalendars.READ_ONLY }
         ChecklistCodec.validate(item.checklist)
         Bills.validate(item.billAmountMinor, item.billCurrency)
         Payments.validate(item.payments)
@@ -449,6 +455,7 @@ class Repository(
     suspend fun deleteItem(item: ItineraryItem) = deleteWithUndo(item)
 
     suspend fun deleteWithUndo(item: ItineraryItem, entireSeries: Boolean = false) = changes.withLock {
+        requirePlannerEvent(item.id)
         val deleted = db.withTransaction {
             val current = itemDao.byId(item.id) ?: return@withTransaction null
             val selected = if (entireSeries && current.seriesId != null) {
@@ -468,6 +475,7 @@ class Repository(
 
     // Delete exactly these occurrences together, with one Undo bundle for the entire selection.
     suspend fun deleteEventsWithUndo(ids: Set<Long>) = changes.withLock {
+        requirePlannerEvents(ids)
         withContext(NonCancellable) {
             val deleted = db.withTransaction {
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
@@ -497,6 +505,7 @@ class Repository(
 
     // Change only the date of the latest saved record; one occurrence of a series stays independent.
     suspend fun moveToTomorrow(id: Long, today: java.time.LocalDate = java.time.LocalDate.now()) = changes.withLock {
+        requirePlannerEvent(id)
         val (move, reminders) = db.withTransaction {
             val current = itemDao.byId(id) ?: error("This event no longer exists")
             val tomorrow = today.plusDays(1)
@@ -537,6 +546,7 @@ class Repository(
     suspend fun deleteTemplate(template: EventTemplate) = changes.withLock { db.templateDao().delete(template) }
 
     suspend fun setSkipped(id: Long, skipped: Boolean) = changes.withLock {
+        requirePlannerEvent(id)
         val reminders = db.withTransaction {
             val current = itemDao.byId(id) ?: error("This event no longer exists")
             require(current.seriesId != null || !skipped) { "Only repeating events can be skipped" }
@@ -547,6 +557,7 @@ class Repository(
     }
 
     suspend fun setPaid(id: Long, paid: Boolean) = changes.withLock {
+        requirePlannerEvent(id)
         changePayment(id, paid)
     }
 

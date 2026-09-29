@@ -8,6 +8,8 @@ import com.example.itinerary.data.AppFont
 import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.BackupException
 import com.example.itinerary.data.BackupManager
+import com.example.itinerary.data.CalendarSync
+import com.example.itinerary.data.toPlanEvent
 import com.example.itinerary.data.DateFormatChoice
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.NextcloudAccount
@@ -24,6 +26,8 @@ import com.example.itinerary.data.Trip
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
@@ -43,6 +47,8 @@ class TripsViewModel(
     private val settings: SettingsRepository,
     private val backup: BackupManager,
     private val nextcloud: NextcloudBackups,
+    // Nextcloud calendars shown beside Planner's events; null in tests that don't need them.
+    private val calendars: CalendarSync? = null,
 ) : ViewModel() {
     suspend fun deleteEvents(ids: Set<Long>) = viewModelScope.async {
         repo.deleteEventsWithUndo(ids)
@@ -85,6 +91,8 @@ class TripsViewModel(
 
     fun disconnectNextcloud() = runBackup("Disconnecting...", cloudAction = true) {
         nextcloud.disconnect()
+        // The calendars use the same login, so their list and downloaded events go too.
+        calendars?.clearAll()
         cloudAccount = null
         cloudLoaded = true
         _cloud.value = _cloud.value.copy(connected = false, backups = null, lastBackup = null,
@@ -206,8 +214,10 @@ class TripsViewModel(
         .stateInWhileVisible(viewModelScope, null)
 
     // Every event of every plan, for the agenda; null until the database has answered, like [trips].
-    val agendaEvents: StateFlow<List<PlanEvent>?> = repo.planEvents
-        .stateInWhileVisible(viewModelScope, null)
+    // Events of ticked Nextcloud calendars are added (with negative ids, see OutsideCalendars).
+    val agendaEvents: StateFlow<List<PlanEvent>?> = combine(repo.planEvents, calendars?.shown ?: flowOf(emptyMap())) { own, outside ->
+        if (outside.isEmpty()) own else own + outside.values.map { it.event.toPlanEvent(it.color) }
+    }.stateInWhileVisible(viewModelScope, null)
 
     val showBillsSummary = settings.showBillsSummary
     val agendaRange = settings.agendaRange

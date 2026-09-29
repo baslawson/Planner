@@ -85,6 +85,7 @@ fun SettingsScreen(
     onNextcloud: () -> Unit,
     onDismiss: () -> Unit,
     onRecentlyDeleted: () -> Unit = {},
+    onCalendars: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = (context.applicationContext as ItineraryApp).settings
@@ -166,6 +167,9 @@ fun SettingsScreen(
                             Toast.makeText(context, "Long-press your home screen, choose Widgets, then Planner.", Toast.LENGTH_LONG).show()
                         }
                     }
+                    SettingsHeading("Calendars")
+                    Text("Show events from your Nextcloud calendars beside your own, read-only.", style = MaterialTheme.typography.bodySmall)
+                    StackedButton("Calendars", onCalendars)
                     SettingsHeading("Backup")
                     StackedButton("Recently deleted", onRecentlyDeleted)
                     BackupStatusPanel()

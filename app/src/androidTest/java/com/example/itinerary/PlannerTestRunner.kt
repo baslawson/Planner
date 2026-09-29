@@ -59,7 +59,10 @@ class CleanStart : RunListener() {
         QuickDraftStore(context).clear()
         TaskDraftStore(context).clear("new")
         val app = context.applicationContext as ItineraryApp
-        runBlocking { app.repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList())) }
+        runBlocking {
+            app.repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
+            app.calendarSync.clearAll() // Nextcloud calendars and their downloaded events
+        }
         with(app.settings) {
             setAgendaTypes(AgendaType.entries.toSet()); setAgendaRange(AgendaRange.UPCOMING)
             setShowBillsSummary(true); setBillsExpanded(true); setCalendarCollapsed(false)

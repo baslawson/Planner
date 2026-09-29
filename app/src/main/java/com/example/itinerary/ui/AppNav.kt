@@ -116,7 +116,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 
     // The agenda owns event, backup and settings state.
     val tripsFactory = viewModelFactory {
-        initializer { TripsViewModel(app.repository, app.settings, app.backup, app.nextcloudBackups) }
+        initializer { TripsViewModel(app.repository, app.settings, app.backup, app.nextcloudBackups, app.calendarSync) }
     }
 
     val pending by app.repository.pendingDeletions.collectAsStateWithLifecycle()
@@ -198,6 +198,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             } while (app.repository.maintenanceIssues.value.isNotEmpty())
         }
     }
+    val outsideEvents by app.calendarSync.shown.collectAsStateWithLifecycle(initialValue = emptyMap())
+    CompositionLocalProvider(LocalOutsideEvents provides outsideEvents) {
     Box(Modifier.fillMaxSize()) {
         NavHost(navController = nav, startDestination = "agenda") {
             composable(
@@ -218,7 +220,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             }
             composable("search") { entry ->
                 val vm: SearchViewModel = viewModel(
-                    factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings) } },
+                    factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings, app.calendarSync.shown) } },
                 )
                 SearchScreen(
                     vm = vm,
@@ -243,7 +245,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 val startDate = entry.arguments?.getString("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
                 val vm: ItineraryViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { ItineraryViewModel(app.repository, app.settings, startDate, createSavedStateHandle()) }
+                        initializer { ItineraryViewModel(app.repository, app.settings, startDate, createSavedStateHandle(), app.calendarSync.shown) }
                     },
                 )
                 var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -315,6 +317,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 onDelete = { item, series -> app.repository.deleteWithUndo(item, series) })
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(8.dp))
+    }
     }
 
 }

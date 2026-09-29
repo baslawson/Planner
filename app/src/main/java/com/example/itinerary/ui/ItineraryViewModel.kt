@@ -9,7 +9,12 @@ import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.Repository
 import com.example.itinerary.data.SettingsRepository
+import com.example.itinerary.data.OutsideInfo
+import com.example.itinerary.data.toItem
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -21,6 +26,8 @@ class ItineraryViewModel(
     private val settings: SettingsRepository,
     startDate: LocalDate? = null, // set when arriving from a search result
     private val savedState: SavedStateHandle = SavedStateHandle(),
+    // Events of ticked Nextcloud calendars (see CalendarSync.shown).
+    outside: Flow<Map<Long, OutsideInfo>> = flowOf(emptyMap()),
 ) : ViewModel() {
     suspend fun deleteEvents(ids: Set<Long>) = viewModelScope.async {
         repo.deleteEventsWithUndo(ids)
@@ -35,8 +42,10 @@ class ItineraryViewModel(
     val addButtonSeeThrough: StateFlow<Int> = settings.addButtonSeeThrough
 
 
-    val items: StateFlow<List<ItineraryItem>> = repo.allItems
-        .stateInWhileVisible(viewModelScope, emptyList())
+    // Planner's own events plus those of ticked Nextcloud calendars (negative ids; tapping one opens a read-only view).
+    val items: StateFlow<List<ItineraryItem>> = combine(repo.allItems, outside) { own, other ->
+        if (other.isEmpty()) own else own + other.values.map { it.event.toItem(it.color) }
+    }.stateInWhileVisible(viewModelScope, emptyList())
 
     val attachments: StateFlow<List<Attachment>> = repo.allAttachments
         .stateInWhileVisible(viewModelScope, emptyList())

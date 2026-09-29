@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import com.example.itinerary.data.OutsideCalendars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,7 +124,9 @@ fun AgendaScreen(
     val dates = remember(eventsByDate, datedTasks, billsByDate) { (eventsByDate.keys + datedTasks.keys + billsByDate.keys).sorted() }
 
     val selectable = remember(days, shownBills) {
-        days.flatMap { it.entries }.distinctBy { it.event.id }.map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
+        // Outside events can't be deleted from Planner, so they can't be selected either.
+        days.flatMap { it.entries }.distinctBy { it.event.id }.filterNot { OutsideCalendars.isOutside(it.event.id) }
+            .map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
     val selection = rememberEventSelection(selectable)
@@ -270,7 +273,8 @@ fun AgendaScreen(
                                 AgendaEventCard(entry, today, selection,
                                     onMove = { vm.moveToTomorrow(entry.event.id) }) {
                                     // A trip shown under Today opens the calendar on today, the day it was shown under.
-                                    if (selection.active) selection.toggle(entry.event.id) else onOpenEvent(if (entry.continuing) today else entry.event.date)
+                                    if (selection.active) { if (!OutsideCalendars.isOutside(entry.event.id)) selection.toggle(entry.event.id) }
+                                    else onOpenEvent(if (entry.continuing) today else entry.event.date)
                                 }
                             }
                         }
@@ -361,7 +365,8 @@ private fun AgendaDayHeading(date: LocalDate, today: LocalDate) {
 private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: EventSelection, onMove: suspend () -> Unit, onClick: () -> Unit) {
     val event = entry.event
     val accent = event.accentColor()
-    TappableRow(onClick = onClick, onLongClick = { selection.toggle(event.id) },
+    val outside = LocalOutsideEvents.current[event.id]
+    TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(event.id) }),
         selected = (event.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
@@ -380,6 +385,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(androidx.compose.ui.text.AnnotatedString(event.title), readableOnSurface(accent), event.category == "Bills")
+            outside?.let { OutsideEventLabel(it) }
             if (event.skipped) Text("Skipped · reminders paused", style = MaterialTheme.typography.labelMedium)
             if (event.category == "Bills" && event.billAmountMinor != null) Text(com.example.itinerary.data.Bills.format(event.billAmountMinor, event.billCurrency), style = MaterialTheme.typography.bodyMedium)
             if (event.category == "Bills") {
@@ -398,7 +404,9 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         }
         val context = LocalContext.current
         val format = LocalTimeFormat.current
-        if (selection.active) androidx.compose.material3.Checkbox(checked = event.id in selection.ids, onCheckedChange = null)
+        // An outside event has nothing to select and none of these actions: they would change it.
+        if (outside != null) Unit
+        else if (selection.active) androidx.compose.material3.Checkbox(checked = event.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(event.id, event.title, event.date, today, onMove,
             billId = event.id.takeIf { event.category == "Bills" }, paid = event.paid,
             repeatId = event.id.takeIf { event.seriesId != null || event.skipped }, skipped = event.skipped,

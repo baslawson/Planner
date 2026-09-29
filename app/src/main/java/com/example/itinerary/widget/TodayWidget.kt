@@ -157,7 +157,8 @@ class TodayWidget : AppWidgetProvider() {
             if (ids.isEmpty()) { alarm.cancel(refreshIntent(context)); return }
             val app = context.applicationContext as ItineraryApp
             val today = LocalDate.now()
-            val events = app.repository.widgetEvents(today)
+            // Planner's own events and those of ticked Nextcloud calendars, in one day order.
+            val events = eventsOnDay(app.repository.widgetEvents(today) + app.calendarSync.widgetItems(today), today)
             val tasks = app.repository.widgetTasks(today)
             ids.forEach { id ->
                 val options = manager.getAppWidgetOptions(id)

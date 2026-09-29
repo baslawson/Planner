@@ -7,8 +7,9 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class],
-    version = 24,
+    entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class,
+        CalendarSource::class, OutsideEvent::class],
+    version = 25,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -20,6 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
     abstract fun attachmentDao(): AttachmentDao
     abstract fun reminderDao(): ReminderDao
+    abstract fun outsideDao(): OutsideDao
 }
 
 val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -237,7 +239,19 @@ val MIGRATION_23_24 = object : Migration(23, 24) {
     }
 }
 
+// Calendar sync: calendars kept on another service and their downloaded events, in two new tables. Nothing existing
+// changes. The statements are the ones Room generates for CalendarSource and OutsideEvent.
+val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `calendar_sources` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `account` TEXT NOT NULL, `href` TEXT NOT NULL, `name` TEXT NOT NULL, `color` INTEGER, `enabled` INTEGER NOT NULL, `ctag` TEXT, `fetchedFor` TEXT, `lastSynced` INTEGER, `lastError` TEXT)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_calendar_sources_account_href` ON `calendar_sources` (`account`, `href`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `outside_events` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sourceId` INTEGER NOT NULL, `date` TEXT NOT NULL, `startTime` TEXT, `durationMinutes` INTEGER, `endDate` TEXT, `timedStart` TEXT, `timedEnd` TEXT, `title` TEXT NOT NULL, `location` TEXT NOT NULL, `notes` TEXT NOT NULL, FOREIGN KEY(`sourceId`) REFERENCES `calendar_sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_outside_events_sourceId` ON `outside_events` (`sourceId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_outside_events_date` ON `outside_events` (`date`)")
+    }
+}
+
 // Every upgrade step, oldest first: the app opens its database with these, and the migration tests use the same list.
 val ALL_MIGRATIONS = arrayOf(
-    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
 )
