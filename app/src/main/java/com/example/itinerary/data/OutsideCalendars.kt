@@ -43,7 +43,56 @@ data class CalendarSource(
     @ColumnInfo(defaultValue = "'NEXTCLOUD'") val kind: String = OutsideCalendars.KIND_NEXTCLOUD,
     // A second line in Settings → Calendars (a phone calendar's account); null = none.
     val detail: String? = null,
+    // Nextcloud only: whether this login may add events to it, and whether Planner sends its own events here (step 5;
+    // at most one calendar).
+    @ColumnInfo(defaultValue = "1") val writable: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val sendHere: Boolean = false,
 )
+
+// Step 5: what Planner sent to Nextcloud for one of its events, so a later pass can tell what to create, update or delete.
+// No foreign key on purpose: a row whose event is gone is how a deletion is noticed. [uid] null = a past event that was
+// only noted, not sent (it's sent once it's edited). [problem]: the copy on Nextcloud was changed or deleted there since
+// Planner last wrote it, so Planner leaves it alone (step 6 resolves these).
+@Entity(tableName = "sent_events", indices = [Index(value = ["itemId"], unique = true)])
+data class SentEvent(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val itemId: Long,
+    val account: String,
+    val calendar: String,
+    val uid: String?,
+    val etag: String? = null,
+    val fingerprint: String,
+    val problem: String? = null,
+) {
+    companion object {
+        const val CHANGED = "CHANGED"
+        const val DELETED = "DELETED"
+    }
+}
+
+@Dao
+interface SentDao {
+    @Query("SELECT * FROM sent_events ORDER BY itemId")
+    suspend fun all(): List<SentEvent>
+
+    @Query("SELECT * FROM sent_events ORDER BY itemId")
+    fun observe(): Flow<List<SentEvent>>
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun put(row: SentEvent): Long
+
+    @Query("DELETE FROM sent_events WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM sent_events WHERE calendar != :calendar OR account != :account")
+    suspend fun deleteOtherCalendars(account: String, calendar: String)
+
+    @Query("DELETE FROM sent_events")
+    suspend fun deleteAll()
+
+    @Insert
+    suspend fun insertAll(rows: List<SentEvent>)
+}
 
 @Entity(
     tableName = "outside_events",

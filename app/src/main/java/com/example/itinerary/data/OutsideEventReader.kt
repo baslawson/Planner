@@ -10,12 +10,14 @@ import java.time.temporal.ChronoUnit
 object OutsideEventReader {
     class Result(val events: List<OutsideEvent>, val skipped: Int)
 
-    fun read(calendarData: List<String>, zone: ZoneId): Result {
+    // [skipUids]: events to leave out (Planner's own, sent from this phone).
+    fun read(calendarData: List<String>, zone: ZoneId, skipUids: Set<String> = emptySet()): Result {
         var skipped = 0
         val events = calendarData.flatMap { text ->
             val lines = runCatching { Ics.lines(text) }.getOrElse { skipped++; return@flatMap emptyList() }
             val components = runCatching { Ics.events(lines, 10_000, "Too many events.") }.getOrElse { skipped++; return@flatMap emptyList() }
             components.mapNotNull { props ->
+                if (props.firstOrNull { it.name == "UID" }?.value?.trim() in skipUids) return@mapNotNull null
                 runCatching { event(props, zone) }.getOrElse { skipped++; null }
             }
         }

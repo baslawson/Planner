@@ -36,6 +36,8 @@ class Repository(
     private val store: AttachmentStore,
     private val scheduler: ReminderAlarms,
     private val onChanged: () -> Unit = {},
+    // A deletion's Undo is no longer on offer (calendar sync may now delete Planner's copy on Nextcloud).
+    private val onDeletionFinished: () -> Unit = {},
 ) {
     // Stay below SQLite's bind-parameter limit, including on older Android versions.
     private suspend fun <T> readIds(ids: Collection<Long>, query: suspend (List<Long>) -> List<T>): List<T> {
@@ -520,6 +522,7 @@ class Repository(
         val bundle = _pendingDeletions.value.find { it.token == token } ?: return@withLock
         _pendingDeletions.value -= bundle
         afterCommit(files = bundle.attachments.map { it.fileName }, notify = false)
+        onDeletionFinished()
     }
 
     // Change only the date of the latest saved record; one occurrence of a series stays independent.

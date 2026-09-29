@@ -42,6 +42,8 @@ class StagedBackup internal constructor(
     val missingFiles: Int,
     // Ticked Nextcloud calendars; null for a backup made before calendar sync, which leaves the current ones alone.
     internal val calendars: List<CalendarChoice>? = null,
+    // Where Planner sends its events on Nextcloud and what it sent (step 5); null for a backup without it (left alone).
+    internal val send: Pair<CalendarChoice?, List<SentEvent>>? = null,
 ) {
     val plans: Int get() = data.trips.size
     val tasks: Int get() = data.tasks.size
@@ -72,7 +74,7 @@ class BackupManager(
         val attachments = snapshot.attachments.filter { it.url != null || store.fileFor(it.fileName).exists() }
         val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || store.fileFor(it.fileName).exists() }
         val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { store.fileFor(it.fileName).exists() })
-        val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty())
+        val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot())
         try {
             val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
             ZipOutputStream(out.buffered()).use { zip ->
@@ -119,6 +121,7 @@ class BackupManager(
                     exportedOn = parsed.exportedOn,
                     missingFiles = parsed.data.storedAttachments.size - saved.storedAttachments.size,
                     calendars = parsed.calendars,
+                    send = parsed.send,
                 )
             }
         } catch (e: Exception) {
@@ -156,6 +159,7 @@ class BackupManager(
         }
         settings.applySnapshot(staged.settings)
         staged.calendars?.let { calendars?.restoreChoices(it) }
+        staged.send?.let { (target, rows) -> calendars?.restoreSend(target, rows) }
         staged.file.delete()
     }
 
@@ -163,7 +167,8 @@ class BackupManager(
         staged.file.delete()
     }
 
-    private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?, val calendars: List<CalendarChoice>?)
+    private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?, val calendars: List<CalendarChoice>?,
+                         val send: Pair<CalendarChoice?, List<SentEvent>>?)
 
     private fun notABackup() = BackupException("That file isn't a Planner backup.")
 
@@ -175,7 +180,17 @@ class BackupManager(
     private fun filterTaskAttachments(tasks: List<PlannerTask>, keep: (Attachment) -> Boolean) =
         tasks.map { it.copy(attachments = it.attachments.filter(keep)) }
 
-    private fun toJson(data: DataSnapshot, settings: SettingsSnapshot, calendars: List<CalendarChoice>): String = JSONObject().apply {
+    private fun toJson(data: DataSnapshot, settings: SettingsSnapshot, calendars: List<CalendarChoice>,
+                       send: Pair<CalendarChoice, List<SentEvent>>?): String = JSONObject().apply {
+        // Optional (older app versions ignore it): the Nextcloud calendar Planner sends to and what it sent there, so a
+        // restore neither sends everything again nor loses track of the copies. Absent = not sending.
+        put("calendarSend", JSONObject().apply {
+            send?.let { (target, rows) ->
+                put("account", target.account).put("href", target.href).put("name", target.name)
+                put("sent", rows.toJson { JSONObject().put("itemId", it.itemId).put("uid", it.uid ?: JSONObject.NULL)
+                    .put("etag", it.etag ?: JSONObject.NULL).put("fingerprint", it.fingerprint).put("problem", it.problem ?: JSONObject.NULL) })
+            }
+        })
         // Optional (older app versions ignore it): the ticked Nextcloud calendars and the subscribed links (account
         // "link", href = the https link), without events or passwords.
         put("calendars", calendars.toJson {
@@ -424,7 +439,20 @@ class BackupManager(
             CalendarChoice(account, href, name.take(200), if (it.isNull("color")) null else parseHexColor(it.optString("color")),
                 it.optBoolean("enabled", true))
         }
-        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, TaskCodec.decode(if (version >= 10 || root.has("tasks")) root.getJSONArray("tasks") else JSONArray())), settings, exportedOn, calendars)
+        // Optional too. An empty object means "not sending" (restoring it stops sending); a missing one leaves things alone.
+        val send = root.optJSONObject("calendarSend")?.let { json ->
+            val account = json.optString("account"); val href = json.optString("href")
+            if (account.isBlank() || !href.startsWith("/")) return@let null to emptyList<SentEvent>()
+            val rows = json.optJSONArray("sent")?.objects().orEmpty().mapNotNull {
+                val itemId = it.optLong("itemId", -1).takeIf { id -> id > 0 && id in itemIds } ?: return@mapNotNull null
+                SentEvent(itemId = itemId, account = account, calendar = href,
+                    uid = if (it.isNull("uid")) null else it.optString("uid").takeIf { u -> u.matches(Regex("[A-Za-z0-9@._-]{1,200}")) } ?: return@mapNotNull null,
+                    etag = if (it.isNull("etag")) null else it.optString("etag"), fingerprint = it.optString("fingerprint"),
+                    problem = if (it.isNull("problem")) null else it.optString("problem"))
+            }.distinctBy { it.itemId }
+            CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud calendar" }.take(200), null, false) to rows
+        }
+        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, TaskCodec.decode(if (version >= 10 || root.has("tasks")) root.getJSONArray("tasks") else JSONArray())), settings, exportedOn, calendars, send)
     }
 
     // "#RRGGBB" to an opaque ARGB int, or null if it isn't that.

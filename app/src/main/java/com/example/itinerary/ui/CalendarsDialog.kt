@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +57,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     val phoneSources = all.filter { it.kind == OutsideCalendars.KIND_PHONE }
     val linkSources = all.filter { it.kind == OutsideCalendars.KIND_LINK }
     val linkState by sync.linkState.collectAsStateWithLifecycle()
+    val sendState by sync.sendState.collectAsStateWithLifecycle()
+    val sendRows by sync.sent.collectAsStateWithLifecycle(initialValue = emptyList())
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<CalendarSource?>(null) }
     val state by sync.state.collectAsStateWithLifecycle()
@@ -78,7 +82,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (connected == true) app.appScope.launch { sync.sync() }
     }
     LaunchedEffect(Unit) { app.appScope.launch { sync.refreshPhone() } }
-    val running = state.running || phoneState.running || linkState.running
+    val running = state.running || phoneState.running || linkState.running || sendState.running
     if (adding) AddLinkDialog(onDismiss = { adding = false })
     removing?.let { source ->
         PlannerDialog("Remove ${source.name}?", onDismissRequest = { removing = null },
@@ -90,7 +94,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     PlannerDialog("Calendars",
         onDismissRequest = onDismiss,
         primary = if (connected == true || phoneAllowed || linkSources.isNotEmpty()) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
-            app.appScope.launch { sync.refreshPhone(); sync.refreshLinks(); if (connected == true) sync.sync() }
+            app.appScope.launch { sync.refreshPhone(); sync.refreshLinks(); if (connected == true) { sync.sync(); sync.send() } }
         } else null,
         dismiss = DialogAction("Close", onClick = onDismiss),
     ) {
@@ -122,6 +126,9 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (connected == true) Text("Syncs when Planner opens (at most every 15 minutes) and when you tap Sync now, " +
             "covering 3 months back to 12 months ahead. Downloaded events aren't included in backups.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (connected == true && sources.isNotEmpty()) SendChoice(sources, sendRows, sendState, enabled = !running) { id ->
+            app.appScope.launch { sync.setSendTarget(id) }
+        }
 
         SettingsHeading("On this phone")
         if (!phoneAllowed) {
@@ -225,4 +232,34 @@ private fun AddLinkDialog(onDismiss: () -> Unit) {
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+}
+
+// Step 5: "Send my Planner events to" one writable Nextcloud calendar, or Off. Shows how many are there and any that were
+// changed on Nextcloud (left alone).
+@Composable
+private fun SendChoice(sources: List<CalendarSource>, rows: List<com.example.itinerary.data.SentEvent>,
+                       state: com.example.itinerary.data.CalendarSync.State, enabled: Boolean, onChoose: (Long?) -> Unit) {
+    val target = sources.firstOrNull { it.sendHere }
+    Text("Send my Planner events to", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+    Column(Modifier.selectableGroup()) {
+        (listOf<CalendarSource?>(null) + sources.filter { it.writable }).forEach { option ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .selectable(selected = option?.id == target?.id, enabled = enabled, role = Role.RadioButton) { onChoose(option?.id) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.RadioButton(selected = option?.id == target?.id, onClick = null, enabled = enabled)
+                Text(option?.name ?: "Off (don't send)")
+            }
+        }
+    }
+    if (target != null) {
+        val here = rows.filter { it.calendar == target.href }
+        val count = here.count { it.uid != null && it.problem == null }
+        Text("$count event${if (count == 1) " is" else "s are"} on ${target.name}. New and changed events are sent a few seconds " +
+            "after you save them; deleting one here deletes Planner's copy there. Past events are sent only once you edit them.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Text("Sends title, time, place and notes. Bills, payments, checklists, reminders and attachments stay in Planner. " +
+        "Planner only ever changes events it sent. Turning this off leaves them on Nextcloud.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    state.message?.let { Text(it, color = if (state.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
 }

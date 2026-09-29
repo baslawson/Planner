@@ -39,7 +39,9 @@ class ItineraryApp : Application() {
     }
 
     val repository: Repository by lazy {
-        Repository(database, attachmentStore, reminderScheduler) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) }
+        Repository(database, attachmentStore, reminderScheduler,
+            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend() },
+            onDeletionFinished = { calendarSync.requestSend() })
     }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
@@ -50,7 +52,8 @@ class ItineraryApp : Application() {
 
     val calendarSync: CalendarSync by lazy {
         CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
-            phone = phoneCalendars)
+            phone = phoneCalendars, scope = appScope,
+            pendingDeleted = { repository.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
     }
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }

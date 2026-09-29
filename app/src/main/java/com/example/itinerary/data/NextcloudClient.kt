@@ -24,12 +24,22 @@ import javax.net.ssl.SSLException
 
 data class NextcloudBackup(val name: String, val size: Long?, val modified: String?, val etag: String?)
 
-// A calendar in the account's calendar home. [href] is its path on the server; [ctag] changes whenever its events do.
-data class RemoteCalendar(val href: String, val name: String, val color: Int?, val ctag: String?)
+// A calendar in the account's calendar home. [href] is its path on the server; [ctag] changes whenever its events do;
+// [writable]: this login may add events to it.
+data class RemoteCalendar(val href: String, val name: String, val color: Int?, val ctag: String?, val writable: Boolean = true)
+
+// What happened to a write (step 5). Changed: the copy on the server isn't the one Planner last wrote (or, for a new one,
+// something already has that name), so nothing was written. Missing: it's no longer on the server.
+sealed class WriteResult {
+    class Ok(val etag: String?) : WriteResult()
+    object Changed : WriteResult()
+    object Missing : WriteResult()
+}
 
 // Blocking transport; callers run on IO. TLS verification stays enabled, redirects are never followed
-// with credentials. Backups are confined to the selected folder under this account's Files root; calendar sync only
-// reads (PROPFIND and REPORT) inside the account's calendar home and never changes anything on the server.
+// with credentials. Backups are confined to the selected folder under this account's Files root. Calendar sync reads
+// (PROPFIND and REPORT) inside the account's calendar home; the only writes (step 5) are PUT and DELETE of Planner's own
+// event files in the calendar the user chose, always conditional (If-None-Match / If-Match) so nothing else is replaced.
 class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(20, TimeUnit.SECONDS)
@@ -136,9 +146,12 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             if (components.isNotEmpty() && components.none { it.attributes["name"].equals("VEVENT", ignoreCase = true) }) return@mapNotNull null
             val name = prop("displayname")?.textContent?.trim()?.takeIf { it.isNotEmpty() }
                 ?: resolved.pathSegments.lastOrNull { it.isNotEmpty() } ?: return@mapNotNull null
+            // Without a privilege list, assume it can be written; the server still refuses a write it doesn't allow.
+            val privileges = prop("current-user-privilege-set")?.children("privilege")?.flatMap { it.nodes }?.map { it.localName }
             RemoteCalendar(path.let { if (it.endsWith('/')) it else "$it/" }, name.take(200),
                 prop("calendar-color", APPLE_ICAL)?.textContent?.let(::parseColor),
-                (prop("getctag", CALENDARSERVER) ?: prop("sync-token"))?.textContent?.trim()?.takeIf { it.isNotEmpty() })
+                (prop("getctag", CALENDARSERVER) ?: prop("sync-token"))?.textContent?.trim()?.takeIf { it.isNotEmpty() },
+                writable = privileges == null || privileges.any { it in setOf("all", "write", "write-content", "bind") })
         }.distinctBy { it.href }
     }
 
@@ -160,6 +173,49 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             empty = "The server returned an empty calendar.").mapNotNull { (_, prop) ->
             prop("calendar-data", CALDAV)?.textContent?.takeIf { it.isNotBlank() }
         }
+    }
+
+    // Step 5: creates ([etag] null, only if nothing has that name) or replaces (only if the server still has version
+    // [etag]) Planner's event [uid] in [calendar].
+    fun putEvent(account: NextcloudAccount, calendar: String, uid: String, body: String, etag: String?): WriteResult {
+        val url = eventUrl(account, calendar, uid)
+        request(account, "PUT", url, body.toRequestBody("text/calendar; charset=utf-8".toMediaType()),
+            if (etag == null) mapOf("If-None-Match" to "*") else mapOf("If-Match" to etag)).use { response ->
+            return when (response.code) {
+                200, 201, 204 -> WriteResult.Ok(response.header("ETag") ?: currentEtag(account, url))
+                412 -> WriteResult.Changed
+                404 -> WriteResult.Missing
+                else -> fail(response.code, calendar = true)
+            }
+        }
+    }
+
+    // Step 5: deletes Planner's event [uid] in [calendar], only if the server still has version [etag].
+    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String?): WriteResult {
+        val url = eventUrl(account, calendar, uid)
+        request(account, "DELETE", url, null, etag?.let { mapOf("If-Match" to it) }.orEmpty()).use { response ->
+            return when (response.code) {
+                200, 204 -> WriteResult.Ok(null)
+                412 -> WriteResult.Changed
+                404 -> WriteResult.Missing
+                else -> fail(response.code, calendar = true)
+            }
+        }
+    }
+
+    // A server that doesn't return the new version marker with the write is asked for it.
+    private fun currentEtag(account: NextcloudAccount, url: HttpUrl): String? = runCatching {
+        multistatus(account, "PROPFIND", url, PROPERTIES, "0", tooLarge = "", invalid = "", empty = "", calendar = true)
+            .firstOrNull()?.second?.invoke("getetag")?.textContent
+    }.getOrNull()
+
+    private fun eventUrl(account: NextcloudAccount, calendar: String, uid: String): HttpUrl {
+        require(uid.matches(Regex("[A-Za-z0-9@._-]{1,200}"))) { "Invalid event name" }
+        val home = account.calendarsRoot
+        val folder = account.server.newBuilder().encodedPath(calendar).build()
+        require(folder.encodedPath.startsWith(home.encodedPath) && folder.encodedPath != home.encodedPath &&
+            folder.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
+        return folder.newBuilder().addPathSegment("$uid.ics").build()
     }
 
     // One WebDAV request answered with a multistatus: each response's address (on this server only) with a lookup for
@@ -270,7 +326,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     private fun fail(code: Int, calendar: Boolean = false): Nothing = throw BackupException(if (calendar) when (code) {
         401 -> "Nextcloud rejected the login. Check your username and app password."
-        403 -> "Nextcloud denied access to your calendars."
+        403 -> "Nextcloud denied access to your calendars (or doesn't allow adding events to this one)."
         404 -> "The calendar wasn't found on Nextcloud. It may have been deleted."
         in 300..399 -> "Nextcloud redirected the request. Enter its final HTTPS address."
         else -> "Nextcloud couldn't send the calendars (HTTP $code). Try again later."
@@ -296,7 +352,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         private const val CALDAV = "urn:ietf:params:xml:ns:caldav"
         private const val APPLE_ICAL = "http://apple.com/ns/ical/"
         private const val CALENDARSERVER = "http://calendarserver.org/ns/"
-        private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/></d:prop></d:propfind>"""
+        private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/><d:current-user-privilege-set/></d:prop></d:propfind>"""
         private val EMPTY = ByteArray(0).toRequestBody(null)
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
         private fun validName(name: String) = name.startsWith("Planner-backup-") && name.endsWith(".zip") &&
