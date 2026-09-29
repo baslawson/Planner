@@ -66,6 +66,7 @@ fun QuickEntryDialog(
     var discard by remember { mutableStateOf(false) }
     var warnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var permission by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    var handover by remember { mutableStateOf<String?>(null) }
     fun update(next: QuickDraft) {
         if (next == draft || loadFailed) return
         try { store.write(next); draft = next; error = null }
@@ -87,12 +88,23 @@ fun QuickEntryDialog(
         QuickEntryEditor(draft.single.baseDate, onDismiss = onDismiss,
             onAdd = { suggestion, task, token ->
                 if (!confirm(QuickCandidate(token, suggestion, task))) throw QuickSaveCancelled()
-                require(suggestion.quickProblem(task, ZonedDateTime.now()) == null)
+                // Checked again: a reminder can pass while "Check before adding" waits.
+                suggestion.quickProblem(task, ZonedDateTime.now())?.let { throw QuickSaveProblem(it) }
                 onAdd(suggestion, task, token)
                 store.clear()
                 android.widget.Toast.makeText(context, if (task) "Task added" else "Event added", android.widget.Toast.LENGTH_SHORT).show()
             },
-            onReview = { s, t -> store.clear(); onReview(s, t) },
+            onReview = { s, t ->
+                // The full editor would offer to resume an older unfinished draft and replace this entry with it.
+                val older = runCatching { if (t) TaskDraftStore(context).read("new") else EditorDraftStore(context).read() }
+                val kind = if (t) "task" else "event"
+                when {
+                    older.isFailure -> handover = "Couldn't check for an unfinished $kind. Your Quick entry is still here; try again."
+                    older.getOrNull() != null -> handover = "You have an unfinished $kind ‘${older.getOrNull()?.optString("title").orEmpty().ifBlank { "untitled" }}’. " +
+                        "Finish or discard it first (Add ${if (t) "task" else "event"}), then open this Quick entry in the full editor. Your Quick entry is kept."
+                    else -> { store.clear(); onReview(s, t) }
+                }
+            },
             onContinue = { task ->
                 val next = QuickDraft(QuickInput(task = task, baseDate = LocalDate.now()))
                 store.write(next); draft = next
@@ -108,6 +120,9 @@ fun QuickEntryDialog(
         Text("This entry may duplicate or overlap your plans. You can go back to edit it.")
         warnings.forEach { Text(it) }
     }
+    handover?.let { message ->
+        PlannerDialog("Unfinished draft", { handover = null }, primary = DialogAction("OK") { handover = null }) { Text(message) }
+    }
     if (discard) PlannerDialog("Discard quick entry draft?", { discard = false },
         primary = DialogAction("Discard", danger = true) {
             try { store.clear(); generation++; draft = QuickDraft(QuickInput(baseDate = today)); loadFailed = false; error = null; discard = false }
@@ -119,6 +134,7 @@ fun QuickEntryDialog(
 }
 
 internal class QuickSaveCancelled : Exception()
+internal class QuickSaveProblem(message: String) : Exception(message)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -152,7 +168,7 @@ fun QuickEntryEditor(
     val showFeedback = settled || attempted || !fieldFocused
     var task by rememberSaveable { mutableStateOf(initial.task) }
     // "Remind me to …" picks Task or Event until the person chooses a type themselves.
-    var typeChosen by rememberSaveable { mutableStateOf(false) }
+    var typeChosen by rememberSaveable { mutableStateOf(initial.typeChosen) }
     var literalOffsets by rememberSaveable { mutableStateOf(initial.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()) }
     val literalRanges = literalOffsets.asList().chunked(2).map { it[0] until it[1] }
     val literalKey = literalOffsets.contentHashCode()
@@ -170,7 +186,7 @@ fun QuickEntryEditor(
     // A draft keeps the day it was started until the person edits it again.
     var baseDate by rememberSaveable { mutableStateOf(today) }
     val parsed = remember(text, title, literalKey, baseDate) { QuickInput(text, literals = literalRanges, baseDate = baseDate, title = title).parse() }
-    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, baseDate, durationText, ai, title)
+    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, baseDate, durationText, ai, title, typeChosen)
     SideEffect { onInput(currentInput) }
     val context = LocalContext.current
     val notifications = rememberNotificationState()
@@ -191,11 +207,19 @@ fun QuickEntryEditor(
     val focus = remember { FocusRequester() }
     var fieldReady by remember { mutableStateOf(false) }
     LaunchedEffect(fieldReady) { if (fieldReady) { focus.requestFocus(); keyboard?.show() } }
+    // Tasks have no time or duration: a time or duration picked for an event would block the task with nothing to remove.
+    fun switchType(toTask: Boolean) {
+        if (toTask && !task) {
+            if (!timeOverride.isNullOrEmpty()) timeOverride = null
+            if (!durationText.isNullOrEmpty()) durationText = null
+        }
+        task = toTask
+    }
     fun editField(value: TextFieldValue) {
         if (value.text != text) {
             val updated = currentInput.rebased(LocalDate.now()).edited(value.text)
             baseDate = updated.baseDate
-            if (!typeChosen) updated.parse().takeIf { it.taskHint }?.let { task = !it.timed() }
+            if (!typeChosen) updated.parse().takeIf { it.taskHint }?.let { switchType(!it.timed()) }
             aiJson = null
             literalOffsets = updated.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()
             dateOverride = updated.dateOverride; timeOverride = updated.timeOverride
@@ -233,6 +257,7 @@ fun QuickEntryEditor(
         scope.launch {
             try { onAdd(suggestion, task, saveToken); if (another && onContinue != null) onContinue(task) else onDismiss() }
             catch (_: QuickSaveCancelled) { /* Return to the unchanged entry. */ }
+            catch (problem: QuickSaveProblem) { now = ZonedDateTime.now(); saveError = problem.message }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { saveError = "Couldn't save. Your entry is still here; try again." }
             finally { busy = false }
@@ -266,7 +291,7 @@ fun QuickEntryEditor(
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     val green = MaterialTheme.colorScheme.primary
                     listOf(false to "Event", true to "Task").forEachIndexed { index, (isTask, label) ->
-                        SegmentedButton(selected = task == isTask, enabled = !busy, onClick = { task = isTask; typeChosen = true },
+                        SegmentedButton(selected = task == isTask, enabled = !busy, onClick = { switchType(isTask); typeChosen = true },
                             shape = SegmentedButtonDefaults.itemShape(index, 2),
                             colors = SegmentedButtonDefaults.colors(activeContainerColor = green.copy(alpha = 0.16f), activeContentColor = green,
                                 activeBorderColor = green, inactiveContainerColor = Color.Transparent,
@@ -403,7 +428,7 @@ fun QuickEntryEditor(
                     }
                     if (showFeedback && suggestion.dateChoices.isEmpty() && suggestion.isPast(now, task)) {
                         Text("This date or time is in the past.", color = MaterialTheme.colorScheme.error)
-                        TextButton(enabled = !busy, onClick = { dateOverride = (if (suggestion.repeat != RepeatRule.NONE) PlannerTask(dueDate = suggestion.date, repeat = suggestion.repeat.name).nextOccurrence(now.toLocalDate())!!.dueDate!! else if (task) now.toLocalDate() else now.toLocalDate().plusDays(1)).toString() }) { Text(if (suggestion.repeat != RepeatRule.NONE) "Move to next occurrence" else if (task) "Move to today" else "Move to tomorrow") }
+                        TextButton(enabled = !busy, onClick = { dateOverride = (if (suggestion.repeat != RepeatRule.NONE) suggestion.nextRepeatDate(task, now) else if (task) now.toLocalDate() else now.toLocalDate().plusDays(1)).toString() }) { Text(if (suggestion.repeat != RepeatRule.NONE) "Move to next occurrence" else if (task) "Move to today" else "Move to tomorrow") }
                     }
                     if (showFeedback && problem != null && problem != "Which date did you mean?") Text(problem, color = MaterialTheme.colorScheme.error)
                     if (!showFeedback && problem != null) Text("Keep typing, or choose a suggestion.", style = MaterialTheme.typography.bodySmall)

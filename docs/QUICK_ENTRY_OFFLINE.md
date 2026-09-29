@@ -47,7 +47,7 @@ still need a specific date, a supported repeat or literal text.
 (`with Bob`) are added after the title. Leave Title empty to type everything in one box as before. Quotation marks
 are removed from a typed title. For AI, the title is sent in quotes on the same line.
 
-Quote title/place words you want left untouched, or use Details → Adjust recognised text → Keep in title.
+Quote title/place words you want left untouched, or use More options → Adjust recognised text → Keep in title.
 Manual corrections survive unrelated title edits; editing the corresponding scheduling phrase reconsiders
 that correction. Check the preview, then tap Add. Closing keeps the unfinished draft.
 

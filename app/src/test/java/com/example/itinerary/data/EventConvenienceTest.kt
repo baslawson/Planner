@@ -24,10 +24,13 @@ class EventConvenienceTest {
     }
     @Test fun reminderPreviewResolvesDstExactlyLikeTheAlarm() {
         val zone = ZoneId.of("America/New_York")
+        // 60 minutes before is one real hour, even when the clocks change in between.
         val spring = reminderTrigger(LocalDate.of(2026,3,8),LocalTime.of(3,30),60,zone)
-        assertEquals(Instant.parse("2026-03-08T07:30:00Z"),spring.toInstant())
-        assertEquals(LocalTime.of(3,30),spring.toLocalTime()) // nonexistent 02:30 resolves forward
+        assertEquals(Instant.parse("2026-03-08T06:30:00Z"),spring.toInstant())
+        assertEquals(LocalTime.of(1,30),spring.toLocalTime())
         val autumn = reminderTrigger(LocalDate.of(2026,11,1),LocalTime.of(2,30),60,zone)
-        assertEquals(Instant.parse("2026-11-01T05:30:00Z"),autumn.toInstant())
+        assertEquals(Instant.parse("2026-11-01T06:30:00Z"),autumn.toInstant())
+        // Whole days keep the clock time: 1 day before a 3:30 event is 3:30 the day before.
+        assertEquals(LocalTime.of(3,30), reminderTrigger(LocalDate.of(2026,3,9),LocalTime.of(3,30),1440,zone).toLocalTime())
     }
 }

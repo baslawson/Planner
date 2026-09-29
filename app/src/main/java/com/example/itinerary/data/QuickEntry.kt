@@ -189,7 +189,10 @@ object QuickEntry {
     private val monthDayRepeat = rx("\\b(?:on\\s+)?(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)\\s+(?:of\\s+)?(?:every|each)\\s+month\\b")
     private val schedulingWords = rx("\\b(?:remind|notify|every)\\b")
     // "Remind me to …", also with the when first: "Remind me tomorrow to …", "Remind me in 2 hours to …".
-    private val remindTo = rx("^\\s*(?:please\\s+)?remind\\s+me\\s+(?:(.{1,60}?)\\s+)??to\\b")
+    // A title typed in its own box is masked in front (\uE000), so it may come first.
+    private val remindTo = rx("^[\\s\uE000]*(?:please\\s+)?remind\\s+me\\s+(?:(.{1,60}?)\\s+)??to\\b")
+    // "Remind me tomorrow", "remind me friday": the when follows directly, usually after a title typed in its own box.
+    private val remindLead = rx("^[\\s\uE000]*(?:please\\s+)?remind\\s+me\\b")
     private val allDay = rx("\\ball[-\\s]day\\b")
     private val nowWords = rx("(?<!\\bfrom\\s)\\b(?:right\\s+)?now\\b")
     // Named days set the date but stay in the title. Plain "Christmas" only with on, or lunch/dinner/breakfast/morning:
@@ -248,14 +251,22 @@ object QuickEntry {
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
         }
         var taskHint = false
+        // Where "remind me" starts, after any masked title in front.
+        fun remindStart(match: MatchResult) = match.range.first + match.value.indexOfFirst { !it.isWhitespace() && it != '\uE000' }
         remindTo.find(remaining)?.let { match ->
             taskHint = true
             // The when between "remind me" and "to" is left for the date and time parsers.
             val between = match.groups[1]
-            if (between == null) consume(match.range, QuickPhraseKind.REMINDER) else {
-                consume(match.range.first until between.range.first, QuickPhraseKind.REMINDER)
+            if (between == null) consume(remindStart(match)..match.range.last, QuickPhraseKind.REMINDER) else {
+                consume(remindStart(match) until between.range.first, QuickPhraseKind.REMINDER)
                 consume(between.range.last + 1..match.range.last, QuickPhraseKind.REMINDER)
             }
+        }
+        // "Remind me tomorrow": as "remind me to", unless it starts a detailed reminder ("remind me 30 min before", "at 9am").
+        if (!taskHint) remindLead.find(remaining)?.let { match ->
+            val detailed = sequenceOf(reminders, reminderClocks, nightBefore)
+                .any { r -> r.findAll(remaining).any { it.range.first <= match.range.last && match.range.first <= it.range.last } }
+            if (!detailed) { taskHint = true; consume(remindStart(match)..match.range.last, QuickPhraseKind.REMINDER) }
         }
 
         var taskPrefixSaid = false
@@ -272,7 +283,7 @@ object QuickEntry {
             phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
             return error(if (rx("\\band\\b").containsMatchIn(match.value))
                 "Planner repeats on one week of the month. Add ‘${match.value.substringAfter(" and ").trim()}’ as a second entry."
-                else if (rx("hour|hrs?\\b|min").containsMatchIn(match.value)) "Planner repeats at most once a day, so it can't repeat ‘${match.value}’. Edit it, or open Details → Adjust recognised text to keep it in the title."
+                else if (rx("hour|hrs?\\b|min").containsMatchIn(match.value)) "Planner repeats at most once a day, so it can't repeat ‘${match.value}’. Edit it, or open More options → Adjust recognised text to keep it in the title."
                 else "Planner can't repeat ‘${match.value}’ in one entry. Add an entry for each, or keep the words in the title.")
         }
         // "every morning", "every weekday evening", "every Monday night": a repeat whose time is asked for, or settled by a
@@ -281,7 +292,7 @@ object QuickEntry {
         var periodRule: RepeatRule? = null
         var periodDay: DayOfWeek? = null
         everyPeriod.findAll(remaining).toList().let { found ->
-            if (found.size > 1) return error("Use one repeat rule. Adjust it in More details.")
+            if (found.size > 1) return error("Use one repeat rule. Adjust it in the full editor (More options → Open in full editor).")
             found.firstOrNull()?.let { match ->
                 dailyPeriod = true
                 val which = match.groupValues[1].lowercase(Locale.ROOT)
@@ -298,7 +309,7 @@ object QuickEntry {
             val value = match.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
             if (!vagueTimes.containsMatchIn(value)) {
                 phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
-                return error("‘${match.value}’ needs a specific date, time or supported repeat. Edit it, or open Details → Adjust recognised text to keep it in the title.")
+                return error("‘${match.value}’ needs a specific date, time or supported repeat. Edit it, or open More options → Adjust recognised text to keep it in the title.")
             }
             if (timePrompt != null) return error("Use one time phrase, or choose a specific time.")
             timePrompt = "What time did you mean by ‘${match.value}’? Tap Choose time."
@@ -342,7 +353,7 @@ object QuickEntry {
         var reminderDaysBack = 0
         val reminderMatches = reminders.findAll(remaining).toList()
         val reminderClockMatches = reminderClocks.findAll(remaining).toList() + nightBefore.findAll(remaining)
-        if (reminderMatches.size + reminderClockMatches.size > 1) return error("Use one reminder here. Add more in More details.")
+        if (reminderMatches.size + reminderClockMatches.size > 1) return error("Use one reminder here. Add more in the full editor (More options → Open in full editor).")
         fun consumeReminder(match: MatchResult) {
             val comma = remaining.substring(0, match.range.first).indexOfLast { !it.isWhitespace() }
             val start = if (comma >= 0 && remaining[comma] == ',') comma else match.range.first
@@ -374,7 +385,7 @@ object QuickEntry {
             consumeReminder(match)
         }
         plainReminder.findAll(remaining).toList().takeIf { it.isNotEmpty() }?.let { found ->
-            if (found.size + reminderMatches.size + reminderClockMatches.size > 1) return error("Use one reminder here. Add more in More details.")
+            if (found.size + reminderMatches.size + reminderClockMatches.size > 1) return error("Use one reminder here. Add more in the full editor (More options → Open in full editor).")
             reminderMinutes = 0
             consumeReminder(found.first())
         }
@@ -480,7 +491,7 @@ object QuickEntry {
         val repeatMatches = repeats.findAll(remaining).toList()
         if (repeatMatches.size + monthDayMatches.size + monthlyWeekdayMatches.size + weekdayListMatches.size + ruleOnWeekdayMatches.size +
             lastDayMatches.size + (if (dailyPeriod) 1 else 0) + (if (rangeRepeat != null) 1 else 0) > 1)
-            return error("Use one repeat rule. Adjust it in More details.")
+            return error("Use one repeat rule. Adjust it in the full editor (More options → Open in full editor).")
         if (dailyPeriod) { repeat = periodRule!!; periodDay?.let { repeatDay = it } }
         rangeRepeat?.let { repeat = it; rangeRepeatDay?.let { day -> repeatDay = day } }
         repeatMatches.firstOrNull()?.let { match ->
@@ -552,7 +563,7 @@ object QuickEntry {
         var startFrom: LocalDate? = null
         if (repeat == RepeatRule.NONE) repeatStart.findAll(remaining).firstOrNull { it.groupValues[1].lowercase(Locale.ROOT).startsWith("next") }?.let { match ->
             phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
-            return error("‘${match.groupValues[1]}’ needs a specific date, time or supported repeat. Edit it, or open Details → Adjust recognised text to keep it in the title.")
+            return error("‘${match.groupValues[1]}’ needs a specific date, time or supported repeat. Edit it, or open More options → Adjust recognised text to keep it in the title.")
         }
         if (repeat != RepeatRule.NONE) repeatStart.findAll(remaining).toList().let { starts ->
             if (starts.size > 1) return error("Use one start date.")
@@ -595,7 +606,8 @@ object QuickEntry {
             val total = spanMinutes(match.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " "))
             if (!total.isFinite() || total !in 1.0..1440.0 || total % 1 != 0.0 || match.value.contains('-'))
                 return error("Use a time from 1 minute to 24 hours from now, in whole minutes.")
-            relativeAt = now?.let { roundUpToFive(it.plusMinutes(total.toLong())) }
+            // Counted on the zone's timeline, so "in 2 hours" is two real hours across a clock change.
+            relativeAt = now?.let { roundUpToFive(it.atZone(zone).plusMinutes(total.toLong()).toLocalDateTime()) }
             consume(match.range, QuickPhraseKind.TIME)
         }
         val nowMatches = nowWords.findAll(remaining).toList()
@@ -960,7 +972,7 @@ object QuickEntry {
         schedulingWords.find(remaining)?.let { match ->
             val end = remaining.indexOf(',', match.range.first).takeIf { it >= 0 } ?: remaining.length
             phrases += QuickEntryPhrase(match.range.first, end, QuickPhraseKind.UNSUPPORTED)
-            return error("Finish the reminder or repeat phrase, or open Details → Adjust recognised text to keep those words in the title.")
+            return error("Finish the reminder or repeat phrase, or open More options → Adjust recognised text to keep those words in the title.")
         }
         // Scheduling-shaped fragments must not silently turn into part of a saved title.
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))

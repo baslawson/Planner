@@ -32,14 +32,14 @@ class QuickDraftStore(context: Context) {
             .put("baseDate", i.baseDate.toString()).put("literals", JSONArray(i.literals.flatMap { listOf(it.first, it.last + 1) }))
             .put("date", i.dateOverride ?: JSONObject.NULL).put("time", i.timeOverride ?: JSONObject.NULL)
             .put("ai", i.ai?.json() ?: JSONObject.NULL)
-            .put("count", i.countText ?: JSONObject.NULL).put("removeReminder", i.removeReminder).put("duration", i.durationText ?: JSONObject.NULL).put("title", i.title)
+            .put("count", i.countText ?: JSONObject.NULL).put("removeReminder", i.removeReminder).put("duration", i.durationText ?: JSONObject.NULL).put("title", i.title).put("typeChosen", i.typeChosen)
         private fun decode(j: JSONObject): QuickInput {
             val a = j.getJSONArray("literals")
             fun nullable(key: String) = if (j.isNull(key)) null else j.getString(key)
             return QuickInput(j.getString("text"), j.getBoolean("task"), List(a.length() / 2) { a.getInt(it * 2) until a.getInt(it * 2 + 1) },
                 nullable("date"), nullable("time"), nullable("count"), j.getBoolean("removeReminder"), LocalDate.parse(j.getString("baseDate")), nullable("duration"), if (j.isNull("ai")) null else QuickAiEntry.decodeDraft(j.getJSONObject("ai")),
                 // Drafts saved before the Title box have no title.
-                j.optString("title", ""))
+                j.optString("title", ""), j.optBoolean("typeChosen", false))
         }
     }
 }

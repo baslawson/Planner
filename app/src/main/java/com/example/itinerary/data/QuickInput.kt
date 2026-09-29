@@ -2,6 +2,7 @@ package com.example.itinerary.data
 
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Locale
 
@@ -15,6 +16,8 @@ data class QuickInput(
     val ai: QuickAiEntry? = null,
     /** Typed in its own box: always kept literally, never read as a date or time. */
     val title: String = "",
+    /** Event or Task was picked by hand, so "remind me to …" no longer switches it. */
+    val typeChosen: Boolean = false,
 ) {
     // Quotes would unbalance the parser's own quoting, so they are dropped from a typed title.
     val typedTitle: String get() = title.filterNot { it == '"' || it == '“' || it == '”' }.trim()
@@ -26,17 +29,17 @@ data class QuickInput(
     val empty: Boolean get() = text.isBlank() && typedTitle.isEmpty()
 
     /** Parses title and when together, the title kept in title; phrase offsets stay relative to [text]. */
-    fun parse(now: LocalDateTime? = null): QuickEntrySuggestion {
-        if (typedTitle.isEmpty()) return QuickEntry.parse(text, baseDate, literals, now)
+    fun parse(now: LocalDateTime? = null, zone: ZoneId = ZoneId.systemDefault()): QuickEntrySuggestion {
+        if (typedTitle.isEmpty()) return QuickEntry.parse(text, baseDate, literals, now, zone = zone)
         val shifted = literals.map { it.first + offset..it.last + offset }
-        val parsed = QuickEntry.parse("$typedTitle $text", baseDate, listOf(0 until typedTitle.length) + shifted, now)
+        val parsed = QuickEntry.parse("$typedTitle $text", baseDate, listOf(0 until typedTitle.length) + shifted, now, zone = zone)
         return parsed.copy(phrases = parsed.phrases.map { it.copy(start = it.start - offset, end = it.end - offset) })
     }
 
     fun suggestion(now: ZonedDateTime = ZonedDateTime.now()): QuickEntrySuggestion {
         // "In 30 minutes" counts from now, so only for entries based on today.
         val clock = now.toLocalDateTime().takeIf { baseDate == now.toLocalDate() }
-        val parsed = ai?.suggestion(baseDate) ?: parse(clock)
+        val parsed = ai?.suggestion(baseDate) ?: parse(clock, now.zone)
         val corrected = parsed.corrected(dateOverride, timeOverride)
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
@@ -49,6 +52,14 @@ data class QuickInput(
             repeatCount = countText?.toIntOrNull() ?: if (countText == null) parsed.repeatCount else 0,
         )
     }
+}
+
+/** The first repeat date still ahead: today counts unless the event's time today has passed. */
+fun QuickEntrySuggestion.nextRepeatDate(task: Boolean, now: ZonedDateTime): LocalDate {
+    val today = now.toLocalDate()
+    fun after(day: LocalDate) = PlannerTask(dueDate = date, repeat = repeat.name).nextOccurrence(day)!!.dueDate!!
+    val first = after(today.minusDays(1))
+    return if (first == today && !task && time != null && time <= now.toLocalTime()) after(today) else first
 }
 
 fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String? {

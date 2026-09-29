@@ -314,7 +314,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     Spacer(Modifier.width(12.dp))
                     Button(enabled = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
                         (repeat != TaskRepeat.AFTER_COMPLETION.name || repeatDays.toIntOrNull() in 1..3650), onClick = {
-                        if (reminderAt != null && reminderAt != initial.reminderAt && reminderAt!! <= System.currentTimeMillis()) {
+                        // A new task (also one handed over from Quick entry) never saves a reminder that has passed.
+                        if (reminderAt != null && (creating || reminderAt != initial.reminderAt) && reminderAt!! <= System.currentTimeMillis()) {
                             error = "Choose a future reminder date and time."
                         } else action { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt,
                             repeat = repeat, repeatDays = repeatDays.toIntOrNull()?.coerceIn(1, 3650) ?: 7,
