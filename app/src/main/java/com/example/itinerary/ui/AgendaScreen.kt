@@ -1,7 +1,6 @@
 package com.example.itinerary.ui
 import com.example.itinerary.ui.MatrixIconButton as IconButton
 import com.example.itinerary.ui.MatrixFilterChip as FilterChip
-import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.combinedClickable
@@ -33,12 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.ui.res.painterResource
-import com.example.itinerary.R
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Surface
@@ -65,8 +59,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.Agenda
 import com.example.itinerary.data.AgendaEntry

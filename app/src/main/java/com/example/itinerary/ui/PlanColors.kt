@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.PlanColors
 import com.example.itinerary.data.PlanEvent
-import com.example.itinerary.data.Trip
 
 class PlanColor(val name: String, val color: Color)
 

@@ -13,7 +13,6 @@ import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.NextcloudAccount
 import com.example.itinerary.data.NextcloudBackup
 import com.example.itinerary.data.NextcloudBackups
-import com.example.itinerary.data.PlanColors
 import com.example.itinerary.data.PlanEvent
 import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.Repository
@@ -25,7 +24,6 @@ import com.example.itinerary.data.Trip
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 

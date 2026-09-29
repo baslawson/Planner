@@ -46,13 +46,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.SideEffect
 import com.example.itinerary.data.DraftCodec
 import com.example.itinerary.data.EditorDraftStore
@@ -84,7 +82,6 @@ import com.example.itinerary.data.Bills
 import com.example.itinerary.data.TemplateContent
 import com.example.itinerary.data.EventSaveOptions
 import com.example.itinerary.data.RepeatRule
-import com.example.itinerary.data.PlanEvent
 import com.example.itinerary.data.overlappingEvents
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.input.KeyboardType

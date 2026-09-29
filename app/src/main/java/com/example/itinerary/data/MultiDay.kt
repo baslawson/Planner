@@ -24,13 +24,11 @@ val PlanEvent.lastDay: LocalDate get() = endDate ?: date
 
 // How many days it covers, counting both ends ("3 Oct – 7 Oct" = 5).
 val ItineraryItem.dayCount: Int get() = ChronoUnit.DAYS.between(date, lastDay).toInt() + 1
-val PlanEvent.dayCount: Int get() = ChronoUnit.DAYS.between(date, lastDay).toInt() + 1
 
 fun ItineraryItem.covers(day: LocalDate): Boolean = day in date..lastDay
 fun PlanEvent.covers(day: LocalDate): Boolean = day in date..lastDay
 
 // Which day of the span [day] is, from 1 ("Day 3 of 5").
-fun PlanEvent.dayNumber(day: LocalDate): Int = ChronoUnit.DAYS.between(date, day).toInt() + 1
 fun ItineraryItem.dayNumber(day: LocalDate): Int = ChronoUnit.DAYS.between(date, day).toInt() + 1
 
 // The same event starting on [start] instead, keeping its length.

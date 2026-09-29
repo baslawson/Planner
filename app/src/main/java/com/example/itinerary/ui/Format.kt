@@ -5,7 +5,6 @@ import android.text.format.DateFormat
 import androidx.compose.runtime.compositionLocalOf
 import com.example.itinerary.data.DateFormatChoice
 import com.example.itinerary.data.TimeFormat
-import com.example.itinerary.data.Trip
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
