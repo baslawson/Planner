@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.CalendarSource
 import com.example.itinerary.data.OutsideCalendars
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -85,6 +86,10 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     }
     LaunchedEffect(Unit) { app.appScope.launch { sync.refreshPhone() } }
     val running = state.running || phoneState.running || linkState.running || sendState.running
+    // The result of the last "Sync now" in this pop-up, shown by the button: (text, something went wrong).
+    var result by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val context = LocalContext.current
+    val format = LocalTimeFormat.current
     if (adding) AddLinkDialog(onDismiss = { adding = false })
     if (reviewing) ConflictsDialog(conflicts, onDismiss = { reviewing = false })
     removing?.let { source ->
@@ -97,8 +102,20 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     PlannerDialog("Calendars",
         onDismissRequest = onDismiss,
         primary = if (connected == true || phoneAllowed || linkSources.isNotEmpty()) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
-            app.appScope.launch { sync.refreshPhone(); sync.refreshLinks(); if (connected == true) { sync.sync(); sync.send() } }
+            result = null
+            app.appScope.launch {
+                sync.refreshPhone(); sync.refreshLinks(); if (connected == true) { sync.sync(); sync.send() }
+                result = syncResult(sync, java.time.LocalTime.now().label(format, context))
+            }
         } else null,
+        note = {
+            val shown = if (running) "Syncing…" to false else result
+            shown?.let { (text, problem) ->
+                Text(text, style = MaterialTheme.typography.bodyMedium,
+                    color = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+            }
+        },
         dismiss = DialogAction("Close", onClick = onDismiss),
     ) {
       // Room on the right for the scroll bar, which this longer pop-up usually shows.
@@ -328,4 +345,19 @@ private fun describe(item: com.example.itinerary.data.ItineraryItem): String {
         start.label(format, context) + (item.durationMinutes?.let { "–" + start.plusMinutes(it.toLong()).label(format, context) } ?: "")
     } ?: item.endDate?.let { "until ${it.shortLabel()}" } ?: "all day"
     return listOf(item.date.dayLabel(LocalDateFormat.current), time, item.title, item.location).filter { it.isNotBlank() }.joinToString(" · ")
+}
+
+// What "Sync now" found, in one line: "Synced just now · 23:25", or what went wrong and where to look.
+private suspend fun syncResult(sync: com.example.itinerary.data.CalendarSync, time: String): Pair<String, Boolean> {
+    val failedCalendars = sync.sources.first().count { it.enabled && it.lastError != null }
+    val conflicts = sync.conflicts.first().size
+    val stateErrors = listOf(sync.state.value, sync.phoneState.value, sync.linkState.value, sync.sendState.value)
+        .filter { it.error }.mapNotNull { it.message }
+    return when {
+        failedCalendars > 0 -> "Synced at $time, but $failedCalendars calendar${if (failedCalendars == 1) "" else "s"} couldn't be updated (see above)." to true
+        conflicts > 0 -> "Synced at $time · $conflicts conflict${if (conflicts == 1) "" else "s"} to review." to true
+        // A whole part failed (offline, login refused): its own message says why.
+        stateErrors.isNotEmpty() -> "Synced at $time, but: ${stateErrors.first()}" to true
+        else -> "Synced just now · $time" to false
+    }
 }

@@ -27,6 +27,7 @@ class DialogAction(val label: String, val enabled: Boolean = true, val danger: B
 // - quiet buttons in a row: [dismiss] (Close / Cancel) on the left, [extra] on the right;
 // - under them, [primary], the one main action, full width: solid green, or red when it is a danger action.
 // [properties]: for a dialog that must, for example, keep a password out of screenshots.
+// [note]: a short line just above the buttons, always in view (such as the result of the main action).
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlannerDialog(
@@ -38,6 +39,7 @@ fun PlannerDialog(
     header: (@Composable ColumnScope.() -> Unit)? = null,
     scroll: ScrollState? = rememberScrollState(),
     properties: DialogProperties = DialogProperties(),
+    note: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     AlertDialog(
@@ -61,6 +63,7 @@ fun PlannerDialog(
         // The footer is one column: AlertDialog's own button row would squeeze three buttons at phone width.
         confirmButton = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                note?.invoke()
                 if (dismiss != null || extra.isNotEmpty()) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     if (dismiss != null) QuietAction(dismiss)
                     if (extra.isNotEmpty()) FlowRow { extra.forEach { QuietAction(it) } }
