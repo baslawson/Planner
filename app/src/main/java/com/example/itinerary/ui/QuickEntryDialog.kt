@@ -17,7 +17,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -104,10 +103,10 @@ fun QuickEntryDialog(
             modeControls = { if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error) })
     }
     if (permission != null) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { permission?.complete(false) }, title = { Text("Check before adding") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("This entry may duplicate or overlap your plans. You can go back to edit it.")
             warnings.forEach { Text(it) }
-        } }, confirmButton = { TextButton(onClick = { permission?.complete(true) }) { Text("Add anyway") } },
+        } } }, confirmButton = { TextButton(onClick = { permission?.complete(true) }) { Text("Add anyway") } },
         dismissButton = { TextButton(onClick = { permission?.complete(false) }) { Text("Go back") } })
     if (discard) AlertDialog(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp, onDismissRequest = { discard = false }, title = { Text("Discard quick entry draft?") },
         text = { Text("Unfinished text will be removed. Entries already saved stay in your planner.") },
@@ -264,7 +263,7 @@ fun QuickEntryEditor(
             }
         },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 modeControls()
                 if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
@@ -401,7 +400,7 @@ fun QuickEntryEditor(
                     if (showDetails && onDiscard != null) TextButton(enabled = !busy, onClick = onDiscard) { Text("Discard draft") }
                 }
                 if (saveError != null) Text(saveError!!, color = MaterialTheme.colorScheme.error)
-            }
+            } }
         },
         // Three buttons do not fit one row at phone width: the main action gets its own full-width row.
         confirmButton = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {

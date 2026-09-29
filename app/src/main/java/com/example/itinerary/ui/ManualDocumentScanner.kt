@@ -19,7 +19,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -226,7 +225,7 @@ fun ManualDocumentScanner(pdf: Boolean, store: AttachmentStore, onDismiss: () ->
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) { Text("Take a photo when you're ready, then adjust the page corners here.") }
                 }
-                Column(Modifier.heightIn(max = 270.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 270.dp), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if (page != null) {
@@ -244,7 +243,7 @@ fun ManualDocumentScanner(pdf: Boolean, store: AttachmentStore, onDismiss: () ->
                         }) { Text("Import image") }
                     }
                     if (pages.size == ScanImages.MAX_PAGES) Text("Maximum 10 pages per scan.")
-                }
+                } }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(enabled = !busy && pendingPhoto == null, onClick = { if (reviewing) reviewing = false else dismiss() }) { Text(if (reviewing) "Adjust corners" else "Cancel") }
                     Button(enabled = !busy && pages.isNotEmpty() && preview != null && previewKey == wantedPreview && pendingPhoto == null, onClick = {

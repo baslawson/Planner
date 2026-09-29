@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -491,10 +490,8 @@ fun ItemEditorSheet(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            Column(
+            ScrollHints(editorScroll, Modifier.weight(1f)) { Column(
                 Modifier
-                    .weight(1f)
-                    .verticalScroll(editorScroll)
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -824,7 +821,7 @@ fun ItemEditorSheet(
                     }
                 },
             )
-            } // Close the inner scrollable Column
+            } } // Close the inner scrollable Column
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -859,13 +856,13 @@ fun ItemEditorSheet(
     if (duplicateBills.isNotEmpty()) AlertDialog(
         onDismissRequest = { if (!busy) duplicateBills = emptyList() },
         title = { Text("Possible duplicate bill") },
-        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 360.dp), fitContent = true) { Column(Modifier.fillMaxWidth()) {
             Text("A bill with the same title, amount and due date already exists:")
             duplicateBills.forEach { bill ->
                 Text("${bill.title} · ${Bills.format(bill.billAmountMinor!!, bill.billCurrency)} · ${bill.date.fullLabel()}")
                 TextButton(enabled = !busy, onClick = { viewingDuplicate = bill.id }) { Text("Open existing bill") }
             }
-        } },
+        } } },
         dismissButton = { TextButton(enabled = !busy, onClick = { duplicateBills = emptyList() }) { Text("Go back") } },
         confirmButton = { TextButton(enabled = !busy, onClick = { save(allowDuplicate = true) }) { Text("Save anyway") } },
     )
@@ -877,7 +874,7 @@ fun ItemEditorSheet(
             text = { Column {
                 Text("Recognition can make mistakes. Check the original document.", style = MaterialTheme.typography.bodySmall)
                 androidx.compose.foundation.text.selection.SelectionContainer {
-                    Text(attachment.recognizedText, Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()))
+                    ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 400.dp), fitContent = true) { Text(attachment.recognizedText) }
                 }
             } }, confirmButton = { TextButton(onClick = { textPreview = null }) { Text("Close") } })
     }

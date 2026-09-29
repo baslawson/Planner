@@ -4,7 +4,6 @@ import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,14 +53,14 @@ fun PaymentsSection(amount: Long?, currency: String, paid: Boolean, payments: Li
         val parsed = Bills.parse(input)
         val valid = parsed != null && parsed > 0 && remaining != null && parsed <= remaining
         AlertDialog(onDismissRequest = { adding = false }, title = { Text("Record payment") }, text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Remaining: ${remaining?.let { Bills.format(it, currency) }.orEmpty()}")
                 OutlinedTextField(input, { input = it.take(16) }, label = { Text("Payment amount") }, singleLine = true,
                     isError = input.isNotBlank() && !valid)
                 TextButton(onClick = { picking = true }) { Text(LocalDate.parse(date).fullLabel()) }
                 OutlinedTextField(note, { note = it.take(200) }, label = { Text("Payment note (optional)") })
                 Text("Applied when you save the bill.", style = MaterialTheme.typography.bodySmall)
-            }
+            } }
         }, confirmButton = { TextButton(enabled = valid, onClick = {
             onChange(payments + BillPayment(amount = parsed!!, date = LocalDate.parse(date), note = note.trim())); adding = false
         }) { Text("Add payment") } }, dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } })

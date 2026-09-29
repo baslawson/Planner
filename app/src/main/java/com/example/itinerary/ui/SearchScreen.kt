@@ -159,7 +159,7 @@ fun SearchScreen(
                 // Only the search box stays put; the controls under it scroll away with the results, so a short
                 // screen (landscape, large text) still shows what was found.
                 val grouped = remember(visibleOutcome) { groupResults(visibleOutcome) }
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                LazyScrollHints(Modifier.fillMaxSize()) { hintState -> LazyColumn(Modifier.fillMaxSize(), state = hintState, contentPadding = PaddingValues(bottom = 24.dp)) {
                     item(key = "search-controls") { Column {
                         SavedSearchControls(query, categories, showCompleted) { saved ->
                             query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
@@ -206,7 +206,7 @@ fun SearchScreen(
                         visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> item(key = "hint") { Hint("Nothing found. Try fewer words or check the spelling.") }
                         else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
                     }
-                }
+                } }
             }
         }
     }

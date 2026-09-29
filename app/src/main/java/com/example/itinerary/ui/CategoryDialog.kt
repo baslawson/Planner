@@ -12,7 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +56,7 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
             onDismissRequest = onDismiss,
             title = { HeadingText("Remove categories") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth()) {
                     Text(
                         "Tick the categories to remove. Events using them become Other.",
                         style = MaterialTheme.typography.bodySmall,
@@ -86,7 +85,7 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
                             )
                         }
                     }
-                }
+                } }
             },
             confirmButton = {
                 DangerButton(

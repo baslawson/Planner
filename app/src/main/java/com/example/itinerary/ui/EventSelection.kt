@@ -73,14 +73,14 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Delete the selected ${noun}s, including their reminders and attachments? For repeating entries, only the selected occurrences will be deleted.")
-                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                    LazyScrollHints(Modifier.heightIn(max = 240.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) {
                         items(chosen, key = { it.id }) { event ->
                             Column(Modifier.padding(vertical = 4.dp)) {
                                 Text(event.title, style = MaterialTheme.typography.titleSmall)
                                 Text(event.date.dayLabel(LocalDateFormat.current), style = MaterialTheme.typography.bodySmall)
                             }
                         }
-                    }
+                    } }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },

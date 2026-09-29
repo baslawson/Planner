@@ -27,7 +27,7 @@ fun BillHistoryDialog(id: Long, onDismiss: () -> Unit) {
                 else if (history.isEmpty()) Text("This bill is no longer available.")
                 else {
                     Text("${history.count { it.paid && !it.skipped }} paid · ${history.count { !it.paid && !it.skipped }} unpaid · ${history.count { it.skipped }} skipped")
-                    LazyColumn(Modifier.heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyScrollHints(Modifier.heightIn(max = 400.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(history, key = { it.id }) { item ->
                             Column {
                                 Text(item.title, style = MaterialTheme.typography.titleSmall)
@@ -38,7 +38,7 @@ fun BillHistoryDialog(id: Long, onDismiss: () -> Unit) {
                                 OverdueBill(item.date, item.paid, item.skipped, today)
                             }
                         }
-                    }
+                    } }
                 }
             }
         }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })

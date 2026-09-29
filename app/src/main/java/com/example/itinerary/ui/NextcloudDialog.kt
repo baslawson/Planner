@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -64,7 +63,7 @@ fun NextcloudDialog(
         properties = DialogProperties(securePolicy = if (state.connected) SecureFlagPolicy.Inherit else SecureFlagPolicy.SecureOn),
         title = { HeadingText("Nextcloud backup") },
         text = {
-            Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+            ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 560.dp), fitContent = true) { Column(Modifier.fillMaxWidth()) {
                 if (!state.connected) {
                     Text("Connect to save all events, tasks, reminders, attachments and settings to your Nextcloud.")
                     Spacer(Modifier.height(8.dp))
@@ -132,7 +131,7 @@ fun NextcloudDialog(
                         }
                     }
                 }
-            }
+            } }
         },
         confirmButton = { OutlinedButton(onClick = onDismiss, enabled = !busy) { Text("Close") } },
     )

@@ -4,13 +4,11 @@ import com.example.itinerary.ui.MatrixTextButton as TextButton
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.*
@@ -31,7 +29,7 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
     val valid = (useTitle || useDate || useAmount) && (!useTitle || title.isNotBlank()) && (!useDate || parsedDate != null) &&
         (!useAmount || Bills.parse(amount) != null && currency.uppercase() in Bills.currencies)
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Review bill details") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("From ${attachment.name}. Check against the document, then tick the fields to apply. Nothing is saved until you save the event.")
             if (attachment.recognizedText.isBlank()) Text("No readable text was found. You can enter the details here, or cancel and scan again.")
             else if (attachment.textStatus == "PARTIAL") ScanUncertainty("Only part of this document was read. Verify every suggested field.")
@@ -47,7 +45,7 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
             OutlinedTextField(currency, { currency = it.uppercase().take(3) }, label = { Text("Currency code") }, isError = useAmount && currency !in Bills.currencies, modifier = Modifier.fillMaxWidth())
             ScanUncertainty(suggestion.warnings["currency"])
             Text("Blank fields could not be identified reliably. A $ symbol alone keeps your current currency ($currentCurrency). Applying details selects Bills.", style = MaterialTheme.typography.bodySmall)
-        }
+        } }
     }, confirmButton = { TextButton(enabled = valid, onClick = { onApply(title.trim().takeIf { useTitle }, parsedDate.takeIf { useDate }, Bills.parse(amount).takeIf { useAmount }, currency) }) { Text("Apply selected") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }

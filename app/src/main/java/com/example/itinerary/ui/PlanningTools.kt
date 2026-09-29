@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.res.painterResource
@@ -243,7 +242,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::read) }
     LaunchedEffect(initialUri) { if (initialUri != null) read(initialUri) }
     if (selected == null) AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Import calendar invitation") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ScrollHints(rememberScrollState(), Modifier.fillMaxWidth(), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Choose an .ics file, then review each appointment in the event editor. Nothing is added until you save.")
             Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text("Choose calendar file") }
             if (busy) CircularProgressIndicator()
@@ -261,7 +260,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                     else error = "Finish or discard your current event draft before importing another appointment."
                 }) { Text("Review ${item.title}") }
             }
-        }
+        } }
     }, confirmButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } })
     selected?.let { NewPlanningEventEditor(it) { selected = null } }
 }

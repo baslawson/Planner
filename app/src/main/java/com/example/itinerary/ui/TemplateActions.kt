@@ -4,7 +4,6 @@ import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -53,7 +52,7 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
             }
         }) { Text("Save template") } }, dismissButton = { TextButton(enabled = !busy, onClick = { saving = false }) { Text("Cancel") } })
     if (choosing && deleting == null) AlertDialog(onDismissRequest = { choosing = false }, title = { Text(if (billTask) "Bill templates" else "Event templates") },
-        text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        text = { ScrollHints(rememberScrollState(), Modifier.fillMaxWidth().heightIn(max = 420.dp), fitContent = true) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Applying replaces details and reminders. Your chosen date and attachments stay.")
             if (matchingTemplates.isEmpty()) Text("No templates yet. Fill in the details and choose Save as template.")
             matchingTemplates.forEach { template ->
@@ -69,7 +68,7 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } })
+        } } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } })
     deleting?.let { template -> AlertDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("Delete ${template.name}?") },
         text = { Text("Entries made from this template are kept.") },
         confirmButton = { DangerButton(enabled = !busy, onClick = {

@@ -31,7 +31,7 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Tasks, events and their attachments can be restored for 30 days after deletion.")
             if (shown.isEmpty()) Text("No recently deleted events or tasks.")
-            LazyColumn(Modifier.heightIn(max = 380.dp)) {
+            LazyScrollHints(Modifier.heightIn(max = 380.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) {
                 items(shown, key = { it.id }) { entry ->
                     Column(Modifier.padding(vertical = 8.dp)) {
                         Text(entry.label, style = MaterialTheme.typography.titleSmall)
@@ -43,7 +43,7 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
                         }
                     }
                 }
-            }
+            } }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Close") } })

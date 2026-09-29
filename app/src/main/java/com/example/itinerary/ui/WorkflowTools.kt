@@ -45,12 +45,12 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
     if (choosing) AlertDialog(onDismissRequest = { choosing = false }, title = { Text("Saved searches") },
         text = { Column {
             if (saved.isEmpty()) Text("Set a search and filters, then choose Save search.")
-            LazyColumn(Modifier.heightIn(max = 380.dp)) { items(saved, key = { it.name }) { value ->
+            LazyScrollHints(Modifier.heightIn(max = 380.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) { items(saved, key = { it.name }) { value ->
                 Row(Modifier.fillMaxWidth()) {
                     TextButton(modifier = Modifier.weight(1f), onClick = { onOpen(value); choosing = false }) { Text(value.name) }
                     TextButton(onClick = { update(saved - value) }) { Text("Remove") }
                 }
-            } }
+            } } }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Close") } })
 }
@@ -85,11 +85,11 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
             text = { Column {
                 OutlinedTextField(query, { query = it }, label = { Text("Find task") }, singleLine = true)
                 if (choices.isEmpty()) Text("No matching tasks. Tasks that would create a loop are excluded.")
-                LazyColumn(Modifier.heightIn(max = 340.dp)) { items(choices, key = { it.id }) { candidate ->
+                LazyScrollHints(Modifier.heightIn(max = 340.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) { items(choices, key = { it.id }) { candidate ->
                     TextButton(onClick = { onChange(ids + candidate.id); choosing = false }) {
                         Text(candidate.title + if (candidate.done) " · Completed" else "")
                     }
-                } }
+                } } }
             } }, confirmButton = { TextButton(onClick = { choosing = false }) { Text("Cancel") } })
     }
     opening?.let { id ->

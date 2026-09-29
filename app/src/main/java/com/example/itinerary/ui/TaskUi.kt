@@ -12,7 +12,6 @@ import org.json.JSONArray
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -212,9 +211,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     BackHandler { if (!busy) onDismiss() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            Column(
-                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
+            ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxWidth()) { Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 HeadingText(if (creating) "Add task" else "Edit task", style = MaterialTheme.typography.headlineSmall)
@@ -303,7 +301,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
                     }) { Text("Take photo") }
                 }
-            }
+            } }
             HorizontalDivider()
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
