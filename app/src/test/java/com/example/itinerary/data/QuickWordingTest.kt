@@ -137,7 +137,7 @@ class QuickWordingTest {
     @Test fun endOfTheMonth() {
         for (text in listOf("Rent due end of month", "Rent due end of the month", "Rent due at the end of the month", "Rent due by the end of the month")) {
             val r = ok(text)
-            assertEquals(text, "Rent due", r.title); assertEquals(text, LocalDate.of(2026, 9, 30), r.date)
+            assertEquals(text, "Rent", r.title); assertEquals(text, LocalDate.of(2026, 9, 30), r.date) // "due" belongs to the date (round 5)
         }
         assertEquals(LocalDate.of(2027, 2, 28), QuickEntry.parse("Rent end of month", LocalDate.of(2027, 2, 3)).date)
         // Parser round 4: the end of the week is its Friday.
