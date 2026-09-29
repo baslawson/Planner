@@ -97,6 +97,7 @@ internal class IcsRepeat private constructor(
                 else -> RepeatRule.NONE
             }
             "MONTHLY" -> when {
+                interval in 2..24 && days.isEmpty() && (monthDay == null || monthDay == start.dayOfMonth) -> RepeatRule.everyMonths(interval)
                 interval != 1 -> RepeatRule.NONE
                 days.isEmpty() && (monthDay == null || monthDay == start.dayOfMonth) -> RepeatRule.MONTHLY
                 days.size == 1 -> days.single().let { (n, day) ->

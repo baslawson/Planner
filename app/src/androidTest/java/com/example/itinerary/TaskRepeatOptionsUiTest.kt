@@ -131,7 +131,7 @@ class TaskRepeatOptionsUiTest {
             // The list is longer than the menu, so later choices need a scroll inside it.
             fun scrollMenu(forward:Boolean) { nodes().lastOrNull { it.isScrollable && it.isVisibleToUser }
                 ?.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);Thread.sleep(300) }
-            for (option in listOf("Never","Daily","Weekly","Fortnightly","Monthly","Yearly","Every few days…","Every few weeks…",
+            for (option in listOf("Never","Daily","Weekly","Fortnightly","Monthly","Yearly","Every few days…","Every few weeks…","Every few months…",
                 "On chosen weekdays…","Monthly on a weekday (e.g. first Monday)…","Days after completion")) {
                 repeat(3) { if (find(option)==null) scrollMenu(true) }
                 assertNotNull("Missing repeat choice $option",find(option))

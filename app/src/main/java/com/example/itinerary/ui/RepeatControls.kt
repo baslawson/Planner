@@ -21,6 +21,7 @@ import java.time.LocalDate
 fun RepeatRule.Kind.choiceLabel(): String = when (this) {
     RepeatRule.Kind.EVERY_N_DAYS -> "Every few days…"
     RepeatRule.Kind.EVERY_N_WEEKS -> "Every few weeks…"
+    RepeatRule.Kind.EVERY_N_MONTHS -> "Every few months…"
     RepeatRule.Kind.DAYS_OF_WEEK -> "On chosen weekdays…"
     RepeatRule.Kind.MONTHLY_WEEKDAY -> "Monthly on a weekday (e.g. first Monday)…"
     else -> name
@@ -30,6 +31,7 @@ fun RepeatRule.Kind.choiceLabel(): String = when (this) {
 fun RepeatRule.Kind.startingRule(date: LocalDate): RepeatRule = when (this) {
     RepeatRule.Kind.EVERY_N_DAYS -> RepeatRule.everyDays(2)
     RepeatRule.Kind.EVERY_N_WEEKS -> RepeatRule.everyWeeks(3)
+    RepeatRule.Kind.EVERY_N_MONTHS -> RepeatRule.everyMonths(3)
     RepeatRule.Kind.DAYS_OF_WEEK -> RepeatRule.onDays(setOf(date.dayOfWeek))
     else -> RepeatRule.monthlyLike(date)
 }
@@ -37,17 +39,20 @@ fun RepeatRule.Kind.startingRule(date: LocalDate): RepeatRule = when (this) {
 /** Every repeat a Repeat list offers: the plain ones, then those that need a further choice. */
 fun repeatChoices(date: LocalDate): List<RepeatRule> = RepeatRule.entries + RepeatRule.customKinds.map { it.startingRule(date) }
 
-/** The further choice a repeat needs: how many days or weeks, which weekdays, or which week of the month. */
+/** The further choice a repeat needs: how many days, weeks or months, which weekdays, or which week of the month. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RepeatDetails(rule: RepeatRule, enabled: Boolean, onChange: (RepeatRule) -> Unit) {
     when (rule.kind) {
-        RepeatRule.Kind.EVERY_N_DAYS, RepeatRule.Kind.EVERY_N_WEEKS -> {
-            val weeks = rule.kind == RepeatRule.Kind.EVERY_N_WEEKS
+        RepeatRule.Kind.EVERY_N_DAYS, RepeatRule.Kind.EVERY_N_WEEKS, RepeatRule.Kind.EVERY_N_MONTHS -> {
             OutlinedTextField(
                 value = if (rule.every == 0) "" else rule.every.toString(),
                 onValueChange = { value -> onChange(rule.copy(every = value.filter(Char::isDigit).take(3).toIntOrNull() ?: 0)) },
-                label = { Text(if (weeks) "Every how many weeks (2–52)" else "Every how many days (2–365)") },
+                label = { Text(when (rule.kind) {
+                    RepeatRule.Kind.EVERY_N_WEEKS -> "Every how many weeks (2–52)"
+                    RepeatRule.Kind.EVERY_N_MONTHS -> "Every how many months (2–24)"
+                    else -> "Every how many days (2–365)"
+                }) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true, enabled = enabled, isError = !rule.valid, modifier = Modifier.fillMaxWidth(),
             )

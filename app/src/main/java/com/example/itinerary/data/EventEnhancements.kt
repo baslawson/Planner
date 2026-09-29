@@ -10,15 +10,15 @@ import java.util.Locale
 
 /**
  * How a series repeats. Stored by [name]: the original rules by their plain name (WEEKLY), the newer ones with their
- * value after a colon: EVERY_N_DAYS:3, EVERY_N_WEEKS:3, DAYS_OF_WEEK:MON,WED,FRI, MONTHLY_WEEKDAY:1,MON
+ * value after a colon: EVERY_N_DAYS:3, EVERY_N_WEEKS:3, EVERY_N_MONTHS:3, DAYS_OF_WEEK:MON,WED,FRI, MONTHLY_WEEKDAY:1,MON
  * (the first Monday) or MONTHLY_WEEKDAY:LAST,FRI. Event series are saved as separate dated events, so the rule
  * describes a series; tasks use it to find their next due date.
  */
 data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWeek> = emptySet(), val week: Int = 0) {
-    enum class Kind { NONE, DAILY, WEEKDAYS, WEEKLY, FORTNIGHTLY, MONTHLY, YEARLY, EVERY_N_DAYS, EVERY_N_WEEKS, DAYS_OF_WEEK, MONTHLY_WEEKDAY }
+    enum class Kind { NONE, DAILY, WEEKDAYS, WEEKLY, FORTNIGHTLY, MONTHLY, YEARLY, EVERY_N_DAYS, EVERY_N_WEEKS, EVERY_N_MONTHS, DAYS_OF_WEEK, MONTHLY_WEEKDAY }
 
     val name: String get() = when (kind) {
-        Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS -> "${kind.name}:$every"
+        Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS, Kind.EVERY_N_MONTHS -> "${kind.name}:$every"
         Kind.DAYS_OF_WEEK -> "${kind.name}:" + days.sorted().joinToString(",") { it.name.take(3) }
         Kind.MONTHLY_WEEKDAY -> "${kind.name}:${if (week == LAST) "LAST" else week},${days.firstOrNull()?.name?.take(3).orEmpty()}"
         else -> kind.name
@@ -34,14 +34,16 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
         Kind.YEARLY -> "Yearly"
         Kind.EVERY_N_DAYS -> "Every $every days"
         Kind.EVERY_N_WEEKS -> "Every $every weeks"
+        Kind.EVERY_N_MONTHS -> "Every $every months"
         Kind.DAYS_OF_WEEK -> "Every " + days.sorted().joinToString(", ") { shortDay(it) }
         Kind.MONTHLY_WEEKDAY -> "Monthly on the ${weekName(week)} ${days.firstOrNull()?.let(::fullDay) ?: "weekday"}"
     }
 
-    /** Every 2–365 days or 2–52 weeks; at least one weekday; the 1st–4th or last of one weekday. */
+    /** Every 2–365 days, 2–52 weeks or 2–24 months; at least one weekday; the 1st–4th or last of one weekday. */
     val valid: Boolean get() = when (kind) {
         Kind.EVERY_N_DAYS -> every in 2..365
         Kind.EVERY_N_WEEKS -> every in 2..52
+        Kind.EVERY_N_MONTHS -> every in 2..24
         Kind.DAYS_OF_WEEK -> days.isNotEmpty()
         Kind.MONTHLY_WEEKDAY -> days.size == 1 && (week in 1..4 || week == LAST)
         else -> true
@@ -67,6 +69,8 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
                     Kind.YEARLY -> start.plusYears(i)
                     Kind.EVERY_N_DAYS -> start.plusDays(i * every)
                     Kind.EVERY_N_WEEKS -> start.plusWeeks(i * every)
+                    // Always from the start date, like MONTHLY: 31 Jan every 3 months → 30 Apr, 31 Jul.
+                    Kind.EVERY_N_MONTHS -> start.plusMonths(i * every)
                     else -> error("Handled above")
                 }
             }
@@ -87,6 +91,7 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
             val step = every.toLong() * if (kind == Kind.EVERY_N_WEEKS) 7 else 1
             start.plusDays((maxOf(0L, ChronoUnit.DAYS.between(start, after)) / step + 1) * step)
         }
+        Kind.EVERY_N_MONTHS -> generateSequence(1L) { it + 1 }.map { start.plusMonths(it * every) }.first { it > after }
         Kind.DAYS_OF_WEEK -> generateSequence(after.plusDays(1)) { it.plusDays(1) }.first { it.dayOfWeek in days }
         Kind.MONTHLY_WEEKDAY -> generateSequence(YearMonth.from(after)) { it.plusMonths(1) }.map(::inMonth).first { it > after }
         else -> error("Only for the newer repeat rules")
@@ -111,10 +116,11 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
         /** The rules that need no further choice. */
         val entries = listOf(NONE, DAILY, WEEKDAYS, WEEKLY, FORTNIGHTLY, MONTHLY, YEARLY)
         /** The rules that take a number, weekdays or a week of the month, in the editor's order. */
-        val customKinds = listOf(Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS, Kind.DAYS_OF_WEEK, Kind.MONTHLY_WEEKDAY)
+        val customKinds = listOf(Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS, Kind.EVERY_N_MONTHS, Kind.DAYS_OF_WEEK, Kind.MONTHLY_WEEKDAY)
 
         fun everyDays(n: Int) = RepeatRule(Kind.EVERY_N_DAYS, every = n)
         fun everyWeeks(n: Int) = RepeatRule(Kind.EVERY_N_WEEKS, every = n)
+        fun everyMonths(n: Int) = RepeatRule(Kind.EVERY_N_MONTHS, every = n)
         fun onDays(days: Set<DayOfWeek>) = RepeatRule(Kind.DAYS_OF_WEEK, days = days)
         fun monthlyOn(week: Int, day: DayOfWeek) = RepeatRule(Kind.MONTHLY_WEEKDAY, days = setOf(day), week = week)
         /** The week of the month [date] is in, as a monthly weekday rule: its last week counts as last from the 5th on. */
@@ -126,7 +132,7 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
             val value = name.substringAfter(':', "")
             fun day(code: String) = DayOfWeek.entries.first { it.name.take(3) == code }
             when (kind) {
-                Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS -> RepeatRule(kind, every = value.toInt())
+                Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS, Kind.EVERY_N_MONTHS -> RepeatRule(kind, every = value.toInt())
                 Kind.DAYS_OF_WEEK -> RepeatRule(kind, days = value.split(',').filter { it.isNotEmpty() }.map(::day).toSet())
                 Kind.MONTHLY_WEEKDAY -> value.split(',').let { (w, d) -> RepeatRule(kind, days = setOf(day(d)), week = if (w == "LAST") LAST else w.toInt()) }
                 else -> RepeatRule(kind).takeIf { value.isEmpty() }

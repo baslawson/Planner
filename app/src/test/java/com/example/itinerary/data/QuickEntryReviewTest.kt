@@ -25,9 +25,9 @@ class QuickEntryReviewTest {
         val literal = QuickEntry.parse(text, today, listOf(phrase.start until phrase.end))
         assertEquals(text, literal.title);assertEquals(RepeatRule.NONE, literal.repeat)
         assertEquals(RepeatRule.everyWeeks(3), QuickEntry.parse("Green Bin every 3 weeks", today).repeat)
-        for (unsupported in listOf("every other month", "every other weekend", "every two months")) {
-            assertNotNull(unsupported, QuickEntry.parse("Green Bin $unsupported", today).error)
-        }
+        assertNotNull(QuickEntry.parse("Green Bin every other weekend", today).error)
+        // Parser round 4: every few months is a repeat now.
+        assertEquals(RepeatRule.everyMonths(2), QuickEntry.parse("Green Bin every two months", today).repeat)
     }
     @Test fun phraseOffsetsMatchOriginalWhitespaceAndLiteralEditsArePreserved() {
         val text="  Meet   Friday\n3pm  at Cafe"

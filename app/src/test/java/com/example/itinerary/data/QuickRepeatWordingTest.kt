@@ -21,7 +21,10 @@ class QuickRepeatWordingTest {
         // Unchanged: two weeks is fortnightly, one day is daily.
         assertEquals(RepeatRule.FORTNIGHTLY, ok("Review every 2 weeks").repeat)
         assertEquals(RepeatRule.DAILY, ok("Review every day").repeat)
-        assertNotNull(parse("Review every other month").error)
+        // Parser round 4: every few months.
+        assertEquals(RepeatRule.everyMonths(2), ok("Review every other month").repeat)
+        assertEquals(RepeatRule.everyMonths(3), ok("Car service every 3 months").repeat)
+        assertEquals(RepeatRule.MONTHLY, ok("Review every 1 months").repeat)
     }
 
     @Test fun chosenWeekdays() {
@@ -59,7 +62,7 @@ class QuickRepeatWordingTest {
         val unclear = parse("Book club every 2nd Tuesday")
         assertTrue(unclear.error!!.contains("every other Tuesday"))
         assertNotNull(parse("Book club every second Tuesday").error)
-        // One month only is not a repeat.
-        assertNotNull(parse("Board meeting first Monday of the month").error)
+        // Parser round 4 (user approved): "of the month" reads as every month, like "of every month".
+        assertEquals(RepeatRule.monthlyOn(1, MONDAY), ok("Board meeting first Monday of the month").repeat)
     }
 }

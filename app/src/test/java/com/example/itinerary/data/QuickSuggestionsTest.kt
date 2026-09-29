@@ -64,7 +64,7 @@ class QuickSuggestionsTest {
     @Test fun extraWeekdaySpellingsAndVagueRangesNeedAChoice() {
         assertEquals(LocalDate.of(2026, 9, 30), parse("Gym weds 6pm").date); assertEquals("Gym", parse("Gym weds 6pm").title)
         assertEquals(LocalDate.of(2026, 10, 1), parse("Gym thur 6pm").date)
-        for (phrase in listOf("next week", "this month", "next year", "the end of the week")) {
+        for (phrase in listOf("next week", "this month", "next year")) {
             val s = parse("Review $phrase")
             assertNotNull(phrase, s.error)
             val p = s.phrases.single { it.kind == QuickPhraseKind.UNSUPPORTED }

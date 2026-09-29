@@ -140,6 +140,7 @@ class QuickWordingTest {
             assertEquals(text, "Rent due", r.title); assertEquals(text, LocalDate.of(2026, 9, 30), r.date)
         }
         assertEquals(LocalDate.of(2027, 2, 28), QuickEntry.parse("Rent end of month", LocalDate.of(2027, 2, 3)).date)
-        assertNotNull(parse("Review end of the week").error)
+        // Parser round 4: the end of the week is its Friday.
+        assertEquals(LocalDate.of(2026, 10, 2), ok("Review end of the week").date)
     }
 }

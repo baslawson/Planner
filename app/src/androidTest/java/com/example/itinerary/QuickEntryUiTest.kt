@@ -144,6 +144,23 @@ class QuickEntryUiTest {
         await { find("Tasks use due dates. Choose Event for a time or duration.")!=null }
         assertEquals(before+2,data().tasks.size);click("Close")
     }
+    // Parser round 4 in the real dialog: a range without am/pm offers the choice (and keeps its length), and every few
+    // months saves a series of that kind.
+    @Test fun rangeChoiceAndEveryFewMonths()=runBlocking {
+        start();setText("","QA r4 study 2 till 4 tomorrow")
+        await { find("Morning or afternoon? Choose a time below, or type am or pm.")!=null && find("2 PM")!=null }
+        screenshot("r4-range-choice")
+        click("2 PM")
+        click("Add event");await { data().items.any { it.title=="QA r4 study" } }
+        data().items.single { it.title=="QA r4 study" }.let {
+            assertEquals(java.time.LocalTime.of(14,0),it.startTime);assertEquals(120,it.durationMinutes);assertEquals(LocalDate.now().plusDays(1),it.date)
+        }
+        click("Quick entry");setText("","QA r4 car service every 3 months for 3 times")
+        click("Add 3 events");await { data().items.count { it.title=="QA r4 car service" }==3 }
+        val series=data().items.filter { it.title=="QA r4 car service" }.sortedBy { it.date }
+        assertTrue(series.all { it.repeatRule=="EVERY_N_MONTHS:3" && it.seriesId==series.first().seriesId })
+        assertEquals(listOf(0L,3L,6L),series.map { java.time.temporal.ChronoUnit.MONTHS.between(series.first().date,it.date) })
+    }
     @Test fun ambiguousTimeUsesExistingClockAndDateCorrectionPersists()=runBlocking {
         start();setText("","QA quick clock tomorrow at 3")
         await { find("Morning or afternoon? Choose a time below, or type am or pm.")!=null }
