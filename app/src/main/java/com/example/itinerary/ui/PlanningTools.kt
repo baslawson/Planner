@@ -15,6 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
@@ -61,7 +64,7 @@ class PlanningToolsState {
 fun PlanningToolMenuItems(state: PlanningToolsState, closeMenu: () -> Unit) {
     DropdownMenuItem(text = { Text("Find free time") },
         leadingIcon = { Icon(painterResource(R.drawable.action_clock), contentDescription = null) }, onClick = { closeMenu(); state.freeTime = true })
-    DropdownMenuItem(text = { Text("Import calendar invitation") },
+    DropdownMenuItem(text = { Text("Import calendar file") },
         leadingIcon = { Icon(Icons.Filled.DateRange, contentDescription = null) }, onClick = { closeMenu(); state.importing = true })
 }
 
@@ -213,59 +216,185 @@ fun FreeTimeDialog(events: List<ItineraryItem>, onDismiss: () -> Unit, onChoose:
     }) }
 }
 
+// Import calendar file: a whole .ics export or a single invitation (also reached by opening a .ics file from another
+// app). Every event is listed with a checkbox; upcoming ones start ticked, past ones and ones already in Planner don't.
+// "Add" saves the ticked ones as ordinary Planner events in one go (repeating ones as a series); "Undo import" then moves
+// them all to Recently deleted. A single event can instead be reviewed in the event editor first.
 @Composable
 fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
-    val existing by repo.allItems.collectAsStateWithLifecycle(emptyList())
+    val existingItems by repo.allItems.collectAsStateWithLifecycle(emptyList())
+    val existing = remember(existingItems) { CalendarFileImport.existingKeys(existingItems) }
     val scope = rememberCoroutineScope()
-    var selected by remember { mutableStateOf<ItineraryItem?>(null) }
-    var invitations by remember { mutableStateOf<List<CalendarImport.Invitation>>(emptyList()) }
+    val today = rememberCurrentDate()
+    var result by remember { mutableStateOf<CalendarFileImport.Result?>(null) }
+    var ticked by remember { mutableStateOf(emptySet<Int>()) }
+    var includePast by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<ItineraryItem?>(null) }
+    var added by remember { mutableStateOf<List<Long>?>(null) }
+    var addedSeries by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     fun read(uri: Uri) {
         busy = true; error = null
         scope.launch {
             try {
-                invitations = withContext(Dispatchers.IO) {
+                val read = withContext(Dispatchers.IO) {
                     val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
                         val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
                         while (true) {
                             val size = input.read(buffer); if (size < 0) break
-                            require(out.size() + size <= CalendarImport.MAX_BYTES) { "Calendar file is too large (maximum 1 MB)." }
+                            require(out.size() + size <= CalendarFileImport.MAX_BYTES) { "This calendar file is too large (maximum 10 MB)." }
                             out.write(buffer, 0, size)
                         }; out.toByteArray()
                     } ?: error("Could not open this file.")
-                    CalendarImport.parse(bytes.toString(Charsets.UTF_8))
+                    CalendarFileImport.read(bytes.toString(Charsets.UTF_8), today = today)
                 }
+                result = read
+                includePast = false
+                ticked = read.entries.filter { !it.past(today) && !CalendarFileImport.duplicate(it, existing, today, false) }.mapTo(HashSet()) { it.id }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { error = e.message ?: "Could not read this calendar invitation."; invitations = emptyList() }
+            catch (e: Exception) { error = e.message ?: "Could not read this calendar file."; result = null }
             finally { busy = false }
         }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::read) }
     LaunchedEffect(initialUri) { if (initialUri != null) read(initialUri) }
-    if (selected == null) PlannerDialog("Import calendar invitation", onDismissRequest = { if (!busy) onDismiss() },
-        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss)) {
-            Text("Choose an .ics file, then review each appointment in the event editor. Nothing is added until you save.")
-            Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text("Choose calendar file") }
+    val entries = result?.entries.orEmpty()
+    val duplicates = remember(entries, existing, includePast, today) {
+        entries.filter { CalendarFileImport.duplicate(it, existing, today, includePast) }.mapTo(HashSet()) { it.id }
+    }
+    // An event saved from the editor (or added some other way) meanwhile is now in Planner: don't add it twice.
+    LaunchedEffect(duplicates) { ticked = ticked - duplicates }
+    val pastIds = remember(entries, today) { entries.filter { it.past(today) }.mapTo(HashSet()) { it.id } }
+
+    editing?.let { NewPlanningEventEditor(it) { editing = null }; return }
+    added?.let { ids ->
+        PlannerDialog("Calendar imported", onDismissRequest = { if (!busy) onDismiss() },
+            primary = DialogAction("Done", enabled = !busy, onClick = onDismiss),
+            extra = listOf(DialogAction("Undo import", enabled = !busy) {
+                busy = true
+                scope.launch {
+                    try { repo.deleteEventsWithUndo(ids.toSet()); onDismiss() }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { error = "Couldn't undo the import. Try again." }
+                    finally { busy = false }
+                }
+            })) {
+            Text(if (ids.size == 1) "Added 1 event." else "Added ${ids.size} events.")
+            if (addedSeries > 0) Text("${if (addedSeries == 1) "1 repeating event was" else "$addedSeries repeating events were"} added as a series: " +
+                "edit one and choose the whole series to change them all.", style = MaterialTheme.typography.bodySmall)
+            Text("Undo import moves them all to Recently deleted.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+        return
+    }
+    if (result == null) {
+        PlannerDialog("Import calendar file", onDismissRequest = { if (!busy) onDismiss() },
+            primary = DialogAction("Choose calendar file", enabled = !busy) { picker.launch(arrayOf("*/*")) },
+            dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss)) {
+            Text("Choose an .ics file: an export of a whole calendar (Google, Outlook, Apple…) or a single invitation. " +
+                "You pick which events to add; nothing is added until you do.")
             if (busy) CircularProgressIndicator()
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            invitations.forEach { invitation ->
-                val item = invitation.item
-                HorizontalDivider()
-                Text(item.title, style = MaterialTheme.typography.titleMedium)
-                Text("${item.date.dayLabel(LocalDateFormat.current)} · ${item.startTime?.label(LocalTimeFormat.current, context) ?: "All day"}")
-                invitation.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                if (existing.any { it.title == item.title && it.date == item.date && it.startTime == item.startTime })
-                    Text("A matching appointment already exists. Review before adding another.", color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = {
-                    if (runCatching { EditorDraftStore(context).read() == null }.getOrDefault(false)) selected = item
-                    else error = "Finish or discard your current event draft before importing another appointment."
-                }) { Text("Review ${item.title}") }
-            }
+        }
+        return
     }
-    selected?.let { NewPlanningEventEditor(it) { selected = null } }
+    val chosen = entries.filter { it.id in ticked }
+    val format = LocalTimeFormat.current
+    PlannerDialog("Import calendar file", onDismissRequest = { if (!busy) onDismiss() },
+        primary = DialogAction(if (busy) "Adding…" else if (chosen.size == 1) "Add 1 event" else "Add ${chosen.size} events",
+            enabled = !busy && chosen.isNotEmpty()) {
+            busy = true; error = null
+            scope.launch {
+                try {
+                    val items = withContext(Dispatchers.Default) { CalendarFileImport.events(chosen, today, includePast) }
+                    addedSeries = chosen.count { it.datesFor(today, includePast).size > 1 }
+                    added = repo.importEvents(items)
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { error = e.message ?: "Couldn't add these events. Nothing was added." }
+                finally { busy = false }
+            }
+        },
+        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss),
+        extra = listOf(DialogAction("Other file", enabled = !busy) { picker.launch(arrayOf("*/*")) }),
+        scroll = null,
+        header = {
+            val repeating = entries.count { it.repeating }
+            Text("${entries.size} event${if (entries.size == 1) "" else "s"} in this file" +
+                if (repeating > 0) " ($repeating repeating)" else "", style = MaterialTheme.typography.bodyMedium)
+            if (pastIds.isNotEmpty()) Row(Modifier.fillMaxWidth().toggleable(value = includePast, enabled = !busy, role = Role.Switch) { on ->
+                includePast = on
+                ticked = if (on) ticked + (pastIds - duplicates) else ticked - pastIds
+            }, verticalAlignment = Alignment.CenterVertically) {
+                // The header sits in the pop-up's title area, so plain text needs its own style there.
+                Text("Include past events (${pastIds.size})", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = includePast, onCheckedChange = null, enabled = !busy)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(enabled = !busy, onClick = {
+                    ticked = entries.filter { it.datesFor(today, includePast).isNotEmpty() }.mapTo(HashSet()) { it.id }
+                }) { Text("Select all") }
+                TextButton(enabled = !busy, onClick = { ticked = emptySet() }) { Text("Select none") }
+            }
+        },
+    ) {
+        val height = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.45f).dp
+        LazyScrollHints(Modifier.fillMaxWidth().heightIn(max = height)) { state ->
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth(), state = state) {
+                items(entries.size, key = { entries[it].id }) { index ->
+                    val entry = entries[index]
+                    val dates = entry.datesFor(today, includePast)
+                    ImportRow(entry, dates, entry.id in ticked, entry.id in duplicates, entry.id in pastIds, enabled = !busy,
+                        format = format, onToggle = { on -> ticked = if (on) ticked + entry.id else ticked - entry.id },
+                        onEdit = if (entry.repeating || busy) null else ({
+                            if (runCatching { EditorDraftStore(context).read() == null }.getOrDefault(false))
+                                editing = entry.item.startingOn(dates.firstOrNull() ?: entry.dates.first())
+                            else error = "Finish or discard your current event draft before reviewing another event."
+                        }))
+                }
+            }
+        }
+        result?.skipped?.takeIf { it > 0 }?.let {
+            Text("$it event${if (it == 1) "" else "s"} couldn't be read and ${if (it == 1) "is" else "are"} left out.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("Times are in your phone's time zone. Reminders, attendees and attachments aren't imported.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+// One event in the import list: tick box, title, first date and time, how it repeats, and why it starts unticked.
+@Composable
+private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, checked: Boolean, duplicate: Boolean, past: Boolean,
+                      enabled: Boolean, format: TimeFormat, onToggle: (Boolean) -> Unit, onEdit: (() -> Unit)?) {
+    val context = LocalContext.current
+    val item = entry.item
+    val first = dates.firstOrNull() ?: entry.dates.first()
+    Row(Modifier.fillMaxWidth().toggleable(value = checked, enabled = enabled && dates.isNotEmpty(), role = Role.Checkbox, onValueChange = onToggle)
+        // Room on the right for the list's scroll bar.
+        .padding(top = 6.dp, bottom = 6.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled && dates.isNotEmpty())
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(item.title, style = MaterialTheme.typography.titleSmall)
+            val time = item.startTime?.let { start ->
+                start.label(format, context) + (item.durationMinutes?.let { " – " + start.plusMinutes(it.toLong()).label(format, context) } ?: "")
+            } ?: "All day"
+            Text("${first.dayLabel(LocalDateFormat.current)} · $time", style = MaterialTheme.typography.bodySmall)
+            item.endDate?.let { end -> Text(spanLabel(first, first.plusDays(java.time.temporal.ChronoUnit.DAYS.between(item.date, end))),
+                style = MaterialTheme.typography.bodySmall) }
+            if (entry.repeating) Text("${if (entry.repeat.kind == RepeatRule.Kind.NONE) "Repeats" else entry.repeat.label} · " +
+                "${dates.size} date${if (dates.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall)
+            if (item.location.isNotBlank()) Text(item.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            entry.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            if (duplicate) Text("Already in Planner", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            else if (past) Text("Past event", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (onEdit != null) TextButton(onClick = onEdit) { Text("Edit") }
+    }
 }
 
 @Composable

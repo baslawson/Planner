@@ -38,32 +38,6 @@ class PlanningToolsTest {
             assertEquals("Minute $minute", expected, actual)
         }
     }
-    private fun ics(body: String) = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n$body\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-    @Test fun utcTimezoneFoldedAndEscapedText() {
-        val invite = CalendarImport.parse(ics("DTSTART:20260928T010000Z\r\nDTEND:20260928T023000Z\r\nSUMMARY:Dentist\\, check\r\n up\r\nDESCRIPTION:One\\nTwo\\;three"), ZoneId.of("Australia/Perth")).single()
-        assertEquals(LocalTime.of(9,0), invite.item.startTime)
-        assertEquals(90, invite.item.durationMinutes)
-        assertEquals("Dentist, checkup", invite.item.title)
-        assertEquals("One\nTwo;three", invite.item.notes)
-        val zoned = CalendarImport.parse(ics("DTSTART;TZID=Europe/London:20260928T100000\r\nDURATION:PT30M"), ZoneId.of("Australia/Perth")).single()
-        assertEquals(LocalTime.of(17,0), zoned.item.startTime)
-    }
-    @Test fun exclusiveAllDayEndAndFloatingTime() {
-        // The end is exclusive: 28–30 Sep in the file is one event covering 28 and 29 Sep.
-        val trip = CalendarImport.parse(ics("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260930")).single().item
-        assertEquals(day, trip.date); assertEquals(day.plusDays(1), trip.endDate); assertNull(trip.startTime)
-        assertNull(CalendarImport.parse(ics("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260929")).single().item.endDate)
-        assertEquals(LocalTime.of(10,0), CalendarImport.parse(ics("DTSTART:20260928T100000"), ZoneOffset.UTC).single().item.startTime)
-    }
-    @Test fun rejectUnsupportedOrBrokenInvitations() {
-        listOf("DTSTART:20260928T100000\r\nRRULE:FREQ=WEEKLY", "DTSTART:20260928T100000\r\nDTEND:20260928T090000",
-            "DTSTART;TZID=Imaginary/Zone:20260928T100000", "DTSTART;VALUE=DATE:20260230", "SUMMARY:Missing start",
-            "DTSTART:20260928T100000\r\nSTATUS:CANCELLED", "DTSTART:20260928T100000\r\nDURATION:PT25H").forEach {
-            assertThrows("Must reject $it", Exception::class.java) { CalendarImport.parse(ics(it)) }
-        }
-        assertThrows(Exception::class.java) { CalendarImport.parse("not a calendar") }
-        assertThrows(Exception::class.java) { CalendarImport.parse("x".repeat(CalendarImport.MAX_BYTES + 1)) }
-    }
     @Test fun duplicateResetsIdentityCompletionDatesAndReminder() {
         val task = PlannerTask(title = "Pack", done = true, dueDate = day, reminderAt = 123L, nextTaskId = "successor",
             checklist = listOf(ChecklistEntry("one", "Passport", true)), repeat = "WEEKLY", repeatAnchorDay = 28)

@@ -166,13 +166,15 @@ class PlanningFiveUiTest {
             ins.runOnMainSync { activity.setContent { ItineraryTheme {
                 CalendarImportDialog({}, Uri.fromFile(file))
             } } }
-            click("Review QA imported meeting")
+            // A single event can still be reviewed in the editor first ("Edit" on its row).
+            await { find("QA imported meeting") != null }
+            click("Edit")
             screenshot("import-editor")
             click("Save")
             await { data().items.any { it.title == "QA imported meeting" } }
             assertEquals(30, data().items.single { it.title == "QA imported meeting" }.durationMinutes)
             screenshot("import-duplicate-warning")
-            assertNotNull(find("A matching appointment already exists. Review before adding another."))
+            await { find("Already in Planner") != null }
             file.delete()
             var chosen: ItineraryItem? = null
             ins.runOnMainSync { activity.setContent { ItineraryTheme { FreeTimeDialog(emptyList(), {}, { chosen = it }) } } }

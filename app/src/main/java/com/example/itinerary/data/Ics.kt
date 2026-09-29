@@ -1,14 +1,19 @@
 package com.example.itinerary.data
 
+import java.time.Duration
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
+import java.time.temporal.ChronoUnit
 
-// iCalendar (.ics) reading shared by CalendarImport (strict, one invitation) and OutsideEventReader (forgiving, a whole
-// calendar): folded lines, properties with parameters, escaped text, date-times and the VEVENTs in a file.
+// iCalendar (.ics) reading shared by CalendarFileImport (a file copied into Planner) and OutsideEventReader (calendar
+// sync): folded lines, properties with parameters, escaped text, date-times, the VEVENTs in a file, and how an event's
+// start and end become Planner's date, time, duration and span.
 internal object Ics {
     class Property(val name: String, val params: Map<String, String>, val value: String)
 
@@ -78,4 +83,44 @@ internal object Ics {
         require(stack.isEmpty()) { unfinished }
         return events
     }
+
+    fun date(p: Property): LocalDate = LocalDate.parse(p.value.take(8), DateTimeFormatter.BASIC_ISO_DATE)
+
+    // iCalendar durations may be in weeks ("P2W"), which java.time.Duration doesn't read.
+    fun duration(value: String): Duration {
+        val weeks = Regex("([+-]?)P([0-9]+)W").matchEntire(value) ?: return Duration.parse(value)
+        val length = Duration.ofDays(weeks.groupValues[2].toLong() * 7)
+        return if (weeks.groupValues[1] == "-") length.negated() else length
+    }
+
+    // How long an all-day event lasts in days: from its exclusive end date or its duration; one day when it has neither.
+    // At least one day and at most MultiDay.MAX_DAYS.
+    fun allDayLength(first: LocalDate, end: Property?, duration: Property?): Long {
+        val after = when {
+            end != null && isDate(end) -> date(end)
+            duration != null -> first.plusDays(duration(duration.value).toDays())
+            else -> first.plusDays(1)
+        }
+        return ChronoUnit.DAYS.between(first, after).coerceIn(1, MultiDay.MAX_DAYS.toLong())
+    }
+
+    // Planner's view of one occurrence. Timed events longer than a day are shown across their days like an all-day
+    // event; timedStart/timedEnd keep their real clock times (the end is on endDate, or the midnight after it at 00:00).
+    data class Timing(val date: LocalDate, val startTime: LocalTime?, val durationMinutes: Int? = null, val endDate: LocalDate? = null,
+                      val timedStart: LocalTime? = null, val timedEnd: LocalTime? = null)
+
+    fun allDay(first: LocalDate, days: Long) = Timing(first, null, endDate = first.plusDays(days - 1).takeIf { days > 1 })
+
+    // [begin] and [finish] on the phone's clock, to the minute. Minutes are wall-clock minutes, as Planner shows them.
+    fun timed(begin: LocalDateTime, finish: LocalDateTime?): Timing {
+        val minutes = finish?.let { ChronoUnit.MINUTES.between(begin, it) }?.takeIf { it > 0 }
+        if (minutes == null || minutes <= MAX_TIMED_MINUTES) return Timing(begin.toLocalDate(), begin.toLocalTime(), minutes?.toInt())
+        // Ending exactly at midnight means the day before was the last one it covered.
+        val lastDay = finish!!.toLocalDate().let { if (finish.toLocalTime() == LocalTime.MIDNIGHT) it.minusDays(1) else it }
+            .coerceAtMost(begin.toLocalDate().plusDays(MultiDay.MAX_DAYS - 1L))
+        return Timing(begin.toLocalDate(), null, endDate = lastDay.takeIf { it > begin.toLocalDate() },
+            timedStart = begin.toLocalTime(), timedEnd = finish.toLocalTime())
+    }
+
+    private const val MAX_TIMED_MINUTES = 1440L
 }

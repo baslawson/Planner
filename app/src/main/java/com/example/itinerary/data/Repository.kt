@@ -441,6 +441,25 @@ class Repository(
         afterCommit(removedFiles, cancelled.map { it.id } + scheduled.flatMap { it.second }.map { it.id }, cancelFirst = resetReminders)
     }
 
+    // Import calendar file: many new, plain events (no reminders, attachments or bills) in one transaction, with one
+    // widget refresh. Series members share their seriesId. Returns the new ids, for Undo import.
+    suspend fun importEvents(items: List<ItineraryItem>): List<Long> = changes.withLock {
+        items.forEach { item ->
+            require(item.id == 0L && item.tripId == 0L && item.category != "Bills") { "Only new events can be imported" }
+            require(item.durationMinutes == null || item.startTime != null && item.durationMinutes in 1..1440)
+            MultiDay.validate(item)
+        }
+        if (items.isEmpty()) return@withLock emptyList()
+        val ids = withContext(NonCancellable) {
+            db.withTransaction {
+                val owner = tripDao.firstId() ?: tripDao.upsert(Trip(name = "Agenda", destination = "", startDate = items.first().date, endDate = items.first().date))
+                items.map { itemDao.upsert(it.copy(tripId = owner)) }
+            }
+        }
+        afterCommit()
+        ids
+    }
+
     // Every event in [names], in any plan, becomes Other.
     suspend fun removeCategories(names: Collection<String>) = changes.withLock {
         if (names.isEmpty()) return@withLock

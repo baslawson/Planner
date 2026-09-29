@@ -55,7 +55,7 @@ class MultiDayViewsTest {
         val item = ItineraryItem(id = 1, tripId = 1, date = oct3, startTime = null, title = "Trip", endDate = oct7)
         val text = CalendarExport.encode(item, "trip-1@planner")
         assertTrue(text.contains("DTSTART;VALUE=DATE:20261003\r\nDTEND;VALUE=DATE:20261008\r\n")) // end is exclusive
-        assertEquals(oct7, CalendarImport.parse(text).single().item.endDate) // and it comes back as one event
+        assertEquals(oct7, CalendarFileImport.read(text).entries.single().item.endDate) // and it comes back as one event
     }
 
     @Test fun aDateSearchFindsATripOnAnyOfItsDays() {
