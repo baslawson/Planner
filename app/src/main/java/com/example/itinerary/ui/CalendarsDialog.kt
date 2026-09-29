@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,10 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     val all by sync.sources.collectAsStateWithLifecycle(initialValue = emptyList())
     val sources = all.filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
     val phoneSources = all.filter { it.kind == OutsideCalendars.KIND_PHONE }
+    val linkSources = all.filter { it.kind == OutsideCalendars.KIND_LINK }
+    val linkState by sync.linkState.collectAsStateWithLifecycle()
+    var adding by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<CalendarSource?>(null) }
     val state by sync.state.collectAsStateWithLifecycle()
     val phoneState by sync.phoneState.collectAsStateWithLifecycle()
     var connected by remember { mutableStateOf<Boolean?>(null) }
@@ -73,11 +78,19 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (connected == true) app.appScope.launch { sync.sync() }
     }
     LaunchedEffect(Unit) { app.appScope.launch { sync.refreshPhone() } }
-    val running = state.running || phoneState.running
+    val running = state.running || phoneState.running || linkState.running
+    if (adding) AddLinkDialog(onDismiss = { adding = false })
+    removing?.let { source ->
+        PlannerDialog("Remove ${source.name}?", onDismissRequest = { removing = null },
+            primary = DialogAction("Remove", danger = true) { removing = null; app.appScope.launch { sync.removeLink(source.id) } },
+            dismiss = DialogAction("Cancel") { removing = null }) {
+            Text("Its events leave Planner. To see them again, add the link again.")
+        }
+    }
     PlannerDialog("Calendars",
         onDismissRequest = onDismiss,
-        primary = if (connected == true || phoneAllowed) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
-            app.appScope.launch { sync.refreshPhone(); if (connected == true) sync.sync() }
+        primary = if (connected == true || phoneAllowed || linkSources.isNotEmpty()) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
+            app.appScope.launch { sync.refreshPhone(); sync.refreshLinks(); if (connected == true) sync.sync() }
         } else null,
         dismiss = DialogAction("Close", onClick = onDismiss),
     ) {
@@ -130,12 +143,26 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
                 "Only calendars shown in your phone's calendar app are listed, and they aren't included in backups.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+
+        SettingsHeading("Subscribed by link")
+        linkSources.forEach { source ->
+            CalendarRow(source, enabled = !linkState.running, onRemove = { removing = source }) { ticked ->
+                app.appScope.launch { sync.setLinkEnabled(source.id, ticked) }
+            }
+        }
+        linkState.message?.let {
+            Text(it, color = if (linkState.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        StackedButton("Add link") { adding = true }
+        Text("A calendar's https or webcal link, such as public holidays, a club's fixtures or a calendar's secret address. " +
+            "Updates when Planner opens (at most once an hour) and when you tap Sync now. Links are included in backups.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
       }
     }
 }
 
 @Composable
-private fun CalendarRow(source: CalendarSource, enabled: Boolean, onTick: (Boolean) -> Unit) {
+private fun CalendarRow(source: CalendarSource, enabled: Boolean, onRemove: (() -> Unit)? = null, onTick: (Boolean) -> Unit) {
     val context = LocalContext.current
     val format = LocalTimeFormat.current
     Row(
@@ -163,5 +190,39 @@ private fun CalendarRow(source: CalendarSource, enabled: Boolean, onTick: (Boole
                     color = if (source.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (onRemove != null) MatrixTextButton(onClick = onRemove, enabled = enabled) { Text("Remove") }
+    }
+}
+
+// Add link: the calendar's https or webcal address and, if wanted, a name of its own. It's downloaded once to check it
+// before it's added. The link can hold a private token, so it isn't kept in saved screen state.
+@Composable
+private fun AddLinkDialog(onDismiss: () -> Unit) {
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    PlannerDialog("Add calendar link", onDismissRequest = { if (!busy) onDismiss() },
+        primary = DialogAction(if (busy) "Checking…" else "Subscribe", enabled = !busy && link.isNotBlank()) {
+            busy = true; error = null
+            scope.launch {
+                try { app.calendarSync.addLink(link, name); onDismiss() }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { error = (e as? com.example.itinerary.data.BackupException)?.message ?: (e as? IllegalArgumentException)?.message ?: "Couldn't add this calendar." }
+                finally { busy = false }
+            }
+        },
+        dismiss = DialogAction("Cancel", enabled = !busy, onClick = onDismiss),
+        properties = androidx.compose.ui.window.DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn)) {
+        androidx.compose.material3.OutlinedTextField(link, { link = it; error = null }, label = { Text("Link (https:// or webcal://)") },
+            singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri))
+        androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name (optional)") },
+            singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+        Text("Planner only reads it. A private link (such as a calendar's secret address) stays on this phone and in your backups.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }

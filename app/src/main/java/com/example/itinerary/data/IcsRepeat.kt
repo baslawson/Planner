@@ -21,17 +21,24 @@ internal class IcsRepeat private constructor(
     private val month: Int?,
 ) {
     // Dates on the event's own clock, in order: [start] first (it always counts, even if the rule wouldn't pick it), then
-    // each later date the rule picks, up to [limit] and the rule's own end, at most [max] in all.
-    fun dates(start: LocalDate, startTime: java.time.LocalTime, limit: LocalDate, max: Int = 5000): List<LocalDate> {
-        val result = mutableListOf(start)
-        if (count == 1) return result
+    // each later date the rule picks, up to [limit] and the rule's own end, at most [max] kept. Dates before [from] still
+    // count towards COUNT but aren't kept, so an old repeating event reaches today without filling [max] with the past.
+    fun dates(start: LocalDate, startTime: java.time.LocalTime, limit: LocalDate, max: Int = 5000, from: LocalDate = start): List<LocalDate> {
+        val result = mutableListOf<LocalDate>()
+        var counted = 0
+        // True when the rule has ended.
+        fun take(date: LocalDate): Boolean {
+            counted++
+            if (date >= from) result += date
+            return count != null && counted >= count || result.size >= max
+        }
+        if (take(start)) return result
         for (period in 0L until 200_000L) {
             if (periodStart(start, period) > limit) break
             for (date in candidates(start, period)) {
                 if (date <= start) continue
                 if (date > limit || until != null && date.atTime(startTime).isAfter(until)) return result
-                result += date
-                if (count != null && result.size >= count || result.size >= max) return result
+                if (take(date)) return result
             }
         }
         return result

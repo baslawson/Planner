@@ -14,7 +14,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 // A ticked calendar, as a backup stores it: which login and calendar, never its events or the password.
-data class CalendarChoice(val account: String, val href: String, val name: String, val color: Int?)
+data class CalendarChoice(val account: String, val href: String, val name: String, val color: Int?, val enabled: Boolean = true)
 
 // Read-only calendar sync. Nextcloud (step 1): lists the calendars on the backup login, downloads the ticked ones and keeps
 // their events in their own tables; it only ever reads from the server, when the app opens (at most every 15 minutes)
@@ -31,6 +31,8 @@ class CalendarSync(
     private val zone: () -> ZoneId = ZoneId::systemDefault,
     // The phone's calendars; null where there is no phone to read (tests of the Nextcloud part).
     private val phone: PhoneCalendarReader? = null,
+    // Downloads subscribed calendars; a var only so UI tests can point the app at a local test server.
+    internal var linkClient: CalendarLinkClient = CalendarLinkClient(),
 ) {
     data class State(val running: Boolean = false, val message: String? = null, val error: Boolean = false)
 
@@ -40,6 +42,10 @@ class CalendarSync(
 
     private val _state = MutableStateFlow(State())
     val state = _state.asStateFlow()
+    private val linkLock = Mutex()
+    private var lastLinkAttempt = 0L
+    private val _linkState = MutableStateFlow(State())
+    val linkState = _linkState.asStateFlow()
     private val phoneLock = Mutex()
     private val _phoneState = MutableStateFlow(State())
     val phoneState = _phoneState.asStateFlow()
@@ -51,8 +57,7 @@ class CalendarSync(
         val byId = sources.associateBy { it.id }
         events.mapNotNull { event ->
             val source = byId[event.sourceId] ?: return@mapNotNull null
-            event.displayId() to OutsideInfo(event, source.name, source.color ?: OutsideCalendars.DEFAULT_COLOR,
-                phone = source.kind == OutsideCalendars.KIND_PHONE)
+            event.displayId() to OutsideInfo(event, source.name, source.color ?: OutsideCalendars.DEFAULT_COLOR, source.kind)
         }.toMap(LinkedHashMap())
     }.distinctUntilChanged()
 
@@ -67,6 +72,7 @@ class CalendarSync(
     // login or a ticked calendar, and at most once every 15 minutes.
     suspend fun syncIfDue() {
         refreshPhone()
+        if (now() - lastLinkAttempt >= LINK_INTERVAL_MS && dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
         if (now() - lastAttempt < MIN_INTERVAL_MS) return
         if (dao.sources().none { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD } || !hasAccount()) return
         sync()
@@ -147,6 +153,114 @@ class CalendarSync(
             ticked.isEmpty() -> "Tick the phone calendars to show in Planner."
             else -> null
         })
+    }
+
+    // ---- Calendars subscribed to by link (step 4) ----
+
+    // Subscribes to [input] (https or webcal) after downloading it once to check it's a calendar. [name] overrides the
+    // calendar's own name. Throws with a message for the user.
+    suspend fun addLink(input: String, name: String?) = withContext(Dispatchers.IO) {
+        val url = CalendarLinks.normalize(input)
+        val href = url.toString()
+        require(dao.sources().none { it.kind == OutsideCalendars.KIND_LINK && it.href == href }) { "You're already subscribed to this calendar." }
+        val fetched = linkClient.fetch(url) as? CalendarLinkClient.Result.Fetched ?: throw BackupException("${url.host} sent no calendar.")
+        val (from, until, key) = linkWindow()
+        val read = CalendarFileImport.window(fetched.text, zone(), from, until)
+        val used = dao.sources().filter { it.kind == OutsideCalendars.KIND_LINK }.mapNotNull { it.color }
+        db.withTransaction {
+            val id = dao.insertSource(CalendarSource(account = LINK_ACCOUNT, href = href, kind = OutsideCalendars.KIND_LINK,
+                name = name?.trim()?.takeIf { it.isNotEmpty() }?.take(200) ?: read.name ?: url.host, detail = url.host,
+                color = read.color ?: OutsideCalendars.LINK_COLORS.minBy { c -> used.count { it == c } },
+                enabled = true, ctag = validator(fetched), fetchedFor = key, lastSynced = now()))
+            dao.insertEvents(read.events.map { it.copy(sourceId = id) })
+        }
+        onChanged()
+    }
+
+    // Downloads the ticked subscriptions again ([only] = just that one). The server says when nothing changed, so an
+    // unchanged calendar costs almost nothing. A failed one keeps its last events and shows why on its row.
+    // Returns false when already running.
+    suspend fun refreshLinks(only: Long? = null): Boolean {
+        if (!linkLock.tryLock()) return false
+        try {
+            lastLinkAttempt = now()
+            _linkState.value = State(running = true)
+            _linkState.value = try {
+                withContext(Dispatchers.IO) { refreshLinksLocked(only) }
+            } catch (e: CancellationException) {
+                _linkState.value = State()
+                throw e
+            }
+            return true
+        } finally {
+            linkLock.unlock()
+        }
+    }
+
+    private suspend fun refreshLinksLocked(only: Long?): State {
+        val (from, until, key) = linkWindow()
+        var changed = false
+        var failed = 0
+        for (source in dao.sources().filter { it.kind == OutsideCalendars.KIND_LINK && it.enabled && (only == null || it.id == only) }) {
+            try {
+                // A new month or time zone downloads in full; otherwise only if the calendar changed.
+                val (etag, modified) = if (source.fetchedFor == key) validators(source.ctag) else null to null
+                when (val result = linkClient.fetch(CalendarLinks.normalize(source.href), etag, modified)) {
+                    is CalendarLinkClient.Result.NotModified ->
+                        db.withTransaction { dao.source(source.id)?.let { dao.updateSource(it.copy(lastSynced = now(), lastError = null)) } }
+                    is CalendarLinkClient.Result.Fetched -> {
+                        val read = CalendarFileImport.window(result.text, zone(), from, until)
+                        db.withTransaction {
+                            val current = dao.source(source.id) ?: return@withTransaction
+                            dao.deleteEvents(source.id)
+                            if (!current.enabled) return@withTransaction
+                            dao.insertEvents(read.events.map { it.copy(sourceId = source.id) })
+                            dao.updateSource(current.copy(ctag = validator(result), fetchedFor = key, lastSynced = now(), lastError = null))
+                        }
+                        changed = true
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed++
+                val message = (e as? BackupException)?.message ?: (e as? IllegalArgumentException)?.message ?: "Couldn't update this calendar."
+                db.withTransaction { dao.source(source.id)?.let { dao.updateSource(it.copy(lastError = message)) } }
+            }
+        }
+        if (changed) onChanged()
+        return if (failed > 0) State(message = "$failed subscribed calendar${if (failed == 1) "" else "s"} couldn't be updated.", error = true) else State()
+    }
+
+    // Unsubscribes: the link and its events leave the phone.
+    suspend fun removeLink(id: Long) {
+        db.withTransaction {
+            if (dao.source(id)?.kind != OutsideCalendars.KIND_LINK) return@withTransaction
+            dao.deleteEvents(id); dao.deleteSource(id)
+        }
+        onChanged()
+    }
+
+    // Ticking a subscription downloads it straight away.
+    suspend fun setLinkEnabled(id: Long, enabled: Boolean) {
+        setEnabled(id, enabled)
+        if (enabled) refreshLinks(only = id)
+    }
+
+    // The same window as Nextcloud: from the first of the month 3 months back to the end of the month 12 ahead.
+    private fun linkWindow(): Triple<LocalDate, LocalDate, String> {
+        val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
+        val from = today.minusMonths(MONTHS_BACK).withDayOfMonth(1)
+        return Triple(from, today.plusMonths(MONTHS_AHEAD + 1).withDayOfMonth(1).minusDays(1), "$from|${zone().id}")
+    }
+
+    // What the server said about this version (ETag, Last-Modified), kept in ctag, one per line.
+    private fun validator(result: CalendarLinkClient.Result.Fetched): String? =
+        listOfNotNull(result.etag?.let { "E:$it" }, result.lastModified?.let { "L:$it" }).joinToString("\n").ifEmpty { null }
+
+    private fun validators(ctag: String?): Pair<String?, String?> {
+        val lines = ctag?.lines().orEmpty()
+        return lines.firstOrNull { it.startsWith("E:") }?.drop(2) to lines.firstOrNull { it.startsWith("L:") }?.drop(2)
     }
 
     // Ticking a phone calendar reads it straight away (it's on the phone).
@@ -255,25 +369,31 @@ class CalendarSync(
     // Everything, both kinds (the test runner's clean start).
     suspend fun clearAll() {
         db.withTransaction { dao.deleteAllEvents(); dao.deleteAllSources() }
-        lastAttempt = 0L
-        _state.value = State(); _phoneState.value = State()
+        lastAttempt = 0L; lastLinkAttempt = 0L
+        _state.value = State(); _phoneState.value = State(); _linkState.value = State()
         onChanged()
     }
 
-    // For backups: which Nextcloud calendars are ticked. Phone calendars are left out: another phone numbers them differently.
-    suspend fun choices(): List<CalendarChoice> = dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-        .map { CalendarChoice(it.account, it.href, it.name, it.color) }
+    // For backups: the ticked Nextcloud calendars and every subscribed link (ticked or not). Phone calendars are left
+    // out: another phone numbers them differently.
+    suspend fun choices(): List<CalendarChoice> = dao.sources()
+        .filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.enabled || it.kind == OutsideCalendars.KIND_LINK }
+        .map { CalendarChoice(it.account, it.href, it.name, it.color, it.enabled) }
 
-    // After restoring a backup: the ticked Nextcloud calendars come back without events; the next sync downloads them.
-    // Phone calendars are left as they are.
+    // After restoring a backup: its Nextcloud calendars and subscribed links come back without events; the next sync
+    // downloads them. Phone calendars are left as they are.
     suspend fun restoreChoices(choices: List<CalendarChoice>) {
         db.withTransaction {
-            dao.deleteEventsOfKind(OutsideCalendars.KIND_NEXTCLOUD); dao.deleteSourcesOfKind(OutsideCalendars.KIND_NEXTCLOUD)
+            listOf(OutsideCalendars.KIND_NEXTCLOUD, OutsideCalendars.KIND_LINK).forEach { dao.deleteEventsOfKind(it); dao.deleteSourcesOfKind(it) }
             choices.distinctBy { it.account to it.href }.forEach {
-                dao.insertSource(CalendarSource(account = it.account, href = it.href, name = it.name, color = it.color, enabled = true))
+                val link = it.account == LINK_ACCOUNT
+                if (link && runCatching { CalendarLinks.normalize(it.href) }.isFailure) return@forEach
+                dao.insertSource(CalendarSource(account = it.account, href = it.href, name = it.name, color = it.color, enabled = it.enabled,
+                    kind = if (link) OutsideCalendars.KIND_LINK else OutsideCalendars.KIND_NEXTCLOUD,
+                    detail = if (link) runCatching { CalendarLinks.normalize(it.href).host }.getOrNull() else null))
             }
         }
-        lastAttempt = 0L
+        lastAttempt = 0L; lastLinkAttempt = 0L
         onChanged()
     }
 
@@ -283,6 +403,8 @@ class CalendarSync(
         const val MONTHS_AHEAD = 12L
         const val PERMISSION_NEEDED = "Permission needed: allow Planner to read calendars."
         private const val PHONE_ACCOUNT = "phone"
+        const val LINK_ACCOUNT = "link"
+        const val LINK_INTERVAL_MS = 60 * 60 * 1000L
         private val ORDER = compareBy<OutsideEvent>({ it.date }, { it.startTime }, { it.title }, { it.endDate }, { it.durationMinutes }, { it.location }, { it.notes })
         private fun phoneHref(id: Long) = "calendar/$id"
         private fun calendarId(href: String) = href.removePrefix("calendar/").toLongOrNull()

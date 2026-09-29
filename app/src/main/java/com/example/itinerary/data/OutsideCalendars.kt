@@ -38,8 +38,8 @@ data class CalendarSource(
     val lastSynced: Long? = null,
     // Why the last download of this calendar failed, in words for the user; null when it worked.
     val lastError: String? = null,
-    // Where it lives: KIND_NEXTCLOUD, or KIND_PHONE (Android's calendar storage: Google, Samsung, DAVx⁵…). Each kind is
-    // synced, cleared and backed up on its own.
+    // Where it lives: KIND_NEXTCLOUD, KIND_PHONE (Android's calendar storage: Google, Samsung, DAVx⁵…) or KIND_LINK (a
+    // calendar subscribed to by its https link; href is the link). Each kind is synced, cleared and backed up on its own.
     @ColumnInfo(defaultValue = "'NEXTCLOUD'") val kind: String = OutsideCalendars.KIND_NEXTCLOUD,
     // A second line in Settings → Calendars (a phone calendar's account); null = none.
     val detail: String? = null,
@@ -67,7 +67,7 @@ data class OutsideEvent(
 )
 
 // An outside event with the calendar it came from, for labels and the read-only view.
-data class OutsideInfo(val event: OutsideEvent, val calendar: String, val color: Int, val phone: Boolean = false)
+data class OutsideInfo(val event: OutsideEvent, val calendar: String, val color: Int, val kind: String = OutsideCalendars.KIND_NEXTCLOUD)
 
 object OutsideCalendars {
     // Every outside event shown in the app belongs to this made-up plan id; no real plan has a negative id.
@@ -82,6 +82,10 @@ object OutsideCalendars {
 
     const val KIND_NEXTCLOUD = "NEXTCLOUD"
     const val KIND_PHONE = "PHONE"
+    const val KIND_LINK = "LINK"
+
+    // For subscribed calendars whose file names no colour: the least used of these.
+    val LINK_COLORS: List<Int> = listOf(0xFF2E7D6BL, 0xFF8E5BB5L, 0xFFC0632DL, 0xFF3F7FBFL, 0xFFA83E5CL, 0xFF6B8E23L).map { it.toInt() }
 }
 
 fun OutsideEvent.displayId(): Long = -id

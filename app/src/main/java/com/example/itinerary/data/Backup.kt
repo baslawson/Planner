@@ -176,9 +176,10 @@ class BackupManager(
         tasks.map { it.copy(attachments = it.attachments.filter(keep)) }
 
     private fun toJson(data: DataSnapshot, settings: SettingsSnapshot, calendars: List<CalendarChoice>): String = JSONObject().apply {
-        // Optional (older app versions ignore it): the ticked Nextcloud calendars, without events or passwords.
+        // Optional (older app versions ignore it): the ticked Nextcloud calendars and the subscribed links (account
+        // "link", href = the https link), without events or passwords.
         put("calendars", calendars.toJson {
-            JSONObject().put("account", it.account).put("href", it.href).put("name", it.name)
+            JSONObject().put("account", it.account).put("href", it.href).put("name", it.name).put("enabled", it.enabled)
                 .put("color", it.color?.let { c -> String.format("#%06X", c and 0xFFFFFF) } ?: JSONObject.NULL)
         })
         put("tasks", TaskCodec.encode(data.tasks))
@@ -418,8 +419,10 @@ class BackupManager(
         // Optional: backups from before calendar sync have none. A calendar entry that doesn't make sense is left out.
         val calendars = root.optJSONArray("calendars")?.objects()?.mapNotNull {
             val account = it.optString("account"); val href = it.optString("href"); val name = it.optString("name")
-            if (account.isBlank() || !href.startsWith("/") || name.isBlank() || account.length > 2000 || href.length > 2000) return@mapNotNull null
-            CalendarChoice(account, href, name.take(200), if (it.isNull("color")) null else parseHexColor(it.optString("color")))
+            val validHref = href.startsWith("/") || account == CalendarSync.LINK_ACCOUNT && href.startsWith("https://")
+            if (account.isBlank() || !validHref || name.isBlank() || account.length > 2000 || href.length > 4000) return@mapNotNull null
+            CalendarChoice(account, href, name.take(200), if (it.isNull("color")) null else parseHexColor(it.optString("color")),
+                it.optBoolean("enabled", true))
         }
         return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, TaskCodec.decode(if (version >= 10 || root.has("tasks")) root.getJSONArray("tasks") else JSONArray())), settings, exportedOn, calendars)
     }

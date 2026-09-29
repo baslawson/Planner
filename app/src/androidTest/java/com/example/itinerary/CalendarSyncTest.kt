@@ -304,7 +304,7 @@ class CalendarSyncTest {
         assertEquals(listOf(listOf(11L)), phone.read)
         val shownNow = shown().values.toList()
         assertEquals(listOf("Swimming"), shownNow.map { it.event.title })
-        assertTrue(shownNow.single().phone)
+        assertEquals(OutsideCalendars.KIND_PHONE, shownNow.single().kind)
         assertEquals(LocalTime.of(16, 0), shownNow.single().event.startTime)
         assertEquals(LocalDate.of(2026, 10, 3), shownNow.single().event.date)
         assertNotNull(source("Family").lastSynced)
