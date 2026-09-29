@@ -13,7 +13,8 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 - Agenda and calendar views for events, tasks and bills.
 - Offline natural-language Quick entry with editable previews.
 - Optional Gemini or OpenAI assistance using a personal API key, sent directly from the phone only when requested.
-- Reminders, recurring entries, calendar invitation import and free-time search.
+- Reminders, recurring entries, calendar file import (.ics, including repeating events) and free-time search.
+- Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways.
 - Document and bill scanning with cropping and on-device text recognition.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
 
