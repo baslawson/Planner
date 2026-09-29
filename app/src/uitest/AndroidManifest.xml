@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the separate test app ("Planner test"): CalendarPhoneUiTest adds a temporary calendar to the emulator's calendar
+     storage and removes it afterwards. The real app only ever reads calendars. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+</manifest>

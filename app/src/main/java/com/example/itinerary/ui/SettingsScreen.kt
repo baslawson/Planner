@@ -168,7 +168,7 @@ fun SettingsScreen(
                         }
                     }
                     SettingsHeading("Calendars")
-                    Text("Show events from your Nextcloud calendars beside your own, read-only.", style = MaterialTheme.typography.bodySmall)
+                    Text("Show events from Nextcloud and from the calendars on this phone beside your own, read-only.", style = MaterialTheme.typography.bodySmall)
                     StackedButton("Calendars", onCalendars)
                     SettingsHeading("Backup")
                     StackedButton("Recently deleted", onRecentlyDeleted)

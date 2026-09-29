@@ -46,8 +46,11 @@ class ItineraryApp : Application() {
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     // Nextcloud calendars shown read-only beside Planner's own events; uses the backup login.
+    val phoneCalendars: com.example.itinerary.data.AndroidPhoneCalendars by lazy { com.example.itinerary.data.AndroidPhoneCalendars(this) }
+
     val calendarSync: CalendarSync by lazy {
-        CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) })
+        CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
+            phone = phoneCalendars)
     }
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }

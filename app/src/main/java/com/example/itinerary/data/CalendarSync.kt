@@ -16,9 +16,11 @@ import java.time.ZoneId
 // A ticked calendar, as a backup stores it: which login and calendar, never its events or the password.
 data class CalendarChoice(val account: String, val href: String, val name: String, val color: Int?)
 
-// Read-only calendar sync with Nextcloud (step 1): lists the calendars on the backup login, downloads the ticked ones and
-// keeps their events in their own tables. It only ever reads from the server. Runs when the app opens (at most every
-// 15 minutes) and on "Sync now"; there is no background work.
+// Read-only calendar sync. Nextcloud (step 1): lists the calendars on the backup login, downloads the ticked ones and keeps
+// their events in their own tables; it only ever reads from the server, when the app opens (at most every 15 minutes)
+// and on "Sync now". The phone's own calendars (step 3): read from Android's calendar storage when the app opens, on
+// "Sync now" and whenever they change while the app is open. There is no background work. Each kind has its own
+// calendars: syncing, disconnecting or restoring one never touches the other.
 class CalendarSync(
     private val db: AppDatabase,
     private val accounts: NextcloudAccountStore,
@@ -27,6 +29,8 @@ class CalendarSync(
     private val onChanged: () -> Unit = {},
     private val now: () -> Long = System::currentTimeMillis,
     private val zone: () -> ZoneId = ZoneId::systemDefault,
+    // The phone's calendars; null where there is no phone to read (tests of the Nextcloud part).
+    private val phone: PhoneCalendarReader? = null,
 ) {
     data class State(val running: Boolean = false, val message: String? = null, val error: Boolean = false)
 
@@ -36,6 +40,9 @@ class CalendarSync(
 
     private val _state = MutableStateFlow(State())
     val state = _state.asStateFlow()
+    private val phoneLock = Mutex()
+    private val _phoneState = MutableStateFlow(State())
+    val phoneState = _phoneState.asStateFlow()
 
     val sources: Flow<List<CalendarSource>> = dao.observeSources()
 
@@ -44,7 +51,8 @@ class CalendarSync(
         val byId = sources.associateBy { it.id }
         events.mapNotNull { event ->
             val source = byId[event.sourceId] ?: return@mapNotNull null
-            event.displayId() to OutsideInfo(event, source.name, source.color ?: OutsideCalendars.DEFAULT_COLOR)
+            event.displayId() to OutsideInfo(event, source.name, source.color ?: OutsideCalendars.DEFAULT_COLOR,
+                phone = source.kind == OutsideCalendars.KIND_PHONE)
         }.toMap(LinkedHashMap())
     }.distinctUntilChanged()
 
@@ -55,11 +63,96 @@ class CalendarSync(
         return eventsOnDay(dao.dayCandidates(day, day.minusDays(1)).map { it.toItem(colors[it.sourceId] ?: OutsideCalendars.DEFAULT_COLOR) }, day)
     }
 
-    // When the app opens: nothing without a login or a ticked calendar, and at most once every 15 minutes.
+    // When the app opens: the phone's calendars (quick, no network), then Nextcloud if it's due — nothing without a
+    // login or a ticked calendar, and at most once every 15 minutes.
     suspend fun syncIfDue() {
+        refreshPhone()
         if (now() - lastAttempt < MIN_INTERVAL_MS) return
-        if (dao.sources().none { it.enabled } || !hasAccount()) return
+        if (dao.sources().none { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD } || !hasAccount()) return
         sync()
+    }
+
+    fun phonePermitted(): Boolean = phone?.permitted() == true
+
+    // Lists the phone's visible calendars (new ones start unticked) and reads the ticked ones' dates in the window.
+    // Without permission the phone's events leave Planner and its calendars say so. Returns false when already running.
+    suspend fun refreshPhone(): Boolean {
+        val reader = phone ?: return false
+        if (!phoneLock.tryLock()) return false
+        try {
+            _phoneState.value = State(running = true)
+            _phoneState.value = try {
+                withContext(Dispatchers.IO) { refreshPhoneLocked(reader) }
+            } catch (e: CancellationException) {
+                _phoneState.value = State()
+                throw e
+            } catch (_: Exception) {
+                State(message = "Couldn't read the phone's calendars.", error = true)
+            }
+            return true
+        } finally {
+            phoneLock.unlock()
+        }
+    }
+
+    private suspend fun refreshPhoneLocked(reader: PhoneCalendarReader): State {
+        val mine = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE }
+        if (!reader.permitted()) {
+            if (mine.isEmpty()) return State()
+            db.withTransaction {
+                dao.deleteEventsOfKind(OutsideCalendars.KIND_PHONE)
+                mine.forEach { dao.updateSource(it.copy(lastError = PERMISSION_NEEDED, lastSynced = null)) }
+            }
+            onChanged()
+            return State(message = "Planner may no longer read this phone's calendars.", error = true)
+        }
+        val calendars = reader.calendars().associateBy { phoneHref(it.id) }
+        var changed = false
+        db.withTransaction {
+            val existing = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE }
+            existing.filter { it.href !in calendars }.forEach { dao.deleteSource(it.id); changed = true }
+            val kept = existing.associateBy { it.href }
+            calendars.forEach { (href, calendar) ->
+                val old = kept[href]
+                val detail = PhoneEvents.detail(calendar)
+                if (old == null) dao.insertSource(CalendarSource(account = PHONE_ACCOUNT, href = href, name = calendar.name, color = calendar.color,
+                    kind = OutsideCalendars.KIND_PHONE, detail = detail))
+                else if (old.name != calendar.name || old.color != calendar.color || old.detail != detail || old.lastError != null)
+                    dao.updateSource(old.copy(name = calendar.name, color = calendar.color, detail = detail, lastError = null))
+            }
+        }
+        val ticked = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE && it.enabled }
+        val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
+        val from = today.minusMonths(MONTHS_BACK).withDayOfMonth(1).atStartOfDay(zone()).toInstant()
+        val until = today.plusMonths(MONTHS_AHEAD + 1).withDayOfMonth(1).atStartOfDay(zone()).toInstant()
+        val byCalendar = if (ticked.isEmpty()) emptyMap()
+            else reader.instances(ticked.mapNotNull { calendarId(it.href) }, from, until).groupBy { it.calendarId }
+        for (source in ticked) {
+            val events = byCalendar[calendarId(source.href)].orEmpty().mapNotNull { PhoneEvents.toEvent(it, zone()) }.distinct()
+                .map { it.copy(sourceId = source.id) }
+            db.withTransaction {
+                val current = dao.source(source.id) ?: return@withTransaction
+                // Unchanged: leave the rows (and every screen showing them) alone.
+                if (current.enabled && dao.eventsFor(source.id).map { it.copy(id = 0) }.sortedWith(ORDER) != events.sortedWith(ORDER)) {
+                    dao.deleteEvents(source.id)
+                    dao.insertEvents(events)
+                    changed = true
+                }
+                dao.updateSource(current.copy(lastSynced = now(), lastError = null))
+            }
+        }
+        if (changed) onChanged()
+        return State(message = when {
+            calendars.isEmpty() -> "No calendars on this phone."
+            ticked.isEmpty() -> "Tick the phone calendars to show in Planner."
+            else -> null
+        })
+    }
+
+    // Ticking a phone calendar reads it straight away (it's on the phone).
+    suspend fun setPhoneEnabled(id: Long, enabled: Boolean) {
+        setEnabled(id, enabled)
+        refreshPhone()
     }
 
     // Lists the calendars on the server (new ones start unticked) and downloads each ticked calendar that changed since
@@ -89,7 +182,7 @@ class CalendarSync(
         val remote = client.calendars(account).associateBy { it.href }
         // Calendars of another login, and ones no longer on the server, go with their events.
         db.withTransaction {
-            val existing = dao.sources()
+            val existing = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
             existing.filter { it.account != key || it.href !in remote }.forEach { dao.deleteSource(it.id) }
             val kept = existing.filter { it.account == key && it.href in remote }.associateBy { it.href }
             remote.values.forEach { calendar ->
@@ -104,7 +197,7 @@ class CalendarSync(
         val window = "$from|${zone().id}"
         var failed = 0
         var skipped = 0
-        for (source in dao.sources().filter { it.enabled }) {
+        for (source in dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }) {
             val calendar = remote[source.href] ?: continue
             if (calendar.ctag != null && calendar.ctag == source.ctag && source.fetchedFor == window && source.lastError == null) continue
             try {
@@ -128,7 +221,7 @@ class CalendarSync(
             }
         }
         onChanged()
-        val ticked = dao.sources().count { it.enabled }
+        val ticked = dao.sources().count { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
         return buildString {
             append(when {
                 remote.isEmpty() -> "No calendars found on Nextcloud."
@@ -151,21 +244,31 @@ class CalendarSync(
         onChanged()
     }
 
-    // After disconnecting Nextcloud: the calendar list and every downloaded event leave the phone.
-    suspend fun clearAll() {
-        db.withTransaction { dao.deleteAllEvents(); dao.deleteAllSources() }
+    // After disconnecting Nextcloud: its calendars and every downloaded event leave the phone. Phone calendars stay.
+    suspend fun clearNextcloud() {
+        db.withTransaction { dao.deleteEventsOfKind(OutsideCalendars.KIND_NEXTCLOUD); dao.deleteSourcesOfKind(OutsideCalendars.KIND_NEXTCLOUD) }
         lastAttempt = 0L
         _state.value = State()
         onChanged()
     }
 
-    // For backups: which calendars are ticked.
-    suspend fun choices(): List<CalendarChoice> = dao.sources().filter { it.enabled }.map { CalendarChoice(it.account, it.href, it.name, it.color) }
+    // Everything, both kinds (the test runner's clean start).
+    suspend fun clearAll() {
+        db.withTransaction { dao.deleteAllEvents(); dao.deleteAllSources() }
+        lastAttempt = 0L
+        _state.value = State(); _phoneState.value = State()
+        onChanged()
+    }
 
-    // After restoring a backup: the ticked calendars come back without events; the next sync downloads them.
+    // For backups: which Nextcloud calendars are ticked. Phone calendars are left out: another phone numbers them differently.
+    suspend fun choices(): List<CalendarChoice> = dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
+        .map { CalendarChoice(it.account, it.href, it.name, it.color) }
+
+    // After restoring a backup: the ticked Nextcloud calendars come back without events; the next sync downloads them.
+    // Phone calendars are left as they are.
     suspend fun restoreChoices(choices: List<CalendarChoice>) {
         db.withTransaction {
-            dao.deleteAllEvents(); dao.deleteAllSources()
+            dao.deleteEventsOfKind(OutsideCalendars.KIND_NEXTCLOUD); dao.deleteSourcesOfKind(OutsideCalendars.KIND_NEXTCLOUD)
             choices.distinctBy { it.account to it.href }.forEach {
                 dao.insertSource(CalendarSource(account = it.account, href = it.href, name = it.name, color = it.color, enabled = true))
             }
@@ -178,6 +281,11 @@ class CalendarSync(
         const val MIN_INTERVAL_MS = 15 * 60 * 1000L
         const val MONTHS_BACK = 3L
         const val MONTHS_AHEAD = 12L
+        const val PERMISSION_NEEDED = "Permission needed: allow Planner to read calendars."
+        private const val PHONE_ACCOUNT = "phone"
+        private val ORDER = compareBy<OutsideEvent>({ it.date }, { it.startTime }, { it.title }, { it.endDate }, { it.durationMinutes }, { it.location }, { it.notes })
+        private fun phoneHref(id: Long) = "calendar/$id"
+        private fun calendarId(href: String) = href.removePrefix("calendar/").toLongOrNull()
 
         // Which login a calendar belongs to: the server address and username, never the password.
         fun accountKey(account: NextcloudAccount): String = "${account.server}|${account.username}"

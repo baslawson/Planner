@@ -71,7 +71,8 @@ fun OutsideEventDialog(info: OutsideInfo, onDismiss: () -> Unit, onCopy: () -> U
         event.endDate?.let { Text(spanLabel(event.date, it)) }
         if (event.location.isNotBlank()) Text(event.location, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (event.notes.isNotBlank()) Text(event.notes, style = MaterialTheme.typography.bodyMedium)
-        Text("This event belongs to your Nextcloud calendar, so it can't be changed here. Copy it to make a Planner event of your own.",
+        Text("This event belongs to ${if (info.phone) "a calendar on your phone" else "your Nextcloud calendar"}, so it can't be changed here. " +
+            "Copy it to make a Planner event of your own.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

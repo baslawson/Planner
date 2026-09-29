@@ -91,8 +91,8 @@ class TripsViewModel(
 
     fun disconnectNextcloud() = runBackup("Disconnecting...", cloudAction = true) {
         nextcloud.disconnect()
-        // The calendars use the same login, so their list and downloaded events go too.
-        calendars?.clearAll()
+        // The Nextcloud calendars use the same login, so their list and downloaded events go too (phone calendars stay).
+        calendars?.clearNextcloud()
         cloudAccount = null
         cloudLoaded = true
         _cloud.value = _cloud.value.copy(connected = false, backups = null, lastBackup = null,

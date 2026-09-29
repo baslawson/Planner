@@ -44,6 +44,7 @@ class CalendarSyncTest {
     private lateinit var sandbox: File
     private lateinit var context: Context
     private val fixture = CalDavFixture()
+    private val phone by lazy { FakePhone() } // lazy: it uses [zone], declared below
     private var clock = Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
     private var zone: ZoneId = ZoneId.of("Australia/Perth")
     private var changes = 0
@@ -73,7 +74,7 @@ class CalendarSyncTest {
         account = NextcloudAccount.create(server.url("/").toString(), "bas", "test-password-only")
         accounts = NextcloudAccountStore(context, alias)
         accounts.save(account)
-        sync = CalendarSync(database, accounts, client, onChanged = { changes++ }, now = { clock }, zone = { zone })
+        sync = CalendarSync(database, accounts, client, onChanged = { changes++ }, now = { clock }, zone = { zone }, phone = phone)
     }
 
     @After fun tearDown() {
@@ -282,6 +283,105 @@ class CalendarSyncTest {
         val backup = BackupManager(context, repo, attachments, settings, sync)
         backup.restore(backup.stage(Uri.fromFile(old)))
         assertEquals(listOf("Work"), sources().filter { it.enabled }.map { it.name })
+    }
+
+    // ---- Step 3: the phone's own calendars (a fake phone; no real calendar storage is touched) ----
+
+    private fun millis(date: LocalDate, hour: Int) = date.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+
+    @Test fun phoneCalendarsNeedPermissionAndStartUnticked() = runBlocking {
+        phone.allowed = false
+        sync.refreshPhone()
+        assertTrue(sources().isEmpty())
+        phone.allowed = true
+        sync.refreshPhone()
+        assertEquals(listOf("Family", "Work phone"), sources().map { it.name })
+        assertTrue(sources().all { it.kind == OutsideCalendars.KIND_PHONE && !it.enabled })
+        assertEquals("me@gmail.com", source("Family").detail)
+        assertTrue(source("Work phone").detail!!.contains("DAVx⁵"))
+        assertTrue(phone.read.isEmpty()) // nothing ticked, no events read
+        sync.setPhoneEnabled(source("Family").id, true)
+        assertEquals(listOf(listOf(11L)), phone.read)
+        val shownNow = shown().values.toList()
+        assertEquals(listOf("Swimming"), shownNow.map { it.event.title })
+        assertTrue(shownNow.single().phone)
+        assertEquals(LocalTime.of(16, 0), shownNow.single().event.startTime)
+        assertEquals(LocalDate.of(2026, 10, 3), shownNow.single().event.date)
+        assertNotNull(source("Family").lastSynced)
+    }
+
+    @Test fun phoneChangesAreReadAndUnchangedOnesLeaveTheRowsAlone() = runBlocking {
+        phone.allowed = true
+        sync.refreshPhone()
+        sync.setPhoneEnabled(source("Family").id, true)
+        val before = changes
+        sync.refreshPhone() // nothing changed on the phone
+        assertEquals(before, changes)
+        phone.events[11L] = listOf(PhoneInstance(11, millis(LocalDate.of(2026, 10, 4), 9), millis(LocalDate.of(2026, 10, 4), 10), false,
+            "Swimming (moved)", null, null))
+        sync.refreshPhone()
+        assertTrue(changes > before)
+        assertEquals(listOf("Swimming (moved)"), shown().values.map { it.event.title })
+        phone.calendars.removeAll { it.id == 11L } // the calendar left the phone
+        sync.refreshPhone()
+        assertEquals(listOf("Work phone"), sources().map { it.name })
+        assertTrue(shown().isEmpty())
+    }
+
+    @Test fun losingThePermissionRemovesPhoneEvents() = runBlocking {
+        phone.allowed = true
+        sync.refreshPhone()
+        sync.setPhoneEnabled(source("Family").id, true)
+        assertEquals(1, shown().size)
+        phone.allowed = false
+        sync.refreshPhone()
+        assertTrue(shown().isEmpty())
+        assertEquals(CalendarSync.PERMISSION_NEEDED, source("Family").lastError)
+        assertTrue(sync.phoneState.value.error)
+        phone.allowed = true // allowed again: back without ticking again
+        sync.refreshPhone()
+        assertNull(source("Family").lastError)
+        assertEquals(1, shown().size)
+    }
+
+    @Test fun nextcloudAndPhoneCalendarsLeaveEachOtherAlone() = runBlocking {
+        phone.allowed = true
+        sync.refreshPhone()
+        sync.setPhoneEnabled(source("Family").id, true)
+        sync.sync() // Nextcloud: finds its own calendars, must not remove the phone's
+        sync.setEnabled(source("Personal").id, true)
+        sync.sync()
+        assertEquals(listOf("Family", "Personal", "Work", "Work phone"), sources().map { it.name })
+        assertEquals(setOf("Swimming", "Dentist", "School holidays"), shown().values.map { it.event.title }.toSet())
+        // Backups keep only the Nextcloud ticks; restoring one leaves the phone's calendars as they are.
+        assertEquals(listOf("Personal"), sync.choices().map { it.name })
+        sync.restoreChoices(sync.choices())
+        assertTrue(source("Family").enabled)
+        assertEquals(listOf("Swimming"), shown().values.map { it.event.title })
+        // Disconnecting Nextcloud removes only Nextcloud calendars.
+        sync.sync()
+        sync.clearNextcloud()
+        assertEquals(listOf("Family", "Work phone"), sources().map { it.name })
+        assertEquals(listOf("Swimming"), shown().values.map { it.event.title })
+    }
+
+    private inner class FakePhone : PhoneCalendarReader {
+        @Volatile var allowed = false
+        val calendars = CopyOnWriteArrayList(listOf(PhoneCalendar(11, "Family", "me@gmail.com", "com.google", 0xFF3366CC.toInt()),
+            PhoneCalendar(12, "Work phone", "cloud", "bitfire.at.davdroid", null)))
+        val events = java.util.concurrent.ConcurrentHashMap(mapOf(
+            11L to listOf(PhoneInstance(11, millis(LocalDate.of(2026, 10, 3), 16), millis(LocalDate.of(2026, 10, 3), 17), false, "Swimming", "Pool", null),
+                PhoneInstance(11, millis(LocalDate.of(2026, 10, 6), 16), millis(LocalDate.of(2026, 10, 6), 17), false, "Called off", null, null, cancelled = true)),
+            12L to listOf(PhoneInstance(12, millis(LocalDate.of(2026, 10, 3), 8), millis(LocalDate.of(2026, 10, 3), 9), false, "Standup", null, null)),
+        ))
+        val read = CopyOnWriteArrayList<List<Long>>()
+        override fun permitted() = allowed
+        override fun calendars(): List<PhoneCalendar> = if (allowed) calendars.toList() else emptyList()
+        override fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> {
+            if (!allowed) return emptyList()
+            read += calendarIds.sorted()
+            return calendarIds.flatMap { events[it].orEmpty() }.filter { it.begin < until.toEpochMilli() && it.end > from.toEpochMilli() }
+        }
     }
 
     private fun event(title: String, start: String, end: String, extra: String = "") =

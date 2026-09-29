@@ -72,6 +72,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // While Planner is on screen, changes to the phone's calendars are read in (see CalendarSync.refreshPhone).
+    private var stopWatchingCalendars: (() -> Unit)? = null
+
+    override fun onResume() {
+        super.onResume()
+        // Also after the calendar permission was just granted (the permission prompt only pauses the screen).
+        if (stopWatchingCalendars == null) (application as ItineraryApp).let { app ->
+            stopWatchingCalendars = app.phoneCalendars.watch { app.appScope.launch { app.calendarSync.refreshPhone() } }
+        }
+    }
+
+    override fun onStop() {
+        stopWatchingCalendars?.invoke()
+        stopWatchingCalendars = null
+        super.onStop()
+    }
+
     override fun onStart() {
         super.onStart()
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
@@ -79,7 +96,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             (application as ItineraryApp).repository.rescheduleAllReminders()
         }
-        // Ticked Nextcloud calendars, at most every 15 minutes; does nothing without a login or a ticked calendar.
+        // The phone's ticked calendars, and ticked Nextcloud calendars at most every 15 minutes (nothing without a login).
         (application as ItineraryApp).let { app -> app.appScope.launch { app.calendarSync.syncIfDue() } }
     }
 

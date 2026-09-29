@@ -1,5 +1,6 @@
 package com.example.itinerary.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -14,7 +15,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 
-// Calendars kept somewhere else (for now, Nextcloud) that Planner shows but never changes. Their events live in their
+// Calendars kept somewhere else (Nextcloud, or the calendars on this phone) that Planner shows but never changes. Their events live in their
 // own table, so they stay out of backups, Recently deleted, reminders and every editor. On screen they become ordinary
 // ItineraryItem/PlanEvent rows with negative ids (see OutsideEvent.toItem); the repository refuses to change those.
 
@@ -37,6 +38,11 @@ data class CalendarSource(
     val lastSynced: Long? = null,
     // Why the last download of this calendar failed, in words for the user; null when it worked.
     val lastError: String? = null,
+    // Where it lives: KIND_NEXTCLOUD, or KIND_PHONE (Android's calendar storage: Google, Samsung, DAVx⁵…). Each kind is
+    // synced, cleared and backed up on its own.
+    @ColumnInfo(defaultValue = "'NEXTCLOUD'") val kind: String = OutsideCalendars.KIND_NEXTCLOUD,
+    // A second line in Settings → Calendars (a phone calendar's account); null = none.
+    val detail: String? = null,
 )
 
 @Entity(
@@ -61,7 +67,7 @@ data class OutsideEvent(
 )
 
 // An outside event with the calendar it came from, for labels and the read-only view.
-data class OutsideInfo(val event: OutsideEvent, val calendar: String, val color: Int)
+data class OutsideInfo(val event: OutsideEvent, val calendar: String, val color: Int, val phone: Boolean = false)
 
 object OutsideCalendars {
     // Every outside event shown in the app belongs to this made-up plan id; no real plan has a negative id.
@@ -73,6 +79,9 @@ object OutsideCalendars {
     fun isOutside(id: Long): Boolean = id < 0
 
     const val READ_ONLY = "Events from other calendars can't be changed in Planner."
+
+    const val KIND_NEXTCLOUD = "NEXTCLOUD"
+    const val KIND_PHONE = "PHONE"
 }
 
 fun OutsideEvent.displayId(): Long = -id
@@ -127,6 +136,15 @@ interface OutsideDao {
 
     @Query("DELETE FROM calendar_sources")
     suspend fun deleteAllSources()
+
+    @Query("DELETE FROM calendar_sources WHERE kind = :kind")
+    suspend fun deleteSourcesOfKind(kind: String)
+
+    @Query("DELETE FROM outside_events WHERE sourceId IN (SELECT id FROM calendar_sources WHERE kind = :kind)")
+    suspend fun deleteEventsOfKind(kind: String)
+
+    @Query("SELECT * FROM outside_events WHERE sourceId = :sourceId ORDER BY date, startTime, id")
+    suspend fun eventsFor(sourceId: Long): List<OutsideEvent>
 
     // Events of ticked calendars only, in date then time order.
     @Query("SELECT e.* FROM outside_events e JOIN calendar_sources s ON s.id = e.sourceId WHERE s.enabled = 1 ORDER BY e.date, e.startTime, e.id")

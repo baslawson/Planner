@@ -1,6 +1,11 @@
 package com.example.itinerary.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,30 +40,51 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 
-// Settings → Calendars: tick which Nextcloud calendars to show. Uses the Nextcloud backup login; without one it offers
-// to connect. Opening it refreshes the list of calendars (and downloads any ticked one that changed). Work runs in the
-// app's scope, so closing the pop-up doesn't stop a sync halfway.
+// Settings → Calendars: tick which calendars to show, in two parts. Nextcloud uses the backup login (without one it offers
+// to connect); "On this phone" lists the phone's visible calendars once the user allows Planner to read them (asked only
+// when they tap "Show phone calendars"). Opening it refreshes both lists (and downloads any ticked Nextcloud calendar that
+// changed). Work runs in the app's scope, so closing the pop-up doesn't stop a sync halfway.
 // [nextcloudOpen]: the Nextcloud login pop-up is showing on top; the login is checked again when it closes.
 @Composable
 fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val sync = app.calendarSync
-    val sources by sync.sources.collectAsStateWithLifecycle(initialValue = emptyList())
+    val all by sync.sources.collectAsStateWithLifecycle(initialValue = emptyList())
+    val sources = all.filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
+    val phoneSources = all.filter { it.kind == OutsideCalendars.KIND_PHONE }
     val state by sync.state.collectAsStateWithLifecycle()
+    val phoneState by sync.phoneState.collectAsStateWithLifecycle()
     var connected by remember { mutableStateOf<Boolean?>(null) }
+    var phoneAllowed by remember { mutableStateOf(sync.phonePermitted()) }
+    var phoneRefused by remember { mutableStateOf(false) }
+    val askPhone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        phoneAllowed = granted
+        phoneRefused = !granted
+        app.appScope.launch { sync.refreshPhone() }
+    }
+    // Permission may be switched off in Android settings while this is open behind them.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val now = sync.phonePermitted()
+        if (now != phoneAllowed) { phoneAllowed = now; app.appScope.launch { sync.refreshPhone() } }
+    }
     LaunchedEffect(nextcloudOpen) {
         if (nextcloudOpen) return@LaunchedEffect
         connected = sync.hasAccount()
         if (connected == true) app.appScope.launch { sync.sync() }
     }
+    LaunchedEffect(Unit) { app.appScope.launch { sync.refreshPhone() } }
+    val running = state.running || phoneState.running
     PlannerDialog("Calendars",
         onDismissRequest = onDismiss,
-        primary = if (connected == true) DialogAction(if (state.running) "Syncing…" else "Sync now", enabled = !state.running) {
-            app.appScope.launch { sync.sync() }
+        primary = if (connected == true || phoneAllowed) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
+            app.appScope.launch { sync.refreshPhone(); if (connected == true) sync.sync() }
         } else null,
         dismiss = DialogAction("Close", onClick = onDismiss),
     ) {
-        Text("Show events from your Nextcloud calendars beside your own. Planner only reads them: nothing on Nextcloud is changed, and they can't be edited here.")
+      // Room on the right for the scroll bar, which this longer pop-up usually shows.
+      Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Show events from your other calendars beside your own. Planner only reads them: nothing in them is changed, and they can't be edited here.")
+        SettingsHeading("Nextcloud")
         when (connected) {
             null -> Text("Checking the Nextcloud connection…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             false -> {
@@ -83,6 +109,28 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (connected == true) Text("Syncs when Planner opens (at most every 15 minutes) and when you tap Sync now, " +
             "covering 3 months back to 12 months ahead. Downloaded events aren't included in backups.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        SettingsHeading("On this phone")
+        if (!phoneAllowed) {
+            Text("Calendars already on this phone: Google, Samsung, Outlook, DAVx⁵ and others. Planner asks to read them; it can't change them.")
+            if (phoneRefused) {
+                Text("Planner wasn't allowed to read calendars. Allow Calendars in Planner's app settings.", color = MaterialTheme.colorScheme.error)
+                StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(app) }
+            } else StackedButton("Show phone calendars") { askPhone.launch(Manifest.permission.READ_CALENDAR) }
+        } else {
+            phoneSources.forEach { source ->
+                CalendarRow(source, enabled = !phoneState.running) { ticked ->
+                    app.appScope.launch { sync.setPhoneEnabled(source.id, ticked) }
+                }
+            }
+            phoneState.message?.let {
+                Text(it, color = if (phoneState.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Updates when Planner opens, when you tap Sync now and whenever these calendars change while Planner is open. " +
+                "Only calendars shown in your phone's calendar app are listed, and they aren't included in backups.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+      }
     }
 }
 
@@ -101,9 +149,10 @@ private fun CalendarRow(source: CalendarSource, enabled: Boolean, onTick: (Boole
         Box(Modifier.size(12.dp).clip(CircleShape).background(Color(source.color ?: OutsideCalendars.DEFAULT_COLOR)))
         Column(Modifier.weight(1f)) {
             Text(source.name)
+            source.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             val detail = when {
-                !source.enabled -> null
                 source.lastError != null -> source.lastError
+                !source.enabled -> null
                 source.lastSynced != null -> Instant.ofEpochMilli(source.lastSynced).atZone(ZoneId.systemDefault()).let {
                     "Synced ${it.toLocalDate().shortLabel()}, ${it.toLocalTime().label(format, context)}"
                 }
