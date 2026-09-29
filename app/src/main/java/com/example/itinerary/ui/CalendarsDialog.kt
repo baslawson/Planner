@@ -188,6 +188,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         Text("Read-only. A calendar's https or webcal link, such as public holidays, a club's fixtures or a calendar's secret address. " +
             "Updates when Planner opens (at most once an hour) and when you tap Sync now. Links are included in backups.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        if (connected == true || phoneAllowed || linkSources.isNotEmpty()) BackgroundChoice()
       }
     }
 }
@@ -360,4 +362,27 @@ private suspend fun syncResult(sync: com.example.itinerary.data.CalendarSync, ti
         stateErrors.isNotEmpty() -> "Synced at $time, but: ${stateErrors.first()}" to true
         else -> "Synced just now · $time" to false
     }
+}
+
+// "Sync in the background": Off (the default) or every 1, 3, 6 or 24 hours. Planner schedules it with Android, which
+// picks the exact moment.
+@Composable
+private fun BackgroundChoice() {
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    val hours by app.settings.calendarBackgroundHours.collectAsStateWithLifecycle()
+    SettingsHeading("Sync in the background")
+    Column(Modifier.selectableGroup()) {
+        com.example.itinerary.data.BackgroundSync.CHOICES.forEach { option ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .selectable(selected = option == hours, role = Role.RadioButton) { app.settings.setCalendarBackgroundHours(option) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.RadioButton(selected = option == hours, onClick = null)
+                Text(com.example.itinerary.data.BackgroundSync.label(option))
+            }
+        }
+    }
+    Text(if (hours == com.example.itinerary.data.BackgroundSync.OFF) "Calendars sync only while Planner is open."
+        else "Also syncs while Planner is closed, when there's a connection, and updates the Today widget. Android decides the exact " +
+            "moment, so it can be later, especially when the battery is low or the phone is idle.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

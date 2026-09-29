@@ -108,7 +108,16 @@ data class SettingsSnapshot(
     // The scroll bar's colour (opaque ARGB) and how see-through it is, in percent (see ScrollBar).
     val scrollBarColor: Int = ScrollBar.DEFAULT_ARGB,
     val scrollBarSeeThrough: Int = ScrollBar.DEFAULT_SEE_THROUGH,
+    // How often calendars sync in the background, in hours; 0 = off (see BackgroundSync).
+    val calendarBackgroundHours: Int = BackgroundSync.OFF,
 )
+
+// Calendar sync in the background (Settings → Calendars): off, or every so many hours. Android picks the exact moment.
+object BackgroundSync {
+    const val OFF = 0
+    val CHOICES = listOf(OFF, 1, 3, 6, 24)
+    fun label(hours: Int) = when (hours) { OFF -> "Off"; 1 -> "Every hour"; 24 -> "Once a day"; else -> "Every $hours hours" }
+}
 
 // Headings (screen titles, section headings, day headers, dialog titles) share one colour the user can change.
 object HeadingColor {
@@ -297,6 +306,15 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _scrollBarSeeThrough.value = clean
     }
 
+    private val _calendarBackgroundHours = MutableStateFlow(
+        prefs.getInt(KEY_CALENDAR_BACKGROUND_HOURS, BackgroundSync.OFF).takeIf { it in BackgroundSync.CHOICES } ?: BackgroundSync.OFF)
+    val calendarBackgroundHours: StateFlow<Int> = _calendarBackgroundHours.asStateFlow()
+    fun setCalendarBackgroundHours(hours: Int) {
+        val clean = hours.takeIf { it in BackgroundSync.CHOICES } ?: BackgroundSync.OFF
+        prefs.edit { putInt(KEY_CALENDAR_BACKGROUND_HOURS, clean) }
+        _calendarBackgroundHours.value = clean
+    }
+
     private val _appFont = MutableStateFlow(
         runCatching { AppFont.valueOf(prefs.getString(KEY_APP_FONT, null).orEmpty()) }.getOrDefault(AppFont.DEFAULT),
     )
@@ -370,6 +388,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _savedSearches.value,
         _scrollBarColor.value,
         _scrollBarSeeThrough.value,
+        _calendarBackgroundHours.value,
     )
 
     fun applySnapshot(settings: SettingsSnapshot) {
@@ -385,6 +404,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         setHeadingColor(settings.headingColor)
         setScrollBarColor(settings.scrollBarColor)
         setScrollBarSeeThrough(settings.scrollBarSeeThrough)
+        setCalendarBackgroundHours(settings.calendarBackgroundHours)
         setAppFont(settings.appFont)
         setTextSizePercent(settings.textSizePercent)
         setDateFormat(settings.dateFormat)
@@ -410,6 +430,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_HEADING_COLOR = "heading_color"
         const val KEY_SCROLL_BAR_COLOR = "scroll_bar_color"
         const val KEY_SCROLL_BAR_SEE_THROUGH = "scroll_bar_see_through"
+        const val KEY_CALENDAR_BACKGROUND_HOURS = "calendar_background_hours"
         const val KEY_APP_FONT = "app_font"
         const val KEY_TEXT_SIZE = "text_size_percent"
         const val KEY_DATE_FORMAT = "date_format"

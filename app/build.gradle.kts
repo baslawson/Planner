@@ -104,12 +104,15 @@ dependencies {
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    // Calendar sync in the background at the interval chosen in Settings → Calendars (Off by default).
+    implementation(libs.androidx.work.runtime)
     ksp(libs.androidx.room.compiler)
     implementation(libs.okhttp)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Plain JVM tests (app/src/test), e.g. the agenda ordering and filtering in AgendaTest.
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(libs.okhttp.mockwebserver)
+    androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(libs.okhttp.tls)
     androidTestImplementation(libs.androidx.test.runner)
 }

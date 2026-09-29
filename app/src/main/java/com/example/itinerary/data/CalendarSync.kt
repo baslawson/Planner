@@ -92,6 +92,16 @@ class CalendarSync(
         send()
     }
 
+    // A background run (see CalendarBackground): everything that has something to sync — phone calendars, links (at most
+    // hourly), Nextcloud (reading and the synced calendar both ways) — then Planner's own changes. Cheap when there's
+    // nothing to do.
+    suspend fun backgroundSync() {
+        refreshPhone()
+        if (dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
+        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere) } && hasAccount()) sync()
+        send()
+    }
+
     fun phonePermitted(): Boolean = phone?.permitted() == true
 
     // Lists the phone's visible calendars (new ones start unticked) and reads the ticked ones' dates in the window.

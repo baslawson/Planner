@@ -73,5 +73,7 @@ class ItineraryApp : Application() {
             runCatching { aiStore.retireObsoleteAccess() }
         }
         createReminderChannel(this)
+        // Calendar sync in the background follows the setting (and a restored backup's).
+        appScope.launch { settings.calendarBackgroundHours.collect { CalendarBackground.schedule(this@ItineraryApp, it) } }
     }
 }

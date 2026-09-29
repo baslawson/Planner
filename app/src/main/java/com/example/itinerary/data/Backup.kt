@@ -217,6 +217,7 @@ class BackupManager(
                 .put("headingColor", String.format("#%06X", settings.headingColor and 0xFFFFFF))
                 .put("scrollBarColor", String.format("#%06X", settings.scrollBarColor and 0xFFFFFF))
                 .put("scrollBarSeeThrough", settings.scrollBarSeeThrough)
+                .put("calendarBackgroundHours", settings.calendarBackgroundHours)
                 .put("font", settings.appFont.name)
                 .put("textSize", settings.textSizePercent)
                 .put("dateFormat", settings.dateFormat.name)
@@ -410,6 +411,9 @@ class BackupManager(
             scrollBarColor = settingsJson?.optString("scrollBarColor")?.let(::parseHexColor) ?: ScrollBar.DEFAULT_ARGB,
             scrollBarSeeThrough = (settingsJson?.optInt("scrollBarSeeThrough", ScrollBar.DEFAULT_SEE_THROUGH) ?: ScrollBar.DEFAULT_SEE_THROUGH)
                 .coerceIn(ScrollBar.MIN_SEE_THROUGH, ScrollBar.MAX_SEE_THROUGH),
+            // Optional (older backups have none): calendar sync in the background stays off.
+            calendarBackgroundHours = (settingsJson?.optInt("calendarBackgroundHours", BackgroundSync.OFF) ?: BackgroundSync.OFF)
+                .takeIf { it in BackgroundSync.CHOICES } ?: BackgroundSync.OFF,
             // Optional; a missing or unknown font gets the default.
             appFont = runCatching { AppFont.valueOf(settingsJson?.optString("font").orEmpty()) }.getOrDefault(AppFont.DEFAULT),
             // Optional; a missing value gets 100 percent.
