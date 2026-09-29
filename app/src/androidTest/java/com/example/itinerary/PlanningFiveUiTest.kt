@@ -179,7 +179,8 @@ class PlanningFiveUiTest {
             click("Find gaps")
             reveal { nodes().any { it.isVisibleToUser && it.text?.toString()?.contains("–") == true && it.text?.toString()?.contains(" · ") == true } }
             screenshot("free-time-results")
-            val gap = nodes().first { it.isVisibleToUser && it.text?.toString()?.contains("–") == true && it.text?.toString()?.contains(" · ") == true }.text.toString()
+            // The last visible gap, on a later day: today's first gap starts "now" and the clock can pass it.
+            val gap = nodes().last { it.isVisibleToUser && it.text?.toString()?.contains("–") == true && it.text?.toString()?.contains(" · ") == true }.text.toString()
             click(gap); click("Set time")
             await { chosen != null }
             assertEquals(60, chosen!!.durationMinutes)
@@ -216,7 +217,8 @@ class PlanningFiveUiTest {
             click("More above")
             click("Find gaps")
             await { resultHeading()!=null };screenshot("repeat-search-visible")
-            val gap=nodes().first { it.isVisibleToUser && it.text?.toString()?.contains("–")==true && it.text?.toString()?.contains(" · ")==true }.text.toString()
+            // The last visible gap, on a later day: today's first gap starts "now" and the clock can pass it.
+            val gap=nodes().last { it.isVisibleToUser && it.text?.toString()?.contains("–")==true && it.text?.toString()?.contains(" · ")==true }.text.toString()
             click(gap);click("Set time");await { chosen!=null };assertEquals(60,chosen!!.durationMinutes)
             val blocked=(0L..6L).map { ItineraryItem(tripId=0,date=LocalDate.now().plusDays(it),startTime=null,title="Blocked") }
             ins.runOnMainSync { activity.setContent { ItineraryTheme {
