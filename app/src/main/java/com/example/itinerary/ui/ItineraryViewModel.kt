@@ -31,6 +31,9 @@ class ItineraryViewModel(
 
     fun setCalendarCollapsed(collapsed: Boolean) = settings.setCalendarCollapsed(collapsed)
 
+    // How see-through the big + button is, in percent.
+    val addButtonSeeThrough: StateFlow<Int> = settings.addButtonSeeThrough
+
 
     val items: StateFlow<List<ItineraryItem>> = repo.allItems
         .stateInWhileVisible(viewModelScope, emptyList())

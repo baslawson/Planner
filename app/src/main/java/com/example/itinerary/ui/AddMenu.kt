@@ -1,5 +1,25 @@
 package com.example.itinerary.ui
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import com.example.itinerary.data.Attachment
+import com.example.itinerary.data.EventSaveOptions
+import com.example.itinerary.data.ItineraryItem
+import com.example.itinerary.data.PlanColors
+import com.example.itinerary.data.PlannerTask
+import com.example.itinerary.data.QuickEntrySuggestion
+import com.example.itinerary.data.Reminder
+import com.example.itinerary.data.RepeatRule
+import com.example.itinerary.data.quickReminders
+import com.example.itinerary.data.quickTask
+import java.time.LocalDate
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -188,4 +208,126 @@ private fun AgendaActionRow(label: String, icon: Int, onClick: () -> Unit) {
             Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+// A new event being added: from the big + menu, or handed over by a planning tool. [quickDefaults] carries what Quick
+// entry understood when its suggestion is opened for review.
+class NewEventState {
+    var adding by mutableStateOf<ItineraryItem?>(null)
+    var scanBill by mutableStateOf(false)
+    var quickDefaults by mutableStateOf<QuickEntrySuggestion?>(null)
+
+    fun start(item: ItineraryItem, scan: Boolean = false, quick: QuickEntrySuggestion? = null) {
+        adding = item; scanBill = scan; quickDefaults = quick
+    }
+}
+
+// The big + and its menu (Add task, Add event, Quick entry) with everything they open, shared by the agenda and the
+// calendar. A new event starts on [day]; [usedColors] lists the palette colours a day's events already take, so it
+// gets the one used least. [onEventSaved] follows each new event once it is saved.
+@Composable
+fun BoxScope.AddMenuHost(
+    state: NewEventState,
+    showButton: Boolean,
+    day: LocalDate,
+    today: LocalDate,
+    usedColors: (LocalDate) -> List<Int>,
+    seeThroughPercent: Int,
+    categoryCounts: Map<String, Int>,
+    hiddenCategories: Set<String>,
+    onRemoveCategories: (Set<String>) -> Unit,
+    onShowCategory: (String) -> Unit,
+    planningTools: PlanningToolsState,
+    saveEvent: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Unit,
+    onEventSaved: (ItineraryItem) -> Unit = {},
+) {
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var quickEntry by rememberSaveable { mutableStateOf(false) }
+    var choosingTaskType by rememberSaveable { mutableStateOf(false) }
+    var newTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var quickTask by remember { mutableStateOf<PlannerTask?>(null) }
+    val repository = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).repository
+
+    fun addEvent(bill: Boolean = false, scan: Boolean = false) {
+        if (state.adding != null) return
+        state.start(ItineraryItem(
+            // Storage ownership is assigned when the new event is saved.
+            tripId = 0L,
+            date = day,
+            startTime = null,
+            title = "",
+            category = if (bill) "Bills" else "Other",
+            colorIndex = PlanColors.next(usedColors(day), PlanColors.EVENT_COUNT),
+        ), scan = scan)
+    }
+
+    if (showButton) {
+        if (menuOpen) {
+            // The popup stays bright above this scrim; its outside-touch handler dismisses it.
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    onClickLabel = "Close add menu") { menuOpen = false })
+        }
+        AgendaActionsButton(
+            seeThroughPercent = seeThroughPercent,
+            open = menuOpen,
+            onOpenChange = { menuOpen = it },
+            onAddEvent = { addEvent() },
+            onQuickEntry = { quickEntry = true },
+            onAddTask = { choosingTaskType = true },
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
+        )
+    }
+
+    fun quickEvent(suggestion: QuickEntrySuggestion) = ItineraryItem(
+        tripId = 0L, title = suggestion.title, date = suggestion.date, endDate = suggestion.endDate, startTime = suggestion.time,
+        durationMinutes = suggestion.durationMinutes, location = suggestion.location, repeatRule = suggestion.repeat.name,
+        colorIndex = PlanColors.next(usedColors(suggestion.date), PlanColors.EVENT_COUNT),
+    )
+    if (quickEntry) QuickEntryDialog(today, onDismiss = { quickEntry = false },
+        onAdd = { suggestion, task, token ->
+            if (task) repository.saveTask(suggestion.quickTask().copy(id = token))
+            else {
+                val event = quickEvent(suggestion)
+                saveEvent(event, emptyList(), emptyList(), suggestion.quickReminders(), emptyList(), EventSaveOptions(repeat = suggestion.repeat, count = if (suggestion.repeat == RepeatRule.NONE) 1 else suggestion.repeatCount, draftToken = token))
+                onEventSaved(event)
+            }
+        },
+        onReview = { suggestion, task ->
+            if (task) quickTask = suggestion.quickTask()
+            else state.start(quickEvent(suggestion), quick = suggestion)
+            quickEntry = false
+        })
+    quickTask?.let { task ->
+        key(task.id) { TaskEditor(task, true) { quickTask = null } }
+    }
+    state.adding?.let { current ->
+        val quick = state.quickDefaults
+        ItemEditorSheet(
+            initial = current,
+            startWithBillScan = state.scanBill,
+            initialAddedReminders = quick?.quickReminders().orEmpty(),
+            initialRepeatCount = quick?.repeatCount ?: 12,
+            existingAttachments = emptyList(),
+            existingReminders = emptyList(),
+            categoryCounts = categoryCounts,
+            hiddenCategories = hiddenCategories,
+            onRemoveCategories = onRemoveCategories,
+            onShowCategory = onShowCategory,
+            onDismiss = { state.adding = null; state.quickDefaults = null; planningTools.eventEditorDismissed() },
+            onSave = { item, added, removed, addedReminders, removedReminders, options ->
+                saveEvent(item, added, removed, addedReminders, removedReminders, options)
+                planningTools.eventSaved()
+                onEventSaved(item)
+            },
+            // A new event has nothing to delete.
+            onDelete = { _, _ -> },
+        )
+    }
+    if (choosingTaskType) TaskTypeDialog(
+        onTask = { choosingTaskType = false; newTaskId = java.util.UUID.randomUUID().toString() },
+        onBill = { choosingTaskType = false; addEvent(bill = true) },
+        onScan = { choosingTaskType = false; addEvent(bill = true, scan = true) },
+        onDismiss = { choosingTaskType = false })
+    newTaskId?.let { id -> key(id) { TaskEditor(PlannerTask(id = id), true) { newTaskId = null } } }
 }

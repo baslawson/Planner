@@ -8,8 +8,6 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,10 +64,6 @@ import com.example.itinerary.data.AgendaType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import com.example.itinerary.data.quickReminders
-import com.example.itinerary.data.quickTask
-import com.example.itinerary.data.ItineraryItem
-import com.example.itinerary.data.PlanColors
 import java.time.LocalDate
 
 // Events grouped by day. Opening an event shows the shared calendar on its date.
@@ -89,9 +82,7 @@ fun AgendaScreen(
     var showCompleted by rememberSaveable { mutableStateOf(false) }
     var anytimeExpanded by rememberSaveable { mutableStateOf(true) }
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
-    var choosingTaskType by rememberSaveable { mutableStateOf(false) }
     var editingBillId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var creatingTask by rememberSaveable { mutableStateOf(false) }
     val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
     val backupStore = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).backup.status
     val backupReminder by backupStore.reminder.collectAsStateWithLifecycle()
@@ -104,19 +95,13 @@ fun AgendaScreen(
     val overlayMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
-    var addMenuOpen by rememberSaveable { mutableStateOf(false) }
     val showBillsSummary by vm.showBillsSummary.collectAsStateWithLifecycle()
     val range by vm.agendaRange.collectAsStateWithLifecycle()
     val settings = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).settings
     val types by settings.agendaTypes.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     // A new event being added with the + button; existing events are edited from the calendar.
-    var adding by remember { mutableStateOf<ItineraryItem?>(null) }
-    var scanBill by remember { mutableStateOf(false) }
-    var quickDefaults by remember { mutableStateOf<com.example.itinerary.data.QuickEntrySuggestion?>(null) }
-    var quickTask by remember { mutableStateOf<com.example.itinerary.data.PlannerTask?>(null) }
-    val entryContext = LocalContext.current
-    var quickEntry by rememberSaveable { mutableStateOf(false) }
+    val newEvent = remember { NewEventState() }
 
     // Re-read when the app comes back to the front, so an agenda left open overnight moves on to the new day.
     val today = rememberCurrentDate()
@@ -143,28 +128,8 @@ fun AgendaScreen(
     }
     val selection = rememberEventSelection(selectable)
 
-    fun addEvent(bill: Boolean = false, scan: Boolean = false) {
-        if (adding != null) return
-        scanBill = scan
-        quickDefaults = null
-        val date = today
-        adding = ItineraryItem(
-                // Storage ownership is assigned when the new event is saved.
-                tripId = 0L,
-                date = date,
-                startTime = null,
-                title = "",
-                category = if (bill) "Bills" else "Other",
-                // The colour the fewest of that day's events use, as on the calendar.
-                colorIndex = PlanColors.next(
-                    events.filter { it.date == date && it.customColor == null }.map { it.colorIndex },
-                    PlanColors.EVENT_COUNT,
-                ),
-            )
-    }
-
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
-    PlanningToolDialogs(planningTools, onEvent = { adding = it })
+    PlanningToolDialogs(planningTools, onEvent = { newEvent.start(it) })
 
     OverlayMenuScreen(overlayMenu) {
         Scaffold(
@@ -277,7 +242,7 @@ fun AgendaScreen(
                                 }
                             }
                             if (anytimeExpanded) items(anytimeTasks, key = { "task-${it.id}" }) { task ->
-                                TaskCard(task, today, enabled = !selection.active) { creatingTask = false; editingTaskId = task.id }
+                                TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
                             }
                         }
                         if (dates.isEmpty() && anytimeTasks.isEmpty()) item(key = "empty") {
@@ -297,7 +262,7 @@ fun AgendaScreen(
                                 BillTaskCard(bill, today, selection) { editingBillId = bill.id }
                             }
                             items(datedTasks[date].orEmpty(), key = { "task-${it.id}" }, contentType = { "task" }) { task ->
-                                TaskCard(task, today, enabled = !selection.active) { creatingTask = false; editingTaskId = task.id }
+                                TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
                             }
                             // A trip under way appears twice (its first day and Today), so its Today card needs its own key.
                             items(eventsByDate[date]?.entries.orEmpty(), key = { if (it.continuing) "under-way-${it.event.id}" else it.event.id },
@@ -314,74 +279,25 @@ fun AgendaScreen(
             }
         }
 
-        // Keep creation and bill tools together under the big +.
-        if (loadedEvents != null && !selection.active && !selection.busy) {
-            if (addMenuOpen) {
-                // The popup stays bright above this scrim; its outside-touch handler dismisses it.
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        onClickLabel = "Close add menu") { addMenuOpen = false })
-            }
-            AgendaActionsButton(
-                seeThroughPercent = addButtonSeeThrough,
-                open = addMenuOpen,
-                onOpenChange = { addMenuOpen = it },
-                onAddEvent = { addEvent() },
-                onQuickEntry = { quickEntry = true },
-                onAddTask = { choosingTaskType = true },
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
-            )
-        }
-
-        fun quickEvent(suggestion: com.example.itinerary.data.QuickEntrySuggestion) = ItineraryItem(
-            tripId = 0L, title = suggestion.title, date = suggestion.date, endDate = suggestion.endDate, startTime = suggestion.time,
-            durationMinutes = suggestion.durationMinutes, location = suggestion.location, repeatRule = suggestion.repeat.name,
-            colorIndex = PlanColors.next(events.filter { it.date == suggestion.date && it.customColor == null }.map { it.colorIndex }, PlanColors.EVENT_COUNT),
+        // Keep creation and bill tools together under the big +. A new event starts today.
+        AddMenuHost(
+            state = newEvent,
+            showButton = loadedEvents != null && !selection.active && !selection.busy,
+            day = today,
+            today = today,
+            usedColors = { date -> events.filter { it.date == date && it.customColor == null }.map { it.colorIndex } },
+            seeThroughPercent = addButtonSeeThrough,
+            categoryCounts = categoryCounts,
+            hiddenCategories = hiddenCategories,
+            onRemoveCategories = vm::removeCategories,
+            onShowCategory = vm::showCategory,
+            planningTools = planningTools,
+            saveEvent = vm::saveEvent,
         )
-        if (quickEntry) QuickEntryDialog(today, onDismiss = { quickEntry = false },
-            onAdd = { suggestion, task, token ->
-                if (task) (entryContext.applicationContext as com.example.itinerary.ItineraryApp).repository.saveTask(suggestion.quickTask().copy(id = token))
-                else vm.saveEvent(quickEvent(suggestion), emptyList(), emptyList(), suggestion.quickReminders(), emptyList(), com.example.itinerary.data.EventSaveOptions(repeat = suggestion.repeat, count = if (suggestion.repeat == com.example.itinerary.data.RepeatRule.NONE) 1 else suggestion.repeatCount, draftToken = token))
-            },
-            onReview = { suggestion, task ->
-                if (task) quickTask = suggestion.quickTask()
-                else { scanBill = false; quickDefaults = suggestion; adding = quickEvent(suggestion) }
-                quickEntry = false
-            })
-        quickTask?.let { task ->
-            androidx.compose.runtime.key(task.id) { TaskEditor(task, true) { quickTask = null } }
-        }
-        adding?.let { current ->
-            ItemEditorSheet(
-                initial = current,
-                startWithBillScan = scanBill,
-                initialAddedReminders = quickDefaults?.quickReminders().orEmpty(),
-                initialRepeatCount = quickDefaults?.repeatCount ?: 12,
-                existingAttachments = emptyList(),
-                existingReminders = emptyList(),
-                categoryCounts = categoryCounts,
-                hiddenCategories = hiddenCategories,
-                onRemoveCategories = vm::removeCategories,
-                onShowCategory = vm::showCategory,
-                onDismiss = { adding = null; quickDefaults = null; planningTools.eventEditorDismissed() },
-                onSave = { item, added, removed, addedReminders, removedReminders, options ->
-                    vm.saveEvent(item, added, removed, addedReminders, removedReminders, options)
-                    planningTools.eventSaved()
-                },
-                // A new event has nothing to delete.
-                onDelete = { _, _ -> },
-            )
-        }
-
-        if (choosingTaskType) TaskTypeDialog(
-            onTask = { choosingTaskType = false; creatingTask = true; editingTaskId = java.util.UUID.randomUUID().toString() },
-            onBill = { choosingTaskType = false; addEvent(bill = true) },
-            onScan = { choosingTaskType = false; addEvent(bill = true, scan = true) },
-            onDismiss = { choosingTaskType = false })
         editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
         editingTaskId?.let { id ->
-            val task = if (creatingTask) com.example.itinerary.data.PlannerTask(id = id) else tasks.find { it.id == id }
-            if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, creatingTask) { editingTaskId = null } }
+            val task = tasks.find { it.id == id }
+            if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
         }
         SettingsHost(vm = vm, show = showSettings, onDismiss = { showSettings = false })
     }

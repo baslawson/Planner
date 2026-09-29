@@ -191,5 +191,22 @@ class EighthFeaturesUiTest {
         assertEquals(before.items,data().items);assertEquals(before.reminders,data().reminders)
         assertNull(EditorDraftStore(context).read())
     }
+    @Test fun calendarHasTheAgendaMenuAndAddsOnTheSelectedDay()=runBlocking {
+        EditorDraftStore(context).clear()
+        // A day other than today, so the check can tell "the selected day" from "today".
+        val day=LocalDate.now().plusDays(3)
+        app.settings.lastCalendarDate=day
+        open()
+        click("Switch to Calendar view");await { find("CALENDAR")!=null }
+        assertNull(find("Add event"))
+        click("Add menu")
+        for (label in listOf("Add task","Add event","Quick entry")) assertNotNull(label,find(label))
+        screenshot("calendar-add-menu")
+        click("Add event");await { find("New event")!=null }
+        setText("","QA calendar plus")
+        click("Save")
+        await { data().items.any { it.title=="QA calendar plus" } }
+        assertEquals(day,data().items.single { it.title=="QA calendar plus" }.date)
+    }
 
 }

@@ -1,5 +1,4 @@
 package com.example.itinerary.ui
-import androidx.compose.foundation.border
 import com.example.itinerary.ui.MatrixIconButton as IconButton
 
 import com.example.itinerary.data.billTaskSummary
@@ -25,9 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -46,7 +43,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.ItineraryItem
-import com.example.itinerary.data.PlanColors
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -62,7 +58,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val allReminders by vm.reminders.collectAsStateWithLifecycle()
     val categoryCounts by vm.categoryCounts.collectAsStateWithLifecycle()
     val hiddenCategories by vm.hiddenCategories.collectAsStateWithLifecycle()
+    val addButtonSeeThrough by vm.addButtonSeeThrough.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ItineraryItem?>(null) }
+    // A new event from the big +; it starts on the selected day.
+    val newEvent = remember { NewEventState() }
     val overlayMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
@@ -84,6 +83,14 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
         }
     }
 
+
+    // If a saved event is on another day, follow it so it doesn't seem to have vanished.
+    fun follow(item: ItineraryItem) {
+        if (item.date != selected) {
+            vm.select(item.date)
+            vm.showMonth(YearMonth.from(item.date))
+        }
+    }
 
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
     PlanningToolDialogs(planningTools, onEvent = { editing = it })
@@ -113,27 +120,6 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         }
                         MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings)
                     },
-                )
-            },
-            floatingActionButton = {
-                if (!selection.active && !selection.busy) ExtendedFloatingActionButton(
-                    onClick = {
-                        // A new event starts on the colour the fewest of that day's events use.
-                        editing = ItineraryItem(
-                            tripId = 0L,
-                            date = selected,
-                            startTime = null,
-                            title = "",
-                            // Events with a colour of their own don't use up a palette colour.
-                            colorIndex = PlanColors.next(
-                                dayItems.filter { it.customColor == null }.map { it.colorIndex },
-                                PlanColors.EVENT_COUNT,
-                            ),
-                        )
-                    },
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("Add event") },
-                    modifier = Modifier.border(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.primary, androidx.compose.material3.FloatingActionButtonDefaults.extendedFabShape),
                 )
             },
         ) { inner ->
@@ -172,11 +158,11 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
                     DayHeader(date = selected)
-                    LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 96.dp)) {
+                    LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
                         if (dayItems.isEmpty()) {
                             item {
                                 Text(
-                                    "Nothing planned for this day. Tap Add event to start.",
+                                    "Nothing planned for this day. Tap + to add something.",
                                     modifier = Modifier.padding(horizontal = 20.dp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -205,6 +191,21 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 }
             }
         }
+        AddMenuHost(
+            state = newEvent,
+            showButton = !selection.active && !selection.busy,
+            day = selected,
+            today = today,
+            usedColors = { date -> com.example.itinerary.data.eventsOnDay(allItems, date).filter { it.customColor == null }.map { it.colorIndex } },
+            seeThroughPercent = addButtonSeeThrough,
+            categoryCounts = categoryCounts,
+            hiddenCategories = hiddenCategories,
+            onRemoveCategories = vm::removeCategories,
+            onShowCategory = vm::showCategory,
+            planningTools = planningTools,
+            saveEvent = vm::saveItem,
+            onEventSaved = ::follow,
+        )
     }
 
     editing?.let { current ->
@@ -220,11 +221,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             onSave = { item, added, removed, addedReminders, removedReminders, options ->
                 vm.saveItem(item, added, removed, addedReminders, removedReminders, options)
                 planningTools.eventSaved()
-                // If the event moved to another day, follow it so it doesn't seem to have vanished.
-                if (item.date != selected) {
-                    vm.select(item.date)
-                    vm.showMonth(YearMonth.from(item.date))
-                }
+                follow(item)
             },
             onDelete = vm::deleteItem,
         )
