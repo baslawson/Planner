@@ -103,7 +103,9 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     ) {
       // Room on the right for the scroll bar, which this longer pop-up usually shows.
       Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Show events from your other calendars beside your own. Planner only reads them: nothing in them is changed, and they can't be edited here.")
+        Text("Show events from your other calendars beside your own. Only a Nextcloud calendar can sync both ways (choose it under " +
+            "Nextcloud → Keep in sync with). All other calendars here, including phone calendars and links, are read-only: " +
+            "Planner doesn't change them and their events can't be edited here.")
         SettingsHeading("Nextcloud")
         when (connected) {
             null -> Text("Checking the Nextcloud connection…", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -137,7 +139,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
 
         SettingsHeading("On this phone")
         if (!phoneAllowed) {
-            Text("Calendars already on this phone: Google, Samsung, Outlook, DAVx⁵ and others. Planner asks to read them; it can't change them.")
+            Text("Calendars already on this phone: Google, Samsung, Outlook, DAVx⁵ and others. Read-only: Planner asks to read them; it can't change them.")
             if (phoneRefused) {
                 Text("Planner wasn't allowed to read calendars. Allow Calendars in Planner's app settings.", color = MaterialTheme.colorScheme.error)
                 StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(app) }
@@ -151,7 +153,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
             phoneState.message?.let {
                 Text(it, color = if (phoneState.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("Updates when Planner opens, when you tap Sync now and whenever these calendars change while Planner is open. " +
+            Text("Read-only. Updates when Planner opens, when you tap Sync now and whenever these calendars change while Planner is open. " +
                 "Only calendars shown in your phone's calendar app are listed, and they aren't included in backups.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -166,7 +168,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
             Text(it, color = if (linkState.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         StackedButton("Add link") { adding = true }
-        Text("A calendar's https or webcal link, such as public holidays, a club's fixtures or a calendar's secret address. " +
+        Text("Read-only. A calendar's https or webcal link, such as public holidays, a club's fixtures or a calendar's secret address. " +
             "Updates when Planner opens (at most once an hour) and when you tap Sync now. Links are included in backups.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
       }
