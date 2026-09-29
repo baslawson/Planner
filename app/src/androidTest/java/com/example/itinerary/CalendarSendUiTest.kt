@@ -21,7 +21,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.util.concurrent.ConcurrentHashMap
 
-/** Calendar sync step 5 in the real app: choose "Send my Planner events to" in Settings → Calendars against a local
+/** Calendar sync steps 5–6 in the real app: choose "Keep in sync with" in Settings → Calendars against a local
  *  HTTPS CalDAV server (never a real Nextcloud), and see an existing and a new event arrive there. */
 @Suppress("DEPRECATION")
 class CalendarSendUiTest {
@@ -71,6 +71,13 @@ class CalendarSendUiTest {
                     request.method == "PUT" && path.startsWith("${home}personal/planner-") && request.getHeader("If-None-Match") == "*" -> {
                         files[path] = request.body.readUtf8(); MockResponse().setResponseCode(201).setHeader("ETag", "\"e${files.size}\"")
                     }
+                    // Two-way sync reads the calendar back: its files and their version markers.
+                    request.method == "PROPFIND" && path == "${home}personal/" -> MockResponse().setResponseCode(207).setBody(
+                        """<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">""" + files.keys.sorted().joinToString("") { p ->
+                            """<d:response><d:href>$p</d:href><d:propstat><d:prop><d:getetag>"e${files.keys.sorted().indexOf(p) + 1}"</d:getetag><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+                        } + "</d:multistatus>")
+                    request.method == "REPORT" && path == "${home}personal/" -> MockResponse().setResponseCode(207).setBody(
+                        """<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav"></d:multistatus>""")
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -89,12 +96,12 @@ class CalendarSendUiTest {
             await { find("AGENDA") != null }
             click("Settings")
             click("Calendars")
-            await { find("Send my Planner events to") != null && find("QA Personal") != null }
+            await { find("Keep in sync with") != null && find("QA Personal") != null }
             assertTrue(files.isEmpty()) // nothing is sent until a calendar is chosen
-            // The name shows twice: under reading (a tick box) and under "Send my Planner events to" (the last one).
+            // The name shows twice before it's chosen: under reading (a tick box) and under "Keep in sync with" (the last one).
             nodes().last { it.isVisibleToUser && it.text?.toString() == "QA Personal" }.let { var n: AccessibilityNodeInfo? = it
                 while (n != null && !n.isClickable) n = n.parent; assertTrue(n!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)) }
-            await { files.values.any { it.contains("SUMMARY:QA Sent existing") } && has("1 event is on QA Personal") }
+            await { files.values.any { it.contains("SUMMARY:QA Sent existing") } && has("1 event is kept in sync with QA Personal") }
             screenshot("sending")
             click("Close")
             click("Save")

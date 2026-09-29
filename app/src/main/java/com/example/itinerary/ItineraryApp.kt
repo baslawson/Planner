@@ -8,6 +8,7 @@ import com.example.itinerary.data.AttachmentStore
 import com.example.itinerary.data.BackupManager
 import com.example.itinerary.data.CalendarSync
 import com.example.itinerary.data.NextcloudAccountStore
+import com.example.itinerary.data.asPlannerStore
 import com.example.itinerary.data.NextcloudBackups
 import com.example.itinerary.data.Repository
 import com.example.itinerary.data.SettingsRepository
@@ -47,12 +48,13 @@ class ItineraryApp : Application() {
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
-    // Nextcloud calendars shown read-only beside Planner's own events; uses the backup login.
     val phoneCalendars: com.example.itinerary.data.AndroidPhoneCalendars by lazy { com.example.itinerary.data.AndroidPhoneCalendars(this) }
 
+    // Other calendars shown read-only beside Planner's own events (Nextcloud on the backup login, the phone's, links), and
+    // two-way sync with one Nextcloud calendar.
     val calendarSync: CalendarSync by lazy {
         CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
-            phone = phoneCalendars, scope = appScope,
+            phone = phoneCalendars, scope = appScope, planner = repository.asPlannerStore(),
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
     }
 

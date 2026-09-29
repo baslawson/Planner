@@ -49,10 +49,13 @@ data class CalendarSource(
     @ColumnInfo(defaultValue = "0") val sendHere: Boolean = false,
 )
 
-// Step 5: what Planner sent to Nextcloud for one of its events, so a later pass can tell what to create, update or delete.
-// No foreign key on purpose: a row whose event is gone is how a deletion is noticed. [uid] null = a past event that was
-// only noted, not sent (it's sent once it's edited). [problem]: the copy on Nextcloud was changed or deleted there since
-// Planner last wrote it, so Planner leaves it alone (step 6 resolves these).
+// Steps 5–6: one Planner event kept in sync with a file in the Nextcloud calendar, so each pass can tell what changed on
+// which side. No foreign key on purpose: a row whose event is gone is how a deletion in Planner is noticed. [uid] null =
+// a past event that was only noted, not sent (it's sent once it's edited). [href]: the file on the server (null = the
+// uid's own name, as Planner names what it creates). [ics]: that file as last synced, so an update changes only what
+// Planner manages and keeps the rest (attendees, alarms…). [problem]: CHANGED/DELETED — a write found the server copy
+// changed or gone (the next check sorts it out); CONFLICT — changed on both sides, [conflict] holds Nextcloud's version
+// ("" = deleted there) until the user chooses.
 @Entity(tableName = "sent_events", indices = [Index(value = ["itemId"], unique = true)])
 data class SentEvent(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -63,11 +66,29 @@ data class SentEvent(
     val etag: String? = null,
     val fingerprint: String,
     val problem: String? = null,
+    val href: String? = null,
+    val ics: String? = null,
+    val conflict: String? = null,
 ) {
     companion object {
         const val CHANGED = "CHANGED"
         const val DELETED = "DELETED"
+        const val CONFLICT = "CONFLICT"
     }
+}
+
+// What two-way sync needs from Planner's own events: save a change (reminders follow), add one, and move some to
+// Recently deleted. The app passes its Repository (see asPlannerStore); tests may too.
+interface PlannerStore {
+    suspend fun update(item: ItineraryItem)
+    suspend fun add(item: ItineraryItem): Long
+    suspend fun archive(ids: Set<Long>)
+}
+
+fun Repository.asPlannerStore(): PlannerStore = object : PlannerStore {
+    override suspend fun update(item: ItineraryItem) = saveItem(item)
+    override suspend fun add(item: ItineraryItem): Long = importEvents(listOf(item)).single()
+    override suspend fun archive(ids: Set<Long>) = archiveEvents(ids)
 }
 
 @Dao

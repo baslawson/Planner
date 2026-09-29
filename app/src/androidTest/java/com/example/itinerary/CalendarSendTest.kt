@@ -191,8 +191,9 @@ class CalendarSendTest {
         assertEquals("Edited on the web version kept", "e-edited-on-web", dav.files[changedPath]!!.first)
         assertTrue(mine().values.none { it.second.contains("QA Gone there") }) // not created again
         assertEquals(setOf(SentEvent.CHANGED, SentEvent.DELETED), rows().mapNotNull { it.problem }.toSet())
-        assertTrue(sync.sendState.value.error)
-        assertTrue(sync.sendState.value.message!!.startsWith("2 events were changed or deleted on Nextcloud"))
+        // Step 6: not an error any more; the next check turns these into an update or a conflict to choose.
+        assertFalse(sync.sendState.value.error)
+        assertEquals("2 events were changed on Nextcloud; Planner will check at the next sync.", sync.sendState.value.message)
         // Further edits and even deleting it in Planner never touch their version.
         items().single { it.title == "QA Theirs now" }.let { repo.saveItem(it.copy(title = "Again")); repo.deleteItem(it) }
         repo.finishDeletion(repo.pendingDeletions.value.single().token)
@@ -213,14 +214,6 @@ class CalendarSendTest {
         sync.send()
         assertEquals(1, mine().size)
         assertFalse(sync.sendState.value.error)
-    }
-
-    @Test fun readingTheSameCalendarDoesNotShowPlannersEventsTwice() = runBlocking {
-        save("QA Mine")
-        start()
-        sync.setEnabled(source("Personal").id, true)
-        sync.sync()
-        assertEquals(listOf("Their meeting"), sync.shown.first().values.map { it.event.title })
     }
 
     @Test fun offAndSwitchingLeaveCopiesAndBackupsDontSendTwice() = runBlocking {

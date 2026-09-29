@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -38,6 +40,8 @@ class CalendarSync(
     private val pendingDeleted: () -> Set<Long> = { emptySet() },
     // For sending a few seconds after a change (requestSend); null in tests, which call send() themselves.
     private val scope: kotlinx.coroutines.CoroutineScope? = null,
+    // Planner's own events, for two-way sync (step 6); null leaves the synced calendar one-way (Planner → Nextcloud).
+    private val planner: PlannerStore? = null,
 ) {
     data class State(val running: Boolean = false, val message: String? = null, val error: Boolean = false)
 
@@ -82,11 +86,10 @@ class CalendarSync(
     // login or a ticked calendar, and at most once every 15 minutes.
     suspend fun syncIfDue() {
         refreshPhone()
-        send()
         if (now() - lastLinkAttempt >= LINK_INTERVAL_MS && dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
         if (now() - lastAttempt < MIN_INTERVAL_MS) return
-        if (dao.sources().none { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD } || !hasAccount()) return
-        sync()
+        if (dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD } && hasAccount()) sync()
+        send()
     }
 
     fun phonePermitted(): Boolean = phone?.permitted() == true
@@ -166,19 +169,28 @@ class CalendarSync(
         })
     }
 
-    // ---- Sending Planner's events to Nextcloud (step 5) ----
-    // Only Planner's own events, only to the one chosen calendar, and every write conditional so nothing else on the
-    // server is replaced. What was sent is remembered per event (sent_events); each pass compares Planner with that.
+    // ---- Keeping Planner in sync with one Nextcloud calendar (steps 5–6) ----
+    // Only that calendar and its event files, and every write conditional (If-None-Match / If-Match), so nothing Planner
+    // hasn't seen is replaced. sent_events remembers, per Planner event, its file, version and what was last synced; each
+    // pass compares both sides with that. Planner → Nextcloud a few seconds after a change (send); Nextcloud → Planner
+    // when calendars sync (pull: on open at most every 15 minutes, and Sync now). Changed on both sides = a conflict the
+    // user settles (resolve). Events Planner can't hold exactly (repeating, timed over a day) stay read-only there.
 
-    // Sends to [id] (a writable Nextcloud calendar), or stops sending (null; what was sent stays on Nextcloud). Past
-    // events are noted but not sent: they go only once edited. Choosing another calendar leaves the old copies there.
+    enum class Resolution { PLANNER, NEXTCLOUD, BOTH }
+
+    val conflicts: Flow<List<SentEvent>> = sent.map { rows -> rows.filter { it.problem == SentEvent.CONFLICT } }
+
+    // Keeps Planner in sync with [id] (a writable Nextcloud calendar), or stops (null; the copies stay on Nextcloud).
+    // Upcoming events are sent; past ones are noted and sent once edited; the calendar's own events come into Planner.
+    // Choosing another calendar leaves the old one as it is.
     suspend fun setSendTarget(id: Long?) {
         val sentDao = db.sentDao()
         db.withTransaction {
             val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-            sources.filter { it.sendHere && it.id != id }.forEach { dao.updateSource(it.copy(sendHere = false)) }
+            sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
             val target = sources.firstOrNull { it.id == id && it.writable } ?: return@withTransaction
-            if (!target.sendHere) dao.updateSource(target.copy(sendHere = true))
+            // Its read-only events show like a ticked calendar's; its other events become Planner events.
+            dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null))
             sentDao.deleteOtherCalendars(target.account, target.href)
             val known = sentDao.all().mapTo(HashSet()) { it.itemId }
             val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
@@ -187,7 +199,8 @@ class CalendarSync(
             }
         }
         _sendState.value = State()
-        if (id != null) send()
+        onChanged()
+        if (id != null) { sync(); send() }
     }
 
     // Sends a few seconds after a change in Planner, so a burst of edits is one pass.
@@ -197,28 +210,23 @@ class CalendarSync(
         sendJob = scope.launch { kotlinx.coroutines.delay(SEND_DELAY_MS); send() }
     }
 
-    // One pass: creates what's new, updates what changed, deletes what Planner no longer has (not while its Undo is on
-    // offer). A copy changed or deleted on Nextcloud is left alone and counted. Offline, the rest waits for the next pass.
-    // Returns false when a pass was already running.
-    suspend fun send(): Boolean {
-        if (!sendLock.tryLock()) return false
-        try {
-            val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return true
-            val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return true
-            if (target.account != accountKey(account)) return true
-            _sendState.value = State(running = true)
-            _sendState.value = try {
-                withContext(Dispatchers.IO) { sendLocked(account, target) }
-            } catch (e: CancellationException) {
-                _sendState.value = State()
-                throw e
-            } catch (e: Exception) {
-                State(message = ((e as? BackupException)?.message ?: "Couldn't send events to Nextcloud.") + " The rest will be sent later.", error = true)
-            }
-            return true
-        } finally {
-            sendLock.unlock()
+    // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
+    // deletes what Planner no longer has (not while its Undo is on offer). A write that finds the server copy changed or
+    // gone leaves it and marks it for the next pull. Offline, the rest waits for the next pass.
+    suspend fun send(): Boolean = sendLock.withLock {
+        val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return@withLock true
+        val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
+        if (target.account != accountKey(account)) return@withLock true
+        _sendState.value = State(running = true)
+        _sendState.value = try {
+            withContext(Dispatchers.IO) { sendLocked(account, target) }
+        } catch (e: CancellationException) {
+            _sendState.value = State()
+            throw e
+        } catch (e: Exception) {
+            State(message = ((e as? BackupException)?.message ?: "Couldn't send events to Nextcloud.") + " The rest will be sent later.", error = true)
         }
+        true
     }
 
     private suspend fun sendLocked(account: NextcloudAccount, target: CalendarSource): State {
@@ -229,6 +237,7 @@ class CalendarSync(
         val waiting = pendingDeleted()
         for (item in items) {
             val row = rows[item.id]
+            if (row?.problem != null) continue // settled by the next pull or by the user
             if (!sendable(item)) {
                 // A bill now, or a skipped date: its copy goes.
                 if (row != null) { removeCopy(account, target, row); sentDao.delete(row.id) }
@@ -238,50 +247,201 @@ class CalendarSync(
             when {
                 row == null || row.uid == null && row.fingerprint != print -> {
                     val uid = "planner-${java.util.UUID.randomUUID()}@planner"
-                    when (val result = client.putEvent(account, target.href, uid, CalendarExport.encode(item, uid, zone(), java.time.Instant.ofEpochMilli(now())), null)) {
-                        is WriteResult.Ok -> sentDao.put(SentEvent(id = row?.id ?: 0, itemId = item.id, account = target.account, calendar = target.href,
-                            uid = uid, etag = result.etag, fingerprint = print))
-                        WriteResult.Changed -> sentDao.put(SentEvent(id = row?.id ?: 0, itemId = item.id, account = target.account, calendar = target.href,
-                            uid = uid, fingerprint = print, problem = SentEvent.CHANGED))
-                        WriteResult.Missing -> throw BackupException("The calendar Planner sends to wasn't found on Nextcloud.")
+                    val body = CalendarExport.encode(item, uid, zone(), java.time.Instant.ofEpochMilli(now()))
+                    val fresh = SentEvent(id = row?.id ?: 0, itemId = item.id, account = target.account, calendar = target.href,
+                        uid = uid, fingerprint = print, ics = body)
+                    when (val result = client.putEvent(account, target.href, uid, body, null)) {
+                        is WriteResult.Ok -> sentDao.put(fresh.copy(etag = result.etag))
+                        WriteResult.Changed -> sentDao.put(fresh.copy(ics = null, problem = SentEvent.CHANGED))
+                        WriteResult.Missing -> throw BackupException("The calendar Planner syncs with wasn't found on Nextcloud.")
                     }
                 }
-                row.uid != null && row.problem == null && row.fingerprint != print ->
-                    when (val result = client.putEvent(account, target.href, row.uid, CalendarExport.encode(item, row.uid, zone(), java.time.Instant.ofEpochMilli(now())), row.etag)) {
-                        is WriteResult.Ok -> sentDao.put(row.copy(etag = result.etag, fingerprint = print))
+                row.uid != null && row.fingerprint != print -> {
+                    val href = hrefOf(target, row)
+                    // Change only what Planner manages in the file as last synced (fetched once if unknown).
+                    val base = row.ics ?: client.getFile(account, target.href, href)?.let { file ->
+                        if (file.etag != row.etag) { sentDao.put(row.copy(problem = SentEvent.CHANGED)); null } else file.data
+                    }
+                    if (base == null) { if (sentDao.all().none { it.id == row.id && it.problem != null }) sentDao.put(row.copy(problem = SentEvent.DELETED)); continue }
+                    val body = ServerEvents.patch(base, item, zone(), java.time.Instant.ofEpochMilli(now()))
+                    when (val result = client.putFile(account, target.href, href, body, row.etag)) {
+                        is WriteResult.Ok -> sentDao.put(row.copy(etag = result.etag, ics = body, fingerprint = print))
                         WriteResult.Changed -> sentDao.put(row.copy(problem = SentEvent.CHANGED))
                         WriteResult.Missing -> sentDao.put(row.copy(problem = SentEvent.DELETED))
                     }
+                }
             }
         }
         // Deleted in Planner (and past its Undo): the copy goes too, unless it was changed on Nextcloud meanwhile.
-        for (row in rows.values) if (row.itemId !in present && row.itemId !in waiting) {
+        for (row in rows.values) if (row.itemId !in present && row.itemId !in waiting && row.problem != SentEvent.CONFLICT) {
             removeCopy(account, target, row)
             sentDao.delete(row.id)
         }
-        val problems = sentDao.all().count { it.calendar == target.href && it.problem != null }
-        return if (problems == 0) State()
-            else State(message = "$problems event${if (problems == 1) " was" else "s were"} changed or deleted on Nextcloud, so Planner didn't update " +
-                "${if (problems == 1) "it" else "them"} there.", error = true)
+        return summary(target)
     }
 
-    // Deletes Planner's copy of [row], only if Nextcloud still has the version Planner wrote. A copy changed on Nextcloud
+    private suspend fun summary(target: CalendarSource): State {
+        val rows = db.sentDao().all().filter { it.calendar == target.href }
+        val conflicts = rows.count { it.problem == SentEvent.CONFLICT }
+        val waiting = rows.count { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
+        return when {
+            conflicts > 0 -> State(message = "$conflicts event${if (conflicts == 1) " was" else "s were"} changed in both places. " +
+                "Choose which version to keep.", error = true)
+            waiting > 0 -> State(message = "$waiting event${if (waiting == 1) " was" else "s were"} changed on Nextcloud; " +
+                "Planner will check at the next sync.")
+            else -> State()
+        }
+    }
+
+    // Deletes Planner's copy of [row], only if Nextcloud still has the version Planner synced. A copy changed on Nextcloud
     // meanwhile stays there (the server refuses the delete); either way Planner then forgets the row.
     private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentEvent) {
-        val uid = row.uid ?: return
-        if (row.problem == null) client.deleteEvent(account, target.href, uid, row.etag)
+        if (row.uid == null || row.problem != null) return
+        client.deleteFile(account, target.href, hrefOf(target, row), row.etag)
+    }
+
+    // The file of [row]: its own name for events that came from Nextcloud, "<uid>.ics" for ones Planner created.
+    private fun hrefOf(target: CalendarSource, row: SentEvent): String = row.href ?: "${target.href}${row.uid}.ics"
+
+    // One pass Nextcloud → Planner for the synced calendar: nothing when its change marker says nothing changed.
+    private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?) {
+        val store = planner ?: return
+        val sentDao = db.sentDao()
+        val (from, until, key) = linkWindow()
+        val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }
+        val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
+        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled) return
+        val listing = client.eventEtags(account, target.href)
+        val inWindow = client.calendarFiles(account, target.href, from.atStartOfDay(zone()).toInstant(),
+            until.plusDays(1).atStartOfDay(zone()).toInstant()).associateBy { it.href }
+        val synced = rows.filter { it.uid != null }.associateBy { hrefOf(target, it) }
+        // Synced events outside the window that changed there are fetched too.
+        val older = synced.filter { (href, row) -> href in listing && listing[href] != row.etag && href !in inWindow }.keys
+        val files = inWindow + client.multiget(account, target.href, older).associateBy { it.href }
+        val items = db.itemDao().all().associateBy { it.id }
+        val waiting = pendingDeleted()
+        val readOnly = mutableListOf<OutsideEvent>()
+        fun shown(file: ServerFile) = CalendarFileImport.window(file.data, zone(), from, until).events
+        for ((href, file) in files) {
+            val parsed = ServerEvents.parse(file.data, zone())
+            val row = synced[href]
+            if (row == null) {
+                val server = parsed.item
+                if (server == null) { readOnly += runCatching { shown(file) }.getOrDefault(emptyList()); continue }
+                // New on Nextcloud: a Planner event from now on.
+                val id = store.add(server)
+                val added = db.itemDao().byId(id) ?: continue
+                sentDao.put(SentEvent(itemId = id, account = target.account, calendar = target.href,
+                    uid = parsed.uid ?: href.substringAfterLast('/').removeSuffix(".ics"), href = href, etag = file.etag, ics = file.data,
+                    fingerprint = fingerprint(added)))
+                continue
+            }
+            if (row.problem == SentEvent.CONFLICT) { if (file.etag != row.etag) sentDao.put(row.copy(conflict = file.data)); continue }
+            if (file.etag == row.etag) { if (row.ics == null) sentDao.put(row.copy(ics = file.data)); continue }
+            // Changed on Nextcloud.
+            val server = parsed.item
+            val item = items[row.itemId]
+            when {
+                // Now repeating, or otherwise more than Planner can hold: it's read-only from now on; Planner's event stays.
+                server == null -> { sentDao.delete(row.id); readOnly += runCatching { shown(file) }.getOrDefault(emptyList()) }
+                // Deleted in Planner meanwhile.
+                item == null || row.itemId in waiting -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
+                // Unchanged in Planner since the last sync: take Nextcloud's version (Planner-only details stay).
+                fingerprint(item) == row.fingerprint -> {
+                    store.update(ServerEvents.apply(item, server))
+                    val saved = db.itemDao().byId(item.id) ?: continue
+                    sentDao.put(row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
+                }
+                else -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
+            }
+        }
+        // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile.
+        for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT) {
+            val item = items[row.itemId]
+            when {
+                item == null -> sentDao.delete(row.id)
+                fingerprint(item) == row.fingerprint -> { store.archive(setOf(item.id)); sentDao.delete(row.id) }
+                else -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = ""))
+            }
+        }
+        db.withTransaction {
+            dao.deleteEvents(target.id)
+            dao.insertEvents(readOnly.distinct().map { it.copy(id = 0, sourceId = target.id) })
+            dao.source(target.id)?.let { dao.updateSource(it.copy(ctag = ctag, fetchedFor = key, lastSynced = now(), lastError = null)) }
+        }
+        onChanged()
+    }
+
+    // Settles a conflict: keep Planner's version (written to Nextcloud, or Nextcloud's copy deleted if it was deleted in
+    // Planner), Nextcloud's (taken into Planner, or Planner's event to Recently deleted if it was deleted there), or both
+    // (Nextcloud's becomes a second Planner event; Planner's is sent as a new file). Throws with a message for the user.
+    suspend fun resolve(rowId: Long, choice: Resolution) {
+        sendLock.withLock {
+            withContext(Dispatchers.IO) {
+                val store = planner ?: return@withContext
+                val sentDao = db.sentDao()
+                val account = accounts.load() ?: throw BackupException("Connect to Nextcloud first.")
+                val row = sentDao.all().firstOrNull { it.id == rowId && it.problem == SentEvent.CONFLICT } ?: return@withContext
+                val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.href == row.calendar }
+                    ?: throw BackupException("Choose the calendar to keep in sync with first.")
+                val href = hrefOf(target, row)
+                val item = db.itemDao().byId(row.itemId)
+                val current = client.getFile(account, target.href, href)
+                val stamp = java.time.Instant.ofEpochMilli(now())
+                fun changedAgain(): Nothing = throw BackupException("It changed on Nextcloud again. Check it and choose once more.")
+                when (choice) {
+                    Resolution.PLANNER -> when {
+                        item == null -> { if (current != null && client.deleteFile(account, target.href, href, current.etag) == WriteResult.Changed) changedAgain(); sentDao.delete(row.id) }
+                        current == null -> {
+                            val uid = "planner-${java.util.UUID.randomUUID()}@planner"
+                            val body = CalendarExport.encode(item, uid, zone(), stamp)
+                            val result = client.putEvent(account, target.href, uid, body, null) as? WriteResult.Ok ?: changedAgain()
+                            sentDao.put(row.copy(uid = uid, href = null, etag = result.etag, ics = body, fingerprint = fingerprint(item), problem = null, conflict = null))
+                        }
+                        else -> {
+                            val body = ServerEvents.patch(current.data, item, zone(), stamp)
+                            val result = client.putFile(account, target.href, href, body, current.etag) as? WriteResult.Ok ?: changedAgain()
+                            sentDao.put(row.copy(etag = result.etag, ics = body, fingerprint = fingerprint(item), problem = null, conflict = null))
+                        }
+                    }
+                    Resolution.NEXTCLOUD -> {
+                        val server = current?.let { ServerEvents.parse(it.data, zone()).item }
+                        when {
+                            current == null -> { item?.let { store.archive(setOf(it.id)) }; sentDao.delete(row.id) }
+                            server == null -> sentDao.delete(row.id) // read-only there now; Planner's event stays as it is
+                            else -> {
+                                val id = if (item != null) { store.update(ServerEvents.apply(item, server)); item.id } else store.add(server)
+                                val saved = db.itemDao().byId(id) ?: return@withContext
+                                sentDao.put(row.copy(itemId = id, etag = current.etag, ics = current.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
+                            }
+                        }
+                    }
+                    Resolution.BOTH -> {
+                        val server = current?.let { ServerEvents.parse(it.data, zone()).item }
+                        require(item != null && current != null && server != null) { "Both versions are needed to keep both." }
+                        // Nextcloud's file now belongs to a new Planner event; Planner's own event is sent as a new file.
+                        val id = store.add(server)
+                        val saved = db.itemDao().byId(id) ?: return@withContext
+                        sentDao.put(row.copy(itemId = id, etag = current.etag, ics = current.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
+                    }
+                }
+            }
+        }
+        onChanged()
+        send()
     }
 
     private fun sendable(item: ItineraryItem) = item.id > 0 && item.category != "Bills" && !item.skipped
 
-    // What Planner would send for [item], as a short fingerprint: a change in any sent detail (or the phone's time zone,
+    // What Planner syncs for [item], as a short fingerprint: a change in any synced detail (or the phone's time zone,
     // which moves the times) changes it.
     private fun fingerprint(item: ItineraryItem): String {
         val text = CalendarExport.encode(item, "planner", zone(), java.time.Instant.EPOCH)
         return java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
     }
 
-    // For backups: where Planner sends and what it sent, so a restore doesn't send everything again.
+    // For backups: which calendar Planner keeps in sync with and what it synced, so a restore doesn't send everything
+    // again. Conflicts aren't kept (they're checked again).
     suspend fun sendSnapshot(): Pair<CalendarChoice, List<SentEvent>>? {
         val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return null
         return CalendarChoice(target.account, target.href, target.name, target.color, target.enabled) to
@@ -294,9 +454,9 @@ class CalendarSync(
             dao.sources().filter { it.sendHere }.forEach { dao.updateSource(it.copy(sendHere = false)) }
             if (target == null) return@withTransaction
             val existing = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.account == target.account && it.href == target.href }
-            if (existing != null) dao.updateSource(existing.copy(sendHere = true))
+            if (existing != null) dao.updateSource(existing.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null))
             else dao.insertSource(CalendarSource(account = target.account, href = target.href, name = target.name, color = target.color,
-                enabled = false, sendHere = true))
+                enabled = true, sendHere = true))
             db.sentDao().insertAll(rows.filter { it.account == target.account && it.calendar == target.href }.map { it.copy(id = 0) })
         }
         _sendState.value = State()
@@ -461,7 +621,7 @@ class CalendarSync(
         val window = "$from|${zone().id}"
         var failed = 0
         var skipped = 0
-        for (source in dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }) {
+        for (source in dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD && !it.sendHere }) {
             val calendar = remote[source.href] ?: continue
             if (calendar.ctag != null && calendar.ctag == source.ctag && source.fetchedFor == window && source.lastError == null) continue
             try {
@@ -484,6 +644,15 @@ class CalendarSync(
                 failed++
                 val message = (e as? BackupException)?.message ?: "Couldn't download this calendar."
                 db.withTransaction { dao.source(source.id)?.let { dao.updateSource(it.copy(lastError = message)) } }
+            }
+        }
+        // The calendar kept in sync both ways (step 6).
+        dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.account == key }?.let { target ->
+            remote[target.href]?.let { calendar ->
+                try { sendLock.withLock { pullLocked(account, target, calendar.ctag) } }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { failed++; _sendState.value = State(message = (e as? BackupException)?.message ?: "Couldn't check the synced calendar.", error = true) }
+                if (failed == 0) _sendState.value = summary(target)
             }
         }
         onChanged()

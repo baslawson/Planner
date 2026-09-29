@@ -514,6 +514,25 @@ class Repository(
         }
     }
 
+    // Two-way calendar sync: events deleted on Nextcloud go to Recently deleted (restorable there), without the Undo
+    // message a deletion in Planner shows.
+    suspend fun archiveEvents(ids: Set<Long>) = changes.withLock {
+        withContext(NonCancellable) {
+            val reminders = db.withTransaction {
+                val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
+                if (selected.isEmpty()) return@withTransaction emptyList()
+                val selectedIds = selected.mapTo(hashSetOf()) { it.id }
+                val bundle = PendingDeletion(items = selected,
+                    attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
+                    reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id })
+                archive(bundle)
+                selected.forEach { itemDao.delete(it) }
+                bundle.reminders
+            }
+            afterCommit(reminderIds = reminders.map { it.id })
+        }
+    }
+
     suspend fun undoDeletion(token: String) = changes.withLock {
         restoreDeletedLocked(token)
     }

@@ -187,7 +187,7 @@ class BackupManager(
         put("calendarSend", JSONObject().apply {
             send?.let { (target, rows) ->
                 put("account", target.account).put("href", target.href).put("name", target.name)
-                put("sent", rows.toJson { JSONObject().put("itemId", it.itemId).put("uid", it.uid ?: JSONObject.NULL)
+                put("sent", rows.toJson { JSONObject().put("itemId", it.itemId).put("uid", it.uid ?: JSONObject.NULL).put("href", it.href ?: JSONObject.NULL)
                     .put("etag", it.etag ?: JSONObject.NULL).put("fingerprint", it.fingerprint).put("problem", it.problem ?: JSONObject.NULL) })
             }
         })
@@ -448,7 +448,9 @@ class BackupManager(
                 SentEvent(itemId = itemId, account = account, calendar = href,
                     uid = if (it.isNull("uid")) null else it.optString("uid").takeIf { u -> u.matches(Regex("[A-Za-z0-9@._-]{1,200}")) } ?: return@mapNotNull null,
                     etag = if (it.isNull("etag")) null else it.optString("etag"), fingerprint = it.optString("fingerprint"),
-                    problem = if (it.isNull("problem")) null else it.optString("problem"))
+                    problem = if (it.isNull("problem")) null else it.optString("problem"),
+                    // The file of an event that came from Nextcloud (step 6); only inside that calendar.
+                    href = if (it.isNull("href")) null else it.optString("href").takeIf { h -> h.startsWith(href) && h.length > href.length && '/' !in h.removePrefix(href) })
             }.distinctBy { it.itemId }
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud calendar" }.take(200), null, false) to rows
         }

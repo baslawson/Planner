@@ -1,0 +1,70 @@
+package com.example.itinerary
+
+import okhttp3.Credentials
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+
+/** A small Nextcloud for the two-way sync tests: calendars "Planner" (kept in sync) and "Work" in [home], event files
+ *  with ETags, a ctag that changes with them, calendar-query (from the window start on) and multiget REPORTs, GET, and
+ *  PUT/DELETE honouring If-Match / If-None-Match. Files in Work get the fixed ETag "w-orig". [code] fails everything. */
+class FakeCalDav(private val home: String, private val user: String, private val password: String) : Dispatcher() {
+    val synced = "${home}planner/"
+    val other = "${home}work/"
+    val files = ConcurrentHashMap<String, Pair<String, String>>()
+    val requests = CopyOnWriteArrayList<Triple<String, String, String?>>()
+    @Volatile var code: Int? = null
+    @Volatile private var version = 0
+    fun bump() { version++ }
+    fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
+    fun edit(path: String, change: (String) -> String) { files[path] = "\"s${++version}\"" to change(files[path]!!.second) }
+    override fun dispatch(request: RecordedRequest): MockResponse {
+        val path = request.requestUrl!!.encodedPath
+        val body = request.body.readUtf8()
+        requests += Triple(request.method.orEmpty(), path, request.getHeader("If-Match"))
+        code?.let { return MockResponse().setResponseCode(it) }
+        if (request.getHeader("Authorization") != Credentials.basic(user, password, Charsets.UTF_8)) return MockResponse().setResponseCode(401)
+        fun ms(xml: String) = MockResponse().setResponseCode(207).setBody("""<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/">$xml</d:multistatus>""")
+        fun entry(p: String, v: Pair<String, String>, data: Boolean) = """<d:response><d:href>$p</d:href><d:propstat><d:prop><d:getetag>${v.first}</d:getetag>""" +
+            (if (data) "<cal:calendar-data>${v.second.replace("&", "&amp;").replace("<", "&lt;")}</cal:calendar-data>" else "<d:resourcetype/>") +
+            """</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+        val current = files[path]
+        return when (request.method) {
+            "PROPFIND" -> when (path) {
+                home -> ms(listOf("planner" to "Planner", "work" to "Work").joinToString("") { (slug, name) ->
+                    """<d:response><d:href>$home$slug/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><cal:calendar/></d:resourcetype><d:displayname>$name</d:displayname><cs:getctag>$slug-$version-${files.size}</cs:getctag><d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+                })
+                synced, other -> ms("""<d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>""" +
+                    files.filterKeys { it.startsWith(path) }.entries.joinToString("") { entry(it.key, it.value, false) })
+                else -> if (current != null) ms(entry(path, current, false)) else MockResponse().setResponseCode(404)
+            }
+            "REPORT" -> {
+                val wanted = Regex("<d:href>([^<]+)</d:href>").findAll(body).map { it.groupValues[1] }.toSet()
+                // calendar-query: events from the window start on (or repeating); multiget: the listed files.
+                val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
+                ms(files.filterKeys { it.startsWith(path) }.filter { (p, v) ->
+                    if (body.contains("calendar-multiget")) p in wanted
+                    else v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
+                }.entries.joinToString("") { entry(it.key, it.value, true) })
+            }
+            "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)
+            "PUT" -> {
+                val ifMatch = request.getHeader("If-Match"); val ifNone = request.getHeader("If-None-Match")
+                when {
+                    ifNone == "*" && current != null -> MockResponse().setResponseCode(412)
+                    ifMatch != null && current == null -> MockResponse().setResponseCode(404)
+                    ifMatch != null && ifMatch != current!!.first -> MockResponse().setResponseCode(412)
+                    else -> { val etag = "\"s${++version}\""; files[path] = etag to body; MockResponse().setResponseCode(if (current == null) 201 else 204).setHeader("ETag", etag) }
+                }
+            }
+            "DELETE" -> when {
+                current == null -> MockResponse().setResponseCode(404)
+                request.getHeader("If-Match") != null && request.getHeader("If-Match") != current.first -> MockResponse().setResponseCode(412)
+                else -> { files.remove(path); version++; MockResponse().setResponseCode(204) }
+            }
+            else -> MockResponse().setResponseCode(405)
+        }
+    }
+}

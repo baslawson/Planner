@@ -30,6 +30,9 @@ data class RemoteCalendar(val href: String, val name: String, val color: Int?, v
 
 // What happened to a write (step 5). Changed: the copy on the server isn't the one Planner last wrote (or, for a new one,
 // something already has that name), so nothing was written. Missing: it's no longer on the server.
+// An event file in a calendar (step 6): its path on the server, version marker and text.
+data class ServerFile(val href: String, val etag: String?, val data: String)
+
 sealed class WriteResult {
     class Ok(val etag: String?) : WriteResult()
     object Changed : WriteResult()
@@ -177,8 +180,12 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     // Step 5: creates ([etag] null, only if nothing has that name) or replaces (only if the server still has version
     // [etag]) Planner's event [uid] in [calendar].
-    fun putEvent(account: NextcloudAccount, calendar: String, uid: String, body: String, etag: String?): WriteResult {
-        val url = eventUrl(account, calendar, uid)
+    fun putEvent(account: NextcloudAccount, calendar: String, uid: String, body: String, etag: String?): WriteResult =
+        putFile(account, calendar, eventUrl(account, calendar, uid).encodedPath, body, etag)
+
+    // Step 6: the same for any event file [href] in [calendar] (one created on Nextcloud keeps its own name).
+    fun putFile(account: NextcloudAccount, calendar: String, href: String, body: String, etag: String?): WriteResult {
+        val url = fileUrl(account, calendar, href)
         request(account, "PUT", url, body.toRequestBody("text/calendar; charset=utf-8".toMediaType()),
             if (etag == null) mapOf("If-None-Match" to "*") else mapOf("If-Match" to etag)).use { response ->
             return when (response.code) {
@@ -191,8 +198,11 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     }
 
     // Step 5: deletes Planner's event [uid] in [calendar], only if the server still has version [etag].
-    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String?): WriteResult {
-        val url = eventUrl(account, calendar, uid)
+    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String?): WriteResult =
+        deleteFile(account, calendar, eventUrl(account, calendar, uid).encodedPath, etag)
+
+    fun deleteFile(account: NextcloudAccount, calendar: String, href: String, etag: String?): WriteResult {
+        val url = fileUrl(account, calendar, href)
         request(account, "DELETE", url, null, etag?.let { mapOf("If-Match" to it) }.orEmpty()).use { response ->
             return when (response.code) {
                 200, 204 -> WriteResult.Ok(null)
@@ -203,6 +213,77 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         }
     }
 
+    // Step 6: every event file in [calendar] with its version marker (any date), to notice changes and deletions there.
+    fun eventEtags(account: NextcloudAccount, calendar: String): Map<String, String?> {
+        val folder = calendarUrl(account, calendar)
+        return multistatus(account, "PROPFIND", folder, PROPERTIES, "1", calendar = true, limit = 8 * 1024 * 1024,
+            tooLarge = "This calendar has too many events to check.", invalid = "The server returned an invalid calendar. Try again later.",
+            empty = "The server returned an empty calendar.").mapNotNull { (resolved, prop) ->
+            val path = resolved.encodedPath
+            if (!path.startsWith(folder.encodedPath) || path == folder.encodedPath || prop("resourcetype")?.children("collection")?.isNotEmpty() == true) null
+            else path to prop("getetag")?.textContent
+        }.toMap()
+    }
+
+    // Step 6: the event files in [calendar] between [from] and [until] as they are (repeats not expanded).
+    fun calendarFiles(account: NextcloudAccount, calendar: String, from: Instant, until: Instant): List<ServerFile> {
+        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        val range = "start=\"${stamp.format(from)}\" end=\"${stamp.format(until)}\""
+        return files(account, calendar, """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
+            """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">""" +
+            """<c:time-range $range/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>""")
+    }
+
+    // Step 6: these event files of [calendar], in one request.
+    fun multiget(account: NextcloudAccount, calendar: String, hrefs: Collection<String>): List<ServerFile> {
+        if (hrefs.isEmpty()) return emptyList()
+        hrefs.forEach { fileUrl(account, calendar, it) }
+        val list = hrefs.joinToString("") { "<d:href>${it.replace("&", "&amp;").replace("<", "&lt;")}</d:href>" }
+        return files(account, calendar, """<?xml version="1.0" encoding="utf-8"?><c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
+            """<d:prop><d:getetag/><c:calendar-data/></d:prop>$list</c:calendar-multiget>""")
+    }
+
+    // Step 6: one event file as it is now; null when it's no longer there.
+    fun getFile(account: NextcloudAccount, calendar: String, href: String): ServerFile? {
+        val url = fileUrl(account, calendar, href)
+        request(account, "GET", url).use { response ->
+            if (response.code == 404) return null
+            if (response.code != 200) fail(response.code, calendar = true)
+            val bytes = (response.body ?: return null).byteStream().use { it.readBytesLimited(2 * 1024 * 1024, "This event is too large.") }
+            return ServerFile(url.encodedPath, response.header("ETag"), bytes.toString(Charsets.UTF_8))
+        }
+    }
+
+    private fun files(account: NextcloudAccount, calendar: String, query: String): List<ServerFile> {
+        val folder = calendarUrl(account, calendar)
+        return multistatus(account, "REPORT", folder, query, "1", calendar = true, limit = 16 * 1024 * 1024,
+            tooLarge = "This calendar has too many events to download.", invalid = "The server returned an invalid calendar. Try again later.",
+            empty = "The server returned an empty calendar.").mapNotNull { (resolved, prop) ->
+            val data = prop("calendar-data", CALDAV)?.textContent?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            if (!resolved.encodedPath.startsWith(folder.encodedPath)) null else ServerFile(resolved.encodedPath, prop("getetag")?.textContent, data)
+        }
+    }
+
+    // A calendar inside this account's calendar home.
+    private fun calendarUrl(account: NextcloudAccount, calendar: String): HttpUrl {
+        val home = account.calendarsRoot
+        val folder = account.server.newBuilder().encodedPath(calendar).build()
+        require(folder.encodedPath.startsWith(home.encodedPath) && folder.encodedPath != home.encodedPath &&
+            folder.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
+        return folder
+    }
+
+    // An event file directly inside [calendar].
+    private fun fileUrl(account: NextcloudAccount, calendar: String, href: String): HttpUrl {
+        val folder = calendarUrl(account, calendar)
+        val url = account.server.newBuilder().encodedPath(href).build()
+        require(url.encodedPath.startsWith(folder.encodedPath) && url.encodedPath != folder.encodedPath &&
+            url.encodedPath.removePrefix(folder.encodedPath).none { it == '/' } && url.pathSegments.none { it == "." || it == ".." }) {
+            "Event outside the calendar"
+        }
+        return url
+    }
+
     // A server that doesn't return the new version marker with the write is asked for it.
     private fun currentEtag(account: NextcloudAccount, url: HttpUrl): String? = runCatching {
         multistatus(account, "PROPFIND", url, PROPERTIES, "0", tooLarge = "", invalid = "", empty = "", calendar = true)
@@ -211,11 +292,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     private fun eventUrl(account: NextcloudAccount, calendar: String, uid: String): HttpUrl {
         require(uid.matches(Regex("[A-Za-z0-9@._-]{1,200}"))) { "Invalid event name" }
-        val home = account.calendarsRoot
-        val folder = account.server.newBuilder().encodedPath(calendar).build()
-        require(folder.encodedPath.startsWith(home.encodedPath) && folder.encodedPath != home.encodedPath &&
-            folder.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
-        return folder.newBuilder().addPathSegment("$uid.ics").build()
+        return calendarUrl(account, calendar).newBuilder().addPathSegment("$uid.ics").build()
     }
 
     // One WebDAV request answered with a multistatus: each response's address (on this server only) with a lookup for

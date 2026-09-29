@@ -13,6 +13,18 @@ object CalendarExport {
         require(uid.matches(Regex("[A-Za-z0-9@._-]+")))
         val lines = mutableListOf("BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Planner//Event Export//EN", "CALSCALE:GREGORIAN",
             "BEGIN:VEVENT", "UID:$uid", "DTSTAMP:${timestamp.format(now)}")
+        lines += managed(item, zone)
+        lines += listOf("END:VEVENT", "END:VCALENDAR")
+        return lines.joinToString("\r\n", postfix = "\r\n") { fold(it) }
+    }
+
+    // The properties Planner manages in an event (unfolded): its dates or times, title, place and notes. Two-way sync
+    // (step 6) replaces only these in a file that has more.
+    val MANAGED = setOf("DTSTART", "DTEND", "DURATION", "SUMMARY", "LOCATION", "DESCRIPTION")
+
+    fun managed(item: ItineraryItem, zone: ZoneId = ZoneId.systemDefault()): List<String> {
+        require(item.date.year in 1..9998) { "Calendar export supports years 1–9998" }
+        val lines = mutableListOf<String>()
         val time = item.startTime
         if (time == null) {
             lines += "DTSTART;VALUE=DATE:${item.date.format(DateTimeFormatter.BASIC_ISO_DATE)}"
@@ -26,13 +38,14 @@ object CalendarExport {
         lines += "SUMMARY:${escape(item.title)}"
         if (item.location.isNotBlank()) lines += "LOCATION:${escape(item.location)}"
         if (item.notes.isNotBlank()) lines += "DESCRIPTION:${escape(item.notes)}"
-        lines += listOf("END:VEVENT", "END:VCALENDAR")
-        return lines.joinToString("\r\n", postfix = "\r\n") { fold(it) }
+        return lines
     }
+
+    fun stamp(now: Instant): String = timestamp.format(now)
     private fun escape(value: String) = value.replace("\\", "\\\\").replace("\r\n", "\n").replace("\r", "\n")
         .replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
         .filter { it == '\t' || it.code >= 32 && it.code != 127 }
-    private fun fold(line: String): String = buildString {
+    fun fold(line: String): String = buildString {
         var bytes = 0
         line.codePoints().forEach { cp ->
             val character = String(Character.toChars(cp))

@@ -59,6 +59,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     val linkState by sync.linkState.collectAsStateWithLifecycle()
     val sendState by sync.sendState.collectAsStateWithLifecycle()
     val sendRows by sync.sent.collectAsStateWithLifecycle(initialValue = emptyList())
+    val conflicts by sync.conflicts.collectAsStateWithLifecycle(initialValue = emptyList())
+    var reviewing by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<CalendarSource?>(null) }
     val state by sync.state.collectAsStateWithLifecycle()
@@ -84,6 +86,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     LaunchedEffect(Unit) { app.appScope.launch { sync.refreshPhone() } }
     val running = state.running || phoneState.running || linkState.running || sendState.running
     if (adding) AddLinkDialog(onDismiss = { adding = false })
+    if (reviewing) ConflictsDialog(conflicts, onDismiss = { reviewing = false })
     removing?.let { source ->
         PlannerDialog("Remove ${source.name}?", onDismissRequest = { removing = null },
             primary = DialogAction("Remove", danger = true) { removing = null; app.appScope.launch { sync.removeLink(source.id) } },
@@ -110,7 +113,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
             }
             true -> {
                 if (sources.isEmpty() && state.running) Text("Looking for calendars…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                sources.forEach { source ->
+                // The calendar kept in sync both ways isn't a read-only one; it's chosen under "Keep in sync with".
+                sources.filterNot { it.sendHere }.forEach { source ->
                     CalendarRow(source, enabled = !state.running) { ticked ->
                         app.appScope.launch {
                             sync.setEnabled(source.id, ticked)
@@ -129,6 +133,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (connected == true && sources.isNotEmpty()) SendChoice(sources, sendRows, sendState, enabled = !running) { id ->
             app.appScope.launch { sync.setSendTarget(id) }
         }
+        if (conflicts.isNotEmpty()) StackedButton("Review ${conflicts.size} conflict${if (conflicts.size == 1) "" else "s"}") { reviewing = true }
 
         SettingsHeading("On this phone")
         if (!phoneAllowed) {
@@ -234,32 +239,91 @@ private fun AddLinkDialog(onDismiss: () -> Unit) {
     }
 }
 
-// Step 5: "Send my Planner events to" one writable Nextcloud calendar, or Off. Shows how many are there and any that were
-// changed on Nextcloud (left alone).
+// Steps 5–6: "Keep in sync with" one writable Nextcloud calendar, or Off. Shows how many events are kept in sync and
+// anything waiting.
 @Composable
 private fun SendChoice(sources: List<CalendarSource>, rows: List<com.example.itinerary.data.SentEvent>,
                        state: com.example.itinerary.data.CalendarSync.State, enabled: Boolean, onChoose: (Long?) -> Unit) {
     val target = sources.firstOrNull { it.sendHere }
-    Text("Send my Planner events to", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+    Text("Keep in sync with", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
     Column(Modifier.selectableGroup()) {
         (listOf<CalendarSource?>(null) + sources.filter { it.writable }).forEach { option ->
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 .selectable(selected = option?.id == target?.id, enabled = enabled, role = Role.RadioButton) { onChoose(option?.id) },
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 androidx.compose.material3.RadioButton(selected = option?.id == target?.id, onClick = null, enabled = enabled)
-                Text(option?.name ?: "Off (don't send)")
+                Text(option?.name ?: "Off (don't sync)")
             }
         }
     }
     if (target != null) {
         val here = rows.filter { it.calendar == target.href }
         val count = here.count { it.uid != null && it.problem == null }
-        Text("$count event${if (count == 1) " is" else "s are"} on ${target.name}. New and changed events are sent a few seconds " +
-            "after you save them; deleting one here deletes Planner's copy there. Past events are sent only once you edit them.",
+        Text("$count event${if (count == 1) " is" else "s are"} kept in sync with ${target.name}. Changes in Planner go there a few " +
+            "seconds after you save; changes there come into Planner when calendars sync. Its events become Planner events, " +
+            "except repeating ones and timed ones longer than a day, which stay read-only. Events deleted there go to " +
+            "Recently deleted. Past Planner events go there only once you edit them.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    Text("Sends title, time, place and notes. Bills, payments, checklists, reminders and attachments stay in Planner. " +
-        "Planner only ever changes events it sent. Turning this off leaves them on Nextcloud.",
+    Text("Title, time, place and notes are synced; anything else in its events (attendees, alarms…) is kept. Bills, payments, " +
+        "checklists, reminders and attachments stay in Planner. Turning this off leaves the events in both places.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     state.message?.let { Text(it, color = if (state.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+}
+
+// Step 6: events changed in both places. For each, what Planner has and what Nextcloud has (or that it was deleted
+// there), and the choice. Nothing is written for an event until it's settled.
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ConflictsDialog(conflicts: List<com.example.itinerary.data.SentEvent>, onDismiss: () -> Unit) {
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    val items by app.repository.allItems.collectAsStateWithLifecycle(initialValue = emptyList())
+    val byId = remember(items) { items.associateBy { it.id } }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val zone = java.time.ZoneId.systemDefault()
+    LaunchedEffect(conflicts.isEmpty()) { if (conflicts.isEmpty()) onDismiss() }
+    PlannerDialog("Changed in both places", onDismissRequest = { if (!busy) onDismiss() },
+        dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss)) {
+        Text("These events were changed in Planner and on Nextcloud since they were last synced. Choose which version to keep.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        conflicts.forEach { row ->
+            val mine = byId[row.itemId]
+            val theirs = row.conflict?.takeIf { it.isNotEmpty() }?.let { com.example.itinerary.data.ServerEvents.parse(it, zone).item }
+            SettingsHeading(mine?.title ?: theirs?.title ?: "Event")
+            Text("In Planner: " + (mine?.let { describe(it) } ?: "deleted"))
+            Text("On Nextcloud: " + when {
+                row.conflict == "" -> "deleted"
+                theirs != null -> describe(theirs)
+                else -> "changed"
+            })
+            fun choose(choice: com.example.itinerary.data.CalendarSync.Resolution) {
+                busy = true; error = null
+                app.appScope.launch {
+                    try { app.calendarSync.resolve(row.id, choice) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) { error = (e as? com.example.itinerary.data.BackupException)?.message ?: e.message ?: "Couldn't settle this. Try again." }
+                    finally { busy = false }
+                }
+            }
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MatrixTextButton(onClick = { choose(com.example.itinerary.data.CalendarSync.Resolution.PLANNER) }, enabled = !busy) { Text("Keep Planner's") }
+                MatrixTextButton(onClick = { choose(com.example.itinerary.data.CalendarSync.Resolution.NEXTCLOUD) }, enabled = !busy) { Text("Keep Nextcloud's") }
+                if (mine != null && theirs != null)
+                    MatrixTextButton(onClick = { choose(com.example.itinerary.data.CalendarSync.Resolution.BOTH) }, enabled = !busy) { Text("Keep both") }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+// "Mon 5 Oct · 09:00–10:00 · Dentist · Room 1"
+@Composable
+private fun describe(item: com.example.itinerary.data.ItineraryItem): String {
+    val context = LocalContext.current
+    val format = LocalTimeFormat.current
+    val time = item.startTime?.let { start ->
+        start.label(format, context) + (item.durationMinutes?.let { "–" + start.plusMinutes(it.toLong()).label(format, context) } ?: "")
+    } ?: item.endDate?.let { "until ${it.shortLabel()}" } ?: "all day"
+    return listOf(item.date.dayLabel(LocalDateFormat.current), time, item.title, item.location).filter { it.isNotBlank() }.joinToString(" · ")
 }
