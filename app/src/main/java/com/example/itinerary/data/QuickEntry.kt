@@ -38,6 +38,8 @@ data class QuickEntrySuggestion(
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
 object QuickEntry {
+    /** "In 2 hours" or "now" in a draft based on an earlier day: there is no current time to count from. */
+    const val STALE_RELATIVE = "‘In …’ and ‘now’ count from the current time, but this draft is based on an earlier day. Edit the entry to use today, or replace ‘in …’ with a date."
     /** How to read a numeric date such as 3/4: day first, month first, or null to ask. Follows Settings → Date format. */
     @Volatile var numericDayFirst: Boolean? = null
     private fun rx(pattern: String) = Regex(pattern, RegexOption.IGNORE_CASE)
@@ -931,7 +933,7 @@ object QuickEntry {
         }
         if (relative && (timePrompt != null || ts.isNotEmpty() || rs.isNotEmpty()))
             return error("Use one time: ‘in …’ or a clock time.")
-        if (relative) time = relativeAt?.toLocalTime() ?: return error("‘In …’ counts from now, so it only works on today's entries. Choose a time.")
+        if (relative) time = relativeAt?.toLocalTime() ?: return error(STALE_RELATIVE)
         if (allDayMatches.isNotEmpty() && (time != null || ambiguous || duration != null))
             return error("Use all day or a time, not both.")
         // "3pm AEST": converted to the phone's time zone.

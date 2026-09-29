@@ -1,6 +1,10 @@
 package com.example.itinerary.data
 
+import java.time.LocalDate
 import java.util.Locale
+
+/** Typing in a draft from an earlier day moves it to [today], so new words are read against today. */
+fun QuickInput.rebased(today: LocalDate): QuickInput = if (baseDate == today) this else copy(baseDate = today)
 
 /** Only the scheduling detail that changed loses its explicit correction. The typed title is kept. */
 fun QuickInput.edited(value: String): QuickInput {

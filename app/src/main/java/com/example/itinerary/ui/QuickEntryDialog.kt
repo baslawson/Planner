@@ -167,8 +167,10 @@ fun QuickEntryEditor(
     var selectedPhrase by remember { mutableStateOf<QuickEntryPhrase?>(null) }
     var busy by remember { mutableStateOf(false) }
     var saveError by remember(text, title, task) { mutableStateOf<String?>(null) }
-    val parsed = remember(text, title, literalKey, today) { QuickInput(text, literals = literalRanges, baseDate = today, title = title).parse() }
-    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, today, durationText, ai, title)
+    // A draft keeps the day it was started until the person edits it again.
+    var baseDate by rememberSaveable { mutableStateOf(today) }
+    val parsed = remember(text, title, literalKey, baseDate) { QuickInput(text, literals = literalRanges, baseDate = baseDate, title = title).parse() }
+    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, baseDate, durationText, ai, title)
     SideEffect { onInput(currentInput) }
     val context = LocalContext.current
     val notifications = rememberNotificationState()
@@ -191,7 +193,8 @@ fun QuickEntryEditor(
     LaunchedEffect(fieldReady) { if (fieldReady) { focus.requestFocus(); keyboard?.show() } }
     fun editField(value: TextFieldValue) {
         if (value.text != text) {
-            val updated = currentInput.edited(value.text)
+            val updated = currentInput.rebased(LocalDate.now()).edited(value.text)
+            baseDate = updated.baseDate
             if (!typeChosen) updated.parse().takeIf { it.taskHint }?.let { task = !it.timed() }
             aiJson = null
             literalOffsets = updated.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()
@@ -203,7 +206,7 @@ fun QuickEntryEditor(
     }
     fun edit(value: String) = editField(TextFieldValue(value, TextRange(value.length)))
     fun editTitle(value: TextFieldValue) {
-        if (value.text != title) { aiJson = null; settled = false; attempted = false }
+        if (value.text != title) { aiJson = null; settled = false; attempted = false; baseDate = LocalDate.now() }
         titleField = value
     }
     val completions = if (fieldFocused && field.selection.collapsed && !busy)
@@ -239,10 +242,14 @@ fun QuickEntryEditor(
         QuickPhraseKind.TIME to MaterialTheme.colorScheme.tertiary, QuickPhraseKind.DURATION to MaterialTheme.colorScheme.secondary,
         QuickPhraseKind.LOCATION to MaterialTheme.colorScheme.secondary, QuickPhraseKind.REMINDER to MaterialTheme.colorScheme.tertiary,
         QuickPhraseKind.REPEAT to MaterialTheme.colorScheme.primary, QuickPhraseKind.UNSUPPORTED to if (showFeedback) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+    // "In 2 hours" in an old draft can't be read, so it isn't shown as understood.
+    val staleRelative = suggestion.error == QuickEntry.STALE_RELATIVE
+    val errorColor = MaterialTheme.colorScheme.error
     val highlight = VisualTransformation { original ->
         val result = AnnotatedString.Builder(original)
         (if (ai == null) parsed.phrases else emptyList()).forEach { phrase -> if (phrase.start >= 0 && phrase.end <= original.length)
-            result.addStyle(SpanStyle(color = colors.getValue(phrase.kind), fontWeight = FontWeight.Bold), phrase.start, phrase.end) }
+            result.addStyle(SpanStyle(color = if (staleRelative && phrase.kind == QuickPhraseKind.TIME) errorColor else colors.getValue(phrase.kind),
+                fontWeight = FontWeight.Bold), phrase.start, phrase.end) }
         TransformedText(result.toAnnotatedString(), OffsetMapping.Identity)
     }
     val canAdd = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback)
@@ -269,7 +276,7 @@ fun QuickEntryEditor(
         },
     ) {
                 modeControls()
-                if (today != LocalDate.now()) Text("Dates based on ${today.fullLabel()}", style = MaterialTheme.typography.bodySmall)
+                if (baseDate != LocalDate.now()) Text("Dates based on ${baseDate.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
                     label = { Text("Title") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
