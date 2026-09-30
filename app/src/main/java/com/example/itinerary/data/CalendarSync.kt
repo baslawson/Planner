@@ -243,11 +243,16 @@ class CalendarSync(
         val sentDao = db.sentDao()
         val items = db.itemDao().all().filter { it.id > 0 }
         val present = items.mapTo(HashSet()) { it.id }
-        val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }.associateBy { it.itemId }
+        val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }.associateByTo(HashMap()) { it.itemId }
         val waiting = pendingDeleted()
         // Two-way, new files wait until the calendar has been read since it was chosen: a reconnect first links the
         // files already there to their Planner events (pullLocked) instead of sending every event a second time.
         val checked = planner == null || target.fetchedFor != null
+        // Past events before the pull window are only noted then; one edited since may have a file there already.
+        if (checked && planner != null) { val start = linkWindow().first
+            rows += linkEdited(account, target, rows, items.filter { item -> rows[item.id]?.let { it.uid == null && it.problem == null &&
+                sendable(item) && item.lastDay < start && !inSync(it.fingerprint, item) } == true })
+        }
         for (item in items) {
             var row = rows[item.id]
             val pending = row?.problem == SentEvent.PENDING
@@ -322,6 +327,26 @@ class CalendarSync(
         client.deleteFile(account, target.href, hrefOf(target, row), row.etag)
     }
 
+    // The files of [edited] events (noted past ones, edited since) looked for around their dates only, and linked (see
+    // relink, linkedForSend): their rows now. The pull doesn't read the whole history for them. A lookup that fails (a
+    // reply too large, a server error) is skipped: those events are sent as new files, as before there was a lookup.
+    private suspend fun linkEdited(account: NextcloudAccount, target: CalendarSource, rows: Map<Long, SentEvent>, edited: List<ItineraryItem>): Map<Long, SentEvent> {
+        if (edited.isEmpty()) return emptyMap()
+        val known = rows.values.filter { it.uid != null }.mapTo(HashSet()) { hrefOf(target, it) }
+        val found = lookupRanges(edited).flatMap { (start, end) ->
+            try { client.calendarFiles(account, target.href, start.atStartOfDay(zone()).toInstant(), end.atStartOfDay(zone()).toInstant()) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { android.util.Log.w("CalendarSync", "Skipped looking for past events' files ($start to $end)", e); emptyList() }
+        }.filter { it.href !in known }.associateBy { it.href }
+        val parsed = found.mapValues { ServerEvents.parse(it.value.data, zone()) }
+        val byId = edited.associateBy { it.id }
+        return relink(parsed.mapNotNull { (href, p) -> p.item?.let { Triple(href, p.uid, it) } }, edited).entries.associate { (href, id) ->
+            val p = parsed.getValue(href)
+            id to linkedForSend(rows.getValue(id), href, p.uid ?: href.substringAfterLast('/').removeSuffix(".ics"), found.getValue(href),
+                p.item!!, byId.getValue(id), zone()).also { db.sentDao().put(it) }
+        }
+    }
+
     private suspend fun adopt(row: SentEvent, file: ServerFile, item: ItineraryItem?) { db.sentDao().put(adopted(row, file, item, zone())) }
 
     // The file of [row]: its own name for events that came from Nextcloud, "<uid>.ics" for ones Planner created.
@@ -352,7 +377,7 @@ class CalendarSync(
         val noted = rows.filter { it.uid == null && it.problem == null }.associateBy { it.itemId }
         val unlinked = items.values.filter { sendable(it) && it.id !in linkedIds && it.id !in waiting }
         // Events outside the window may have files too (send would write them again): those are read only to link them.
-        val outside = linkRanges(unlinked, from, until, target.fetchedFor == null).flatMap { (start, end) ->
+        val outside = linkRanges(unlinked, until).flatMap { (start, end) ->
             client.calendarFiles(account, target.href, start.atStartOfDay(zone()).toInstant(), end.atStartOfDay(zone()).toInstant())
         }.filter { it.href !in synced && it.href !in files }.associateBy { it.href }
         val parsedFiles = (files + outside).mapValues { ServerEvents.parse(it.value.data, zone()) }
@@ -822,12 +847,32 @@ class CalendarSync(
             }
         }
 
-        // Outside the pull window, the date ranges (end exclusive) whose files are read only to link them to [unlinked]
-        // events (send would write those again): after the window when an unlinked event lies there; before it too on the
-        // [first] pull since the calendar was chosen (after reconnecting, past events are only noted, never sent).
-        internal fun linkRanges(unlinked: List<ItineraryItem>, from: LocalDate, until: LocalDate, first: Boolean): List<Pair<LocalDate, LocalDate>> =
-            listOfNotNull((from.minusYears(100) to from).takeIf { first && unlinked.any { it.lastDay < from } },
-                (until.plusDays(1) to until.plusYears(100)).takeIf { unlinked.any { it.lastDay > until } })
+        // After the pull window, the date range (end exclusive) whose files are read only to link them to [unlinked]
+        // events (send would write those again), when one lies there. Never before it: past events are only noted, and
+        // one edited since is looked for around its own date when it is sent (lookupRanges), so a pull never depends on
+        // the size of the calendar's history.
+        internal fun linkRanges(unlinked: List<ItineraryItem>, until: LocalDate): List<Pair<LocalDate, LocalDate>> =
+            listOfNotNull((until.plusDays(1) to until.plusYears(100)).takeIf { unlinked.any { it.lastDay > until } })
+
+        // Where to look for the files of [events] (end exclusive): each one's days and a day either side (a file written in
+        // another time zone), ranges less than a month apart taken together.
+        internal fun lookupRanges(events: List<ItineraryItem>): List<Pair<LocalDate, LocalDate>> =
+            events.map { it.date.minusDays(1) to it.lastDay.plusDays(2) }.sortedBy { it.first }.fold(mutableListOf()) { ranges, next ->
+                val last = ranges.lastOrNull()
+                if (last != null && next.first <= last.second.plusMonths(1)) ranges[ranges.lastIndex] = last.first to maxOf(last.second, next.second)
+                else ranges += next
+                ranges
+            }
+
+        // [row] (a noted past event, edited since) linked to [file], its file on Nextcloud: counts as synced as Nextcloud
+        // has it, so Planner's edit is then sent as an update of that file; changed there too since it was noted, it's a
+        // conflict for the user, as when the pull links.
+        internal fun linkedForSend(row: SentEvent, href: String, uid: String, file: ServerFile, server: ItineraryItem, item: ItineraryItem, zone: ZoneId): SentEvent {
+            val theirs = ServerEvents.apply(item, server)
+            val clash = fingerprint(theirs) != fingerprint(item) && !inSync(row.fingerprint, theirs, zone)
+            return row.copy(uid = uid, href = href, etag = file.etag, ics = file.data, fingerprint = fingerprint(theirs),
+                problem = if (clash) SentEvent.CONFLICT else null, conflict = if (clash) file.data else null)
+        }
 
         // Planner's own file names for events it created (see sendLocked).
         internal fun isPlannerUid(uid: String?) = uid != null && uid.startsWith("planner-") && uid.endsWith("@planner")

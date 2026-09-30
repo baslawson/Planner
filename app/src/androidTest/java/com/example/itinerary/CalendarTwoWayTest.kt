@@ -312,18 +312,46 @@ class CalendarTwoWayTest {
     }
 
     @Test fun reconnectingLinksPastEventsBeforeThePullWindowToo() = runBlocking {
-        // The window starts on 1 July (three months back); this one is from March and already on Nextcloud.
+        // The window starts on 1 July (three months back); this one is from March and already on Nextcloud, with years
+        // of other past events.
         repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, 5), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA Long ago"))
         val uid = "planner-00000001-aaaa-bbbb-cccc-dddddddddddd@planner"
         dav.put("${synced}$uid.ics", ics(uid, "QA Long ago", "20260305T090000Z"))
+        for (n in 1..40) { val date = LocalDate.of(2026, 2, 1).minusWeeks(n.toLong())
+            repo.saveItem(ItineraryItem(tripId = 0, date = date, startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA History $n"))
+            dav.put("${synced}history-$n.ics", ics("history-$n", "QA History $n", "${date.toString().replace("-", "")}T090000Z")) }
         start()
+        // The first pull reads the window only, however long the history (its files would be too large to read at once).
+        assertTrue(dav.queries.isNotEmpty() && dav.queries.all { it >= "20260701" })
+        assertEquals(41, rows().count { it.uid == null && it.problem == null })
         val before = writes().size
         repo.saveItem(item("QA Long ago").copy(location = "Room 3"))
         sync.send()
-        // Its own file is updated, not a second one written.
+        // Edited, it is looked for around its own date: its own file is updated, not a second one written.
+        assertEquals("20260304", dav.queries.last())
         assertEquals(before + 1, writes().size)
         assertEquals(1, dav.files.count { it.key.startsWith(synced) && it.value.second.contains("QA Long ago") })
         assertTrue(dav.files["${synced}$uid.ics"]!!.second.contains("LOCATION:Room 3"))
+        assertEquals(uid, rows().single { it.itemId == item("QA Long ago").id }.uid)
+        assertNull(sync.sendState.value.message)
+        // An unedited past event is neither looked for nor sent.
+        syncAgain()
+        assertEquals(before + 1, writes().size)
+        assertEquals(40, rows().count { it.uid == null && it.problem == null })
+        assertOtherCalendarUntouched()
+    }
+
+    @Test fun anEditedPastEventWhoseLookupFailsIsSentAsANewFile() = runBlocking {
+        repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, 5), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA Long ago"))
+        start()
+        // As if the reply were too large, or the server failed: the lookup is skipped, not the send.
+        dav.refuseBefore = "20260701"
+        repo.saveItem(item("QA Long ago").copy(location = "Room 3"))
+        sync.send()
+        assertTrue(dav.queries.any { it < "20260701" })
+        assertTrue(plannerFile("QA Long ago").value.second.contains("LOCATION:Room 3"))
+        assertNull(sync.sendState.value.message)
+        assertTrue(rows().none { it.problem != null })
         assertOtherCalendarUntouched()
     }
 

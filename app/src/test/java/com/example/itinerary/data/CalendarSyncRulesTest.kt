@@ -56,13 +56,32 @@ class CalendarSyncRulesTest {
     }
 
     @Test fun eventsBeforeThePullWindowAreLookedUpAfterReconnecting() {
-        val from = LocalDate.of(2026, 7, 1); val until = LocalDate.of(2027, 10, 31)
+        val until = LocalDate.of(2027, 10, 31)
         val longAgo = event(1, "Long ago", date = LocalDate.of(2026, 3, 5)); val far = event(2, "Far", date = LocalDate.of(2028, 1, 1)); val soon = event(3, "Soon")
-        assertEquals(listOf(until.plusDays(1) to until.plusYears(100)), CalendarSync.linkRanges(listOf(soon, far), from, until, first = true))
-        // The first pull since the calendar was chosen also reads the files before the window, to link past events.
-        assertEquals(listOf(from.minusYears(100) to from), CalendarSync.linkRanges(listOf(longAgo, soon), from, until, first = true))
-        assertTrue(CalendarSync.linkRanges(listOf(longAgo, soon), from, until, first = false).isEmpty())
-        assertTrue(CalendarSync.linkRanges(listOf(soon), from, until, first = true).isEmpty())
+        assertEquals(listOf(until.plusDays(1) to until.plusYears(100)), CalendarSync.linkRanges(listOf(soon, far), until))
+        assertTrue(CalendarSync.linkRanges(listOf(longAgo, soon), until).isEmpty())
+        // A past one is looked for when it is sent (edited since it was noted), around its own days only.
+        assertEquals(listOf(LocalDate.of(2026, 3, 4) to LocalDate.of(2026, 3, 7)), CalendarSync.lookupRanges(listOf(longAgo)))
+        // Near ones share one lookup; far apart ones don't make it span the years between.
+        val trip = event(4, "Trip", date = LocalDate.of(2026, 3, 20)).copy(endDate = LocalDate.of(2026, 3, 25)); val older = event(5, "Older", date = LocalDate.of(2019, 6, 1))
+        assertEquals(listOf(LocalDate.of(2019, 5, 31) to LocalDate.of(2019, 6, 3), LocalDate.of(2026, 3, 4) to LocalDate.of(2026, 3, 27)),
+            CalendarSync.lookupRanges(listOf(trip, longAgo, older)))
+    }
+
+    @Test fun anEditedPastEventLinkedWhenSentIsAnUpdateUnlessChangedThereToo() {
+        val noted = event(1, "Long ago", date = LocalDate.of(2026, 3, 5))
+        val row = SentEvent(id = 7, itemId = 1, account = "a", calendar = "/c/", uid = null, fingerprint = CalendarSync.fingerprint(noted))
+        val file = ServerFile("/c/${planner(1)}.ics", "\"e1\"", CalendarExport.encode(noted, planner(1), ZoneOffset.UTC, Instant.EPOCH))
+        val edited = noted.copy(location = "Room 3")
+        // Nextcloud still has it as noted: linked, and Planner's edit is then sent as an update of that file.
+        val linked = CalendarSync.linkedForSend(row, file.href, planner(1), file, noted, edited, ZoneOffset.UTC)
+        assertEquals(7L, linked.id); assertEquals(planner(1), linked.uid); assertEquals(file.href, linked.href); assertEquals("\"e1\"", linked.etag)
+        assertNull(linked.problem); assertEquals(row.fingerprint, linked.fingerprint); assertNotEquals(CalendarSync.fingerprint(edited), linked.fingerprint)
+        // Already as Planner has it: nothing to send.
+        assertEquals(CalendarSync.fingerprint(edited), CalendarSync.linkedForSend(row, file.href, planner(1), file, edited, edited, ZoneOffset.UTC).fingerprint)
+        // Changed on Nextcloud too: the user chooses.
+        val both = CalendarSync.linkedForSend(row, file.href, planner(1), file, noted.copy(startTime = LocalTime.of(15, 0)), edited, ZoneOffset.UTC)
+        assertEquals(SentEvent.CONFLICT, both.problem); assertEquals(file.data, both.conflict)
     }
 
     @Test fun anEventOutsideYearsOneTo9998IsNeitherSentNorCompared() {
@@ -70,6 +89,13 @@ class CalendarSyncRulesTest {
         assertFalse(CalendarSync.sendable(far))
         assertFalse(CalendarSync.inSync(CalendarSync.fingerprint(event(1, "Far")), far, ZoneOffset.UTC))
         assertTrue(CalendarSync.sendable(event(1, "Near", date = LocalDate.of(9998, 12, 31))))
+    }
+
+    @Test fun theFirstPullNeverReadsTheWholeHistory() {
+        // However many past events were noted when the calendar was chosen, no pull reads the files before its window.
+        val from = LocalDate.of(2026, 7, 1); val until = LocalDate.of(2027, 10, 31)
+        val past = (1..500L).map { event(it, "Past $it", date = from.minusDays(it)) }
+        assertTrue(CalendarSync.linkRanges(past + event(999, "Soon"), until).isEmpty())
     }
 
     @Test fun plannersOwnFilesAreRecognised() {
