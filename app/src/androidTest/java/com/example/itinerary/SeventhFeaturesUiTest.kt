@@ -81,7 +81,9 @@ class SeventhFeaturesUiTest {
         val base=data().items.filter { it.category=="Bills" && !it.paid && !it.skipped && it.billCurrency=="AUD" && YearMonth.from(it.date)==YearMonth.from(today) }.sumOf { it.billAmountMinor?:0 }
         app.repository.saveItem(ItineraryItem(tripId=0,date=today,startTime=null,title="QA power bill",category="Bills",billAmountMinor=12345,
             checklist=listOf(ChecklistEntry(text="Receipt filed",done=true))),
-            addedReminders=listOf(Reminder(itemId=0,amount=3,unit=ReminderUnit.DAYS)),options=EventSaveOptions(RepeatRule.FORTNIGHTLY,3))
+            // Monthly, so each series has exactly one bill in this month on any day (fortnightly put all three in the
+            // month during its first half, and the totals below count this month only).
+            addedReminders=listOf(Reminder(itemId=0,amount=3,unit=ReminderUnit.DAYS)),options=EventSaveOptions(RepeatRule.MONTHLY,3))
         open();click("QA power bill");click("QA power bill")
         click("Save as template");setText("QA power bill","Power bill preset");click("Save template")
         await { data().templates.any { it.name=="Power bill preset" } }
