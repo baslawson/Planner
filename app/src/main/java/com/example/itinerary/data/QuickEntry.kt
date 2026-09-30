@@ -686,8 +686,20 @@ object QuickEntry {
         val meridiemRanges = ranges.findAll(remaining).filter { rx("$meridiem$").containsMatchIn(rangeEnds(it).second) }.toList()
         // "Work 9-5 weekdays", "Shift Saturday 10-2": with a day or repeat already given, 9-5 is hours, not a date.
         val whenGiven = repeat != RepeatRule.NONE || ds.isNotEmpty() || rangeStart != null || startFrom != null || impliedToday || holidays.containsMatchIn(remaining)
+        // It stays a date beside another clock time ("Gym every Monday 12-10 6pm"), or where it is a date soon that fits
+        // the weekday or repeat given with it ("Dentist Fri 2-10" is Friday 2 October).
+        fun hoursNotDate(n: MatchResult): Boolean {
+            if (!whenGiven || !hourRange.matches(n.value)) return false
+            if (times.findAll(remaining).any { it.range.last < n.range.first || it.range.first > n.range.last }) return false
+            val (a, b) = n.value.split('-').map { it.toInt() }
+            val weekday = ds.firstOrNull { bareWeekday.matches(it.value) }?.let { weekdayOf(it.value) }
+            val readings = listOfNotNull(true to (a to b), false to (b to a)).filter { dayFirst == null || it.first == dayFirst }.mapNotNull { (_, dm) ->
+                runCatching { LocalDate.of(today.year, dm.second, dm.first).let { if (it < today) it.plusYears(1) else it } }.getOrNull() }
+            return readings.none { d -> d <= today.plusDays(60) && (weekday == null || d.dayOfWeek == weekday) &&
+                (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay) }
+        }
         val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
-            .filterNot { whenGiven && hourRange.matches(it.value) }.toList()
+            .filterNot(::hoursNotDate).toList()
         // A weekday beside a calendar date is a cross-check, not a second date: Friday 2 October, Fri 3/10.
         var weekdayCheck: DayOfWeek? = null
         (ds + numeric).sortedBy { it.range.first }.takeIf { it.size == 2 }?.let { (a, b) ->
@@ -702,6 +714,7 @@ object QuickEntry {
         }
         // "next Thursday or Friday": both offered, as for a date that reads two ways.
         var orDates: List<LocalDate>? = null
+        var orPast = false
         if (ds.size == 2 && numeric.isEmpty() && !impliedToday) {
             val (a, b) = ds
             if (rx("\\s*,?\\s*or\\s+").matches(remaining.substring(a.range.last + 1, b.range.first))) {
@@ -709,6 +722,7 @@ object QuickEntry {
                 val first = read(a)
                 // "next Thursday or Friday": the second is next week's too.
                 val carried = rx("^(?:next|this) ").find(first)?.value?.takeIf { bareWeekday.matches(b.value) && !read(b).startsWith("on ") } ?: ""
+                orPast = listOf(first, read(b)).any { pastDateWords.matches(it) }
                 orDates = listOf(parseDate(first, today) ?: return error("That date isn't valid."),
                     parseDate(carried + read(b), today) ?: return error("That date isn't valid.")).distinct()
                 consume(a.range.first..b.range.last, QuickPhraseKind.DATE)
@@ -783,6 +797,7 @@ object QuickEntry {
         if (ds.isEmpty() && numeric.isEmpty() && !relative && !impliedToday && orDates == null) holidays.find(remaining)?.let { match ->
             // "Boxing Day 2027": that year's, and the year is not a time.
             val year = rx("^\\s*,?\\s*(\\d{4})\\b").find(remaining.substring(match.range.last + 1))
+            if (year != null && year.groupValues[1].toInt() !in 1..9999) return error("That date isn't valid.")
             date = nextHoliday(match.value.lowercase(Locale.ROOT), year?.let { LocalDate.of(it.groupValues[1].toInt(), 1, 1) } ?: today)
             year?.groups?.get(1)?.range?.let { r -> consume(r.first + match.range.last + 1..r.last + match.range.last + 1, QuickPhraseKind.DATE) }
             holiday = true
@@ -790,7 +805,7 @@ object QuickEntry {
             phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.DATE)
         }
         // A date before today typed on purpose: saved as it is, for logging what happened. A repeat can't start there.
-        val pastSaid = impliedYesterday || ds.any { pastDateWords.matches(it.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")) } ||
+        val pastSaid = impliedYesterday || orPast || ds.any { pastDateWords.matches(it.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")) } ||
             startFromPast
         if (pastSaid && repeat != RepeatRule.NONE) return error("A repeat can't start in the past. Start it today or later, or remove the repeat.")
         if (anchorName != null && dateChoices.isEmpty() && !fitsAnchor(date))
@@ -836,6 +851,8 @@ object QuickEntry {
             val timeLike = rx("^$hhmm$").matches(value) && (value.startsWith("0") ||
                 rx("(?:\\b(?:at|from|until|till|to|by|actually)\\s+|[-–—]\\s*)$").containsMatchIn(before) ||
                 rx("^\\s*$hoursSuffix\\b").containsMatchIn(after) ||
+                // The next of several times: "0800 and 2000".
+                rx("(?:\\b$hhmm(?:\\s*$hoursSuffix)?|\\b\\d{1,2}(?::\\d{2})?\\s*$meridiem|\\b\\d{1,2}:\\d{2})\\s*(?:,\\s*(?:and\\s+)?|&\\s*|and\\s+)$").containsMatchIn(before) ||
                 rx("^\\s*(?:[-–—]|to\\b|until\\b|till\\b|[,—–-]?\\s*actually\\s+(?:at\\s+)?)\\s*$hhmm\\b").containsMatchIn(after) ||
                 phrases.any { it.kind == QuickPhraseKind.DATE && it.end <= match.range.first && text.substring(it.end, match.range.first).matches(Regex("[\\s,]*")) })
             if (!timeLike) mask(match.range, '\uE000')
@@ -917,7 +934,8 @@ object QuickEntry {
                 // "9-5", "10 till 2": an end hour below the start is the working day, morning to afternoon. Not across
                 // noon from 12, and not for night work ("Night shift 10-6"), which still ask.
                 val (startHour, endHour) = endpoints.map { twelveHour.matchEntire(it)!!.groupValues[1].toInt() }
-                if (endHour < startHour && startHour != 12 && !rx("\\bnight").containsMatchIn(text)) {
+                // With a part of the day ("tonight 10-2") that decides am/pm instead.
+                if (endHour < startHour && startHour != 12 && timePrompt == null && !rx("\\bnight").containsMatchIn(text)) {
                     val length = at(endpoints[1], true).toSecondOfDay() / 60 - starts[0].toSecondOfDay() / 60
                     if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
                     time = starts[0]; duration = length
