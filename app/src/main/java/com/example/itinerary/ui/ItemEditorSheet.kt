@@ -203,6 +203,12 @@ private fun ItemEditorForm(
     var deleting by remember { mutableStateOf(false) }
     val repository = remember { (context.applicationContext as ItineraryApp).repository }
     val allEvents by repository.allItems.collectAsStateWithLifecycle(initialValue = emptyList())
+    // E10: the event as stored, watched while this form is open. Each form (the first, and each one after a Save or a
+    // Reload) watches afresh from its own [initial], so its own save is never taken for a change from elsewhere.
+    val stored by remember { if (initial.id == 0L) kotlinx.coroutines.flow.flowOf(null) else repository.observeItem(initial.id) }
+        .collectAsStateWithLifecycle(initialValue = null)
+    var askingStale by remember { mutableStateOf(false) }
+    var askingReload by remember { mutableStateOf(false) }
 
     // Attachment changes are held here until Save, because a new event has no id to link to yet.
     // Files added during this edit are deleted again unless the edit is saved.
@@ -382,6 +388,16 @@ private fun ItemEditorForm(
         committed = true
         onDismiss()
     }
+    // E10: the form again from the event as stored now (changed on Nextcloud); what was unsaved here is dropped, like
+    // Discard. [onSaved] loads it, as after a Save.
+    fun reload() {
+        draftStore.clear()
+        added.forEach(::discardAddedFile)
+        pendingPhoto?.delete()
+        File(context.filesDir, "draft-scan").deleteRecursively()
+        committed = true
+        scope.launch { withContext(NonCancellable) { onSaved(initial.id) } }
+    }
     // Read inputs during composition so even a title-only edit invalidates this scope.
     // Reading them only inside SideEffect misses changes handled by a nested editor scope.
     val draftSnapshot by remember(existingAttachments, existingReminders) { derivedStateOf {
@@ -449,6 +465,9 @@ private fun ItemEditorForm(
         if (creatingSeries && repeat != RepeatRule.NONE) repeatCount else "", duplicating, listOf(durationText, beforeText, afterText, billAmountText))
     val openedWith = remember { edit() }
     val unsaved = EditorRules.eventUnsaved(openedWith, edit(), recovered = recovered != null)
+    // Changed underneath this form (a sync pull): a banner offers Reload, and Save asks first. Not once this form has
+    // saved (its own write) or is on its way out; a copy being made (Duplicate) isn't affected.
+    val changedElsewhere = !committed && !duplicating && EditorRules.changedElsewhere(initial, stored)
     // The draft on disk holds only what is unsaved (a new event's too, as before), so a saved event leaves nothing to
     // recover; edits undone again clear it.
     val keepDraft = unsaved || isNew
@@ -480,8 +499,9 @@ private fun ItemEditorForm(
         addedReminders.clear(); removedReminders.clear(); removedReminders.addAll(existingReminders)
         addedReminders.addAll(content.reminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) })
     }
-    fun save(allowDuplicate: Boolean = false) {
+    fun save(allowDuplicate: Boolean = false, allowStale: Boolean = false) {
         if (busy) return
+        if (changedElsewhere && !allowStale) { askingStale = true; return }
         busy = true
         error = null
         val copy = duplicating
@@ -569,6 +589,14 @@ private fun ItemEditorForm(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
+            if (changedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
+                FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("This ${if (billTask) "bill" else "event"} was changed on Nextcloud",
+                        color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.align(Alignment.CenterVertically))
+                    TextButton(enabled = !busy && !readingText, onClick = { if (unsaved) askingReload = true else reload() }) { Text("Reload") }
+                }
+            }
             TemplateActions(isNew = isNew, title = title, billTask = billTask, canApply = !busy && !readingText,
                 enabled = !busy && !readingText && title.isNotBlank() && validBillAmount && validDuration && (billTask || validBuffers) && validRepeat && checklist.all { it.text.isNotBlank() },
                 content = { TemplateContent(currentItem(), shownReminders, repeat,
@@ -923,7 +951,7 @@ private fun ItemEditorForm(
 
     if (duplicateBills.isNotEmpty()) PlannerDialog("Possible duplicate bill",
         onDismissRequest = { if (!busy) { duplicateBills = emptyList(); closeAfterSave = false } },
-        primary = DialogAction("Save anyway", enabled = !busy) { save(allowDuplicate = true) },
+        primary = DialogAction("Save anyway", enabled = !busy) { save(allowDuplicate = true, allowStale = true) },
         dismiss = DialogAction("Go back", enabled = !busy) { duplicateBills = emptyList(); closeAfterSave = false },
     ) {
         Text("A bill with the same title, amount and due date already exists:")
@@ -941,6 +969,23 @@ private fun ItemEditorForm(
     ) {
         Text(if (canSave || busy) "This ${if (billTask) "bill" else "event"} has changes that aren't saved yet."
             else "This ${if (billTask) "bill" else "event"} has changes that can't be saved as they are. Keep editing to fix them, or discard them.")
+    }
+
+    // E10: Save while the event changed underneath: keep this version (written over Nextcloud's), or reload theirs.
+    if (askingStale) PlannerDialog("Changed on Nextcloud",
+        onDismissRequest = { askingStale = false; closeAfterSave = false },
+        primary = DialogAction("Save anyway", enabled = !busy) { askingStale = false; save(allowStale = true) },
+        dismiss = DialogAction("Reload", enabled = !busy) { askingStale = false; closeAfterSave = false; reload() },
+    ) {
+        Text("This ${if (billTask) "bill" else "event"} changed on Nextcloud since you opened it. Save your version anyway?")
+        Text("Reload shows it as it is now, without your unsaved changes.", style = MaterialTheme.typography.bodySmall)
+    }
+    if (askingReload) PlannerDialog("Reload?",
+        onDismissRequest = { askingReload = false },
+        primary = DialogAction("Reload", danger = true, enabled = !busy) { askingReload = false; reload() },
+        dismiss = DialogAction("Keep editing") { askingReload = false },
+    ) {
+        Text("Your unsaved changes to this ${if (billTask) "bill" else "event"} will be lost.")
     }
 
     viewingDuplicate?.let { ExistingBillDialog(it) { viewingDuplicate = null } }

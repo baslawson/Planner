@@ -98,6 +98,10 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE id = :id")
     suspend fun byId(id: Long): ItineraryItem?
 
+    // One event as stored, again whenever it changes (null once it's gone): an open editor watching for a sync's update.
+    @Query("SELECT * FROM items WHERE id = :id")
+    fun observe(id: Long): Flow<ItineraryItem?>
+
     // A multi-day event keeps its length: the end date moves by the same number of days (SET reads the old row).
     @Query("UPDATE items SET date = :date, endDate = CASE WHEN endDate IS NULL THEN NULL " +
         "ELSE date(endDate, printf('%+d days', CAST(julianday(:date) - julianday(date) AS INTEGER))) END WHERE id = :id")

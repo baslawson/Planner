@@ -88,4 +88,23 @@ class EditorRulesTest {
         assertEquals(listOf(kept), EditorRules.keptAttachments(listOf(kept, indexed), listOf(removed)))
         assertEquals(listOf(kept, indexed), EditorRules.keptAttachments(listOf(kept, indexed), emptyList()))
     }
+
+    // E10: an open editor notices when a sync pull changed its event underneath it, in anything sync brings from
+    // Nextcloud, and only then.
+    @Test fun changedElsewhereIsWhatSyncBringsFromNextcloud() {
+        val opened = ItineraryItem(id = 7, tripId = 0, date = oct3, startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "Dentist",
+            location = "Clinic", notes = "Bring card")
+        assertEquals(false, EditorRules.changedElsewhere(opened, opened))
+        assertEquals(false, EditorRules.changedElsewhere(opened, null)) // not read yet, or gone
+        listOf(opened.copy(title = "Dentist (web)"), opened.copy(date = oct7), opened.copy(startTime = LocalTime.NOON),
+            opened.copy(durationMinutes = 30), opened.copy(location = "Other"), opened.copy(notes = ""),
+            opened.copy(startTime = null, durationMinutes = null, endDate = oct7)).forEach {
+            assertEquals(it.toString(), true, EditorRules.changedElsewhere(opened, it))
+        }
+        // Planner-only details changed elsewhere (a bill paid from its notification…) aren't Nextcloud's changes.
+        assertEquals(false, EditorRules.changedElsewhere(opened, opened.copy(paid = true, category = "Health", colorIndex = 3)))
+        // A new event has nothing stored to change; another row is never compared.
+        assertEquals(false, EditorRules.changedElsewhere(opened.copy(id = 0), opened.copy(id = 0, title = "x")))
+        assertEquals(false, EditorRules.changedElsewhere(opened, opened.copy(id = 8, title = "x")))
+    }
 }

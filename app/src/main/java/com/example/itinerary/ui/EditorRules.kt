@@ -69,6 +69,13 @@ object EditorRules {
         return recovered || saved.stored() != now.stored()
     }
 
+    // E10: the event as [stored] now differs from what the editor opened with or last saved ([baseline]) in what two-way
+    // sync brings from Nextcloud (title, dates, time, length, place, notes): changed underneath the open editor, whose Save
+    // would otherwise write its older copy back. Planner-only details (paid from a notification…) don't count, nor does a
+    // new event (nothing stored yet) or one gone meanwhile.
+    fun changedElsewhere(baseline: ItineraryItem, stored: ItineraryItem?): Boolean =
+        baseline.id != 0L && stored != null && stored.id == baseline.id && com.example.itinerary.data.ServerEvents.apply(baseline, stored) != baseline
+
     // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
     fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
         fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),

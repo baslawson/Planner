@@ -242,6 +242,9 @@ class Repository(
         itemDao.byId(id)?.let { Triple(it, attachmentDao.forItem(id), reminderDao.forItem(id)) }
     }
 
+    // One event as stored, as it changes (null once gone): an open editor notices a sync pull's update of it.
+    fun observeItem(id: Long): Flow<ItineraryItem?> = itemDao.observe(id).distinctUntilChanged()
+
     private suspend fun archive(bundle: PendingDeletion, plans: List<Trip>? = null) {
         val owners = plans ?: readIds(bundle.items.map { it.tripId }, tripDao::byIds).sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val label = bundle.items.firstOrNull()?.title ?: bundle.tasks.firstOrNull()?.title ?: owners.firstOrNull()?.name ?: "Deleted events"
