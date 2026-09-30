@@ -180,9 +180,15 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         .put("attachments", DraftCodec.attachments(attachments)).put("pendingPhoto", pendingPhoto.orEmpty())
     val lastWritten = remember { arrayOfNulls<String>(1) }
     val encoded = snapshot.toString()
+    // What the editor opened with. Until something differs no draft is kept, so opening a task (or a new one) and
+    // going Back leaves nothing to resume and doesn't block sharing; edits undone again clear it.
+    val untouched = remember { encoded }
     SideEffect {
         if (!finished && encoded != lastWritten[0]) {
-            try { draftStore.write(draftKey, snapshot); lastWritten[0] = encoded }
+            try {
+                if (draft == null && encoded == untouched) draftStore.clear(draftKey) else draftStore.write(draftKey, snapshot)
+                lastWritten[0] = encoded
+            }
             catch (_: Exception) { error = "Couldn't protect this draft. Keep the app open and save your task." }
         }
     }

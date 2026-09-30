@@ -90,11 +90,12 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     }
 
 
-    // If a saved event is on another day, follow it so it doesn't seem to have vanished.
+    // If a saved event no longer shows on this day, follow it so it doesn't seem to have vanished.
+    // A later day of a trip or the morning after an overnight event still shows it, so the view stays.
     fun follow(item: ItineraryItem) {
-        if (item.date != selected) {
-            vm.select(item.date)
-            vm.showMonth(YearMonth.from(item.date))
+        EditorRules.followDate(item, selected)?.let { day ->
+            vm.select(day)
+            vm.showMonth(YearMonth.from(day))
         }
     }
 

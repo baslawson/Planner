@@ -258,7 +258,9 @@ fun ItemEditorSheet(
     val after = afterText.toIntOrNull() ?: 0
     val validBuffers = time == null || (before in 0..1440 && after in 0..1440)
     val duration = durationText.toIntOrNull()
-    val validDuration = time == null || durationText.isBlank() || duration != null && duration in 1..1440
+    // A task's time block needs a start and a duration, so All day and No duration aren't offered for it.
+    val timeBlock = isNew && !duplicating && initial.linkedTaskId != null
+    val validDuration = time == null || durationText.isBlank() && !timeBlock || duration != null && duration in 1..1440
     var lastTimedTime by remember { mutableStateOf(draft?.optString("lastTimedTime")?.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) ?: values.startTime ?: LocalTime.of(9, 0)) }
     var location by remember { mutableStateOf(values.location) }
     var notes by remember { mutableStateOf(values.notes) }
@@ -283,7 +285,7 @@ fun ItemEditorSheet(
     var date by remember { mutableStateOf(values.date) }
     // Last day of a multi-day event (all day, not a bill); kept while switching to a time so it can come back.
     var endDate by remember { mutableStateOf(values.endDate) }
-    val spanEnd = endDate?.takeIf { time == null && !billTask && it > date }
+    val spanEnd = EditorRules.spanEnd(date, endDate, time, category)
     var pickingRange by remember { mutableStateOf(value = false) }
     var pickingTime by remember { mutableStateOf(value = false) }
     var pickingDate by remember { mutableStateOf(value = false) }
@@ -410,12 +412,13 @@ fun ItemEditorSheet(
         val item = content.forDate(date)
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
         bpayBillerCode = item.bpayBillerCode; bpayReference = item.bpayReference
-        title = item.title; time = item.startTime; lastTimedTime = item.startTime ?: LocalTime.of(9, 0); endDate = item.endDate
+        // A time block keeps its own time and length when the template has none.
+        title = item.title; time = item.startTime ?: time.takeIf { timeBlock }; lastTimedTime = item.startTime ?: LocalTime.of(9, 0); endDate = item.endDate
         location = item.location; notes = item.notes; category = item.category; colorIndex = item.colorIndex
         beforeText = item.bufferBeforeMinutes.toString(); afterText = item.bufferAfterMinutes.toString()
-        customColor = item.customColor; durationText = item.durationMinutes?.toString().orEmpty(); checklist = item.checklist
+        customColor = item.customColor; durationText = item.durationMinutes?.toString() ?: durationText.takeIf { timeBlock }.orEmpty(); checklist = item.checklist
         if (payments.isEmpty()) { billAmountText = Bills.input(item.billAmountMinor); billCurrency = item.billCurrency; paid = false }
-        repeat = content.repeat; repeatCount = content.count.toString(); entireSeries = false
+        repeat = content.repeat; repeatCount = EditorRules.templateCount(content.repeat, content.count, repeatCount); entireSeries = false
         addedReminders.clear(); removedReminders.clear(); removedReminders.addAll(existingReminders)
         addedReminders.addAll(content.reminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) })
     }
@@ -452,7 +455,7 @@ fun ItemEditorSheet(
                     if (!disposed) onDismiss()
                 } catch (e: Exception) {
                     committed = false
-                    error = (e as? com.example.itinerary.data.PaymentUpdateException)?.message ?: "Couldn't save the ${if (billTask) "bill" else "event"}. Your changes are still here; try again."
+                    error = EditorRules.saveError(e, billTask)
                 } finally { busy = false }
             }
         }
@@ -612,7 +615,7 @@ fun ItemEditorSheet(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val allDay = time == null
-                Row(
+                if (!timeBlock) Row(
                     modifier = Modifier
                         .toggleable(
                             value = allDay,
@@ -659,16 +662,16 @@ fun ItemEditorSheet(
                 OutlinedTextField(
                     value = durationText,
                     onValueChange = { durationText = it.filter(Char::isDigit).take(4) },
-                    label = { Text("Duration in minutes (optional)") },
+                    label = { Text(if (timeBlock) "Duration in minutes" else "Duration in minutes (optional)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                     singleLine = true,
                     isError = !validDuration,
-                    supportingText = { Text(if (!validDuration) "Enter 1–1440 minutes, or leave blank" else
+                    supportingText = { Text(if (!validDuration) "Enter 1–1440 minutes${if (timeBlock) "" else ", or leave blank"}" else
                         duration?.let { eventEndLabel(date, time, it, LocalTimeFormat.current, context) }.orEmpty()) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(null to "No duration", 30 to "30 min", 60 to "1 hour", 120 to "2 hours").forEach { (minutes, label) ->
+                    listOfNotNull((null to "No duration").takeIf { !timeBlock }, 30 to "30 min", 60 to "1 hour", 120 to "2 hours").forEach { (minutes, label) ->
                         FilterChip(selected = durationText == minutes?.toString().orEmpty(),
                             onClick = { durationText = minutes?.toString().orEmpty() }, label = { Text(label) })
                     }
@@ -691,7 +694,7 @@ fun ItemEditorSheet(
                     label = "Repeat",
                     current = repeat.label,
                     options = repeatChoices(date),
-                    onSelect = { repeat = if (it.kind == repeat.kind) repeat else it },
+                    onSelect = { repeat = if (it.kind == repeat.kind) repeat else it; repeatCount = EditorRules.countForRepeat(repeat, repeatCount) },
                     entry = { Text(if (it.kind in RepeatRule.customKinds) it.kind.choiceLabel() else it.label) },
                 )
                 RepeatDetails(repeat, enabled = !busy) { repeat = it }
@@ -973,7 +976,8 @@ fun ItemEditorSheet(
         SingleDateDialog(
             initial = date,
             onDismiss = { pickingDate = false },
-            onConfirm = { date = it; pickingDate = false },
+            // A span held while the event is timed moves with the start, keeping its length.
+            onConfirm = { endDate = EditorRules.movedEndDate(date, it, endDate); date = it; pickingDate = false },
         )
     }
     if (pickingRange) {

@@ -266,7 +266,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
         }
         hits.forEach { hit ->
             item(key = "item-${hit.item.id}") {
-                HitRow(hit, outcome.tokens, selection) {
+                HitRow(hit, outcome.tokens, selection, today) {
                     if (selection.active) { if (!OutsideCalendars.isOutside(hit.item.id)) selection.toggle(hit.item.id) }
                     else onOpenResult(hit.item.date)
                 }
@@ -276,8 +276,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
 }
 
 @Composable
-private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelection, onClick: () -> Unit) {
-    val today = rememberCurrentDate()
+private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelection, today: LocalDate, onClick: () -> Unit) {
     val item = hit.item
     // Same colours as in the plan's day list, so an event looks the same everywhere.
     val accent = item.accentColor()
@@ -299,6 +298,8 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(highlight(item.title, tokens), readableOnSurface(accent), item.category == "Bills")
+            // Grouped under its first day, so say how far it runs; a match on a later day is inside this span.
+            item.endDate?.let { end -> Text(spanLabel(item.date, end), style = MaterialTheme.typography.bodySmall) }
             if (item.durationMinutes != null && item.startTime != null) Text(
                 eventEndLabel(item.date, item.startTime, item.durationMinutes, LocalTimeFormat.current, LocalContext.current),
                 style = MaterialTheme.typography.bodySmall,
