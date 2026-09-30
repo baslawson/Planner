@@ -1,5 +1,6 @@
 package com.example.itinerary.ui
 
+import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.MultiDay
 import com.example.itinerary.data.Reminder
@@ -43,5 +44,9 @@ object EditorRules {
 
     // Removed saved reminders are matched by id: a snooze while the editor is open changes the record.
     fun keptReminders(existing: List<Reminder>, removed: List<Reminder>): List<Reminder> =
+        existing.filter { kept -> removed.none { it.id == kept.id } }
+
+    // Saved attachments likewise, by id: the editor shouldn't depend on the record staying the same while it is open.
+    fun keptAttachments(existing: List<Attachment>, removed: List<Attachment>): List<Attachment> =
         existing.filter { kept -> removed.none { it.id == kept.id } }
 }

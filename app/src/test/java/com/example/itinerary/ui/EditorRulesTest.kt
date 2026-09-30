@@ -81,4 +81,11 @@ class EditorRulesTest {
         assertEquals(listOf(kept), EditorRules.keptReminders(listOf(kept, snoozed), listOf(removed)))
         assertEquals(listOf(kept, snoozed), EditorRules.keptReminders(listOf(kept, snoozed), emptyList()))
     }
+    @Test fun removedAttachmentStaysRemovedWhenItsRecordChanges() {
+        val kept = com.example.itinerary.data.Attachment(id = 1, itemId = 9, name = "a.pdf", fileName = "a.pdf", mimeType = "application/pdf")
+        val removed = com.example.itinerary.data.Attachment(id = 2, itemId = 9, name = "b.pdf", fileName = "b.pdf", mimeType = "application/pdf")
+        val indexed = removed.copy(recognizedText = "invoice", textStatus = "INDEXED")
+        assertEquals(listOf(kept), EditorRules.keptAttachments(listOf(kept, indexed), listOf(removed)))
+        assertEquals(listOf(kept, indexed), EditorRules.keptAttachments(listOf(kept, indexed), emptyList()))
+    }
 }

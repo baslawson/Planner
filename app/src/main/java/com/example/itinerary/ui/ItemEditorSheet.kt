@@ -170,7 +170,7 @@ fun ItemEditorSheet(
     var addingLink by remember { mutableStateOf(value = false) }
     val shownAttachments by remember(existingAttachments) {
         derivedStateOf {
-            existingAttachments.filter { it !in removed } + added
+            EditorRules.keptAttachments(existingAttachments, removed) + added
         }
     }
 
@@ -754,7 +754,7 @@ fun ItemEditorSheet(
                             val indexed = com.example.itinerary.scanner.DocumentText.index(attachment, store)
                             val index = added.indexOf(attachment)
                             if (index >= 0) added[index] = indexed
-                            else if (attachment !in removed) { removed.add(attachment); added.add(indexed.copy(id = 0, itemId = 0)) }
+                            else if (removed.none { it.id == attachment.id }) { removed.add(attachment); added.add(indexed.copy(id = 0, itemId = 0)) }
                         } finally { readingText = false }
                     }
                 },
