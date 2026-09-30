@@ -67,7 +67,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -178,6 +181,7 @@ private fun ItemEditorForm(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val store = remember { (context.applicationContext as ItineraryApp).attachmentStore }
     val draftStore = remember { EditorDraftStore(context) }
     val recovered = remember { runCatching { draftStore.read() }.getOrNull()?.takeIf {
@@ -503,6 +507,9 @@ private fun ItemEditorForm(
         if (busy) return
         if (changedElsewhere && !allowStale) { askingStale = true; return }
         busy = true
+        // The form is locked while it saves (see lockedWhile): Save stores it as it is now and then shows the saved
+        // event, so anything typed in between would be lost.
+        focusManager.clearFocus(force = true)
         error = null
         val copy = duplicating
         val item = currentItem(copy)
@@ -579,6 +586,7 @@ private fun ItemEditorForm(
         ) {
             ScrollHints(editorScroll, Modifier.weight(1f)) { Column(
                 Modifier
+                    .lockedWhile(busy)
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -634,13 +642,14 @@ private fun ItemEditorForm(
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it.replace('\n', ' ') },
+                readOnly = busy,
                 label = { Text(if (billTask) "Bill title" else "What are you doing?") },
                 // Grows as the text wraps; Done closes the keyboard instead of adding a line break.
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth(),
             )
             if (category == "Bills") {
-                OutlinedTextField(value = billAmountText, onValueChange = {
+                OutlinedTextField(value = billAmountText, readOnly = busy, onValueChange = {
                     billAmountText = it.take(16)
                     if (payments.isNotEmpty()) paid = payments.any { p -> !p.reversed } && Bills.parse(billAmountText)?.let { n -> paidTotal >= n } == true
                 },
@@ -755,6 +764,7 @@ private fun ItemEditorForm(
                 }
                 OutlinedTextField(
                     value = durationText,
+                    readOnly = busy,
                     onValueChange = { durationText = it.filter(Char::isDigit).take(4) },
                     label = { Text(if (timeBlock) "Duration in minutes" else "Duration in minutes (optional)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
@@ -773,10 +783,10 @@ private fun ItemEditorForm(
                 Text("Travel and preparation buffers", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(beforeText, { beforeText = it.filter(Char::isDigit).take(4) },
-                        label = { Text("Before (min)") }, singleLine = true, isError = before !in 0..1440,
+                        label = { Text("Before (min)") }, readOnly = busy, singleLine = true, isError = before !in 0..1440,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
                     OutlinedTextField(afterText, { afterText = it.filter(Char::isDigit).take(4) },
-                        label = { Text("After (min)") }, singleLine = true, isError = after !in 0..1440,
+                        label = { Text("After (min)") }, readOnly = busy, singleLine = true, isError = after !in 0..1440,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
                 }
                 Text("Reserve 0–1440 minutes on each side for travel or preparation. Included in clashes and free time; reminders keep the event's start time.", style = MaterialTheme.typography.bodySmall)
@@ -795,6 +805,7 @@ private fun ItemEditorForm(
                 if (repeat != RepeatRule.NONE && creatingSeries) {
                     OutlinedTextField(
                         value = repeatCount,
+                        readOnly = busy,
                         onValueChange = { value -> repeatCount = value.filter(Char::isDigit).take(3) },
                         label = { Text(if (billTask) "Bills (including this one)" else "Occurrences (including this event)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
@@ -825,6 +836,7 @@ private fun ItemEditorForm(
             }
             OutlinedTextField(
                 value = location,
+                readOnly = busy,
                 onValueChange = { location = it.replace('\n', ' ') },
                 label = { Text(if (billTask) "Payee / location (optional)" else "Location") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -833,6 +845,7 @@ private fun ItemEditorForm(
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it },
+                readOnly = busy,
                 label = { Text("Notes") },
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
@@ -1127,4 +1140,10 @@ private fun ItemEditorForm(
             onConfirm = { time = it; lastTimedTime = it; pickingTime = false },
         )
     }
+}
+
+// Touches don't reach the form while [locked] (an event saving): taps on fields, dates, chips and attachments do nothing.
+// Its text fields are also read-only then, which stops text arriving another way (a screen reader, autofill).
+private fun Modifier.lockedWhile(locked: Boolean): Modifier = if (!locked) this else pointerInput(Unit) {
+    awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
 }
