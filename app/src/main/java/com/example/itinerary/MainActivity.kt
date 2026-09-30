@@ -42,6 +42,33 @@ import com.example.itinerary.ui.theme.ItineraryTheme
 internal fun actsOnLaunchIntent(flags: Int, savedStateNull: Boolean): Boolean =
     savedStateNull && (flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
 
+/**
+ * What an intent asks Planner to open: shared text (with its subject), a widget task, a calendar file, an entry
+ * shortcut, a widget day. Null: not asked. [U] is android.net.Uri (generic so the rules run in a plain JVM test).
+ */
+internal data class LaunchFields<U>(
+    val sharedText: String? = null,
+    val sharedSubject: String? = null,
+    val widgetTaskId: String? = null,
+    val calendarUri: U? = null,
+    val entryAction: String? = null,
+    val widgetDate: java.time.LocalDate? = null,
+) {
+    /**
+     * These fields after a later intent ([incoming]) arrives while Planner is open: what it carries replaces the old
+     * value, the rest stay (E5: a reminder notification used to close an open share review for good). A share's subject
+     * goes with its text.
+     */
+    fun mergedWith(incoming: LaunchFields<U>): LaunchFields<U> = LaunchFields(
+        sharedText = incoming.sharedText ?: sharedText,
+        sharedSubject = if (incoming.sharedText != null) incoming.sharedSubject else sharedSubject,
+        widgetTaskId = incoming.widgetTaskId ?: widgetTaskId,
+        calendarUri = incoming.calendarUri ?: calendarUri,
+        entryAction = incoming.entryAction ?: entryAction,
+        widgetDate = incoming.widgetDate ?: widgetDate,
+    )
+}
+
 class MainActivity : ComponentActivity() {
     private var sharedText by mutableStateOf<String?>(null)
     private var sharedSubject by mutableStateOf<String?>(null)
@@ -49,19 +76,33 @@ class MainActivity : ComponentActivity() {
     private var calendarUri by mutableStateOf<android.net.Uri?>(null)
     private var entryAction by mutableStateOf<String?>(null)
     private var widgetDate by mutableStateOf<java.time.LocalDate?>(null)
-    private fun readWidgetIntent(intent: Intent?) {
-        sharedText = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
+    private fun launchFields() = LaunchFields(sharedText, sharedSubject, widgetTaskId, calendarUri, entryAction, widgetDate)
+    private fun launchFieldsOf(intent: Intent?): LaunchFields<android.net.Uri> {
+        val sharedText = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
             intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: "" else null
-        sharedSubject = if (sharedText != null) intent?.getStringExtra(Intent.EXTRA_SUBJECT) else null
-        widgetTaskId = if (intent?.action == com.example.itinerary.widget.TodayWidget.OPEN_TASK) intent.getStringExtra("task_id") else null
-        calendarUri = if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme in listOf("content", "file")) intent.data else null
-        entryAction = intent?.action?.takeIf(EntryShortcuts::accepts)
-        widgetDate = when (intent?.action) {
-            com.example.itinerary.widget.TodayWidget.OPEN_TODAY -> java.time.LocalDate.now()
-            com.example.itinerary.widget.TodayWidget.OPEN_DATE -> runCatching { java.time.LocalDate.parse(intent.getStringExtra("widget_date")) }.getOrNull()
-            else -> null
-        }
+        return LaunchFields(
+            sharedText = sharedText,
+            sharedSubject = if (sharedText != null) intent?.getStringExtra(Intent.EXTRA_SUBJECT) else null,
+            widgetTaskId = if (intent?.action == com.example.itinerary.widget.TodayWidget.OPEN_TASK) intent.getStringExtra("task_id") else null,
+            calendarUri = if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme in listOf("content", "file")) intent.data else null,
+            entryAction = intent?.action?.takeIf(EntryShortcuts::accepts),
+            widgetDate = when (intent?.action) {
+                com.example.itinerary.widget.TodayWidget.OPEN_TODAY -> java.time.LocalDate.now()
+                com.example.itinerary.widget.TodayWidget.OPEN_DATE -> runCatching { java.time.LocalDate.parse(intent.getStringExtra("widget_date")) }.getOrNull()
+                else -> null
+            },
+        )
     }
+    private fun setLaunchFields(fields: LaunchFields<android.net.Uri>) {
+        sharedText = fields.sharedText
+        sharedSubject = fields.sharedSubject
+        widgetTaskId = fields.widgetTaskId
+        calendarUri = fields.calendarUri
+        entryAction = fields.entryAction
+        widgetDate = fields.widgetDate
+    }
+    // A fresh launch takes everything from its intent; a later intent (see onNewIntent) only what it carries.
+    private fun readWidgetIntent(intent: Intent?) = setLaunchFields(launchFieldsOf(intent))
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("sharedText", sharedText)
         outState.putString("sharedSubject", sharedSubject)
@@ -71,7 +112,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (!actsOnLaunchIntent(intent.flags, savedStateNull = true)) return
-        readWidgetIntent(intent)
+        // E5: tapping a reminder or the widget must not close an open share review, calendar-file import or widget
+        // task editor: only what this intent carries is replaced.
+        setLaunchFields(launchFields().mergedWith(launchFieldsOf(intent)))
         stopAlarmIfRequested(intent)
     }
 
