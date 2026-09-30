@@ -66,23 +66,30 @@ class MonthArrowsUiTest {
     }
     private fun visible(text: String) = nodes().filter { it.isVisibleToUser && !it.isEditable && it.text?.toString() == text }
 
-    // Snapped: the month's day 1 is the only visible "1", and it sits in the grid's first row, right under the weekday names.
-    private fun assertSnapped(month: YearMonth) {
-        val names = DayOfWeek.values().map { it.getDisplayName(TextStyle.SHORT, Locale.getDefault()) }.toSet()
-        val weekdays = nodes().filter { it.isVisibleToUser && it.text?.toString() in names }
-        assertTrue("weekday names", weekdays.isNotEmpty())
-        val headerBottom = weekdays.maxOf { Rect().also(it::getBoundsInScreen).bottom }
+    // How far day 1 is, sideways, from the centre of its own weekday name: 0 when the pager has snapped to that month.
+    private fun dayOneDrift(month: YearMonth): Int {
+        val weekday = month.atDay(1).dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+        val name = nodes().filter { it.isVisibleToUser && it.text?.toString() == weekday }
+        assertEquals("weekday name $weekday", 1, name.size)
         val ones = visible("1")
         assertEquals("one visible day 1 in $month", 1, ones.size)
-        val top = Rect().also(ones.single()::getBoundsInScreen).top
-        val halfRow = (24 * ins.targetContext.resources.displayMetrics.density).toInt()
-        assertTrue("day 1 of $month in the first row (top $top, weekdays end $headerBottom)", top in headerBottom..headerBottom + halfRow)
+        return Rect().also(ones.single()::getBoundsInScreen).centerX() - Rect().also(name.single()::getBoundsInScreen).centerX()
     }
-
+    private var restingDrift = 0
+    private fun shot(name: String) {
+        val dir = java.io.File(ins.targetContext.cacheDir, "qa-month-arrows").apply { mkdirs() }
+        ins.uiAutomation.takeScreenshot()?.let { b -> java.io.File(dir, "$name.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; b.recycle() }
+    }
+    private fun assertSnapped(month: YearMonth) {
+        shot("month-$month")
+        val drift = dayOneDrift(month)
+        assertTrue("day 1 of $month centred under its weekday (drift $drift px, resting ${restingDrift} px)", kotlin.math.abs(drift - restingDrift) <= 3)
+    }
     @Test fun twoQuickNextTapsMoveTwoMonthsAndSnap() {
         openCalendar()
         var month = YearMonth.from(start)
         await("start month") { find(month.label()) != null }
+        shot("start-$month"); restingDrift = dayOneDrift(month)
         for (gap in listOf(150L, 200L, 250L, 350L)) {
             click("Next month")
             Thread.sleep(gap)
@@ -94,6 +101,36 @@ class MonthArrowsUiTest {
             Thread.sleep(1500)
             assertNotNull("header still $expected after taps $gap ms apart", find(expected.label()))
             assertSnapped(expected)
+        }
+    }
+
+    private fun tapAt(x: Float, y: Float) {
+        val down = SystemClock.uptimeMillis()
+        fun event(action: Int, t: Long) = android.view.MotionEvent.obtain(down, t, action, x, y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_DOWN, down), true)
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_UP, down + 30), true)
+    }
+    // Real touches, closer together than accessibility clicks allow, so the second lands during the first page animation.
+    @Test fun twoFastTouchesOnNextMoveTwoMonthsAndSnap() {
+        openCalendar()
+        var month = YearMonth.from(start)
+        await("start month") { find(month.label()) != null }
+        restingDrift = dayOneDrift(month)
+        for (gap in listOf(60L, 90L, 120L, 150L, 180L)) {
+            await("Next month") { find("Next month") != null }
+            var node = find("Next month")
+            while (node != null && !node.isClickable) node = node.parent
+            val r = Rect().also(node!!::getBoundsInScreen)
+            tapAt(r.exactCenterX(), r.exactCenterY())
+            Thread.sleep(gap)
+            tapAt(r.exactCenterX(), r.exactCenterY())
+            month = month.plusMonths(2)
+            val expected = month
+            Thread.sleep(1500)
+            shot("touch-$gap-$expected")
+            assertNotNull("header $expected after touches $gap ms apart (shows: ${nodes().mapNotNull { it.text }.firstOrNull { t -> t.contains(" 20") }})", find(expected.label()))
+            val drift = dayOneDrift(expected)
+            assertTrue("day 1 of $expected centred after touches $gap ms apart (drift $drift px)", kotlin.math.abs(drift - restingDrift) <= 3)
         }
     }
 }
