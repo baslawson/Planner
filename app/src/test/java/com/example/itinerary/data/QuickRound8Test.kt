@@ -70,7 +70,8 @@ class QuickRound8Test {
         assertTrue(refused("Call mum yesterday and today").startsWith("Use one date"))
         // Future dates are not marked as past.
         assertFalse(ok("Dentist tomorrow 3pm").pastDate)
-        assertFalse(ok("Dentist this Monday").pastDate)
+        // (Today is a Wednesday: "this Monday" is past, see QuickFixesHuntTwoTest.)
+        assertFalse(ok("Dentist this Friday").pastDate)
     }
 
     @Test fun pastDateIsReadAgainstTheDraftsDay() {

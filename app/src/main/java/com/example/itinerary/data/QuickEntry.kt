@@ -686,17 +686,19 @@ object QuickEntry {
         val meridiemRanges = ranges.findAll(remaining).filter { rx("$meridiem$").containsMatchIn(rangeEnds(it).second) }.toList()
         // "Work 9-5 weekdays", "Shift Saturday 10-2": with a day or repeat already given, 9-5 is hours, not a date.
         val whenGiven = repeat != RepeatRule.NONE || ds.isNotEmpty() || rangeStart != null || startFrom != null || impliedToday || holidays.containsMatchIn(remaining)
-        // It stays a date beside another clock time ("Gym every Monday 12-10 6pm"), or where it is a date soon that fits
-        // the weekday or repeat given with it ("Dentist Fri 2-10" is Friday 2 October).
+        // It stays a date beside another clock time ("Gym every Monday 12-10 6pm"), or where it is the very day a weekday
+        // given with it names ("Dentist Fri 2-10" is Friday 2 October; "Meeting Friday 9-10" is hours on that Friday).
         fun hoursNotDate(n: MatchResult): Boolean {
             if (!whenGiven || !hourRange.matches(n.value)) return false
-            if (times.findAll(remaining).any { it.range.last < n.range.first || it.range.first > n.range.last }) return false
+            // A four-digit number without a leading zero or "hrs" is title text here ("Budget 2026 review"); see fourDigits.
+            if (times.findAll(remaining).any { (it.range.last < n.range.first || it.range.first > n.range.last) &&
+                    !Regex("[1-9]\\d{3}").matches(it.value) }) return false
             val (a, b) = n.value.split('-').map { it.toInt() }
-            val weekday = ds.firstOrNull { bareWeekday.matches(it.value) }?.let { weekdayOf(it.value) }
+            val weekday = ds.firstOrNull { bareWeekday.matches(it.value) }?.let { weekdayOf(it.value) } ?: return true
+            val named = today.with(TemporalAdjusters.nextOrSame(weekday))
             val readings = listOfNotNull(true to (a to b), false to (b to a)).filter { dayFirst == null || it.first == dayFirst }.mapNotNull { (_, dm) ->
                 runCatching { LocalDate.of(today.year, dm.second, dm.first).let { if (it < today) it.plusYears(1) else it } }.getOrNull() }
-            return readings.none { d -> d <= today.plusDays(60) && (weekday == null || d.dayOfWeek == weekday) &&
-                (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay) }
+            return readings.none { d -> d == named && (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay) }
         }
         val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
             .filterNot(::hoursNotDate).toList()
@@ -805,8 +807,9 @@ object QuickEntry {
             phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.DATE)
         }
         // A date before today typed on purpose: saved as it is, for logging what happened. A repeat can't start there.
+        // "this Monday" on a Wednesday is this week's, already gone: past as well.
         val pastSaid = impliedYesterday || orPast || ds.any { pastDateWords.matches(it.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")) } ||
-            startFromPast
+            startFromPast || date < today && ds.any { rx("^(?:(?:on|by|before|due(?:\\s+(?:on|by))?)\\s+)?(?:this\\s+(?:$weekdays)|$weekThis)$").matches(it.value) }
         if (pastSaid && repeat != RepeatRule.NONE) return error("A repeat can't start in the past. Start it today or later, or remove the repeat.")
         if (anchorName != null && dateChoices.isEmpty() && !fitsAnchor(date))
             return error("The start date doesn't match the $anchorName. Choose a matching date.")
