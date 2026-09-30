@@ -19,6 +19,7 @@ internal class IcsRepeat private constructor(
     private val days: List<Pair<Int?, DayOfWeek>>, // BYDAY, with the optional ordinal (1 = first, -1 = last)
     private val monthDay: Int?,
     private val month: Int?,
+    private val weekStart: DayOfWeek = DayOfWeek.MONDAY, // WKST: where a week (of INTERVAL=2 and so on) begins
 ) {
     // Dates on the event's own clock, in order: [start] first (it always counts, even if the rule wouldn't pick it), then
     // each later date the rule picks, up to [limit] and the rule's own end, at most [max] kept. Dates before [from] still
@@ -44,10 +45,11 @@ internal class IcsRepeat private constructor(
         return result
     }
 
-    // Periods are days, weeks (from Monday), months or years, [interval] apart; each is later than the one before.
+    // Periods are days, weeks (from WKST, Monday unless the rule says otherwise), months or years, [interval] apart;
+    // each is later than the one before.
     private fun periodStart(start: LocalDate, period: Long): LocalDate = when (freq) {
         "DAILY" -> start.plusDays(period * interval)
-        "WEEKLY" -> start.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(period * interval)
+        "WEEKLY" -> start.with(TemporalAdjusters.previousOrSame(weekStart)).plusWeeks(period * interval)
         "MONTHLY" -> YearMonth.from(start).plusMonths(period * interval).atDay(1)
         else -> YearMonth.of(start.year, month ?: start.monthValue).plusYears(period * interval).atDay(1)
     }
@@ -57,18 +59,20 @@ internal class IcsRepeat private constructor(
         val from = periodStart(start, period)
         return when (freq) {
             "DAILY" -> listOf(from).filter { d -> days.isEmpty() || days.any { it.second == d.dayOfWeek } }
-            "WEEKLY" -> (if (days.isEmpty()) listOf(start.dayOfWeek) else days.map { it.second }).distinct().sorted().map { from.plusDays(it.value - 1L) }
+            "WEEKLY" -> (if (days.isEmpty()) listOf(start.dayOfWeek) else days.map { it.second }).distinct()
+                .map { from.plusDays(((it.value - weekStart.value + 7) % 7).toLong()) }.sorted()
             else -> listOfNotNull(inMonth(YearMonth.from(from), start))
         }
     }
 
-    // The one date this rule picks in [month]: the Nth/last weekday, the given day of the month, or the start's day.
-    // Null when the month doesn't have it (the 31st in April, 29 February in most years).
+    // The one date this rule picks in [month]: the Nth weekday (-1 the last, -2 the one before…), the given day of the
+    // month, or the start's day. Null when the month doesn't have it (a 5th Monday, the 31st in April, 29 February).
     private fun inMonth(month: YearMonth, start: LocalDate): LocalDate? {
         days.singleOrNull()?.let { (ordinal, day) ->
             val n = ordinal ?: return null
-            return if (n > 0) month.atDay(1).with(TemporalAdjusters.dayOfWeekInMonth(n, day)).takeIf { YearMonth.from(it) == month }
-            else month.atEndOfMonth().with(TemporalAdjusters.lastInMonth(day))
+            val date = if (n > 0) month.atDay(1).with(TemporalAdjusters.dayOfWeekInMonth(n, day))
+                else month.atEndOfMonth().with(TemporalAdjusters.lastInMonth(day)).minusWeeks(-n - 1L)
+            return date.takeIf { YearMonth.from(it) == month }
         }
         val day = monthDay ?: start.dayOfMonth
         val actual = if (day > 0) day else month.lengthOfMonth() + day + 1
@@ -129,8 +133,10 @@ internal class IcsRepeat private constructor(
             }
             val days = parts["BYDAY"]?.split(',')?.map { code ->
                 val match = Regex("([+-]?[0-9]{1,2})?([A-Za-z]{2})").matchEntire(code.trim()) ?: return null
-                match.groupValues[1].takeIf { it.isNotEmpty() }?.toInt() to (DAYS[match.groupValues[2].uppercase()] ?: return null)
+                val ordinal = match.groupValues[1].takeIf { it.isNotEmpty() }?.toInt()?.also { n -> if (n == 0 || n !in -5..5) return null }
+                ordinal to (DAYS[match.groupValues[2].uppercase()] ?: return null)
             }.orEmpty()
+            val weekStart = parts["WKST"]?.let { DAYS[it.trim().uppercase()] ?: return null } ?: DayOfWeek.MONDAY
             val monthDay = parts["BYMONTHDAY"]?.let { if (',' in it) return null else it.toInt().also { d -> if (d == 0 || d !in -31..31) return null } }
             val month = parts["BYMONTH"]?.let { if (',' in it) return null else it.toInt().also { m -> if (m !in 1..12) return null } }
             // Combinations beyond the everyday ones are refused rather than guessed.
@@ -141,7 +147,7 @@ internal class IcsRepeat private constructor(
                 "YEARLY" -> if (days.size > 1 || days.any { it.first == null } || days.isNotEmpty() && monthDay != null ||
                     month == null && (days.isNotEmpty() || monthDay != null) || month != null && days.isEmpty() && monthDay == null && month != start.monthValue) return null
             }
-            IcsRepeat(freq, interval, count, until, days, monthDay, month)
+            IcsRepeat(freq, interval, count, until, days, monthDay, month, weekStart)
         }.getOrNull()
     }
 }
