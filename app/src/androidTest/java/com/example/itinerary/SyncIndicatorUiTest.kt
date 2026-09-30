@@ -98,6 +98,30 @@ class SyncIndicatorUiTest {
             await { syncLabels() == listOf("Sync: up to date") }
             screenshot("agenda-synced")
 
+            // A tap on "up to date" syncs at once, without opening Calendars: a change made on Nextcloud arrives.
+            runBlocking {
+                val path = dav.files.keys.single { it.startsWith(dav.synced) }
+                dav.edit(path) { it.replace("SUMMARY:QA Indicator", "SUMMARY:QA Indicator tapped") }
+            }
+            click("Sync: up to date")
+            await { runBlocking { app.repository.snapshot() }.items.any { it.title == "QA Indicator tapped" } }
+            assertNull("tap doesn't open Calendars", find("Keep in sync with"))
+            await { syncLabels() == listOf("Sync: up to date") }
+            runBlocking {
+                val path = dav.files.keys.single { it.startsWith(dav.synced) }
+                dav.edit(path) { it.replace("SUMMARY:QA Indicator tapped", "SUMMARY:QA Indicator") }
+                app.calendarSync.sync()
+            }
+            await { syncLabels() == listOf("Sync: up to date") }
+            // A long press opens Calendars.
+            await { nodes().firstOrNull { it.contentDescription?.toString() == "Sync: up to date" }?.let { n ->
+                var c: AccessibilityNodeInfo? = n; while (c != null && !c.isLongClickable) c = c.parent
+                c?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) } == true }
+            await { find("Keep in sync with") != null }
+            screenshot("agenda-long-press-calendars")
+            back()
+            await { find("Keep in sync with") == null && find("AGENDA") != null }
+
             // A slow sync: the icon says it is syncing, then up to date again.
             slow.set(true)
             app.appScope.launch { app.calendarSync.sync() }

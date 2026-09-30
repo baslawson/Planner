@@ -86,6 +86,12 @@ class CalendarSync(
 
     // When the app opens: the phone's calendars (quick, no network), then Nextcloud if it's due — nothing without a
     // login or a ticked calendar, and at most once every 15 minutes.
+    // "Sync now" (Settings → Calendars, or a tap on the sync icon): phone calendars and links, then two-way Nextcloud both ways.
+    suspend fun syncNow() {
+        refreshPhone(); refreshLinks()
+        if (hasAccount()) { sync(); send() }
+    }
+
     suspend fun syncIfDue() {
         refreshPhone()
         if (now() - lastLinkAttempt >= LINK_INTERVAL_MS && dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()

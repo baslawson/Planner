@@ -56,4 +56,12 @@ class SyncIndicatorTest {
             syncResult(listOf(source(), work.copy(lastError = "x")), 0, emptyList(), "09:00"))
         assertEquals("Synced just now · 09:00" to false, syncResult(listOf(source(), work), 0, emptyList(), "09:00"))
     }
+    @Test fun aTapSyncsWhenAllIsWellAndOpensCalendarsWhenSomethingNeedsALook() {
+        assertEquals(SyncIndicatorState.Tap.SYNC, SyncIndicatorState.Synced.tap)
+        assertEquals(SyncIndicatorState.Tap.NOTHING, SyncIndicatorState.Syncing.tap)
+        assertEquals(SyncIndicatorState.Tap.OPEN, SyncIndicatorState.Failed.tap)
+        assertEquals(SyncIndicatorState.Tap.OPEN, SyncIndicatorState.Conflicts(2).tap)
+        assertEquals("Sync now", SyncIndicatorState.Synced.tapLabel)
+        assertEquals("Open Calendars", SyncIndicatorState.Failed.tapLabel)
+    }
 }

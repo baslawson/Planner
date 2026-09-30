@@ -1,6 +1,16 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixIconButton as IconButton
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -29,6 +39,10 @@ import com.example.itinerary.data.OutsideCalendars
 /** What the sync icon on Agenda and Calendar shows; null hides it (two-way Nextcloud sync is off). */
 internal sealed interface SyncIndicatorState {
     val label: String
+    // What a tap does: sync now while all is well, nothing while a sync runs, open Calendars when something needs a look.
+    enum class Tap { SYNC, NOTHING, OPEN }
+    val tap: Tap get() = when (this) { Synced -> Tap.SYNC; Syncing -> Tap.NOTHING; else -> Tap.OPEN }
+    val tapLabel: String? get() = when (tap) { Tap.SYNC -> "Sync now"; Tap.OPEN -> "Open Calendars"; Tap.NOTHING -> null }
     data object Synced : SyncIndicatorState { override val label = "Sync: up to date" }
     data object Syncing : SyncIndicatorState { override val label = "Sync: syncing" }
     data object Failed : SyncIndicatorState { override val label = "Sync: problem, open Calendars" }
@@ -54,7 +68,12 @@ internal sealed interface SyncIndicatorState {
     }
 }
 
-/** Two-way Nextcloud sync at a glance, for a top bar: spins while syncing, warns on a problem; a tap opens Calendars. */
+/**
+ * Two-way Nextcloud sync at a glance, for a top bar: spins while syncing, warns on a problem. A tap syncs now while all is
+ * well (and does nothing while a sync runs); with a problem or conflicts it opens Calendars, where they're shown. A long
+ * press always opens Calendars.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun SyncIndicator(onOpenCalendars: () -> Unit) {
     val sync = (LocalContext.current.applicationContext as ItineraryApp).calendarSync
@@ -66,8 +85,19 @@ fun SyncIndicator(onOpenCalendars: () -> Unit) {
     // change the calendar list or start a sync); keeps its last answer meanwhile, so the icon does not flicker.
     val loggedIn by produceState<Boolean?>(null, sources, state, sendState) { value = sync.hasAccount() }
     val shown = SyncIndicatorState.of(sources, loggedIn, state.running || sendState.running, state.error || sendState.error, conflicts.size) ?: return
-    IconButton(onClick = onOpenCalendars) {
-        when (shown) {
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    val onTap: () -> Unit = when (shown.tap) {
+        SyncIndicatorState.Tap.SYNC -> { { app.appScope.launch { sync.syncNow() } } }
+        SyncIndicatorState.Tap.NOTHING -> { {} }
+        SyncIndicatorState.Tap.OPEN -> onOpenCalendars
+    }
+    Box(
+        Modifier.size(48.dp).clip(CircleShape)
+            .combinedClickable(onClick = onTap, onLongClick = onOpenCalendars, onLongClickLabel = "Open Calendars",
+                onClickLabel = shown.tapLabel, role = Role.Button),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.primary) { when (shown) {
             is SyncIndicatorState.Conflicts -> BadgedBox(badge = { Badge { Text("${shown.count}") } }) {
                 Icon(Icons.Filled.Warning, contentDescription = shown.label, tint = MaterialTheme.colorScheme.error)
             }
@@ -78,6 +108,6 @@ fun SyncIndicator(onOpenCalendars: () -> Unit) {
                 Icon(Icons.Filled.Refresh, contentDescription = shown.label, modifier = Modifier.rotate(turn))
             }
             SyncIndicatorState.Synced -> Icon(Icons.Filled.Refresh, contentDescription = shown.label)
-        }
+        } }
     }
 }

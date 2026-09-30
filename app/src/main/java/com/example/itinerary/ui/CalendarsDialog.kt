@@ -104,7 +104,7 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         primary = if (connected == true || phoneAllowed || linkSources.isNotEmpty()) DialogAction(if (running) "Syncing…" else "Sync now", enabled = !running) {
             result = null
             app.appScope.launch {
-                sync.refreshPhone(); sync.refreshLinks(); if (connected == true) { sync.sync(); sync.send() }
+                sync.syncNow()
                 result = syncResult(sync, java.time.LocalTime.now().label(format, context))
             }
         } else null,
