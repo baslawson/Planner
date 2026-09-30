@@ -41,6 +41,7 @@ class CalendarTwoWayTest {
     private val synced = "${home}planner/"
     private val other = "${home}work/"
     private val day = LocalDate.of(2026, 10, 5)
+    private var zone: java.time.ZoneId = ZoneOffset.UTC
 
     @Before fun setUp() {
         val base = instrumentation.targetContext
@@ -63,7 +64,7 @@ class CalendarTwoWayTest {
         accounts.save(NextcloudAccount.create(server.url("/").toString(), "bas", "test-password-only"))
         sync = CalendarSync(database, accounts, NextcloudClient(OkHttpClient.Builder()
             .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build()),
-            now = { clock }, zone = { ZoneOffset.UTC }, planner = repo.asPlannerStore(),
+            now = { clock }, zone = { zone }, planner = repo.asPlannerStore(),
             pendingDeleted = { repo.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
         dav.put("${other}untouchable.ics", ics("w1", "Work thing", "20261006T090000Z"))
     }
@@ -206,6 +207,90 @@ class CalendarTwoWayTest {
         sync.resolve(conflicts().single().id, CalendarSync.Resolution.PLANNER)
         assertTrue(dav.files.values.any { it.second.contains("SUMMARY:QA Deleted there") && it.second.contains("LOCATION:Still on") })
         assertTrue(conflicts().isEmpty())
+    }
+
+    private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
+
+    @Test fun reconnectingLinksTheFilesAlreadyThereInsteadOfCopyingThem() = runBlocking {
+        dav.put("${synced}from-web.ics", ics("web-1", "QA Made on the web", "20261007T090000Z"))
+        save("QA Kept"); save("QA Edited there", 10); save("QA Edited here", 11)
+        repo.saveItem(ItineraryItem(tripId = 0, date = day.plusMonths(20), startTime = null, title = "QA Far ahead"))
+        start()
+        assertEquals(5, items().size); assertEquals(5, plannerFiles().size)
+        // Disconnect (the record of what was sent goes), change a little on each side, then connect the same calendar.
+        sync.clearNextcloud()
+        dav.edit(plannerFile("QA Edited there").key) { it.replace("DTSTART:20261005T100000Z", "DTSTART:20261005T160000Z") }
+        repo.saveItem(item("QA Edited here").copy(location = "Room 2"))
+        val before = writes().size
+        start()
+        assertEquals(5, items().size) // nothing brought in twice
+        assertEquals(5, plannerFiles().size) // nothing sent twice
+        assertEquals(before, writes().size)
+        // Edited on one side while apart: which to keep is the user's choice, then it's settled in place.
+        assertEquals(2, conflicts().size)
+        conflicts().forEach { sync.resolve(it.id, CalendarSync.Resolution.PLANNER) }
+        assertEquals(5, plannerFiles().size)
+        assertTrue(plannerFile("QA Edited here").value.second.contains("LOCATION:Room 2"))
+        // Linked for good: an edit updates its own file.
+        repo.saveItem(item("QA Kept").copy(notes = "After reconnecting"))
+        sync.send()
+        assertTrue(plannerFile("QA Kept").value.second.contains("DESCRIPTION:After reconnecting"))
+        assertEquals(5, plannerFiles().size)
+        assertOtherCalendarUntouched()
+    }
+
+    @Test fun aLostReplyNeverMakesASecondFile() = runBlocking {
+        start()
+        dav.loseReplies = 1
+        save("QA Lost reply")
+        sync.send() // the file arrives, the reply doesn't (OkHttp may retry, which then finds it there)
+        assertNotNull(rows().single().uid)
+        assertTrue(rows().single().problem in setOf(null, SentEvent.PENDING))
+        sync.send(); syncAgain(); syncAgain()
+        assertEquals(1, items().size)
+        assertEquals(1, plannerFiles().size)
+        assertNull(rows().single().problem)
+        repo.saveItem(item("QA Lost reply").copy(location = "Found"))
+        sync.send()
+        assertTrue(plannerFile("QA Lost reply").value.second.contains("LOCATION:Found"))
+        assertEquals(1, plannerFiles().size)
+    }
+
+    @Test fun madeRepeatingOnNextcloudStaysReadOnlyAndIsNotSentAgain() = runBlocking {
+        save("QA Now weekly")
+        start()
+        dav.edit(plannerFile("QA Now weekly").key) { it.replace("SUMMARY:QA Now weekly", "SUMMARY:QA Now weekly\r\nRRULE:FREQ=WEEKLY;COUNT=3") }
+        val before = writes().size
+        syncAgain(); syncAgain()
+        assertEquals(before, writes().size)
+        assertEquals(1, plannerFiles().size)
+        assertEquals(1, items().size) // Planner's event stays as it was
+        assertEquals(SentEvent.DETACHED, rows().single().problem)
+        assertEquals(3, sync.shown.first().values.count { it.event.title == "QA Now weekly" })
+        // Edited in Planner: still not sent (Nextcloud's is the series now).
+        repo.saveItem(item("QA Now weekly").copy(location = "Gym"))
+        syncAgain()
+        assertEquals(before, writes().size)
+        assertEquals(1, items().size)
+    }
+
+    @Test fun aNewTimeZoneAloneSendsNothing() = runBlocking {
+        save("QA Travelling")
+        start()
+        val before = writes().size
+        zone = java.time.ZoneId.of("Australia/Perth")
+        syncAgain()
+        assertEquals(before, writes().size)
+        // A row from before this change (fingerprint in the phone's zone) is accepted once and brought up to date.
+        val row = rows().single()
+        database.sentDao().put(row.copy(fingerprint = CalendarSync.zonedFingerprint(item("QA Travelling"), zone)))
+        syncAgain()
+        assertEquals(before, writes().size)
+        assertEquals(CalendarSync.fingerprint(item("QA Travelling")), rows().single().fingerprint)
+        // A real edit is still sent, with the times of the phone's zone now.
+        repo.saveItem(item("QA Travelling").copy(startTime = LocalTime.of(17, 0)))
+        sync.send()
+        assertTrue(plannerFile("QA Travelling").value.second.contains("DTSTART:20261005T090000Z"))
     }
 
     @Test fun offlineKeepsEverythingAndOtherCalendarsAreNeverWritten() = runBlocking {

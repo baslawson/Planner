@@ -74,6 +74,12 @@ data class SentEvent(
         const val CHANGED = "CHANGED"
         const val DELETED = "DELETED"
         const val CONFLICT = "CONFLICT"
+        // Written to Nextcloud as <uid>.ics, but no reply came back yet: the next pass retries under the same uid (or
+        // takes the file if it arrived), so a lost reply never makes a second file.
+        const val PENDING = "PENDING"
+        // Now more than Planner can hold on Nextcloud (repeating, an unknown time zone…): shown read-only from there,
+        // Planner's event stays as it is and is neither sent again nor brought in twice.
+        const val DETACHED = "DETACHED"
     }
 }
 

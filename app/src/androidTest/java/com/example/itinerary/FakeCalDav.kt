@@ -9,13 +9,15 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /** A small Nextcloud for the two-way sync tests: calendars "Planner" (kept in sync) and "Work" in [home], event files
  *  with ETags, a ctag that changes with them, calendar-query (from the window start on) and multiget REPORTs, GET, and
- *  PUT/DELETE honouring If-Match / If-None-Match. Files in Work get the fixed ETag "w-orig". [code] fails everything. */
+ *  PUT/DELETE honouring If-Match / If-None-Match. Files in Work get the fixed ETag "w-orig". [code] fails everything;
+ *  [loseReplies] saves that many PUTs and then drops the connection instead of answering (a reply lost on the way). */
 class FakeCalDav(private val home: String, private val user: String, private val password: String) : Dispatcher() {
     val synced = "${home}planner/"
     val other = "${home}work/"
     val files = ConcurrentHashMap<String, Pair<String, String>>()
     val requests = CopyOnWriteArrayList<Triple<String, String, String?>>()
     @Volatile var code: Int? = null
+    @Volatile var loseReplies = 0
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -56,7 +58,9 @@ class FakeCalDav(private val home: String, private val user: String, private val
                     ifNone == "*" && current != null -> MockResponse().setResponseCode(412)
                     ifMatch != null && current == null -> MockResponse().setResponseCode(404)
                     ifMatch != null && ifMatch != current!!.first -> MockResponse().setResponseCode(412)
-                    else -> { val etag = "\"s${++version}\""; files[path] = etag to body; MockResponse().setResponseCode(if (current == null) 201 else 204).setHeader("ETag", etag) }
+                    else -> { val etag = "\"s${++version}\""; files[path] = etag to body
+                        if (loseReplies > 0) { loseReplies--; return MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST) }
+                        MockResponse().setResponseCode(if (current == null) 201 else 204).setHeader("ETag", etag) }
                 }
             }
             "DELETE" -> when {
