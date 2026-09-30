@@ -8,8 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class,
-        CalendarSource::class, OutsideEvent::class, SentEvent::class],
-    version = 28,
+        CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class],
+    version = 29,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -282,7 +282,30 @@ val MIGRATION_27_28 = object : Migration(27, 28) {
     }
 }
 
+// A task's snooze moves only this reminder, not the series' reminder time (null for every existing task). Event reminders
+// record their last on-time delivery; the ones already due count as delivered, so a later westward time-zone change
+// doesn't show them again.
+val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `snoozedUntil` INTEGER")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `reminder_deliveries` (`reminderId` INTEGER NOT NULL, `key` TEXT NOT NULL, PRIMARY KEY(`reminderId`), FOREIGN KEY(`reminderId`) REFERENCES `reminders`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        val now = System.currentTimeMillis()
+        db.query("SELECT r.id, r.amount, r.unit, i.date, i.startTime FROM reminders r JOIN items i ON r.itemId = i.id WHERE r.snoozedUntil IS NULL").use { rows ->
+            while (rows.moveToNext()) {
+                // A row that can't be read is simply not recorded; the upgrade must not fail over it.
+                val seed = runCatching {
+                    val date = java.time.LocalDate.parse(rows.getString(3))
+                    val time = if (rows.isNull(4)) null else java.time.LocalTime.parse(rows.getString(4))
+                    val offset = rows.getLong(1) * ReminderUnit.valueOf(rows.getString(2)).minutes
+                    if (reminderTrigger(date, time, offset).toInstant().toEpochMilli() <= now) ReminderDeliveries.key(date, time, offset) else null
+                }.getOrNull() ?: continue
+                db.execSQL("INSERT OR REPLACE INTO reminder_deliveries (reminderId, `key`) VALUES (?, ?)", arrayOf<Any>(rows.getLong(0), seed))
+            }
+        }
+    }
+}
+
 // Every upgrade step, oldest first: the app opens its database with these, and the migration tests use the same list.
 val ALL_MIGRATIONS = arrayOf(
-    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28,
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
 )

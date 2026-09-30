@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.Reminder
+import com.example.itinerary.data.activeReminderAt
 import com.example.itinerary.data.reminderTrigger
 
 interface ReminderAlarms {
@@ -22,16 +23,17 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
     override fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {
-        if (task.done || task.reminderAt == null) { cancelTask(task.id); return }
+        val triggerAt = task.activeReminderAt
+        if (task.done || triggerAt == null) { cancelTask(task.id); return }
         // Android may still have an inexact/idle-delayed alarm queued after its requested time.
         // Opening the app must leave that alarm and any delivered notification alone. Edits that
         // replace/remove its time, completion and deletion explicitly cancel the old reminder.
-        if (task.reminderAt <= System.currentTimeMillis()) return
+        if (triggerAt <= System.currentTimeMillis()) return
         // Distinct receiver and URI keep task alarms independent of event ids and hash collisions.
-        val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", task.reminderAt)
+        val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt)
         val updated = PendingIntent.getBroadcast(context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        setAlarm(task.reminderAt, updated)
+        setAlarm(triggerAt, updated)
     }
 
     override fun cancelTask(id: String) {
@@ -54,7 +56,8 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         if (item.paid || item.skipped) { cancel(reminder.id); return }
         if (triggerAt <= System.currentTimeMillis()) {
             // Reloading the app must not dismiss a delivered reminder or an active ringing alarm.
-            // Reloading must also preserve an alarm Android has not delivered yet.
+            // Reloading must also preserve an alarm Android has not delivered yet, including one set before an
+            // eastward time-zone change moved this time into the past (Repository.deliverReminder accepts it).
             if (!preservePending) {
                 cancelCode(reminder.id.toInt())
                 cancelCode(snoozeCode(reminder.id))

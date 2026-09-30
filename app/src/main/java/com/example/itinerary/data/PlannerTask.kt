@@ -27,7 +27,12 @@ data class PlannerTask(
     @ColumnInfo(defaultValue = "'[]'") val checklist: List<ChecklistEntry> = emptyList(),
     @ColumnInfo(defaultValue = "'[]'") val attachments: List<Attachment> = emptyList(),
     @ColumnInfo(defaultValue = "'[]'") val prerequisiteIds: List<String> = emptyList(),
+    // Snoozing moves only this reminder; [reminderAt] stays the base a repeating task's next reminder follows.
+    val snoozedUntil: Long? = null,
 )
+
+/** When the reminder is due now: the snooze if there is one, else [PlannerTask.reminderAt]. Removing the reminder ends the snooze. */
+val PlannerTask.activeReminderAt: Long? get() = reminderAt?.let { snoozedUntil ?: it }
 
 @Dao
 interface TaskDao {
@@ -74,6 +79,7 @@ object Tasks {
         require(task.attachments.map { it.fileName }.distinct().size == task.attachments.size)
         require(task.attachments.all { it.url == null && Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.fileName) && it.name.isNotBlank() })
         require(task.reminderAt == null || task.reminderAt in 1..253402300799999L)
+        require(task.snoozedUntil == null || task.snoozedUntil in 1..253402300799999L)
     }
 }
 
@@ -83,6 +89,7 @@ object TaskCodec {
             .put("dueDate", task.dueDate?.toString() ?: JSONObject.NULL).put("priority", task.priority.name)
             .put("notes", task.notes).put("done", task.done)
             .put("reminderAt", task.reminderAt ?: JSONObject.NULL)
+            .apply { task.snoozedUntil?.let { put("snoozedUntil", it) } }
             .put("repeat", task.repeat).put("repeatDays", task.repeatDays).put("repeatAnchorDay", task.repeatAnchorDay)
             .put("nextTaskId", task.nextTaskId ?: JSONObject.NULL)
             .put("prerequisiteIds", JSONArray(task.prerequisiteIds))
@@ -103,7 +110,13 @@ object TaskCodec {
             nextTaskId = if (value.isNull("nextTaskId")) null else value.getString("nextTaskId"),
             checklist = ChecklistCodec.decode(value.optJSONArray("checklist")?.toString() ?: "[]"),
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
-            prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()))
+            prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),
+            // Optional: older backups have no task snoozes.
+            snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null else {
+                val timestamp = value.get("snoozedUntil")
+                require(timestamp is Long || timestamp is Int) { "Invalid task snooze time" }
+                (timestamp as Number).toLong()
+            })
             .also(Tasks::validate)
     }.also { tasks -> require(tasks.map { it.id }.distinct().size == tasks.size) }
 }

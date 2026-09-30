@@ -70,12 +70,13 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
             date
         }
     }
+    // From the base reminder, never a snooze, so snoozing one occurrence doesn't shift the rest.
     val nextReminder = reminderAt?.let { timestamp ->
         val localReminder = Instant.ofEpochMilli(timestamp).atZone(zone)
         // An undated task has no due-date offset: keep its reminder clock time on the new due date.
         val reminderBase = dueDate ?: localReminder.toLocalDate()
         localReminder.plusDays(ChronoUnit.DAYS.between(reminderBase, next)).toInstant().toEpochMilli()
     }
-    return copy(id = UUID.randomUUID().toString(), dueDate = next, done = false, reminderAt = nextReminder,
+    return copy(id = UUID.randomUUID().toString(), dueDate = next, done = false, reminderAt = nextReminder, snoozedUntil = null,
         repeatAnchorDay = anchor, nextTaskId = null, checklist = checklist.map { it.copy(done = false) })
 }

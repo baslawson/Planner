@@ -129,6 +129,36 @@ data class Reminder(
         get() = if (amount == 0) "At the time" else "$amount ${if (amount == 1) unit.singular else unit.plural} before"
 }
 
+// The last on-time (not snoozed) delivery of each reminder, keyed by the event's local date, time and offset. Those don't
+// change when the phone's time zone does, so a reminder that already went off is not scheduled again after a westward
+// move. Derived state: not in backups, and it goes with its reminder.
+@Entity(
+    tableName = "reminder_deliveries",
+    foreignKeys = [ForeignKey(entity = Reminder::class, parentColumns = ["id"], childColumns = ["reminderId"], onDelete = ForeignKey.CASCADE)],
+)
+data class ReminderDelivery(@PrimaryKey val reminderId: Long, val key: String)
+
+object ReminderDeliveries {
+    // Time zones span UTC-12 to UTC+14.
+    const val MAX_ZONE_SHIFT_MS = 26 * 3_600_000L
+
+    /** Null for a snoozed reminder: a snooze is an absolute time, so a zone change never moves it. */
+    fun key(item: ItineraryItem, reminder: Reminder): String? =
+        if (reminder.snoozedUntil != null) null else key(item.date, item.startTime, reminder.offsetMinutes)
+    fun key(date: LocalDate, time: LocalTime?, offsetMinutes: Long): String = "$date|${time ?: ""}|$offsetMinutes"
+
+    fun delivered(recorded: String?, item: ItineraryItem, reminder: Reminder): Boolean =
+        recorded != null && recorded == key(item, reminder)
+
+    /**
+     * Whether an alarm set for [trigger] may still show. Besides an exact match, an on-time alarm set before the phone
+     * moved east is accepted: its recomputed time [expected] is earlier and already past, and scheduling leaves the old
+     * alarm in place rather than drop the reminder. (A move west re-times the still-future alarm instead.)
+     */
+    fun accepts(trigger: Long, expected: Long, snoozed: Boolean, now: Long): Boolean =
+        trigger == expected || !snoozed && (trigger == 0L || trigger in (expected + 1)..minOf(now, expected + MAX_ZONE_SHIFT_MS))
+}
+
 // The file itself lives in app-private storage under [fileName]; [name] is what the user sees. A link has no file:
 // its [url] is set (see Links), [fileName] is empty and [mimeType] is Links.MIME_TYPE.
 @Entity(

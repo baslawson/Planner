@@ -164,6 +164,12 @@ interface ReminderDao {
 
     @Delete
     suspend fun delete(reminder: Reminder)
+
+    @Upsert
+    suspend fun recordDelivery(delivery: ReminderDelivery)
+
+    @Query("SELECT * FROM reminder_deliveries WHERE reminderId IN (:ids)")
+    suspend fun deliveries(ids: List<Long>): List<ReminderDelivery>
 }
 
 @Dao

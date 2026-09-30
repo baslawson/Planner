@@ -104,7 +104,7 @@ class Repository(
                 val reminder = reminderDao.byId(id)
                 val event = reminder?.let { itemDao.byId(it.itemId) }
                 if (event == null || id in cancelFirst) scheduler.cancel(id)
-                if (event != null) { if (event.paid || event.skipped) scheduler.cancel(id) else scheduler.schedule(event, reminder) }
+                if (event != null) { if (event.paid || event.skipped) scheduler.cancel(id) else if (!deliveredAlready(event, reminder)) scheduler.schedule(event, reminder) }
             }
         }
         taskIds.distinct().forEach { id ->
@@ -117,6 +117,11 @@ class Repository(
         if (notify) work["widget"] = { onChanged() }
         performFollowUp(work)
     }
+
+    // Went off on time already, for this date, time and offset: after a westward time-zone change its time is ahead
+    // again, and scheduling it would show it twice.
+    private suspend fun deliveredAlready(event: ItineraryItem, reminder: Reminder): Boolean =
+        ReminderDeliveries.delivered(reminderDao.deliveries(listOf(reminder.id)).firstOrNull()?.key, event, reminder)
 
     suspend fun retryMaintenance() = changes.withLock { performFollowUp(followUp.toMap()) }
 
@@ -163,14 +168,18 @@ class Repository(
             val existing = taskDao.byId(task.id)
             if (create) {
                 // Retrying a save after activity/process recreation must not create another task.
-                if (existing == null) taskDao.insert(clean)
-                else check(existing == clean) { "This task was already saved and changed" }
+                // A new task (or a duplicate of a snoozed one) starts unsnoozed.
+                if (existing == null) taskDao.insert(clean.copy(snoozedUntil = null))
+                else check(existing == clean.copy(snoozedUntil = null)) { "This task was already saved and changed" }
             } else {
                 check(existing != null) { "This task no longer exists" }
-                taskDao.update(clean.copy(done = existing.done, nextTaskId = existing.nextTaskId))
+                // A snooze (possibly made while the editor was open) lasts until the reminder time itself is changed.
+                taskDao.update(clean.copy(done = existing.done, nextTaskId = existing.nextTaskId,
+                    snoozedUntil = if (existing.reminderAt == clean.reminderAt) existing.snoozedUntil else null))
             }
+            val saved = taskDao.byId(task.id)
             afterCommit(files = existing?.attachments.orEmpty().map { it.fileName }, taskIds = listOf(task.id),
-                resetTaskIds = if (existing?.reminderAt != clean.reminderAt) setOf(task.id) else emptySet())
+                resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt) setOf(task.id) else emptySet())
         }
     }
     suspend fun setTaskDone(id: String, done: Boolean) = changes.withLock {
@@ -185,19 +194,20 @@ class Repository(
             // Keep the successor receipt even after reopening/deleting the next occurrence.
             val next = if (done && task.nextTaskId == null) task.nextOccurrence() else null
             if (next != null) taskDao.insert(next)
-            taskDao.update(task.copy(done = done, nextTaskId = next?.id ?: task.nextTaskId))
+            taskDao.update(task.copy(done = done, nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (done) null else task.snoozedUntil))
             listOfNotNull(id, next?.id)
         }
         afterCommit(taskIds = changed)
     }
     suspend fun actOnTaskReminder(id: String, trigger: Long, snoozeUntil: Long? = null): Boolean = changes.withLock {
         val task = taskDao.byId(id) ?: return@withLock false
-        if (task.done || task.reminderAt != trigger || trigger > System.currentTimeMillis()) return@withLock false
+        if (task.done || task.activeReminderAt != trigger || trigger > System.currentTimeMillis()) return@withLock false
         if (snoozeUntil == null) setTaskDoneLocked(id, true)
         else {
             require(snoozeUntil > System.currentTimeMillis())
             withContext(NonCancellable) {
-                taskDao.update(task.copy(reminderAt = snoozeUntil))
+                // Keep reminderAt: a repeating task's next reminder follows it, not the snooze.
+                taskDao.update(task.copy(snoozedUntil = snoozeUntil))
                 afterCommit(taskIds = listOf(id), resetTaskIds = setOf(id))
             }
         }
@@ -342,7 +352,7 @@ class Repository(
         ChecklistCodec.validate(item.checklist)
         Bills.validate(item.billAmountMinor, item.billCurrency)
         Payments.validate(item.payments)
-        require(item.payments.none { !it.reversed } || item.billAmountMinor != null)
+        require(item.payments.none { !it.reversed } || item.billAmountMinor != null) { "A bill with payments needs an amount." }
         require(item.bufferBeforeMinutes in 0..1440 && item.bufferAfterMinutes in 0..1440)
         require(item.durationMinutes == null || item.startTime != null && item.durationMinutes in 1..1440)
         MultiDay.validate(item)
@@ -354,8 +364,9 @@ class Repository(
         db.withTransaction {
             if (options.draftToken != null && itemDao.hasDraftToken(options.draftToken)) return@withTransaction
             if (item.id == 0L && item.linkedTaskId != null) {
-                require(taskDao.byId(item.linkedTaskId) != null) { "The linked task was deleted. Restore it before scheduling." }
-                require(item.startTime != null && item.durationMinutes != null && item.category != "Bills")
+                require(taskDao.byId(item.linkedTaskId) != null) { "The task this time block belongs to was deleted." }
+                require(item.startTime != null && item.durationMinutes != null) { "A time block needs a start time and a duration." }
+                require(item.category != "Bills") { "A time block can't be a bill." }
             }
             val original = if (item.id == 0L) null else itemDao.byId(item.id)
             val members = if (options.entireSeries && original?.seriesId != null)
@@ -376,34 +387,38 @@ class Repository(
                     val series = if (dates.size > 1) UUID.randomUUID().toString() else null
                     dates.mapIndexed { index, date -> item.startingOn(date).copy(id = if (index == 0) item.id else 0, tripId = owner, seriesId = series,
                         paid = index == 0 && item.paid, payments = if (index == 0) item.payments else emptyList(), skipped = false,
+                        checklist = if (index == 0) item.checklist else item.checklist.map { it.copy(done = false) },
                         repeatRule = if (series == null) "NONE" else options.repeat.name) }
                 }
                 options.entireSeries && original?.seriesId != null -> {
                     val shift = ChronoUnit.DAYS.between(original.date, item.date)
                     val dates = if (options.changeRepeat && options.repeat != RepeatRule.NONE)
                         options.repeat.dates(members.first().date.plusDays(shift), members.size) else members.map { it.date.plusDays(shift) }
-                    members.mapIndexed { index, old ->
-                        item.startingOn(dates[index]).copy(id = old.id, tripId = old.tripId, paid = if (old.id == item.id) item.paid else old.paid,
-                            payments = if (old.id == item.id) item.payments else old.payments, skipped = old.skipped,
-                            seriesId = if (options.changeRepeat && options.repeat == RepeatRule.NONE) null else old.seriesId,
-                            repeatRule = if (options.changeRepeat) options.repeat.name else old.repeatRule)
-                    }
+                    members.mapIndexed { index, old -> seriesOccurrence(item, old, dates[index], options.changeRepeat, options.repeat) }
                 }
                 else -> listOf(item)
             }
-            val replaceChildren = options.entireSeries && original?.seriesId != null || item.id != 0L && targets.size > 1
-            val attachmentsByItem = if (replaceChildren)
+            val seriesSave = options.entireSeries && original?.seriesId != null
+            val newSeries = !seriesSave && item.id != 0L && targets.size > 1
+            // An entire-series save gives the other occurrences this one's files and reminders only when this save changed
+            // them; otherwise each keeps its own (a receipt replaced here would be deleted for good).
+            val replaceAttachments = newSeries || seriesSave && (added.isNotEmpty() || removed.isNotEmpty())
+            val replaceReminders = newSeries || seriesSave && (addedReminders.isNotEmpty() || removedReminders.isNotEmpty())
+            val attachmentsByItem = if (replaceAttachments)
                 readIds(targets.filter { it.id != 0L }.map { it.id }, attachmentDao::forItems).groupBy { it.itemId }
                 else emptyMap()
-            val selectedAttachments = attachmentsByItem[item.id].orEmpty().filter { it !in removed } + added
-            val selectedReminders = if (replaceChildren) {
-                reminderDao.forItem(item.id).filter { it !in removedReminders } + addedReminders
+            // By id: text recognition or a snooze may have changed the record since the editor read it.
+            val selectedAttachments = attachmentsByItem[item.id].orEmpty().filter { old -> removed.none { it.id == old.id } } + added
+            val selectedReminders = if (replaceReminders) {
+                reminderDao.forItem(item.id).filter { old -> removedReminders.none { it.id == old.id } } + addedReminders
             } else emptyList()
             for (target in targets) {
                 val paymentTotal = Payments.total(target.payments)
-                require(target.category != "Bills" || paymentTotal == 0L || target.billAmountMinor != null && paymentTotal <= target.billAmountMinor)
+                require(target.category != "Bills" || paymentTotal == 0L || target.billAmountMinor != null && paymentTotal <= target.billAmountMinor) {
+                    "\"${target.title}\" on ${target.date} has payments of more than its amount. Raise the amount or remove payments first." }
                 val previous = previousById[target.id]
-                require(previous == null || previous.payments.isEmpty() || target.category != "Bills" || previous.billCurrency == target.billCurrency)
+                require(previous == null || previous.payments.isEmpty() || target.category != "Bills" || previous.billCurrency == target.billCurrency) {
+                    "\"${target.title}\" on ${target.date} has payments in ${previous?.billCurrency}. Remove them before changing the currency." }
                 val normalized = target.copy(paid = target.category == "Bills" && (if (target.payments.any { !it.reversed })
                     target.billAmountMinor != null && paymentTotal >= target.billAmountMinor else target.paid),
                     payments = target.payments, draftToken = options.draftToken)
@@ -417,17 +432,19 @@ class Repository(
                 }
                 val rowId = itemDao.upsert(normalized)
                 val saved = normalized.copy(id = if (rowId > 0) rowId else target.id)
-                if (replaceChildren) {
-                    val oldAttachments = attachmentsByItem[saved.id].orEmpty()
-                    oldAttachments.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
-                    val oldReminders = reminderDao.forItem(saved.id)
-                    oldReminders.forEach { reminderDao.delete(it); cancelled.add(it) }
+                if (replaceAttachments) {
+                    attachmentsByItem[saved.id].orEmpty().forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
                     selectedAttachments.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
-                    selectedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                 } else {
                     added.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                     removed.filter { it.itemId == saved.id }.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
-                    addedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id)) }
+                }
+                // A reminder copied from the editor (e.g. after toggling "ring until dismissed") must not keep an old snooze.
+                if (replaceReminders) {
+                    reminderDao.forItem(saved.id).forEach { reminderDao.delete(it); cancelled.add(it) }
+                    selectedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
+                } else {
+                    addedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                     removedReminders.filter { it.itemId == saved.id }.forEach { reminderDao.delete(it); cancelled.add(it) }
                 }
                 if (previous?.paid != saved.paid) {
@@ -544,6 +561,10 @@ class Repository(
         onDeletionFinished()
     }
 
+    // A new date or time makes an old snooze meaningless: it would stand in for the reminder at the new time.
+    private suspend fun clearSnoozes(itemId: Long): List<Reminder> =
+        reminderDao.forItem(itemId).onEach { if (it.snoozedUntil != null) reminderDao.snooze(it.id, null) }.map { it.copy(snoozedUntil = null) }
+
     // Change only the date of the latest saved record; one occurrence of a series stays independent.
     suspend fun moveToTomorrow(id: Long, today: java.time.LocalDate = java.time.LocalDate.now()) = changes.withLock {
         requirePlannerEvent(id)
@@ -552,7 +573,7 @@ class Repository(
             val tomorrow = today.plusDays(1)
             if (current.date == tomorrow) return@withTransaction null
             itemDao.moveDate(id, tomorrow)
-            PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = tomorrow) to reminderDao.forItem(id)
+            PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = tomorrow) to clearSnoozes(id)
         } ?: return@withLock
         _pendingMoves.value += move
         afterCommit(reminderIds = reminders.map { it.id }, cancelFirst = reminders.mapTo(hashSetOf()) { it.id })
@@ -564,7 +585,7 @@ class Repository(
         val (restored, reminders) = db.withTransaction {
             val current = itemDao.byId(move.itemId)
             if (current == null || current.date != move.toDate) false to emptyList<Reminder>()
-            else { itemDao.moveDate(current.id, move.fromDate); true to reminderDao.forItem(current.id) }
+            else { itemDao.moveDate(current.id, move.fromDate); true to clearSnoozes(current.id) }
         }
         _pendingMoves.value = _pendingMoves.value.filterNot { it.token == token }
         if (restored) {
@@ -676,12 +697,14 @@ class Repository(
         val reminder = reminderDao.byId(id) ?: return@withLock
         val item = itemDao.byId(reminder.itemId) ?: return@withLock
         val expected = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder.offsetMinutes).toInstant().toEpochMilli()
-        if (!item.paid && !item.skipped && (trigger == expected || trigger == 0L && reminder.snoozedUntil == null)) deliver(item, reminder)
+        if (item.paid || item.skipped || !ReminderDeliveries.accepts(trigger, expected, reminder.snoozedUntil != null, System.currentTimeMillis())) return@withLock
+        deliver(item, reminder)
+        ReminderDeliveries.key(item, reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(reminder.id, it)) }
     }
 
     suspend fun deliverTaskReminder(id: String, trigger: Long, deliver: (PlannerTask) -> Unit) = changes.withLock {
         val task = taskDao.byId(id) ?: return@withLock
-        if (!task.done && task.reminderAt == trigger && trigger <= System.currentTimeMillis()) deliver(task)
+        if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) deliver(task)
     }
 
     // Everything in the database, read in one go so the pieces agree with each other (for backups).
@@ -726,9 +749,11 @@ class Repository(
         performFollowUp(linkedMapOf("cleanup:expired" to { purgeExpiredDeleted() }, "reminders:reload" to {
             val reminders = reminderDao.all()
             val items = readIds(reminders.map { it.itemId }, itemDao::byIds).associateBy { it.id }
+            val delivered = readIds(reminders.map { it.id }, reminderDao::deliveries).associate { it.reminderId to it.key }
             var failure: Exception? = null
             reminders.forEach { reminder ->
-                try { items[reminder.itemId]?.let { if (it.paid || it.skipped) scheduler.cancel(reminder.id) else scheduler.reconcile(it, reminder) } }
+                try { items[reminder.itemId]?.let { if (it.paid || it.skipped) scheduler.cancel(reminder.id)
+                    else if (!ReminderDeliveries.delivered(delivered[reminder.id], it, reminder)) scheduler.reconcile(it, reminder) } }
                 catch (e: Exception) { failure = e }
             }
             taskDao.all().forEach { task ->
@@ -737,4 +762,24 @@ class Repository(
             failure?.let { throw it }
         }))
     }
+}
+
+/**
+ * One occurrence [old] of an entire-series save: it takes the edited occurrence's details, moved to [date], but keeps its
+ * own paid state, payments, skip and checklist ticks. A bill with payments also keeps its amount, currency and category:
+ * the payments were made against those, and a new amount would un-pay it or leave it paid for more than it costs.
+ */
+internal fun seriesOccurrence(edited: ItineraryItem, old: ItineraryItem, date: java.time.LocalDate, changeRepeat: Boolean, repeat: RepeatRule): ItineraryItem {
+    val moved = edited.startingOn(date).copy(id = old.id, tripId = old.tripId, skipped = old.skipped,
+        seriesId = if (changeRepeat && repeat == RepeatRule.NONE) null else old.seriesId,
+        repeatRule = if (changeRepeat) repeat.name else old.repeatRule)
+    if (old.id == edited.id) return moved
+    val own = moved.copy(paid = old.paid, payments = old.payments, checklist = keepChecklistTicks(edited.checklist, old.checklist))
+    return if (old.payments.isEmpty()) own else own.copy(billAmountMinor = old.billAmountMinor, billCurrency = old.billCurrency, category = old.category)
+}
+
+/** The edited list (entries added, removed, renamed), each ticked only if the same entry was ticked in [own]. */
+internal fun keepChecklistTicks(edited: List<ChecklistEntry>, own: List<ChecklistEntry>): List<ChecklistEntry> {
+    val done = own.associate { it.id to it.done }
+    return edited.map { it.copy(done = done[it.id] ?: false) }
 }
