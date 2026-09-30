@@ -16,6 +16,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.data?.lastPathSegment ?: return
         val trigger = intent.getLongExtra("trigger", 0L)
+        (context.applicationContext as ItineraryApp).reminderScheduler.ledger.fired(MissedReminders.taskKey(id), System.currentTimeMillis())
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {

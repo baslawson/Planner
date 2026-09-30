@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import com.example.itinerary.reminders.ReminderAlarms
+import com.example.itinerary.reminders.MissedReminders
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -766,6 +767,19 @@ class Repository(
             }
             failure?.let { throw it }
         }))
+    }
+
+    /** After a reboot: [post] the [pending] alarms that fell due while the phone was off; missed event reminders then count as delivered. */
+    suspend fun deliverMissedReminders(pending: Map<String, Long>, now: Long, post: (List<MissedReminders.Missed>) -> Unit) = changes.withLock {
+        val due = MissedReminders.due(pending, now)
+        val events = due.keys.mapNotNull(MissedReminders::eventId).mapNotNull { id ->
+            reminderDao.byId(id)?.let { r -> itemDao.byId(r.itemId)?.let { id to (it to r) } } }.toMap()
+        val delivered = readIds(events.keys, reminderDao::deliveries).associate { it.reminderId to it.key }
+        val tasks = due.keys.mapNotNull(MissedReminders::taskId).mapNotNull { taskDao.byId(it) }.associateBy { it.id }
+        val missed = MissedReminders.select(due, events, delivered, tasks)
+        post(missed)
+        missed.filterIsInstance<MissedReminders.Event>().forEach { m ->
+            ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) } }
     }
 }
 

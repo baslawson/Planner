@@ -12,6 +12,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val id = intent.getLongExtra(ReminderScheduler.EXTRA_REMINDER_ID, 0L)
         // Sample alarms use id zero and have no database record.
         if (id == 0L) { show(context, intent); return }
+        (context.applicationContext as ItineraryApp).reminderScheduler.ledger.fired(MissedReminders.eventKey(id), System.currentTimeMillis())
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {

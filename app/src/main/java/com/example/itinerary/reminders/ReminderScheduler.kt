@@ -21,6 +21,7 @@ interface ReminderAlarms {
 
 class ReminderScheduler(private val context: Context) : ReminderAlarms {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
+    val ledger = AlarmLedger(context)
 
     override fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {
         val triggerAt = task.activeReminderAt
@@ -33,11 +34,13 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt)
         val updated = PendingIntent.getBroadcast(context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        ledger.set(MissedReminders.taskKey(task.id), triggerAt)
         setAlarm(triggerAt, updated)
     }
 
     override fun cancelTask(id: String) {
         taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
+        ledger.remove(MissedReminders.taskKey(id))
         androidx.core.app.NotificationManagerCompat.from(context).cancel("task:$id", 0)
     }
 
@@ -59,6 +62,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             // Reloading must also preserve an alarm Android has not delivered yet, including one set before an
             // eastward time-zone change moved this time into the past (Repository.deliverReminder accepts it).
             if (!preservePending) {
+                ledger.remove(MissedReminders.eventKey(reminder.id))
                 cancelCode(reminder.id.toInt())
                 cancelCode(snoozeCode(reminder.id))
             }
@@ -74,6 +78,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        ledger.set(MissedReminders.eventKey(reminder.id), triggerAt)
         setAlarm(triggerAt, pending)
     }
 
@@ -92,6 +97,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     }
 
     override fun cancel(reminderId: Long) {
+        ledger.remove(MissedReminders.eventKey(reminderId))
         cancelCode(reminderId.toInt())
         cancelCode(snoozeCode(reminderId))
         androidx.core.app.NotificationManagerCompat.from(context).cancel(reminderId.toInt())
