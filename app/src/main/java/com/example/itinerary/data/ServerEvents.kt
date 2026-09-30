@@ -7,7 +7,8 @@ import java.time.temporal.ChronoUnit
 // Calendar sync step 6 (two-way): event files in the calendar Planner keeps in sync with.
 object ServerEvents {
     // [item] is the event as a Planner event, or null when Planner can't hold it exactly (a repeating event, a timed one
-    // longer than a day, several events in one file, a cancelled or unreadable one): those stay read-only.
+    // longer than a day, several events in one file, a cancelled or unreadable one, one outside the years a calendar file
+    // can hold): those stay read-only.
     class Parsed(val uid: String?, val item: ItineraryItem?)
 
     fun parse(text: String, zone: ZoneId): Parsed = runCatching {
@@ -34,7 +35,7 @@ object ServerEvents {
         Parsed(uid, ItineraryItem(tripId = 0, date = timing.date, startTime = timing.startTime, durationMinutes = timing.durationMinutes,
             endDate = timing.endDate, title = one("SUMMARY")?.value?.let(Ics::unescape)?.trim()?.takeIf { it.isNotEmpty() }?.take(500) ?: "(No title)",
             location = one("LOCATION")?.value?.let(Ics::unescape)?.trim().orEmpty().take(2000),
-            notes = one("DESCRIPTION")?.value?.let(Ics::unescape)?.trim().orEmpty().take(20_000)))
+            notes = one("DESCRIPTION")?.value?.let(Ics::unescape)?.trim().orEmpty().take(20_000)).takeIf(CalendarExport::exportable))
     }.getOrElse { Parsed(null, null) }
 
     // The fields two-way sync carries from Nextcloud into a Planner event; everything Planner-only (checklist, reminders,

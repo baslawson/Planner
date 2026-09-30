@@ -287,10 +287,60 @@ class CalendarTwoWayTest {
         syncAgain()
         assertEquals(before, writes().size)
         assertEquals(CalendarSync.fingerprint(item("QA Travelling")), rows().single().fingerprint)
-        // A real edit is still sent, with the times of the phone's zone now.
+        // A real edit is still sent, with the times of the phone's zone now — even one moved by exactly the zone's offset
+        // (17:00 in Perth is the 09:00 UTC it was).
         repo.saveItem(item("QA Travelling").copy(startTime = LocalTime.of(17, 0)))
         sync.send()
+        assertEquals(before + 1, writes().size)
         assertTrue(plannerFile("QA Travelling").value.second.contains("DTSTART:20261005T090000Z"))
+    }
+
+    @Test fun aLostReplyThenDeletedInPlannerIsDeletedOnNextcloudToo() = runBlocking {
+        save("QA Kept")
+        start()
+        save("QA Lost then deleted", 10)
+        sync.send()
+        // As if the reply had been lost: pending, its version unknown.
+        val row = rows().single { it.itemId == item("QA Lost then deleted").id }
+        database.sentDao().put(row.copy(etag = null, ics = null, problem = SentEvent.PENDING))
+        repo.deleteWithUndo(item("QA Lost then deleted")); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+        syncAgain(); dav.bump(); syncAgain()
+        assertEquals(listOf("QA Kept"), items().map { it.title }) // not brought back in
+        assertTrue(dav.files.values.none { it.second.contains("QA Lost then deleted") })
+        assertTrue(rows().none { it.problem != null })
+        assertOtherCalendarUntouched()
+    }
+
+    @Test fun reconnectingLinksPastEventsBeforeThePullWindowToo() = runBlocking {
+        // The window starts on 1 July (three months back); this one is from March and already on Nextcloud.
+        repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, 5), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA Long ago"))
+        val uid = "planner-00000001-aaaa-bbbb-cccc-dddddddddddd@planner"
+        dav.put("${synced}$uid.ics", ics(uid, "QA Long ago", "20260305T090000Z"))
+        start()
+        val before = writes().size
+        repo.saveItem(item("QA Long ago").copy(location = "Room 3"))
+        sync.send()
+        // Its own file is updated, not a second one written.
+        assertEquals(before + 1, writes().size)
+        assertEquals(1, dav.files.count { it.key.startsWith(synced) && it.value.second.contains("QA Long ago") })
+        assertTrue(dav.files["${synced}$uid.ics"]!!.second.contains("LOCATION:Room 3"))
+        assertOtherCalendarUntouched()
+    }
+
+    @Test fun anEventInYear9999NeitherBreaksThePullNorComesIn() = runBlocking {
+        dav.put("${synced}far.ics", ics("web-far", "QA Year 9999", "99990105T090000Z"))
+        dav.put("${synced}near.ics", ics("web-near", "QA Near", "20261007T090000Z"))
+        save("QA Moved far")
+        start()
+        assertEquals("Calendars are up to date.", sync.state.value.message)
+        assertEquals(setOf("QA Near", "QA Moved far"), items().map { it.title }.toSet())
+        // A synced event moved to 9999 on Nextcloud: read-only from then on; Planner's event stays and the pull still works.
+        dav.edit(plannerFile("QA Moved far").key) { it.replace("DTSTART:20261005T090000Z", "DTSTART:99991005T090000Z") }
+        syncAgain()
+        assertEquals("Calendars are up to date.", sync.state.value.message)
+        assertEquals(SentEvent.DETACHED, rows().single { it.itemId == item("QA Moved far").id }.problem)
+        assertEquals(day, item("QA Moved far").date)
+        assertOtherCalendarUntouched()
     }
 
     @Test fun offlineKeepsEverythingAndOtherCalendarsAreNeverWritten() = runBlocking {

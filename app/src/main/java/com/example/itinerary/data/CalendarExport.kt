@@ -8,8 +8,11 @@ import java.time.format.DateTimeFormatter
 /** RFC 5545: one saved occurrence, with UTC timed values and exclusive all-day end. */
 object CalendarExport {
     private val timestamp = DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+    // The years a calendar file holds (encode and managed refuse others).
+    fun exportable(item: ItineraryItem) = item.date.year in 1..9998
+
     fun encode(item: ItineraryItem, uid: String, zone: ZoneId = ZoneId.systemDefault(), now: Instant = Instant.now()): String {
-        require(item.date.year in 1..9998) { "Calendar export supports years 1–9998" }
+        require(exportable(item)) { "Calendar export supports years 1–9998" }
         require(uid.matches(Regex("[A-Za-z0-9@._-]+")))
         val lines = mutableListOf("BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Planner//Event Export//EN", "CALSCALE:GREGORIAN",
             "BEGIN:VEVENT", "UID:$uid", "DTSTAMP:${timestamp.format(now)}")
@@ -23,7 +26,7 @@ object CalendarExport {
     val MANAGED = setOf("DTSTART", "DTEND", "DURATION", "SUMMARY", "LOCATION", "DESCRIPTION")
 
     fun managed(item: ItineraryItem, zone: ZoneId = ZoneId.systemDefault()): List<String> {
-        require(item.date.year in 1..9998) { "Calendar export supports years 1–9998" }
+        require(exportable(item)) { "Calendar export supports years 1–9998" }
         val lines = mutableListOf<String>()
         val time = item.startTime
         if (time == null) {

@@ -29,6 +29,20 @@ class ServerEventsTest {
         assertEquals("r", ServerEvents.parse(file("UID:r", "DTSTART:20261005T010000Z", "RRULE:FREQ=WEEKLY"), utc).uid)
     }
 
+    @Test fun aSemicolonInAQuotedParameterKeepsTheEventEditable() {
+        val text = file("UID:q", "DTSTART:20261005T010000Z", "SUMMARY:Lunch", "ATTENDEE;CN=\"Smith; Jane\":mailto:jane@example.com")
+        assertEquals("Lunch", ServerEvents.parse(text, utc).item!!.title)
+    }
+
+    @Test fun anEventOutsideYearsOneTo9998StaysReadOnly() {
+        listOf(file("UID:f", "DTSTART:99990105T090000Z", "SUMMARY:Far"), file("UID:f", "DTSTART;VALUE=DATE:99991231", "SUMMARY:Far"),
+            file("UID:f", "DTSTART;VALUE=DATE:00000105", "SUMMARY:Year zero")).forEach {
+            val parsed = ServerEvents.parse(it, utc)
+            assertEquals("f", parsed.uid); assertNull("Must stay read-only: $it", parsed.item)
+        }
+        assertNotNull(ServerEvents.parse(file("UID:n", "DTSTART;VALUE=DATE:99981231", "SUMMARY:Near"), utc).item)
+    }
+
     @Test fun patchingChangesOnlyWhatPlannerManages() {
         val original = file("UID:m1", "DTSTAMP:20260101T000000Z", "DTSTART;TZID=Europe/London:20261005T090000", "DTEND;TZID=Europe/London:20261005T100000",
             "SUMMARY:Meeting", "LOCATION:Room 4", "SEQUENCE:3", "ORGANIZER;CN=Sam:mailto:sam@example.com",

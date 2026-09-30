@@ -258,8 +258,8 @@ class CalendarSync(
                 continue
             }
             val print = fingerprint(item)
-            // A row from before fingerprints ignored the time zone: taken as it is (once), so the update sends nothing.
-            if (row != null && row.fingerprint != print && row.fingerprint == zonedFingerprint(item, zone())) row = row.copy(fingerprint = print).also { sentDao.put(it) }
+            // A row from before this version (see inSync) still describing the event: brought up to date, nothing sent.
+            if (row != null && row.fingerprint != print && inSync(row.fingerprint, item, zone())) row = row.copy(fingerprint = print).also { sentDao.put(it) }
             when {
                 pending || row == null || row.uid == null && row.fingerprint != print -> {
                     if (!pending && !checked) continue
@@ -322,13 +322,7 @@ class CalendarSync(
         client.deleteFile(account, target.href, hrefOf(target, row), row.etag)
     }
 
-    // [file] is the one a pending row wrote (its reply was lost): the row takes it. What it holds counts as synced, so
-    // an edit made since is sent at the next pass; a file Planner can't read is left for the next pull to check.
-    private suspend fun adopt(row: SentEvent, file: ServerFile, item: ItineraryItem?) {
-        val server = ServerEvents.parse(file.data, zone()).item
-        db.sentDao().put(if (server == null || item == null) row.copy(problem = SentEvent.CHANGED)
-            else row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(ServerEvents.apply(item, server)), problem = null))
-    }
+    private suspend fun adopt(row: SentEvent, file: ServerFile, item: ItineraryItem?) { db.sentDao().put(adopted(row, file, item, zone())) }
 
     // The file of [row]: its own name for events that came from Nextcloud, "<uid>.ics" for ones Planner created.
     private fun hrefOf(target: CalendarSource, row: SentEvent): String = row.href ?: "${target.href}${row.uid}.ics"
@@ -357,11 +351,11 @@ class CalendarSync(
         val linkedIds = rows.filter { it.uid != null || it.problem != null }.mapTo(HashSet()) { it.itemId }
         val noted = rows.filter { it.uid == null && it.problem == null }.associateBy { it.itemId }
         val unlinked = items.values.filter { sendable(it) && it.id !in linkedIds && it.id !in waiting }
-        // Events after the window may have files too (send would write them again): those are read only to link them.
-        val later = if (unlinked.none { it.lastDay > until }) emptyMap() else client.calendarFiles(account, target.href,
-            until.plusDays(1).atStartOfDay(zone()).toInstant(), until.plusYears(100).atStartOfDay(zone()).toInstant())
-            .filter { it.href !in synced && it.href !in files }.associateBy { it.href }
-        val parsedFiles = (files + later).mapValues { ServerEvents.parse(it.value.data, zone()) }
+        // Events outside the window may have files too (send would write them again): those are read only to link them.
+        val outside = linkRanges(unlinked, from, until, target.fetchedFor == null).flatMap { (start, end) ->
+            client.calendarFiles(account, target.href, start.atStartOfDay(zone()).toInstant(), end.atStartOfDay(zone()).toInstant())
+        }.filter { it.href !in synced && it.href !in files }.associateBy { it.href }
+        val parsedFiles = (files + outside).mapValues { ServerEvents.parse(it.value.data, zone()) }
         val relinked = relink(parsedFiles.filterKeys { it !in synced }.mapNotNull { (href, p) -> p.item?.let { Triple(href, p.uid, it) } }, unlinked)
         fun uidOf(href: String) = parsedFiles[href]?.uid ?: href.substringAfterLast('/').removeSuffix(".ics")
         // What Nextcloud has counts as synced; if Planner's event differs, the user chooses which to keep.
@@ -372,7 +366,7 @@ class CalendarSync(
                 uid = uidOf(href), href = href, etag = file.etag, ics = file.data, fingerprint = print,
                 problem = if (same) null else SentEvent.CONFLICT, conflict = if (same) null else file.data))
         }
-        for ((href, file) in later) { val item = relinked[href]?.let { items[it] } ?: continue; link(href, file, parsedFiles.getValue(href).item ?: continue, item) }
+        for ((href, file) in outside) { val item = relinked[href]?.let { items[it] } ?: continue; link(href, file, parsedFiles.getValue(href).item ?: continue, item) }
         for ((href, file) in files) {
             val parsed = parsedFiles.getValue(href)
             val row = synced[href]
@@ -498,10 +492,7 @@ class CalendarSync(
         send()
     }
 
-    private fun sendable(item: ItineraryItem) = item.id > 0 && item.category != "Bills" && !item.skipped
-
-    // True when [stored] (a row's fingerprint) still describes [item]: unchanged in Planner since the last sync.
-    private fun inSync(stored: String, item: ItineraryItem) = stored == fingerprint(item) || stored == zonedFingerprint(item, zone())
+    private fun inSync(stored: String, item: ItineraryItem) = inSync(stored, item, zone())
 
     // For backups: which calendar Planner keeps in sync with and what it synced, so a restore doesn't send everything
     // again. Conflicts aren't kept (they're checked again).
@@ -799,15 +790,44 @@ class CalendarSync(
 
         // What Planner syncs for [item], as a short fingerprint: a change in any synced detail changes it. Worked out in
         // UTC, so a new phone time zone on its own (travelling) changes nothing and sends nothing; an event edited
-        // afterwards is still written with the zone of the moment.
-        internal fun fingerprint(item: ItineraryItem): String = zonedFingerprint(item, java.time.ZoneOffset.UTC)
+        // afterwards is still written with the zone of the moment. Prefixed, so a row saved before (without it) is told
+        // apart: see inSync.
+        internal fun fingerprint(item: ItineraryItem): String = PRINT + zonedFingerprint(item, java.time.ZoneOffset.UTC)
+        private const val PRINT = "u1:"
 
-        // How fingerprints were worked out until 0.0.8: in the phone's zone. A row from then still counts as synced when
-        // it matches in the current zone (and send brings it up to date), so the update doesn't send everything again.
+        // The hash alone, as fingerprints were until 0.0.9 (in the phone's zone until 0.0.8, in UTC in 0.0.9).
         internal fun zonedFingerprint(item: ItineraryItem, zone: ZoneId): String {
             val text = CalendarExport.encode(item, "planner", zone, java.time.Instant.EPOCH)
             return java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
         }
+
+        // Not a bill or a skipped date, and within the years a calendar file can hold.
+        internal fun sendable(item: ItineraryItem) = item.id > 0 && item.category != "Bills" && !item.skipped && CalendarExport.exportable(item)
+
+        // True when [stored] (a row's fingerprint) still describes [item]: unchanged in Planner since the last sync. A row
+        // saved before fingerprints had their prefix may match the old ways too (UTC in 0.0.9, the phone's zone until
+        // 0.0.8); send then rewrites it, so that is only ever once.
+        internal fun inSync(stored: String, item: ItineraryItem, zone: ZoneId) = CalendarExport.exportable(item) &&
+            (stored == fingerprint(item) || !stored.startsWith(PRINT) && (stored == zonedFingerprint(item, java.time.ZoneOffset.UTC) || stored == zonedFingerprint(item, zone)))
+
+        // [file] is the one a pending [row] wrote (its reply was lost): the row takes it. What it holds counts as synced, so
+        // an edit made since is sent at the next pass; a file Planner can't read is left for the next pull to check.
+        internal fun adopted(row: SentEvent, file: ServerFile, item: ItineraryItem?, zone: ZoneId): SentEvent {
+            val server = ServerEvents.parse(file.data, zone).item
+            return when {
+                // Deleted in Planner meanwhile: still pending, now with the file's version, so send deletes exactly that file.
+                item == null -> row.copy(etag = file.etag, problem = SentEvent.PENDING)
+                server == null -> row.copy(problem = SentEvent.CHANGED)
+                else -> row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(ServerEvents.apply(item, server)), problem = null)
+            }
+        }
+
+        // Outside the pull window, the date ranges (end exclusive) whose files are read only to link them to [unlinked]
+        // events (send would write those again): after the window when an unlinked event lies there; before it too on the
+        // [first] pull since the calendar was chosen (after reconnecting, past events are only noted, never sent).
+        internal fun linkRanges(unlinked: List<ItineraryItem>, from: LocalDate, until: LocalDate, first: Boolean): List<Pair<LocalDate, LocalDate>> =
+            listOfNotNull((from.minusYears(100) to from).takeIf { first && unlinked.any { it.lastDay < from } },
+                (until.plusDays(1) to until.plusYears(100)).takeIf { unlinked.any { it.lastDay > until } })
 
         // Planner's own file names for events it created (see sendLocked).
         internal fun isPlannerUid(uid: String?) = uid != null && uid.startsWith("planner-") && uid.endsWith("@planner")

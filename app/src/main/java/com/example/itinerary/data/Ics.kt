@@ -27,8 +27,14 @@ internal object Ics {
             if (line[i] == '"') quoted = !quoted
             line[i] == ':' && !quoted
         } ?: error("Invalid calendar property.")
-        val pieces = line.substring(0, colon).split(';')
-        return Property(pieces[0].uppercase(), pieces.drop(1).associate {
+        // Parameters end at a ';' outside double quotes (CN="Smith; Jane").
+        val pieces = mutableListOf(StringBuilder())
+        quoted = false
+        for (c in line.substring(0, colon)) {
+            if (c == '"') quoted = !quoted
+            if (c == ';' && !quoted) pieces += StringBuilder() else pieces.last().append(c)
+        }
+        return Property(pieces[0].toString().uppercase(), pieces.drop(1).map { it.toString() }.associate {
             require('=' in it) { "Invalid calendar parameter." }
             it.substringBefore('=').uppercase() to it.substringAfter('=').trim('"')
         }, line.substring(colon + 1))
