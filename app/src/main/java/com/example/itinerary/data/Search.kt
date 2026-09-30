@@ -241,13 +241,15 @@ object Search {
                 token in WEEKDAYS -> { dates += exact(weekdayDate(WEEKDAYS.getValue(token), "this", today)); i++ }
                 isDayNumber(token) && next != null && monthOf(next) != null -> {
                     val year = yearAt(tokens, i + 2)
-                    dates += dayMonth(token.toInt(), monthOf(next)!!, year)
-                    i += if (year != null) 3 else 2
+                    val size = if (year != null) 3 else 2
+                    named(token.toInt(), monthOf(next)!!, year, tokens.subList(i, i + size), dates, invalidDates)
+                    i += size
                 }
                 monthOf(token) != null && next != null && isDayNumber(next) -> {
                     val year = yearAt(tokens, i + 2)
-                    dates += dayMonth(next.toInt(), monthOf(token)!!, year)
-                    i += if (year != null) 3 else 2
+                    val size = if (year != null) 3 else 2
+                    named(next.toInt(), monthOf(token)!!, year, tokens.subList(i, i + size), dates, invalidDates)
+                    i += size
                 }
                 token in MONTHS -> {
                     val year = yearAt(tokens, i + 1)
@@ -261,6 +263,13 @@ object Search {
             }
         }
         return Parsed(words, dates, invalidDates.distinct())
+    }
+
+    // A named date is checked like an ISO one: "31 February" or "29 February 2027" must be corrected. Without a year,
+    // 29 February is allowed (it falls in leap years).
+    private fun named(day: Int, month: Month, year: Int?, words: List<String>, dates: MutableList<DateFilter>, invalidDates: MutableList<String>) {
+        val valid = if (year == null) day <= month.maxLength() else java.time.YearMonth.of(year, month).isValidDay(day)
+        if (valid) dates += dayMonth(day, month, year) else invalidDates += words.joinToString(" ")
     }
 
     private fun isDayNumber(token: String): Boolean = token.length <= 2 && token.toIntOrNull() in 1..31
