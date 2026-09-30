@@ -97,16 +97,32 @@ object QuickEntry {
     private val ordinalDates = "(?:the\\s+)?(?:$ordinalWords)\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+(?:the\\s+)?(?:$ordinalWords)\\b(?:,?\\s+\\d{4})?" +
         // Alone only where nothing else follows: "Review the twenty-first", not "Watch the first episode".
         "|the\\s+(?:$ordinalWords)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
+    // Right after a day number, am or pm makes it a time: "Call Jan 3 pm" is 3pm, with Jan (a name) left in the title.
+    private const val notClockHour = "(?!\\d{1,2}\\s*(?:am|pm|a\\.m|p\\.m)(?![a-z]))"
+    // "Dentist 3rd 2pm": a day number with st/nd/rd/th and no "the" is a date right before a time; with "on", also at the
+    // end or before at/from/for ("Dentist on 3rd at 2pm"). Before other words it stays in the title: "3rd floor".
+    private const val bareOrdinal = "\\d{1,2}(?:st|nd|rd|th)(?=\\s*,?\\s*(?:at\\s+|@\\s*)?\\d)"
+    private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
-    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)"
+    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
     // "before Friday" is a deadline: the date is Friday, "before" leaves the title.
-    private val dates = rx("\\b(?:(?<!-)(?:on|by|before|due(?:\\s+(?:on|by))?)\\s+)?(?:$datePhrases)\\b")
+    private val dates = rx("\\b(?:(?:(?<!-)(?:on|by|before|due(?:\\s+(?:on|by))?)\\s+)?(?:$datePhrases)|$onOrdinal)\\b")
+    // A four-digit number after a month-name date ("3 Oct 1500", "Oct 3, 1930", "3-7 Oct 0800"): group 2 is its year only
+    // when it could be one (see parse); otherwise group 1, the space before it, is masked so it stays a 24-hour time.
+    private val yearAfterMonth = rx("\\b(?:$months)(?:\\s+(?:the\\s+)?(?:\\d{1,2}(?:st|nd|rd|th)?(?:$rangeJoin\\d{1,2}(?:st|nd|rd|th)?)?|(?:$ordinalWords)))?(,?\\s+)(\\d{4})(?!\\d)")
+    // "Work 9-5 Oct 3rd": the month goes with the day after it, so 9-5 are hours. Group 1, the space before the month, is
+    // masked so neither "5 Oct" nor "9-5 Oct" reads as a date. "3-7 Oct", "3-7 Oct 2026" and "3-7 Oct 5pm" stay date ranges.
+    private val hoursBeforeMonthDay = rx("(?<![\\w/.:])\\d{1,2}(?:[:.]\\d{2})?\\s*(?:[-–—]|to|until|till)\\s*\\d{1,2}(\\s+)(?=(?:$months)\\s+(?:the\\s+)?$notClockHour\\d{1,2}(?:st|nd|rd|th)?\\b)")
     private const val meridiem = "(?:am|pm|a\\.m\\.?|p\\.m\\.?)"
     // 24-hour times written as four digits: 0600, 1500, 0000, optionally 1500hrs.
     private const val hhmm = "(?:[01]\\d|2[0-3])[0-5]\\d"
     private const val hoursSuffix = "(?:hrs?|hours?|h)"
     private const val noonWords = "noon|midday|mid-day"
-    private const val clock = "(?:$hhmm(?:\\s*$hoursSuffix)?|$noonWords|midnight|\\d{1,2}(?:[:.h]\\d{2})?(?:\\s*$meridiem)?)"
+    // "730pm", "1030am": an hour and minutes without a colon, only with am/pm.
+    private const val clockAmPm = "(?<![.:,\\d])(?:1[0-2]|0?[1-9])[0-5]\\d\\s*$meridiem"
+    // "12 noon", "12 midnight": the 12 is part of the word.
+    private const val noonOrMidnight = "(?:12\\s*)?(?:$noonWords|midnight)"
+    private const val clock = "(?:$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.h]\\d{2})?(?:\\s*$meridiem)?)"
     // Groups 1–2 "between 2 and 4", 3–4 every other form; see rangeEnds.
     private val ranges = rx("\\b(?:between\\s+($clock)\\s+and\\s+($clock)|(?:(?:from|at)\\s+)?($clock)\\s*(?:[-–—]|to|until|till?|'til)\\s*($clock))(?![\\w])")
     private fun rangeEnds(match: MatchResult): Pair<String, String> = match.groupValues.let { g -> if (g[1].isNotEmpty()) g[1] to g[2] else g[3] to g[4] }
@@ -124,7 +140,7 @@ object QuickEntry {
     private const val approx = "(?:(?:around|about|approx(?:imately)?|roughly|circa)\\s+|~\\s*)"
     // 3p, 3:30p and 15.30 are times only where they read like one; see readsAsTime.
     private const val shortClock = "\\d{1,2}(?::\\d{2})?[ap]|\\d{1,2}\\.[0-5]\\d"
-    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$hhmm(?:\\s*$hoursSuffix)?|$noonWords|midnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:.h])(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
+    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:.h])(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
     private val shortClocks = rx("(?<![\\w.:/])($shortClock)(?![\\w.])")
     private const val amount = "(?:-?\\d+(?:\\.\\d+)?|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
@@ -157,8 +173,9 @@ object QuickEntry {
     private val dateRanges = rx("\\b(?:from\\s+)?(?:the\\s+)?($dayNumber)(?:\\s+(?:of\\s+)?($months))?(?:\\s+(\\d{4}))?$rangeJoin(?:the\\s+)?($dayNumber)\\s+(?:of\\s+)?($months)(?:\\s+(\\d{4}))?\\b" +
         "|\\b(?:from\\s+)?($months)\\s+($dayNumber)$rangeJoin(?:($months)\\s+)?($dayNumber)(?:,?\\s+(\\d{4}))?\\b" +
         "|\\b(?:from\\s+)?((?:next\\s+|this\\s+)?(?:$weekdays))(?:\\s*[-–—]\\s*|\\s+(?:to|until|till|through|thru)\\s+)($weekdays)\\b")
-    // "3 nights from Friday", "for 5 nights": a stay, ending the morning after the last night.
-    private val nights = rx("\\b(?:for\\s+)?($relativeCount)\\s+nights?(?:\\s+from)?\\b")
+    // "3 nights from Friday", "for 5 nights": a stay, ending the morning after the last night. "A night" or "one night" only
+    // with "for": "Book a night out", "One night in Bangkok" are titles. The count is group 1 (with for) or 2.
+    private val nights = rx("\\b(?:for\\s+($relativeCount)|(?!(?:a|an|one)\\b)($relativeCount))\\s+nights?(?:\\s+from)?\\b")
     private val spanDays = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?)\\b")
     private val repeatPeriods = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?|fortnights?|months?|years?)\\b")
     private const val reminderSpan = "$span|(?:$amount|half(?:\\s+an?)?)\\s*(?:days?|weeks?)|the\\s+(?:day|week)"
@@ -202,9 +219,10 @@ object QuickEntry {
     private val everyPeriod = rx("\\b(?:every|each)\\s+(?:(weekday|day|$weekdays)\\s+)?(morning|afternoon|arvo|evening|night)\\b")
     // "with a reminder", "…, and remind me": a reminder at the time of the event.
     private val plainReminder = rx("\\bwith\\s+(?:a\\s+)?reminder\\b|(?:,\\s*|\\band\\s+)remind\\s+me\\s*$")
-    // "until Christmas", "until 30 November", "till next Friday": when a repeat stops.
+    // "until Christmas", "until 30 November", "till next Friday": when a repeat stops. A number with one dot is a time,
+    // as elsewhere: "9 until 5.30" is an hour range; "until 5.10.26" is a date.
     private const val holidayNames = "anzac\\s+day|australia\\s+day|father['’]?s\\s+day|nye|easter(?:\\s+(?:sunday|monday))?|good\\s+friday|mother['’]?s\\s+day|christmas\\s+eve|(?:christmas|xmas)(?:\\s+day)?|boxing\\s+day|new\\s+year['’]?s(?:\\s+(?:eve|day))?|hallowe['’]?en|valentine['’]?s(?:\\s+day)?"
-    private val repeatUntil = rx("\\b(?:until|till|til|through|thru|up\\s+(?:to|until))\\s+(?:and\\s+including\\s+)?($holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?)\\b")
+    private val repeatUntil = rx("\\b(?:until|till|til|through|thru|up\\s+(?:to|until))\\s+(?:and\\s+including\\s+)?($holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{1,2}[/-]\\d{1,2})\\b")
     // A repeat's first date: "starting next week", "from 6 Oct", "beginning Monday".
     private val repeatStart = rx("\\b(?:starting|beginning|from)\\s+(?:on\\s+)?(next\\s+week|$datePhrases)\\b")
     // "weekly on Tuesdays", "fortnightly on Friday": the rule with its weekday.
@@ -230,7 +248,7 @@ object QuickEntry {
         // Getting ready happens before the day: "Halloween costume shopping", "Christmas Eve prep".
         "(?!\\s+(?:shopping|costumes?|prep\\w*|planning|decorations?|cards?|gifts?|presents?)\\b)")
     private val bareWeekday = rx("^(?:on\\s+)?(?:$weekdays)$")
-    private val fourDigits = rx("(?<![\\w.:/])(\\d{4})(?=(?:$hoursSuffix)?\\b)(?![/.:]\\d)")
+    private val fourDigits = rx("(?<![\\w.:/])(\\d{4})(?=(?:$hoursSuffix)?\\b)(?![/.:]\\d)(?!\\s*$meridiem(?![\\w]))")
 
     // Short words that are also ordinary title words: "Buy sun cream", "Sat nav", "Midnight Mass".
     // They count as scheduling only beside other scheduling words, never before an ordinary word.
@@ -272,6 +290,11 @@ object QuickEntry {
         }
         quote.findAll(text).forEach { mask(it.range, '\uE000') }
         literalRanges.filter { it.first >= 0 && it.last < text.length && !it.isEmpty() }.forEach { mask(it, '\uE000') }
+        // A space masked with \uE001 keeps the words on either side apart: see yearAfterMonth and hoursBeforeMonthDay.
+        fun separate(range: IntRange) = range.filter { remaining[it].isWhitespace() }.forEach { mask(it..it, '\uE001') }
+        // A year from last year to 2100; any other four digits after a month-name date are a 24-hour time.
+        yearAfterMonth.findAll(remaining).toList().forEach { if (it.groupValues[2].toInt() !in today.year - 1..2100) separate(it.groups[1]!!.range) }
+        hoursBeforeMonthDay.findAll(remaining).toList().forEach { separate(it.groups[1]!!.range) }
         titleWordCandidates.findAll(remaining).toList().forEach { match ->
             val clockWord = match.value.lowercase(Locale.ROOT) in setOf("noon", "midnight", "midday")
             val lead = if (clockWord) "at|from|until|till?|to|by" else "on|next|this|last|every|each|from|until|till?|to|by"
@@ -640,7 +663,7 @@ object QuickEntry {
         if (repeat == RepeatRule.NONE) nights.findAll(remaining).toList().let { found ->
             if (found.size + (if (spanLength != null) 1 else 0) > 1) return error("Use one length.")
             found.firstOrNull()?.let { match ->
-                val count = readAmount(match.groupValues[1].lowercase(Locale.ROOT))
+                val count = readAmount(match.groupValues[1].ifEmpty { match.groupValues[2] }.lowercase(Locale.ROOT))
                 if (!count.isFinite() || count % 1 != 0.0 || count < 1 || count + 1 > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS - 1} nights.")
                 if (rangeStart != null) return error("Use a date range or a length, not both.")
@@ -797,9 +820,8 @@ object QuickEntry {
         }
         var holiday = false
         if (ds.isEmpty() && numeric.isEmpty() && !relative && !impliedToday && orDates == null) holidays.find(remaining)?.let { match ->
-            // "Boxing Day 2027": that year's, and the year is not a time.
-            val year = rx("^\\s*,?\\s*(\\d{4})\\b").find(remaining.substring(match.range.last + 1))
-            if (year != null && year.groupValues[1].toInt() !in 1..9999) return error("That date isn't valid.")
+            // "Boxing Day 2027": that year's, and the year is not a time. "Christmas Day 1100" is a 24-hour time instead.
+            val year = rx("^\\s*,?\\s*(\\d{4})\\b").find(remaining.substring(match.range.last + 1))?.takeIf { it.groupValues[1].toInt() in today.year - 1..2100 }
             date = nextHoliday(match.value.lowercase(Locale.ROOT), year?.let { LocalDate.of(it.groupValues[1].toInt(), 1, 1) } ?: today)
             year?.groups?.get(1)?.range?.let { r -> consume(r.first + match.range.last + 1..r.last + match.range.last + 1, QuickPhraseKind.DATE) }
             holiday = true
@@ -1095,6 +1117,15 @@ object QuickEntry {
             phrases += QuickEntryPhrase(match.range.first, end, QuickPhraseKind.UNSUPPORTED)
             return error("Finish the reminder or repeat phrase, or open More options → Adjust recognised text to keep those words in the title.")
         }
+        // "Book table for Saturday", "Move dentist to Friday", "Party from 7pm": a word left right before the date or time
+        // it introduces goes with it, out of the title. Before a time only for and from: "Work until 5pm" gives no start.
+        rx("(?<![-\\w])(for|from|to|until|till)\\s*$").find(remaining)?.let { match ->
+            val word = match.groups[1]!!.range
+            val next = word.last + 1 + text.substring(word.last + 1).let { it.length - it.trimStart().length }
+            val kinds = if (match.groupValues[1].lowercase(Locale.ROOT) in setOf("for", "from")) setOf(QuickPhraseKind.DATE, QuickPhraseKind.TIME) else setOf(QuickPhraseKind.DATE)
+            if (phrases.any { it.start == next && it.kind in kinds } && consumed.any { next in it })
+                consume(word, phrases.first { it.start == next && it.kind in kinds }.kind)
+        }
         // Scheduling-shaped fragments must not silently turn into part of a saved title.
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))
             return error("Finish the duration, for example for 1 hour and 30 minutes.")
@@ -1252,6 +1283,9 @@ object QuickEntry {
         .replace("a.m", "am").replace("p.m", "pm").replace('.', ':').replace(Regex("(?<=\\d)h(?=\\d)"), ":")
         .replace(Regex("^(\\d{2})(\\d{2})$hoursSuffix?$"), "$1:$2")
         .replace(Regex("(?<=\\d)([ap])$"), "$1m")
+        // "730pm" → 7:30pm; "12 noon" → noon.
+        .replace(Regex("^(1[0-2]|0?[1-9])([0-5]\\d)(?=[ap]m$)"), "$1:$2")
+        .replace(Regex("^12(?=noon$|midday$|mid-day$|midnight$)"), "")
 
     private fun readTime(raw: String): LocalTime? {
         val value = normaliseClock(raw)

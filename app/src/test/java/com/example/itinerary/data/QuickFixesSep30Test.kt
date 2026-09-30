@@ -40,7 +40,8 @@ class QuickFixesSep30Test {
     @Test fun pastChoiceAndHolidayYear() {
         ok("Dentist yesterday or today").let { assertTrue(it.pastDate); assertEquals(listOf(day(9, 29), day(9, 30)), it.dateChoices) }
         assertTrue(parse("Gym yesterday or today every day").error!!.startsWith("A repeat can't start in the past"))
-        assertEquals("That date isn't valid.", parse("Christmas Day 0000").error)
+        // Not a plausible year, so a 24-hour time (third bug hunt, C4).
+        ok("Christmas Day 0000").let { assertEquals(day(12, 25), it.date); assertEquals(at(0), it.time) }
         assertEquals(LocalDate.of(2027, 12, 26), ok("Boxing Day 2027").date)
     }
 }
