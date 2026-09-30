@@ -286,6 +286,23 @@ class SixTaskFeaturesUiTest {
         assertEquals(2,data().tasks.count { it.title==task.title })
         assertTrue(manager.activeNotifications.none { it.tag=="task:${task.id}" })
     }
+    @Test fun snoozedReminderShowsOnCardAndEditor() = runBlocking {
+        val due=System.currentTimeMillis()-1000
+        val task=PlannerTask(title="QA six snoozed",dueDate=LocalDate.now().plusDays(1),reminderAt=due)
+        app.repository.saveTask(task)
+        val until=LocalDate.now().plusDays(1).atTime(10,0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        assertTrue(app.repository.actOnTaskReminder(task.id,due,snoozeUntil=until))
+        fun reminderLines()=nodes().mapNotNull { it.text?.toString() }.filter { it.startsWith("Reminder: ") }
+        fresh();reveal { find("QA six snoozed")!=null && reminderLines().isNotEmpty() };screenshot("task-snoozed-card")
+        val line=reminderLines().single()
+        assertTrue(line,line.startsWith("Reminder: snoozed until ") && line.contains("10"))
+        click("QA six snoozed")
+        reveal { nodes().any { it.text?.toString()?.startsWith("Snoozed until ")==true } };screenshot("task-snoozed-editor")
+        val note=nodes().mapNotNull { it.text?.toString() }.single { it.startsWith("Snoozed until ") }
+        assertTrue(note,note.endsWith(". Changing the reminder ends the snooze.") && note.removePrefix("Snoozed until ").startsWith(line.removePrefix("Reminder: snoozed until ")))
+        click("Remove reminder");await { nodes().none { it.text?.toString()?.startsWith("Snoozed until ")==true } }
+        back();Unit
+    }
     @Test fun taskDocumentImportCopiesBytes() = runBlocking {
         // The document the system picker offers, put in Downloads for this test and removed afterwards.
         val resolver=context.contentResolver

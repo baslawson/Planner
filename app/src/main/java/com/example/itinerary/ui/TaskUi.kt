@@ -75,14 +75,19 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, onEdi
                     style = MaterialTheme.typography.bodySmall,
                     color = if (!task.done && due < today) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 else Text("No due date", style = MaterialTheme.typography.bodySmall)
-                if (!task.done) task.reminderAt?.let { timestamp ->
-                    val reminder = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
-                    Text("Reminder: ${reminder.toLocalDate().dayLabel(LocalDateFormat.current)}, ${reminder.toLocalTime().label(LocalTimeFormat.current, context)}",
+                if (!task.done) task.activeReminderAt?.let { timestamp ->
+                    Text("Reminder: ${if (task.snoozedUntil != null) "snoozed until " else ""}${taskReminderLabel(timestamp)}",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun taskReminderLabel(timestamp: Long): String {
+    val reminder = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
+    return "${reminder.toLocalDate().dayLabel(LocalDateFormat.current)}, ${reminder.toLocalTime().label(LocalTimeFormat.current, LocalContext.current)}"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -261,12 +266,13 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
                     choosingReminderDate = true
                 }) {
-                    Text(reminderAt?.let {
-                        val reminder = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
-                        "${reminder.toLocalDate().dayLabel(LocalDateFormat.current)}, ${reminder.toLocalTime().label(LocalTimeFormat.current, context)}"
-                    } ?: "Add reminder")
+                    Text(reminderAt?.let { taskReminderLabel(it) } ?: "Add reminder")
                 }
                 if (reminderAt != null) {
+                    // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
+                    val snoozed = initial.snoozedUntil
+                    if (snoozed != null && !initial.done && reminderAt == initial.reminderAt)
+                        Text("Snoozed until ${taskReminderLabel(snoozed)}. Changing the reminder ends the snooze.")
                     TextButton(enabled = !busy, onClick = { reminderAt = null }) { Text("Remove reminder") }
                     if (initial.done) Text("Reminders are off while this task is completed.")
                     if (!notifications.enabled) {
