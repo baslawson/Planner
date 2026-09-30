@@ -17,8 +17,8 @@ android {
         applicationId = "io.github.baslawson.planner"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.0.9"
+        versionCode = 17
+        versionName = "0.0.10"
         testInstrumentationRunner = "com.example.itinerary.PlannerTestRunner"
         // Steps that need an outside action between them are run one at a time, not in the full suite.
         testInstrumentationRunnerArguments["notAnnotation"] = "com.example.itinerary.HarnessStage"
