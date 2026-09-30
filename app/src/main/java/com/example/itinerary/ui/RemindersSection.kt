@@ -58,6 +58,51 @@ fun RemindersSection(
     val zone = rememberCurrentZoneId()
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
+    ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint),
+        chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom" to { customOpen = true })) {
+        reminders.forEach { reminder ->
+            val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder.offsetMinutes, zone)
+            ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
+                onRemove = { onRemove(reminder) }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Ring until I stop it",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Switch(
+                        checked = reminder.ringUntilDismissed,
+                        onCheckedChange = { onToggleRing(reminder, it) },
+                    )
+                }
+            }
+        }
+    }
+
+    if (customOpen) {
+        CustomReminderDialog(
+            onDismiss = { customOpen = false },
+            onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
+        )
+    }
+}
+
+/**
+ * The layout every reminders section in the app follows (events, bills, time blocks and tasks): a divider, the
+ * "Reminders" heading, a warning with "Turn on" while notifications are off, hint lines, one row per reminder, and a
+ * row of chips to add one.
+ */
+@Composable
+fun ReminderSectionFrame(
+    notificationsOn: Boolean,
+    onEnableNotifications: () -> Unit,
+    hints: List<String>,
+    chips: List<Pair<String, () -> Unit>>,
+    enabled: Boolean = true,
+    rows: @Composable () -> Unit,
+) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         HeadingText(
@@ -76,46 +121,26 @@ fun RemindersSection(
                 OutlinedButton(onClick = onEnableNotifications) { Text("Turn on") }
             }
         }
-        if (eventTime == null) Text("${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        reminders.forEach { reminder ->
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(reminder.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    IconButton(onClick = { onRemove(reminder) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove reminder: ${reminder.label}")
-                    }
-                }
-                val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder.offsetMinutes, zone)
-                Text("${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Ring until I stop it",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Switch(
-                        checked = reminder.ringUntilDismissed,
-                        onCheckedChange = { onToggleRing(reminder, it) },
-                    )
-                }
-            }
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PRESETS.forEach { preset ->
-                AssistChip(onClick = { onAdd(preset.amount, preset.unit) }, label = { Text(preset.text) })
-            }
-            AssistChip(onClick = { customOpen = true }, label = { Text("Custom") })
+        hints.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        rows()
+        if (chips.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            chips.forEach { (text, onClick) -> AssistChip(onClick = onClick, enabled = enabled, label = { Text(text) }) }
         }
     }
+}
 
-    if (customOpen) {
-        CustomReminderDialog(
-            onDismiss = { customOpen = false },
-            onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
-        )
+/** One reminder in a [ReminderSectionFrame]: its label with a remove button, when it fires, and anything [extra]. */
+@Composable
+fun ReminderRow(label: String, detail: String?, onRemove: () -> Unit, enabled: Boolean = true, extra: @Composable () -> Unit = {}) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            IconButton(onClick = onRemove, enabled = enabled) {
+                Icon(Icons.Filled.Close, contentDescription = "Remove reminder: $label")
+            }
+        }
+        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        extra()
     }
 }
 

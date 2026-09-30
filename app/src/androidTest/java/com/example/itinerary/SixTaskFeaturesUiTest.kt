@@ -300,8 +300,24 @@ class SixTaskFeaturesUiTest {
         reveal { nodes().any { it.text?.toString()?.startsWith("Snoozed until ")==true } };screenshot("task-snoozed-editor")
         val note=nodes().mapNotNull { it.text?.toString() }.single { it.startsWith("Snoozed until ") }
         assertTrue(note,note.endsWith(". Changing the reminder ends the snooze.") && note.removePrefix("Snoozed until ").startsWith(line.removePrefix("Reminder: snoozed until ")))
-        click("Remove reminder");await { nodes().none { it.text?.toString()?.startsWith("Snoozed until ")==true } }
+        val removeLabel=nodes().mapNotNull { it.contentDescription?.toString() }.single { it.startsWith("Remove reminder: ") }
+        click(removeLabel);await { nodes().none { it.text?.toString()?.startsWith("Snoozed until ")==true } }
         back();Unit
+    }
+    @Test fun taskReminderSectionFollowsTheEventLayout() = runBlocking {
+        cleanFixture("QA six chips")
+        fresh(); click("Add menu"); click("Add task"); click("To-do task")
+        field("Task title", "QA six chips")
+        reveal { find("Reminders")!=null && find("Tomorrow 09:00")!=null && find("Custom")!=null };screenshot("task-reminder-chips")
+        assertNull(find("Add reminder")); assertNull(find("Reminder (optional)"))
+        click("Tomorrow 09:00")
+        val expected=java.time.LocalDate.now().plusDays(1).atTime(9,0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        reveal { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ")==true } };screenshot("task-reminder-set")
+        assertNull("chips hidden while a reminder is set",find("Tomorrow 09:00"))
+        click("Save")
+        await { data().tasks.any { it.title=="QA six chips" } }
+        assertEquals(expected,data().tasks.single { it.title=="QA six chips" }.reminderAt)
+        cleanFixture("QA six chips");Unit
     }
     @Test fun taskDocumentImportCopiesBytes() = runBlocking {
         // The document the system picker offers, put in Downloads for this test and removed afterwards.

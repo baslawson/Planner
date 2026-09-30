@@ -19,3 +19,23 @@ fun taskReminderInstant(date: LocalDate, time: LocalTime, now: ZonedDateTime = Z
     val selected = if (!first.isAfter(now) && later.isAfter(now)) later else first
     return selected.toInstant().toEpochMilli()
 }
+
+enum class TaskReminderPreset { ON_THE_DAY, DAY_BEFORE, LATER_TODAY, TOMORROW }
+
+/**
+ * The quick choices in a task's Reminders section, with when each would ring: on the due date (and the day before) at
+ * 09:00, or without one in an hour and tomorrow at 09:00. Only times still ahead are offered; a due date whose 09:00
+ * times have both passed falls back to the choices for no due date.
+ */
+fun taskReminderPresets(dueDate: LocalDate?, now: ZonedDateTime = ZonedDateTime.now()): List<Pair<TaskReminderPreset, Long>> {
+    val nine = LocalTime.of(9, 0)
+    fun at(date: LocalDate) = taskReminderInstant(date, nine, now)
+    val due = if (dueDate == null) emptyList() else listOf(TaskReminderPreset.ON_THE_DAY to at(dueDate), TaskReminderPreset.DAY_BEFORE to at(dueDate.minusDays(1)))
+    val ahead = due.filter { it.second > now.toInstant().toEpochMilli() }
+    if (ahead.isNotEmpty()) return ahead
+    val inAnHour = now.plusHours(1).withSecond(0).withNano(0)
+    return listOfNotNull(
+        (TaskReminderPreset.LATER_TODAY to inAnHour.toInstant().toEpochMilli()).takeIf { inAnHour.toLocalDate() == now.toLocalDate() },
+        TaskReminderPreset.TOMORROW to at(now.toLocalDate().plusDays(1)),
+    )
+}

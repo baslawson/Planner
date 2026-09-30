@@ -261,25 +261,32 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) repeatDays = it }, enabled = !busy,
                     label = { Text("Days after completion (1–3650)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (repeat != TaskRepeat.NONE.name) Text("Completing this task creates the next occurrence. Missed calendar dates are skipped.", style = MaterialTheme.typography.bodySmall)
-                Text("Reminder (optional)", style = MaterialTheme.typography.labelLarge)
-                TextButton(enabled = !busy, onClick = {
-                    reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
-                    choosingReminderDate = true
-                }) {
-                    Text(reminderAt?.let { taskReminderLabel(it) } ?: "Add reminder")
-                }
-                if (reminderAt != null) {
-                    // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
-                    val snoozed = initial.snoozedAt(System.currentTimeMillis())
-                    if (snoozed != null && !initial.done && reminderAt == initial.reminderAt)
-                        Text("Snoozed until ${taskReminderLabel(snoozed)}. Changing the reminder ends the snooze.")
-                    TextButton(enabled = !busy, onClick = { reminderAt = null }) { Text("Remove reminder") }
-                    if (initial.done) Text("Reminders are off while this task is completed.")
-                    if (!notifications.enabled) {
-                        Text("Notifications are off. Enable them to receive task reminders.")
-                        TextButton(onClick = notifications.enable) { Text("Enable notifications") }
+                // The same layout as an event's Reminders section; a task has one reminder at a date and time.
+                val presets = remember(date, reminderAt) { taskReminderPresets(date?.let(LocalDate::parse)) }
+                val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
+                ReminderSectionFrame(notifications.enabled, notifications.enable,
+                    hints = listOfNotNull(if (reminderAt != null && !exactAllowed) "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing." else null),
+                    chips = if (reminderAt != null) emptyList() else presets.map { (preset, at) ->
+                        when (preset) {
+                            TaskReminderPreset.ON_THE_DAY -> "On the day $nine"
+                            TaskReminderPreset.DAY_BEFORE -> "1 day before"
+                            TaskReminderPreset.LATER_TODAY -> "In 1 hour"
+                            TaskReminderPreset.TOMORROW -> "Tomorrow $nine"
+                        } to { reminderAt = at; error = null }
+                    } + ("Custom" to {
+                        reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
+                        choosingReminderDate = true
+                    }),
+                    enabled = !busy) {
+                    reminderAt?.let { at ->
+                        // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
+                        val snoozed = initial.snoozedAt(System.currentTimeMillis())
+                        ReminderRow(taskReminderLabel(at), when {
+                            initial.done -> "Reminders are off while this task is completed."
+                            snoozed != null && at == initial.reminderAt -> "Snoozed until ${taskReminderLabel(snoozed)}. Changing the reminder ends the snooze."
+                            else -> null
+                        }, onRemove = { reminderAt = null }, enabled = !busy)
                     }
-                    if (!exactAllowed) Text("Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing.")
                 }
                 Text("Priority", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
