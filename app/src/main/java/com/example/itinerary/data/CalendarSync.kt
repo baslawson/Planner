@@ -308,7 +308,9 @@ class CalendarSync(
                         is WriteResult.Ok -> sentDao.put(row.copy(etag = result.etag, ics = body, fingerprint = print))
                         // Changed there: unless it already is Planner's event as it is now (an earlier write whose reply
                         // never got recorded), the next pull compares.
-                        WriteResult.Changed -> sentDao.put(client.getFile(account, target.href, href)?.let { alreadyThere(row, it, item, zone()) }
+                        // The check is a safety net only: if it can't be made, the row is CHANGED as before (the send goes on).
+                        WriteResult.Changed -> sentDao.put(try { client.getFile(account, target.href, href)?.let { alreadyThere(row, it, item, zone()) } }
+                            catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                             ?: row.copy(problem = SentEvent.CHANGED))
                         WriteResult.Missing -> sentDao.put(row.copy(problem = SentEvent.DELETED))
                     }
