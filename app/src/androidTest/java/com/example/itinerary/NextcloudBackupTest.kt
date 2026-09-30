@@ -360,7 +360,8 @@ class NextcloudBackupTest {
             clickText(name)
             await { vm.stagedImport.value != null }
             clickText("Replace everything")
-            await { vm.backupBusy.value == null && vm.backupMessage.value == "Backup restored" }
+            await { vm.backupBusy.value == null && vm.backupNote.value == "Backup restored." && vm.cloud.value.status == "Backup restored." }
+            assertNull(vm.backupMessage.value)
             assertEquals(expected, repo.snapshot())
             editFolder("Other/Backups")
             clickText("Save folder")

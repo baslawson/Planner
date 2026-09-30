@@ -37,6 +37,8 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit, showC
     val backupBusy by vm.backupBusy.collectAsStateWithLifecycle()
     val stagedImport by vm.stagedImport.collectAsStateWithLifecycle()
     val backupMessage by vm.backupMessage.collectAsStateWithLifecycle()
+    val backupNote by vm.backupNote.collectAsStateWithLifecycle()
+    LaunchedEffect(show) { if (!show) vm.backupNoteShown() }
     val context = LocalContext.current
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
@@ -75,6 +77,7 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit, showC
             onAddButtonSeeThrough = vm::setAddButtonSeeThrough,
             onExport = { exportLauncher.launch("Planner-backup-${LocalDate.now()}.zip") },
             onImport = { importLauncher.launch(arrayOf("*/*")) },
+            backupNote = backupNote,
             onNextcloud = { showNextcloud = true },
             onDismiss = onDismiss,
             onRecentlyDeleted = { showDeleted = true },

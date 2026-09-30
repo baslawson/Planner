@@ -92,6 +92,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 
     // If a saved event no longer shows on this day, follow it so it doesn't seem to have vanished.
     // A later day of a trip or the morning after an overnight event still shows it, so the view stays.
+    val addedBar = rememberAddedBar()
     fun follow(item: ItineraryItem) {
         EditorRules.followDate(item, selected)?.let { day ->
             vm.select(day)
@@ -222,6 +223,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             planningTools = planningTools,
             saveEvent = vm::saveItem,
             onEventSaved = ::follow,
+            // An event is shown by following it to its day (above); the calendar has no tasks, so a task is said below.
+            onQuickAdded = { if (it.task) addedBar(it) },
         )
     }
 

@@ -217,7 +217,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }
     }
     val outsideEvents by app.calendarSync.shown.collectAsStateWithLifecycle(initialValue = emptyMap())
-    CompositionLocalProvider(LocalOutsideEvents provides outsideEvents) {
+    CompositionLocalProvider(LocalOutsideEvents provides outsideEvents, LocalAppSnackbar provides snackbar) {
     Box(Modifier.fillMaxSize()) {
         NavHost(navController = nav, startDestination = "agenda") {
             composable(

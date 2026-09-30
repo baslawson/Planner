@@ -242,6 +242,8 @@ fun BoxScope.AddMenuHost(
     planningTools: PlanningToolsState,
     saveEvent: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Long,
     onEventSaved: (ItineraryItem) -> Unit = {},
+    // Quick entry's "Add" closed it: the screen shows what was added.
+    onQuickAdded: (QuickAdded) -> Unit = {},
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var quickEntry by rememberSaveable { mutableStateOf(false) }
@@ -286,7 +288,7 @@ fun BoxScope.AddMenuHost(
         durationMinutes = suggestion.durationMinutes, location = suggestion.location, repeatRule = suggestion.repeat.name,
         colorIndex = PlanColors.next(usedColors(suggestion.date), PlanColors.EVENT_COUNT),
     )
-    if (quickEntry) QuickEntryDialog(today, onDismiss = { quickEntry = false },
+    if (quickEntry) QuickEntryDialog(today, onDismiss = { quickEntry = false }, onAddedAndClosed = onQuickAdded,
         onAdd = { suggestion, task, token ->
             if (task) repository.saveTask(suggestion.quickTask().copy(id = token))
             // One event per time. The first keeps the draft's token and is saved last, so that token is only there

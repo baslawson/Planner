@@ -146,7 +146,12 @@ class TripsViewModel(
     private val _stagedImport = MutableStateFlow<StagedBackup?>(null)
     val stagedImport: StateFlow<StagedBackup?> = _stagedImport.asStateFlow()
 
-    // Result of the last backup action, shown once by the screen and then cleared.
+    // A finished backup action worth a line under Backup in Settings ("Backup restored."), until Settings closes.
+    private val _backupNote = MutableStateFlow<String?>(null)
+    val backupNote: StateFlow<String?> = _backupNote.asStateFlow()
+    fun backupNoteShown() { _backupNote.value = null }
+
+    // A backup error, shown once by the screen and then cleared.
     private val _backupMessage = MutableStateFlow<String?>(null)
     val backupMessage: StateFlow<String?> = _backupMessage.asStateFlow()
 
@@ -154,9 +159,10 @@ class TripsViewModel(
         _backupMessage.value = null
     }
 
+    // No message: the Backup section's "Last successful backup" line shows it.
     fun exportTo(uri: Uri) = runBackup("Saving backup...") {
         backup.export(uri)
-        "Backup saved"
+        null
     }
 
     // Reads and checks the file; the user still has to confirm before anything is replaced.
@@ -171,7 +177,10 @@ class TripsViewModel(
         _stagedImport.value = null
         runBackup("Restoring...") {
             backup.restore(staged)
-            "Backup restored"
+            // Said on the screen it came from: under Backup in Settings, and in the Nextcloud pop-up if that's open.
+            _backupNote.value = "Backup restored."
+            _cloud.value = _cloud.value.copy(status = "Backup restored.", error = false)
+            null
         }
     }
 
@@ -184,6 +193,7 @@ class TripsViewModel(
         // Set synchronously: two fast taps cannot start concurrent exports or replace a staged import.
         if (_backupBusy.value != null || _stagedImport.value != null) return
         _backupBusy.value = busy
+        _backupNote.value = null
         viewModelScope.launch {
             try {
                 if (cloudAction) _cloud.value = _cloud.value.copy(status = null, error = false)

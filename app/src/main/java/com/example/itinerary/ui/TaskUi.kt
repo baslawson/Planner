@@ -121,7 +121,8 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
                 // Only unsaved edits made after that save (kept across recreation) are in its draft.
                 val draft = remember { runCatching { store.read(task.id) }.getOrNull() }
                 CompositionLocalProvider(LocalEditingTaskId provides task.id) {
-                    TaskEditorContent(task, false, draft, task.id, store, onDismiss, onSaved, closeRequested, onCloseCancelled)
+                    TaskEditorContent(task, false, draft, task.id, store, onDismiss, onSaved, closeRequested, onCloseCancelled,
+                        justSaved = draft == null)
                 }
             }
         }
@@ -157,7 +158,9 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
 @Composable
 private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JSONObject?, draftKey: String,
                               draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit,
-                              closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {}) {
+                              closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
+                              // Opened again right after a Save: the Save button says "Saved" until something changes.
+                              justSaved: Boolean = false) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -199,7 +202,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                     block(); finished = true; draftStore.clear(draftKey)
                     repo.releaseTaskFiles(attachments.map { it.fileName } + listOfNotNull(pendingPhoto))
-                    if (keepOpen) { onSaved(initial.id); android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show() }
+                    if (keepOpen) onSaved(initial.id)
                 }
                 if (!keepOpen) onDismiss()
             }
@@ -387,7 +390,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     if (!creating) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
                     OutlinedButton(enabled = !busy, onClick = ::close) { Text("Close") }
                     Spacer(Modifier.width(12.dp))
-                    Button(enabled = canSave && (unsaved || creating), onClick = { save() }) { Text("Save") }
+                    Button(enabled = canSave && (unsaved || creating), onClick = { save() }) { SaveLabel(busy, saved = justSaved && !unsaved) }
                 }
             }
         }

@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -48,12 +50,31 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
-/** Quick entry with its private draft: kept across closing, cleared once the entry is added. */
+/** What Quick entry just added: its title, its date (none for an anytime task) and whether it's a task. */
+data class QuickAdded(val title: String, val date: LocalDate?, val task: Boolean) {
+    fun message(format: DateFormatChoice): String = "Added: $title" + (date?.let { ", " + it.dayLabel(format) } ?: "")
+}
+
+/** Says what Quick entry added in the app's bar at the bottom, for a screen that can't show it. */
+@Composable
+fun rememberAddedBar(): (QuickAdded) -> Unit {
+    val bar = LocalAppSnackbar.current
+    val format = LocalDateFormat.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    return { added -> bar?.let { scope.launch { it.showSnackbar(added.message(format), withDismissAction = true) } } }
+}
+
+/** The app's bar at the bottom (the one with Undo), for a screen that has something short to say. */
+val LocalAppSnackbar = androidx.compose.runtime.staticCompositionLocalOf<androidx.compose.material3.SnackbarHostState?> { null }
+
+/** Quick entry with its private draft: kept across closing, cleared once the entry is added. Nothing pops up once it
+ *  is: "Add another" says so in the dialog, and "Add" hands [onAddedAndClosed] what was added for the screen to show. */
 @Composable
 fun QuickEntryDialog(
     today: LocalDate, onDismiss: () -> Unit,
     onAdd: suspend (QuickEntrySuggestion, Boolean, String) -> Unit,
     onReview: (QuickEntrySuggestion, Boolean) -> Unit,
+    onAddedAndClosed: (QuickAdded) -> Unit = {},
 ) {
     val context = LocalContext.current
     val repository = (context.applicationContext as com.example.itinerary.ItineraryApp).repository
@@ -67,6 +88,9 @@ fun QuickEntryDialog(
     var warnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var permission by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var handover by remember { mutableStateOf<String?>(null) }
+    // The entry just added (until the dialog goes on or closes), and the one "Add another" says it added.
+    var justAdded by remember { mutableStateOf<QuickAdded?>(null) }
+    var shownAdded by remember { mutableStateOf<QuickAdded?>(null) }
     fun update(next: QuickDraft) {
         if (next == draft || loadFailed) return
         try { store.write(next); draft = next; error = null }
@@ -85,14 +109,14 @@ fun QuickEntryDialog(
         PlannerDialog("Quick entry draft", onDismiss, primary = DialogAction("Discard draft", danger = true) { discard = true },
             dismiss = DialogAction("Close", onClick = onDismiss)) { Text(error.orEmpty()) }
     } else key(generation) {
-        QuickEntryEditor(draft.single.baseDate, onDismiss = onDismiss,
+        QuickEntryEditor(draft.single.baseDate, onDismiss = { justAdded?.let(onAddedAndClosed); onDismiss() },
             onAdd = { suggestion, task, token ->
                 if (!confirm(suggestion.eachTime().mapIndexed { i, s -> QuickCandidate(quickToken(token, i), s, task) })) throw QuickSaveCancelled()
                 // Checked again: a reminder can pass while "Check before adding" waits.
                 suggestion.quickProblem(task, ZonedDateTime.now())?.let { throw QuickSaveProblem(it) }
                 onAdd(suggestion, task, token)
                 store.clear()
-                android.widget.Toast.makeText(context, if (task) "Task added" else "Event added", android.widget.Toast.LENGTH_SHORT).show()
+                justAdded = QuickAdded(suggestion.title, if (task) suggestion.quickTask().dueDate else suggestion.date, task)
             },
             onReview = { s, t ->
                 // The full editor would offer to resume an older unfinished draft and replace this entry with it.
@@ -106,13 +130,20 @@ fun QuickEntryDialog(
                 }
             },
             onContinue = { task ->
+                shownAdded = justAdded; justAdded = null
                 val next = QuickDraft(QuickInput(task = task, baseDate = LocalDate.now()))
                 store.write(next); draft = next
                 generation++
             },
             onDiscard = { discard = true },
             initial = draft.single, inputBlocked = error != null, onInput = { input -> update(QuickDraft(input)) },
-            modeControls = { if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error) })
+            modeControls = {
+                if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
+                else shownAdded?.let { added ->
+                    Text(added.message(LocalDateFormat.current),
+                        Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.primary)
+                }
+            })
     }
     if (permission != null) PlannerDialog("Check before adding", { permission?.complete(false) },
         primary = DialogAction("Add anyway") { permission?.complete(true) },

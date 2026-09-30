@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import com.example.itinerary.data.OutsideCalendars
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -132,6 +133,42 @@ fun AgendaScreen(
     }
     val selection = rememberEventSelection(selectable)
 
+    // The rows above the days, in the list's order (the list below uses the same flags).
+    val showBackupFailed = backupStatus.failed
+    val showBackupReminder = !backupStatus.failed && backupStatus.outcome != "RUNNING" && backupReminder.due(backupStatus.lastSuccess, today)
+    val showBillSummary = AgendaType.BILLS in types && showBillsSummary && events.any { it.category == "Bills" }
+    val showTaskOptions = (AgendaType.TASKS in types && tasks.isNotEmpty()) || (AgendaType.BILLS in types && events.any { it.category == "Bills" })
+    val showEmpty = dates.isEmpty() && anytimeTasks.isEmpty()
+    // Where the list shows what Quick entry added (its day's heading, or Anytime tasks), or null while it doesn't (not
+    // saved yet, or outside this range or these types).
+    fun rowOf(added: QuickAdded): Int? {
+        var index = listOf(showBackupFailed, showBackupReminder, showBillSummary, showTaskOptions).count { it }
+        if (added.date == null) return index.takeIf { anytimeTasks.any { it.title == added.title } }
+        if (anytimeTasks.isNotEmpty()) index += 1 + if (anytimeExpanded) anytimeTasks.size else 0
+        if (showEmpty) index++
+        val shown = if (added.task) datedTasks[added.date].orEmpty().any { it.title == added.title }
+            else eventsByDate[added.date]?.entries.orEmpty().any { it.event.title == added.title }
+        if (!shown) return null
+        for (date in dates) {
+            if (date == added.date) return index
+            val taskCount = datedTasks[date].orEmpty().size + billsByDate[date].orEmpty().size
+            index += 1 + (if (taskCount > 0) 1 else 0) + taskCount + eventsByDate[date]?.entries.orEmpty().size
+        }
+        return null
+    }
+    // Quick entry's "Add": the list scrolls to it once it's there; if this view doesn't show it, the bar says it.
+    var following by remember { mutableStateOf<QuickAdded?>(null) }
+    val addedBar = rememberAddedBar()
+    LaunchedEffect(following, dates, anytimeTasks, anytimeExpanded) {
+        val added = following ?: return@LaunchedEffect
+        rowOf(added)?.let { listState.animateScrollToItem(it); following = null }
+    }
+    LaunchedEffect(following) {
+        val added = following ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(1500)
+        if (following == added) { following = null; addedBar(added) }
+    }
+
     if (showThemes) ThemesDialog(onDismiss = { showThemes = false })
     PlanningToolDialogs(planningTools, onEvent = { newEvent.start(it) })
 
@@ -218,12 +255,12 @@ fun AgendaScreen(
                         Modifier.fillMaxSize(), state = listState,
                         contentPadding = PaddingValues(bottom = 144.dp),
                     ) {
-                        if (backupStatus.failed) item(key = "backup-failed") {
+                        if (showBackupFailed) item(key = "backup-failed") {
                             com.example.itinerary.ui.MatrixTextButton(onClick = { showSettings = true }) {
                                 Text("Last backup failed or was interrupted · View backup status", color = MaterialTheme.colorScheme.error)
                             }
                         }
-                        if (!backupStatus.failed && backupStatus.outcome != "RUNNING" && backupReminder.due(backupStatus.lastSuccess, today)) item(key = "backup-reminder") {
+                        if (showBackupReminder) item(key = "backup-reminder") {
                             androidx.compose.material3.OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(if (backupStatus.lastSuccess == null) "Keep your events and tasks safe with a backup" else "It's time to back up your events and tasks")
@@ -234,8 +271,8 @@ fun AgendaScreen(
                                 }
                             }
                         }
-                        if (AgendaType.BILLS in types && showBillsSummary && events.any { it.category == "Bills" }) item(key = "bill-summary") { MonthlyBills(events, today) }
-                        if (((AgendaType.TASKS in types && tasks.isNotEmpty()) || (AgendaType.BILLS in types && events.any { it.category == "Bills" }))) item(key = "task-options") {
+                        if (showBillSummary) item(key = "bill-summary") { MonthlyBills(events, today) }
+                        if (showTaskOptions) item(key = "task-options") {
                             FilterChip(selected = showCompleted, enabled = !selection.active,
                                 onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") },
                                 modifier = Modifier.padding(horizontal = 16.dp))
@@ -251,7 +288,7 @@ fun AgendaScreen(
                                 TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
                             }
                         }
-                        if (dates.isEmpty() && anytimeTasks.isEmpty()) item(key = "empty") {
+                        if (showEmpty) item(key = "empty") {
                             if (types.isEmpty()) Text("Select a type to show items.",
                                 Modifier.fillMaxWidth().padding(20.dp),
                                 style = MaterialTheme.typography.bodyLarge,
@@ -301,6 +338,7 @@ fun AgendaScreen(
             onShowCategory = vm::showCategory,
             planningTools = planningTools,
             saveEvent = vm::saveEvent,
+            onQuickAdded = { following = it },
         )
         editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
         editingTaskId?.let { id ->

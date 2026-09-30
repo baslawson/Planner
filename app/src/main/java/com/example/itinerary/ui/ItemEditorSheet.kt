@@ -71,7 +71,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -156,7 +158,7 @@ fun ItemEditorSheet(
     else key(current.first) {
         val (item, attachments, reminders) = current.second
         ItemEditorForm(item, attachments, reminders, categoryCounts, hiddenCategories, onRemoveCategories, onShowCategory,
-            onDismiss, onSave, onSaved, onDelete, initialRepeatCount = initialRepeatCount)
+            onDismiss, onSave, onSaved, onDelete, initialRepeatCount = initialRepeatCount, justSaved = true)
     }
 }
 
@@ -178,6 +180,8 @@ private fun ItemEditorForm(
     startWithBillScan: Boolean = false,
     initialAddedReminders: List<Reminder> = emptyList(),
     initialRepeatCount: Int = 12,
+    // Opened again right after a Save: the Save button says "Saved" until something changes.
+    justSaved: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -324,8 +328,8 @@ private fun ItemEditorForm(
     val billTask = category == "Bills"
     fun selectCategory(selected: String) {
         if (selected == "Bills" && category != selected && shownReminders.isEmpty()) {
+            // Shown in Reminders below; no message.
             addedReminders += Reminder(itemId = 0, amount = 3, unit = com.example.itinerary.data.ReminderUnit.DAYS)
-            Toast.makeText(context, "Reminder added: 3 days before", Toast.LENGTH_SHORT).show()
             val needsPermission = Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
@@ -541,7 +545,7 @@ private fun ItemEditorForm(
                     // with a new draft token, so its next save isn't taken for a retry of this one.
                     if (disposed) Unit
                     else if (closeAfterSave) onDismiss()
-                    else { onSaved(savedId); Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show() }
+                    else onSaved(savedId)
                 } catch (e: Exception) {
                     committed = false
                     closeAfterSave = false
@@ -905,9 +909,8 @@ private fun ItemEditorForm(
                 onEnableNotifications = notifications.enable,
                 onAdd = { amount, unit ->
                     val minutes = amount * unit.minutes
-                    if (shownReminders.any { it.offsetMinutes == minutes }) {
-                        Toast.makeText(context, "That reminder is already set", Toast.LENGTH_SHORT).show()
-                    } else {
+                    // Already in the list: nothing to add.
+                    if (shownReminders.none { it.offsetMinutes == minutes }) {
                         addedReminders += Reminder(itemId = 0, amount = amount, unit = unit)
                         val needsPermission = Build.VERSION.SDK_INT >= 33 &&
                             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -956,7 +959,7 @@ private fun ItemEditorForm(
                     Text("Close")
                 }
                 Button(enabled = canSave && (unsaved || isNew), onClick = { save() }) {
-                    Text(if (busy) "Saving…" else "Save")
+                    SaveLabel(busy, saved = justSaved && !unsaved)
                 }
             }
         }
@@ -1061,12 +1064,10 @@ private fun ItemEditorForm(
         AddLinkDialog(
             onDismiss = { addingLink = false },
             onConfirm = { name, url ->
-                if (shownAttachments.any { it.url == url }) {
-                    Toast.makeText(context, "That link is already added", Toast.LENGTH_SHORT).show()
-                } else {
-                    // Held until Save like the other attachments; a link has no file, so its file name is empty.
+                // Held until Save like the other attachments; a link has no file, so its file name is empty. One already
+                // there (shown in Attachments) isn't added twice.
+                if (shownAttachments.none { it.url == url })
                     added += Attachment(itemId = 0, name = name, fileName = "", mimeType = Links.MIME_TYPE, url = url)
-                }
                 addingLink = false
             },
         )
@@ -1146,4 +1147,14 @@ private fun ItemEditorForm(
 // Its text fields are also read-only then, which stops text arriving another way (a screen reader, autofill).
 private fun Modifier.lockedWhile(locked: Boolean): Modifier = if (!locked) this else pointerInput(Unit) {
     awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
+}
+
+// A Save button's words: "Saving…" while it saves, "✓ Saved" once it has and nothing has changed since, else "Save". A
+// screen reader announces the change, as it did the old "Saved" message.
+@Composable
+internal fun SaveLabel(busy: Boolean, saved: Boolean) {
+    Row(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
+        if (saved && !busy) { Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
+        Text(if (busy) "Saving…" else if (saved) "Saved" else "Save")
+    }
 }

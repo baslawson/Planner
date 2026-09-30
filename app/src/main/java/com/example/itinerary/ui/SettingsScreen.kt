@@ -83,6 +83,7 @@ fun SettingsScreen(
     onAddButtonSeeThrough: (Int) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    backupNote: String? = null,
     onNextcloud: () -> Unit,
     onDismiss: () -> Unit,
     onRecentlyDeleted: () -> Unit = {},
@@ -174,6 +175,7 @@ fun SettingsScreen(
                     SettingsHeading("Backup")
                     StackedButton("Recently deleted", onRecentlyDeleted)
                     BackupStatusPanel()
+                    backupNote?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
                     Text(
                         "Save all your events, tasks, templates, reminders, attachments and settings to one file, or restore them from one. " +
                             "Importing replaces everything currently in the app.",

@@ -31,7 +31,7 @@ fun rememberCalendarExporter(eventId: Long): () -> Unit {
                     val text = CalendarExport.encode(item, "$namespace-${item.id}@planner")
                     checkNotNull(context.contentResolver.openOutputStream(uri, "wt")).bufferedWriter(Charsets.UTF_8).use { it.write(text) }
                 }
-                Toast.makeText(context, "Calendar file saved for this occurrence", Toast.LENGTH_LONG).show()
+                // Saved where the file picker said: no message. Only a failure says anything.
             } catch (_: Exception) {
                 Toast.makeText(context, "Couldn't export this event. Please try again.", Toast.LENGTH_LONG).show()
             }
