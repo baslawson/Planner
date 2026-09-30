@@ -462,6 +462,45 @@ class CalendarTwoWayTest {
         assertOtherCalendarUntouched()
     }
 
+    // E7: the synced calendar can be listed and written but not read (calendar-query fails). Before, the send right after
+    // hid the failure ("up to date"); now it stays on the calendar until a download works, and on a calendar just chosen
+    // nothing new is sent meanwhile.
+    @Test fun aFailingDownloadOfTheSyncedCalendarStaysVisibleUntilOneWorks() = runBlocking {
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse =
+                if (request.method == "REPORT" && request.body.clone().readUtf8().contains("calendar-query")) okhttp3.mockwebserver.MockResponse().setResponseCode(500)
+                else dav.dispatch(request)
+        }
+        save("QA Waits")
+        start() // chooses the calendar: its first download fails
+        fun target() = runBlocking { database.outsideDao().sources() }.single { it.sendHere }
+        assertNotNull(target().lastError)
+        assertNull(target().fetchedFor)
+        sync.send()
+        assertNotNull("A send doesn't clear it", target().lastError)
+        assertFalse(sync.sendState.value.error)
+        assertTrue("Nothing new is sent before a download", plannerFiles().isEmpty())
+        syncAgain()
+        assertNotNull(target().lastError)
+        server.dispatcher = dav
+        syncAgain()
+        assertNull(target().lastError)
+        assertEquals(1, plannerFiles().size)
+        // Failing again later, once the calendar changed there: shown again, and cleared by the next download.
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse =
+                if (request.method == "REPORT" && request.body.clone().readUtf8().contains("calendar-query")) okhttp3.mockwebserver.MockResponse().setResponseCode(500)
+                else dav.dispatch(request)
+        }
+        dav.bump()
+        syncAgain()
+        assertNotNull(target().lastError)
+        server.dispatcher = dav
+        syncAgain()
+        assertNull(target().lastError)
+        assertOtherCalendarUntouched()
+    }
+
     // E6 safety net: a write that reached Nextcloud but wasn't recorded (the app stopped on the way): the next pass is
     // refused (412), finds Planner's own event already there, and takes it as synced instead of a change or conflict.
     @Test fun anUnrecordedWriteOfPlannersOwnEditIsTakenAsSynced() = runBlocking {

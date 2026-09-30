@@ -34,4 +34,26 @@ class SyncIndicatorTest {
         // Not known yet (the login is read off the main thread): hidden rather than a guess.
         assertNull(of(loggedIn = null))
     }
+
+    // E7: a failed download of the synced calendar is kept on it (lastError), so a send that works right after doesn't
+    // turn the icon back to up to date; it clears when a download works. A read-only calendar's failure isn't this icon's.
+    @Test fun aFailedDownloadOfTheSyncedCalendarIsAProblemUntilOneWorks() {
+        val failed = source().copy(lastError = "Couldn't download this calendar.")
+        assertEquals(SyncIndicatorState.Failed, of(sources = listOf(failed)))
+        assertEquals(SyncIndicatorState.Failed, of(sources = listOf(failed), running = true))
+        assertEquals(SyncIndicatorState.Conflicts(1), of(sources = listOf(failed), conflicts = 1))
+        assertEquals(SyncIndicatorState.Synced, of(sources = listOf(source())))
+        assertEquals(SyncIndicatorState.Synced, of(sources = listOf(source(), source(sendHere = false).copy(href = "/work/", lastError = "x"))))
+    }
+
+    // E7: Sync now says the calendar kept in sync couldn't be downloaded, even when every other part worked.
+    @Test fun syncNowReportsAFailedDownloadOfTheSyncedCalendar() {
+        val failed = source().copy(lastError = "Couldn't download this calendar.")
+        val work = source(sendHere = false).copy(href = "/work/", name = "Work")
+        assertEquals("Synced at 09:00, but Personal, the calendar kept in sync, couldn't be downloaded (see above)." to true,
+            syncResult(listOf(failed, work), 0, emptyList(), "09:00"))
+        assertEquals("Synced at 09:00, but 1 calendar couldn't be updated (see above)." to true,
+            syncResult(listOf(source(), work.copy(lastError = "x")), 0, emptyList(), "09:00"))
+        assertEquals("Synced just now · 09:00" to false, syncResult(listOf(source(), work), 0, emptyList(), "09:00"))
+    }
 }

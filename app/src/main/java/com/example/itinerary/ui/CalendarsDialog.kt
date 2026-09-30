@@ -285,6 +285,8 @@ private fun SendChoice(sources: List<CalendarSource>, rows: List<com.example.iti
             "except repeating ones, timed ones longer than a day and all-day ones longer than a year, which stay read-only. Events deleted there go to " +
             "Recently deleted. Past Planner events go there only once you edit them.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Its last download failed: shown until one works (the send state below may say all went well).
+        target.lastError?.let { Text("${target.name}: $it", color = MaterialTheme.colorScheme.error) }
     }
     Text("Title, time, place and notes are synced; anything else in its events (attendees, alarms…) is kept. Bills, payments, " +
         "checklists, reminders and attachments stay in Planner. Turning this off leaves the events in both places.",
@@ -350,12 +352,17 @@ private fun describe(item: com.example.itinerary.data.ItineraryItem): String {
 }
 
 // What "Sync now" found, in one line: "Synced just now · 23:25", or what went wrong and where to look.
-private suspend fun syncResult(sync: com.example.itinerary.data.CalendarSync, time: String): Pair<String, Boolean> {
-    val failedCalendars = sync.sources.first().count { it.enabled && it.lastError != null }
-    val conflicts = sync.conflicts.first().size
-    val stateErrors = listOf(sync.state.value, sync.phoneState.value, sync.linkState.value, sync.sendState.value)
-        .filter { it.error }.mapNotNull { it.message }
+private suspend fun syncResult(sync: com.example.itinerary.data.CalendarSync, time: String): Pair<String, Boolean> =
+    syncResult(sync.sources.first(), sync.conflicts.first().size,
+        listOf(sync.state.value, sync.phoneState.value, sync.linkState.value, sync.sendState.value).filter { it.error }.mapNotNull { it.message }, time)
+
+// The same from what it depends on: the calendars, the conflict count and the error messages of each part.
+internal fun syncResult(sources: List<CalendarSource>, conflicts: Int, stateErrors: List<String>, time: String): Pair<String, Boolean> {
+    // The calendar kept in sync both ways couldn't be read: Nextcloud's changes aren't in Planner, even if sending worked.
+    val target = sources.firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }
+    val failedCalendars = sources.count { it.enabled && !it.sendHere && it.lastError != null }
     return when {
+        target?.lastError != null -> "Synced at $time, but ${target.name}, the calendar kept in sync, couldn't be downloaded (see above)." to true
         failedCalendars > 0 -> "Synced at $time, but $failedCalendars calendar${if (failedCalendars == 1) "" else "s"} couldn't be updated (see above)." to true
         conflicts > 0 -> "Synced at $time · $conflicts conflict${if (conflicts == 1) "" else "s"} to review." to true
         // A whole part failed (offline, login refused): its own message says why.

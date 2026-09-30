@@ -202,7 +202,7 @@ class CalendarSync(
             sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
             val target = sources.firstOrNull { it.id == id && it.writable } ?: return@withTransaction
             // Its read-only events show like a ticked calendar's; its other events become Planner events.
-            dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null))
+            dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null, lastError = null))
             sentDao.deleteOtherCalendars(target.account, target.href)
             val known = sentDao.all().mapTo(HashSet()) { it.itemId }
             val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
@@ -382,7 +382,8 @@ class CalendarSync(
         val (from, until, key) = linkWindow()
         val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }
         val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
-        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled) return
+        // After a failed pull (lastError) the next one always reads, so the error clears only once one works.
+        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled && target.lastError == null) return
         val listing = client.eventEtags(account, target.href)
         val inWindow = client.calendarFiles(account, target.href, from.atStartOfDay(zone()).toInstant(),
             until.plusDays(1).atStartOfDay(zone()).toInstant()).associateBy { it.href }
@@ -753,10 +754,17 @@ class CalendarSync(
         // The calendar kept in sync both ways (step 6).
         dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.account == key }?.let { target ->
             remote[target.href]?.let { calendar ->
-                try { sendLock.withLock { pullLocked(account, target, calendar.ctag) } }
-                catch (e: CancellationException) { throw e }
-                catch (e: Exception) { failed++; _sendState.value = State(message = (e as? BackupException)?.message ?: "Couldn't check the synced calendar.", error = true) }
-                if (failed == 0) _sendState.value = summary(target)
+                try {
+                    sendLock.withLock { pullLocked(account, target, calendar.ctag) }
+                    _sendState.value = summary(target)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    // Kept on the calendar (a send right after doesn't clear it, as it did the send state): the sync icon
+                    // and Sync now show it until a pull works again (on a calendar just chosen, nothing new is sent until then).
+                    failed++
+                    val message = (e as? BackupException)?.message ?: "Couldn't download this calendar. Planner tries again at the next sync."
+                    db.withTransaction { dao.source(target.id)?.let { dao.updateSource(it.copy(lastError = message)) } }
+                }
             }
         }
         onChanged()

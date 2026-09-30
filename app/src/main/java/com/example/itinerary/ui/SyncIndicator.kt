@@ -39,13 +39,17 @@ internal sealed interface SyncIndicatorState {
     companion object {
         // Conflicts and errors outrank a sync in progress: they need the user, and a retry may keep running. No Nextcloud
         // login (a restored backup brings the send-here calendar but not the login) is a problem: nothing can sync.
-        // [loggedIn] null = not read yet: hidden rather than a guess.
-        fun of(sources: List<CalendarSource>, loggedIn: Boolean?, running: Boolean, error: Boolean, conflicts: Int): SyncIndicatorState? = when {
-            sources.none { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } || loggedIn == null -> null
-            conflicts > 0 -> Conflicts(conflicts)
-            error || !loggedIn -> Failed
-            running -> Syncing
-            else -> Synced
+        // [loggedIn] null = not read yet: hidden rather than a guess. A failed download of the synced calendar is kept on
+        // it (lastError) until one works: a send that works meanwhile doesn't make it "up to date".
+        fun of(sources: List<CalendarSource>, loggedIn: Boolean?, running: Boolean, error: Boolean, conflicts: Int): SyncIndicatorState? {
+            val target = sources.firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }
+            return when {
+                target == null || loggedIn == null -> null
+                conflicts > 0 -> Conflicts(conflicts)
+                error || !loggedIn || target.lastError != null -> Failed
+                running -> Syncing
+                else -> Synced
+            }
         }
     }
 }

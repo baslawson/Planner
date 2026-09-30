@@ -149,4 +149,66 @@ class SyncIndicatorUiTest {
             server.shutdown()
         }
     }
+
+    // E7: the synced calendar can't be downloaded (calendar-query fails) while writing to it works. Before, the send right
+    // after the failed download said "up to date"; now the icon warns until a download works, and Sync now says so.
+    @Test fun aFailingDownloadShowsAProblemEvenWhenSendingWorks() {
+        val home = "/remote.php/dav/calendars/qa/"
+        val dav = FakeCalDav(home, "qa", "qa-test-password")
+        val noQuery = java.util.concurrent.atomic.AtomicBoolean(false)
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val clientCertificates = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val server = MockWebServer()
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (noQuery.get() && request.method == "REPORT" && request.body.clone().readUtf8().contains("calendar-query")) MockResponse().setResponseCode(500)
+                else dav.dispatch(request)
+        }
+        server.start()
+        val store = NextcloudAccountStore(context)
+        val original = app.calendarSync.client
+        try {
+            app.calendarSync.client = NextcloudClient(OkHttpClient.Builder()
+                .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build())
+            store.save(NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password"))
+            runBlocking {
+                app.repository.saveItem(ItineraryItem(tripId = 0, date = LocalDate.now().plusDays(2), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA Pull fails"))
+                app.calendarSync.sync()
+                app.calendarSync.setSendTarget(app.database.outsideDao().sources().single { it.name == "Planner" }.id)
+                app.calendarSync.sync()
+            }
+            open()
+            await { syncLabels() == listOf("Sync: up to date") }
+
+            // The download fails, the send after it works: still a problem.
+            noQuery.set(true)
+            dav.bump()
+            runBlocking {
+                app.repository.saveItem(app.repository.snapshot().items.single { it.title == "QA Pull fails" }.copy(location = "Sent anyway"))
+                app.calendarSync.sync(); app.calendarSync.send()
+            }
+            assertTrue(dav.files.values.any { it.second.contains("LOCATION:Sent anyway") })
+            assertFalse(app.calendarSync.sendState.value.error)
+            await { syncLabels() == listOf("Sync: problem, open Calendars") }
+            screenshot("pull-fails-problem")
+            // Sync now says which calendar couldn't be downloaded.
+            click("Sync: problem, open Calendars")
+            click("Sync now")
+            await { nodes().any { it.isVisibleToUser && it.text?.toString()?.contains("Planner, the calendar kept in sync, couldn't be downloaded") == true } }
+            screenshot("pull-fails-sync-now")
+            back()
+            await { find("Keep in sync with") == null && find("AGENDA") != null }
+
+            // A download works again: up to date.
+            noQuery.set(false)
+            runBlocking { app.calendarSync.sync() }
+            await { syncLabels() == listOf("Sync: up to date") }
+        } finally {
+            app.calendarSync.client = original
+            runBlocking { app.calendarSync.clearNextcloud() }
+            store.clear()
+            server.shutdown()
+        }
+    }
 }
