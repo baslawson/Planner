@@ -282,7 +282,7 @@ private fun SendChoice(sources: List<CalendarSource>, rows: List<com.example.iti
         val count = here.count { it.uid != null && it.problem == null }
         Text("$count event${if (count == 1) " is" else "s are"} kept in sync with ${target.name}. Changes in Planner go there a few " +
             "seconds after you save; changes there come into Planner when calendars sync. Its events become Planner events, " +
-            "except repeating ones and timed ones longer than a day, which stay read-only. Events deleted there go to " +
+            "except repeating ones, timed ones longer than a day and all-day ones longer than a year, which stay read-only. Events deleted there go to " +
             "Recently deleted. Past Planner events go there only once you edit them.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }

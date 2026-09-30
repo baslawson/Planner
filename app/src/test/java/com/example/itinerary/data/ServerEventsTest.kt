@@ -77,4 +77,19 @@ class ServerEventsTest {
         assertEquals(listOf("Theirs", "Clinic", "n"), listOf(merged.title, merged.location, merged.notes))
         assertEquals(LocalDate.of(2026, 10, 6), merged.date); assertNull(merged.startTime)
     }
+
+    // E9: an all-day event longer than Planner holds (MultiDay.MAX_DAYS) stays read-only instead of being cut short and
+    // then written back shorter by a Planner edit. Exactly MAX_DAYS is still editable, by end date or by duration.
+    @Test fun anAllDayEventLongerThanPlannerHoldsStaysReadOnly() {
+        val max = ServerEvents.parse(file("UID:y", "DTSTART;VALUE=DATE:20260101", "DTEND;VALUE=DATE:20270102", "SUMMARY:Year"), utc).item!!
+        assertEquals(MultiDay.MAX_DAYS.toLong(), java.time.temporal.ChronoUnit.DAYS.between(max.date, max.endDate!!) + 1)
+        assertNotNull(ServerEvents.parse(file("UID:y", "DTSTART;VALUE=DATE:20260101", "DURATION:P${MultiDay.MAX_DAYS}D", "SUMMARY:Year"), utc).item)
+        listOf(file("UID:l", "DTSTART;VALUE=DATE:20260101", "DTEND;VALUE=DATE:20270103", "SUMMARY:Too long"),
+            file("UID:l", "DTSTART;VALUE=DATE:20260101", "DTEND;VALUE=DATE:20300101", "SUMMARY:Years"),
+            file("UID:l", "DTSTART;VALUE=DATE:20260101", "DURATION:P60W", "SUMMARY:Weeks")).forEach {
+            val parsed = ServerEvents.parse(it, utc)
+            assertNull("Must stay read-only: $it", parsed.item)
+            assertEquals("l", parsed.uid)
+        }
+    }
 }

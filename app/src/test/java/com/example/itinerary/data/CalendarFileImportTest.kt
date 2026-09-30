@@ -144,4 +144,16 @@ class CalendarFileImportTest {
         assertEquals(365, daily.datesFor(today, includePast = true).size)
         assertEquals(today.plusMonths(12), daily.datesFor(today, includePast = true).last())
     }
+
+    // E9: a one-time import of an all-day event longer than Planner holds keeps the first MultiDay.MAX_DAYS and says so;
+    // a subscribed (read-only) calendar shows those days too.
+    @Test fun anAllDayEventLongerThanPlannerHoldsIsCutWithANote() {
+        val entry = single("UID:l\r\nDTSTART;VALUE=DATE:20261001\r\nDTEND;VALUE=DATE:20281001\r\nSUMMARY:Posting")
+        assertEquals(LocalDate.of(2026, 10, 1).plusDays(MultiDay.MAX_DAYS - 1L), entry.item.endDate)
+        assertEquals("Lasts 731 days; Planner imports the first ${MultiDay.MAX_DAYS}.", entry.note)
+        assertNull(single("UID:s\r\nDTSTART;VALUE=DATE:20261001\r\nDTEND;VALUE=DATE:20261005\r\nSUMMARY:Short").note)
+        val shown = CalendarFileImport.window(ics("UID:l\r\nDTSTART;VALUE=DATE:20261001\r\nDTEND;VALUE=DATE:20281001\r\nSUMMARY:Posting"),
+            ZoneOffset.UTC, LocalDate.of(2026, 7, 1), LocalDate.of(2027, 10, 31)).events.single()
+        assertEquals(LocalDate.of(2026, 10, 1).plusDays(MultiDay.MAX_DAYS - 1L), shown.endDate)
+    }
 }

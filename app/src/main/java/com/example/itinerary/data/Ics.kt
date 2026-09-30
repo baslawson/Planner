@@ -99,16 +99,20 @@ internal object Ics {
         return if (weeks.groupValues[1] == "-") length.negated() else length
     }
 
-    // How long an all-day event lasts in days: from its exclusive end date or its duration; one day when it has neither.
-    // At least one day and at most MultiDay.MAX_DAYS.
-    fun allDayLength(first: LocalDate, end: Property?, duration: Property?): Long {
+    // How long an all-day event lasts in days as its file says: from its exclusive end date or its duration; one day when
+    // it has neither. At least one day.
+    fun allDayDays(first: LocalDate, end: Property?, duration: Property?): Long {
         val after = when {
             end != null && isDate(end) -> date(end)
             duration != null -> first.plusDays(duration(duration.value).toDays())
             else -> first.plusDays(1)
         }
-        return ChronoUnit.DAYS.between(first, after).coerceIn(1, MultiDay.MAX_DAYS.toLong())
+        return ChronoUnit.DAYS.between(first, after).coerceAtLeast(1)
     }
+
+    // The same, at most MultiDay.MAX_DAYS: what a read-only copy shows (a longer event is cut there).
+    fun allDayLength(first: LocalDate, end: Property?, duration: Property?): Long =
+        allDayDays(first, end, duration).coerceAtMost(MultiDay.MAX_DAYS.toLong())
 
     // Planner's view of one occurrence. Timed events longer than a day are shown across their days like an all-day
     // event; timedStart/timedEnd keep their real clock times (the end is on endDate, or the midnight after it at 00:00).

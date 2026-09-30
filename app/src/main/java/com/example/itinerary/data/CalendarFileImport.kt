@@ -117,7 +117,10 @@ object CalendarFileImport {
         val ownZone = if (allDay || start.value.endsWith("Z")) zone else start.params["TZID"]?.let { ZoneId.of(it) } ?: zone
         val first: ZonedDateTime = if (allDay) Ics.date(start).atStartOfDay(zone) else strictTime(start, zone)
         val firstLocal = first.withZoneSameInstant(ownZone).toLocalDateTime()
-        val days = if (allDay) Ics.allDayLength(first.toLocalDate(), end, duration) else 0
+        // An all-day event longer than Planner holds is cut to MultiDay.MAX_DAYS (a one-time copy, or a read-only one in a
+        // subscribed calendar: nothing is written back); an import says so.
+        val fullDays = if (allDay) Ics.allDayDays(first.toLocalDate(), end, duration) else 0
+        val days = fullDays.coerceAtMost(MultiDay.MAX_DAYS.toLong())
         val length: Duration? = if (allDay) null else when {
             end != null -> Duration.between(first, strictTime(end, zone)).also { require(!it.isNegative) }
             duration != null -> Ics.duration(duration.value)
@@ -129,6 +132,7 @@ object CalendarFileImport {
         val rule = one("RRULE")?.value
         val repeat = rule?.let { IcsRepeat.parse(it, ownZone, firstLocal.toLocalDate()) }
         if (rule != null && repeat == null) note = "Repeats in a way Planner can't copy, so only the first date is imported."
+        if (fullDays > MultiDay.MAX_DAYS) note = listOfNotNull(note, "Lasts $fullDays days; Planner imports the first ${MultiDay.MAX_DAYS}.").joinToString(" ")
         val keepFrom = from?.minusDays(days.coerceAtLeast(1) + 1) ?: firstLocal.toLocalDate()
         val dates = (repeat?.dates(firstLocal.toLocalDate(), firstLocal.toLocalTime(), limit, from = keepFrom)
             ?: listOf(firstLocal.toLocalDate())).toMutableSet()

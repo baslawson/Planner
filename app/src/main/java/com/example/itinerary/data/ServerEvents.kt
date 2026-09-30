@@ -7,7 +7,7 @@ import java.time.temporal.ChronoUnit
 // Calendar sync step 6 (two-way): event files in the calendar Planner keeps in sync with.
 object ServerEvents {
     // [item] is the event as a Planner event, or null when Planner can't hold it exactly (a repeating event, a timed one
-    // longer than a day, several events in one file, a cancelled or unreadable one, one outside the years a calendar file
+    // longer than a day, an all-day one longer than MultiDay.MAX_DAYS, several events in one file, a cancelled or unreadable one, one outside the years a calendar file
     // can hold): those stay read-only.
     class Parsed(val uid: String?, val item: ItineraryItem?)
 
@@ -21,7 +21,12 @@ object ServerEvents {
         if (one("STATUS")?.value?.uppercase() == "CANCELLED") return Parsed(uid, null)
         val start = one("DTSTART") ?: return Parsed(uid, null)
         val end = one("DTEND"); val duration = one("DURATION")
-        val timing = if (Ics.isDate(start)) Ics.date(start).let { Ics.allDay(it, Ics.allDayLength(it, end, duration)) } else {
+        val timing = if (Ics.isDate(start)) Ics.date(start).let { first ->
+            // Longer than Planner can hold: read-only, never cut short (an edit would write the shorter end back).
+            val days = Ics.allDayDays(first, end, duration)
+            if (days > MultiDay.MAX_DAYS) return Parsed(uid, null)
+            Ics.allDay(first, days)
+        } else {
             // An unknown time zone makes the event read-only rather than guessing its time.
             val begin = Ics.time(start, zone, strictGap = false) { ZoneId.of(it) }.withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
             val finish = when {
