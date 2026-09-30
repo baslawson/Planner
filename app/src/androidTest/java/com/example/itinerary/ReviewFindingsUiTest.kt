@@ -65,7 +65,7 @@ class ReviewFindingsUiTest {
         val activity = launch()
         ins.runOnMainSync { activity.setContent { ItineraryTheme {
             ItemEditorSheet(original, emptyList(), listOf(reminder), emptyMap(), emptySet(), {}, {}, {},
-                { item, added, removed, alarms, deleted, options -> app.repository.saveItem(item,added,removed,alarms,deleted,options) },
+                { item, added, removed, alarms, deleted, options -> app.repository.saveItemId(item,added,removed,alarms,deleted,options) },
                 { _, _ -> })
         } } }
         await("Editor title") { nodes().any { it.isEditable && it.text?.toString()==title } }
@@ -87,6 +87,7 @@ class ReviewFindingsUiTest {
         screenshot(if (recover) "recovered-editor" else "open-editor")
         click("Save")
         await("Saved editor") { data().items.single { it.id==original.id }.title==changedTitle && EditorDraftStore(context).read()==null }
+        click("Close") // Save keeps the editor open on the saved bill; nothing is unsaved, so Close leaves at once
         val saved = data().items.single { it.id==original.id }
         assertTrue(saved.paid); assertEquals(ledger,saved.payments)
         manager.cancel(reminder.id.toInt())

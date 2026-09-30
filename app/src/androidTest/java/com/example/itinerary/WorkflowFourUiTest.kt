@@ -96,6 +96,9 @@ class WorkflowFourUiTest {
     }
 
 
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes asks first; Discard abandons them.
     private fun back() {
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         Thread.sleep(350)
@@ -142,7 +145,7 @@ class WorkflowFourUiTest {
             ins.runOnMainSync { activity.recreate() }
             click("Add task")
             await { find("https://example.test/recover") != null }
-            click("Discard")
+            click("Close") // the shared text is what the editor opened with, so nothing is unsaved
             await { find("Add to Planner") == null }
             assertFalse(data().tasks.any { it.notes == "https://example.test/recover" })
         } finally { TaskDraftStore(context).clear("new") }
@@ -159,7 +162,7 @@ class WorkflowFourUiTest {
             click("Add task")
             await { find("Task title") != null || find("QA confirm dates") != null }
             screenshot("shared-task")
-            click("Save")
+            saveAndClose()
             await { data().tasks.any { it.title == "QA confirm dates" } }
             val prerequisite = data().tasks.single { it.title == "QA confirm dates" }
             assertEquals("https://example.test/booking", prerequisite.notes)
@@ -170,7 +173,7 @@ class WorkflowFourUiTest {
             field("After (min)", "15")
             field("Duration in minutes (optional)", "60")
             screenshot("event-buffers")
-            click("Save")
+            saveAndClose()
             await { data().items.any { it.title == "QA buffered appointment" } }
             val event = data().items.single { it.title == "QA buffered appointment" }
             assertEquals(20, event.bufferBeforeMinutes); assertEquals(15, event.bufferAfterMinutes)

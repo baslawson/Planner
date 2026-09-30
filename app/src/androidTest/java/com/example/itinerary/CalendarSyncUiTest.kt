@@ -97,6 +97,8 @@ class CalendarSyncUiTest {
         screenshot("copy-editor")
         click("Save")
         await { data().items.any { it.title == "QA Outside standup" } }
+        click("Close") // Save keeps the editor open on the copy; nothing is unsaved, so Close leaves at once
+        await { find("Edit event") == null }
         val copy = data().items.single { it.title == "QA Outside standup" }
         assertTrue(copy.id > 0)
         assertEquals(tomorrow, copy.date)

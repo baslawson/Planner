@@ -91,8 +91,8 @@ class FreeTimeReturnUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Add menu")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("Add menu")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -138,8 +138,8 @@ class FreeTimeReturnUiTest {
         val before=android.graphics.Rect();find(gap)!!.getBoundsInScreen(before)
         screenshot("before-gap")
         val idsBefore=data().items.map { it.id }.toSet()
-        click(gap);click("Set time");await { find("Discard")!=null }
-        click("Discard")
+        click(gap);click("Set time");await { find("New event")!=null }
+        click("Close") // nothing typed, so the editor closes at once, back to Find free time
         await { find("Find free time")!=null && find(gap)!=null && find(summary)!=null }
         ins.waitForIdleSync();Thread.sleep(500)
         val after=android.graphics.Rect();find(gap)!!.getBoundsInScreen(after)
@@ -148,7 +148,7 @@ class FreeTimeReturnUiTest {
         assertNull(find("Set time"));assertNull(EditorDraftStore(context).read())
         assertEquals(idsBefore,data().items.map { it.id }.toSet())
         screenshot(if(calendar) "calendar-discard-return" else "agenda-discard-return")
-        click(gap);click("Set time");await { find("Discard")!=null }
+        click(gap);click("Set time");await { find("New event")!=null }
         val title="QA free time return " + if(calendar) "calendar" else "agenda"
         reveal { nodes().any { it.isVisibleToUser && it.isEditable && (it.text.isNullOrEmpty() || it.text.toString()=="What are you doing?") } }
         val field=nodes().first { it.isVisibleToUser && it.isEditable && (it.text.isNullOrEmpty() || it.text.toString()=="What are you doing?") }
@@ -157,6 +157,7 @@ class FreeTimeReturnUiTest {
         }))
         hideQuickTestKeyboard(ins);click("Save")
         if(find("Add anyway")!=null)click("Add anyway")
+        click("Close") // Save keeps the editor open; once saved, Close leaves without going back to Find free time
         await { data().items.any { it.title==title } }
         await { find(if(calendar) "Switch to Agenda view" else "Switch to Calendar view")!=null }
         assertNull(find("Find free time"))

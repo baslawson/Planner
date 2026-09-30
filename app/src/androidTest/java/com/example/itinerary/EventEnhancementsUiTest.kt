@@ -44,7 +44,7 @@ class EventEnhancementsUiTest {
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("duplicate-conflict")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.any { it.title == "QA copied event" } }
         val original = snapshot().items.single { it.title == "QA original event" }
         val copy = snapshot().items.single { it.title == "QA copied event" }
@@ -66,14 +66,14 @@ class EventEnhancementsUiTest {
         await { nodes().any { it.isEditable && it.text?.toString() == "12" } }
         setText(nodes().first { it.isEditable && it.text?.toString() == "12" }, "3")
         screenshot("repeat-editor")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.count { it.title == "QA recurring event" } == 3 }
         val seriesId = snapshot().items.first { it.title == "QA recurring event" }.seriesId!!
         click("QA recurring event")
         click("QA recurring event")
         click("Entire series")
         setText(nodes().first { it.isEditable }, "QA renamed series")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.count { it.title == "QA renamed series" } == 3 }
         click("QA renamed series")
         click("Delete")
@@ -107,6 +107,8 @@ class EventEnhancementsUiTest {
         screenshot("failure")
         throw AssertionError("Timed out. Visible text: " + nodes().mapNotNull { it.text?.toString() }.joinToString(" | "))
     }
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save"); click("Close") }
     private fun click(text: String) {
         var attempts = 0
         var forward = true

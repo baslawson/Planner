@@ -64,6 +64,10 @@ class TasksUiTest {
             }
         }
     }
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes asks first; Discard abandons them.
+    private fun closeAndDiscard() { click("Close");await { find("Save changes?")!=null };click("Discard") }
     private fun click(text:String) {
         if (text == "Settings" && find(text) == null && find("More options") != null) click("More options")
         if (text == "Add bill") {
@@ -108,7 +112,7 @@ class TasksUiTest {
         assertNull(find("Add bill"));assertNull(find("Scan bill"))
         screenshot("add-task-menu");click("Add task");click("To-do task")
         await { find("Task title")!=null }
-        setText("","QA task editor");screenshot("new-task-editor");click("Save")
+        setText("","QA task editor");screenshot("new-task-editor");saveAndClose()
         await { data().tasks.any { it.title=="QA task editor" } }
         var task=data().tasks.single { it.title=="QA task editor" }
         assertNull(task.dueDate);assertEquals(TaskPriority.NORMAL,task.priority)
@@ -118,7 +122,7 @@ class TasksUiTest {
         click("Mark QA task editor incomplete");await { !data().tasks.single { it.id==task.id }.done }
         click("QA task editor");click("High");click("Choose due date");click("Set date")
         setText("","Unique mechanic note")
-        screenshot("task-editor-dated");click("Save")
+        screenshot("task-editor-dated");saveAndClose()
         await { data().tasks.single { it.id==task.id }.dueDate==LocalDate.now() }
         task=data().tasks.single { it.id==task.id }
         assertEquals(TaskPriority.HIGH,task.priority);assertEquals("Unique mechanic note",task.notes)
@@ -127,9 +131,9 @@ class TasksUiTest {
         click("Delete");await { find("Delete task?")!=null };click("Delete")
         await { data().tasks.none { it.id==task.id } };click("Undo")
         await { data().tasks.any { it.id==task.id } };assertEquals(task,data().tasks.single { it.id==task.id })
-        click("QA task editor");click("Remove due date");click("Save")
+        click("QA task editor");click("Remove due date");saveAndClose()
         await { data().tasks.single { it.id==task.id }.dueDate==null }
-        click("QA task editor");setText("QA task editor","Discarded edit");click("Discard")
+        click("QA task editor");setText("QA task editor","Discarded edit");closeAndDiscard()
         assertEquals("QA task editor",data().tasks.single { it.id==task.id }.title)
     }
     @Test fun datedPriorityOverdueAndAnytimeTasksStayInAgendaAndSearchCanEditThem()=runBlocking {
@@ -160,7 +164,7 @@ class TasksUiTest {
         click(anytimeHeading()!!);reveal { find("QA task view anytime")!=null }
         click("Search");setText("","Unicorn wrench")
         reveal { find("QA task view anytime")!=null };screenshot("task-search")
-        click("QA task view anytime");setText("QA task view anytime","QA task view renamed");click("Save")
+        click("QA task view anytime");setText("QA task view anytime","QA task view renamed");saveAndClose()
         await { data().tasks.single { it.id==anytime.id }.title=="QA task view renamed" }
         setText("Unicorn wrench","QA task view completed");await { find("Nothing found. Try fewer words or check the spelling.")!=null }
         click("Show completed tasks");reveal { find("QA task view completed")!=null }

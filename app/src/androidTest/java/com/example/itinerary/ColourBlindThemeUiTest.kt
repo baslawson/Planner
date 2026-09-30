@@ -91,8 +91,8 @@ class ColourBlindThemeUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Add menu")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("Add menu")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }

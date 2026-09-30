@@ -92,8 +92,8 @@ class QuickSuggestionsUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Add menu")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("Add menu")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -166,8 +166,8 @@ class QuickSuggestionsUiTest {
         click("Quick entry");setText("","QA editor repeat tomorrow 10am");click("More options");click("Open in full editor")
         reveal { find("Does not repeat")!=null };click("Does not repeat")
         click("Weekdays");reveal { find("Monday to Friday. A weekend start moves to the following Monday.")!=null }
-        screenshot("editor-weekdays");click("Discard")
-        if (find("Discard changes?")!=null || find("Discard")!=null) click("Discard")
+        // The repeat was changed, so Close asks first; Discard abandons the new event.
+        screenshot("editor-weekdays");click("Close");await { find("Save changes?")!=null };click("Discard")
         assertTrue(data().items.none { it.title=="QA editor repeat" })
     }
 

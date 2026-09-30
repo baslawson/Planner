@@ -92,8 +92,8 @@ class QuickReviewUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Add menu")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("Add menu")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -164,13 +164,14 @@ class QuickReviewUiTest {
     @Test fun moreDetailsRetainsRepeatCountAndSeededReminder()=runBlocking {
         val date=LocalDate.now().plusDays(3)
         start();setText("","QA repeat editor $date noon every month remind me 1 hour before for 2 occurrences")
-        click("More options");click("Open in full editor");reveal { find("Discard")!=null }
+        click("More options");click("Open in full editor");reveal { find("Close")!=null }
         val draft=EditorDraftStore(context).read()!!
         assertEquals("2",draft.getJSONObject("state").getString("count"))
         assertEquals("MONTHLY",draft.getJSONObject("state").getString("repeat"))
         assertEquals(60L,DraftCodec.reminders(draft.optJSONArray("addedReminders")).single().offsetMinutes)
-        open();reveal { find("Discard")!=null }
-        click("Save");await { data().items.count { it.title=="QA repeat editor" }==2 }
+        open();reveal { find("Close")!=null }
+        // Save keeps the editor open on the saved event; Close then leaves at once.
+        click("Save");await { data().items.count { it.title=="QA repeat editor" }==2 };click("Close")
         data().items.filter { it.title=="QA repeat editor" }.forEach { item -> assertEquals(60L,data().reminders.single { it.itemId==item.id }.offsetMinutes) }
     }
     @Test fun taskRepeatAndReminderContinueAfterCompletion()=runBlocking {

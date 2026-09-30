@@ -66,7 +66,7 @@ class FiveConveniencesUiTest {
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("checklist-reminder-preview")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.single { it.title == "QA conveniences" }.durationMinutes == 150 }
         val saved = snapshot().items.single { it.title == "QA conveniences" }
         assertEquals(2,saved.checklist.size)
@@ -75,7 +75,7 @@ class FiveConveniencesUiTest {
         click("QA conveniences")
         click("Duplicate event")
         setText(nodes().first { it.isEditable },"QA conveniences copy")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.any { it.title == "QA conveniences copy" } }
         assertTrue(snapshot().items.single { it.title == "QA conveniences copy" }.checklist.none { it.done })
         click("Switch to Agenda view") // saving from the calendar returns there
@@ -116,6 +116,8 @@ class FiveConveniencesUiTest {
         screenshot("failure")
         throw AssertionError("Timed out. Visible text: " + nodes().mapNotNull { it.text?.toString() }.joinToString(" | "))
     }
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save"); click("Close") }
     private fun click(text: String) {
         var attempts = 0
         var forward = true

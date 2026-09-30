@@ -91,6 +91,10 @@ class TaskRepeatOptionsUiTest {
     }
 
 
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes asks first; Discard abandons them.
+    private fun closeAndDiscard() { click("Close");await { find("Save changes?")!=null };click("Discard") }
     private fun back() {
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         Thread.sleep(350)
@@ -138,7 +142,7 @@ class TaskRepeatOptionsUiTest {
             }
             screenshot("task-repeat-dropdown")
             repeat(3) { scrollMenu(false) }
-            click(label);click("Save")
+            click(label);saveAndClose()
             await { data().tasks.any { it.title=="QA repeat options $label" } }
             val original=data().tasks.single { it.title=="QA repeat options $label" }
             assertEquals(rule,original.repeat)
@@ -150,7 +154,7 @@ class TaskRepeatOptionsUiTest {
             assertEquals(rule,next.repeat)
             assertEquals(next.id,data().tasks.single { it.id==original.id }.nextTaskId)
             click(next.title);reveal { find(label)!=null };screenshot("saved-${rule.lowercase()}")
-            click("Discard")
+            click("Close") // nothing changed: Close leaves at once
         }
     }
     @Test fun eventsAndBillsStillOfferFortnightlyAndYearly() {
@@ -159,7 +163,7 @@ class TaskRepeatOptionsUiTest {
             click("Add menu");click(action);click("Does not repeat")
             assertNotNull(find("Fortnightly"));assertNotNull(find("Yearly"))
             screenshot(if(action=="Add bill") "bill-repeat-dropdown" else "event-repeat-dropdown")
-            click("Yearly");reveal { find("Yearly")!=null };click("Discard")
+            click("Yearly");reveal { find("Yearly")!=null };closeAndDiscard()
         }
     }
 }

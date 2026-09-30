@@ -64,6 +64,8 @@ class SixTaskFeaturesUiTest {
             }
         }
     }
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
     private fun click(text:String) {
         if (text == "Add bill") {
             if (find("Add task") == null && find("Bill payment") == null) click("Add menu")
@@ -127,10 +129,11 @@ class SixTaskFeaturesUiTest {
         click("Never"); click("Weekly")
         click("Add task"); field("Task 1", "Pack documents")
         screenshot("repeat-checklist-editor")
-        back(); await { find("AGENDA")!=null }
+        // Leaving without Close keeps the draft (Close or Back would ask "Save changes?"): restart the app.
+        open(); await { find("AGENDA")!=null }
         click("Add menu"); click("Add task"); click("To-do task")
         click("Resume draft"); reveal { find("Pack documents")!=null }
-        click("Save")
+        saveAndClose()
         await { data().tasks.any { it.title=="QA six repeat" } }
         val task=data().tasks.single { it.title=="QA six repeat" }
         assertEquals("WEEKLY", task.repeat); assertEquals("Pack documents",task.checklist.single().text)
@@ -191,7 +194,7 @@ class SixTaskFeaturesUiTest {
         field("Reference","REF 00123")
         field("BPAY biller code","001234")
         field("BPAY reference","00987654321")
-        screenshot("bill-payment-details");click("Save")
+        screenshot("bill-payment-details");saveAndClose()
         await { data().items.any { it.title=="QA six payment" } }
         val bill=data().items.single { it.title=="QA six payment" }
         assertEquals("https://example.com/pay",bill.paymentLink);assertEquals("REF 00123",bill.paymentReference)
@@ -211,7 +214,7 @@ class SixTaskFeaturesUiTest {
                 else clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
             }
         }
-        click("Discard")
+        click("Close") // only copied, nothing changed: Close leaves at once
     }
     @Test fun taskFilePickerAndPhotoCapture() = runBlocking {
         fresh();click("Add menu");click("Add task");click("To-do task")
@@ -236,7 +239,7 @@ class SixTaskFeaturesUiTest {
             }
         }
         (find("Done") ?: cameraButton("done_button"))!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        reveal { find("Task photo.jpg")!=null };screenshot("task-photo-attached");click("Save")
+        reveal { find("Task photo.jpg")!=null };screenshot("task-photo-attached");saveAndClose()
         await { data().tasks.any { it.title=="QA six attachments" } }
         val file=data().tasks.single { it.title=="QA six attachments" }.attachments.single()
         assertTrue(app.attachmentStore.fileFor(file.fileName).length()>0)
@@ -254,7 +257,7 @@ class SixTaskFeaturesUiTest {
     @HarnessStage @Test fun resumeProcessDeathDraft() = runBlocking {
         open();click("Add menu");click("Add task");click("To-do task");click("Resume draft")
         reveal { find("QA six cold draft")!=null };reveal { find("Keep this step")!=null }
-        screenshot("draft-after-kill");click("Save")
+        screenshot("draft-after-kill");saveAndClose()
         await { data().tasks.any { it.title=="QA six cold draft" } }
         val task=data().tasks.single { it.title=="QA six cold draft" }
         assertEquals("AFTER_COMPLETION",task.repeat);assertEquals(12,task.repeatDays)
@@ -302,7 +305,8 @@ class SixTaskFeaturesUiTest {
         assertTrue(note,note.endsWith(". Changing the reminder ends the snooze.") && note.removePrefix("Snoozed until ").startsWith(line.removePrefix("Reminder: snoozed until ")))
         val removeLabel=nodes().mapNotNull { it.contentDescription?.toString() }.single { it.startsWith("Remove reminder: ") }
         click(removeLabel);await { nodes().none { it.text?.toString()?.startsWith("Snoozed until ")==true } }
-        back();Unit
+        // The reminder removal is unsaved, so Back asks first; Discard leaves the task as it was.
+        back();await { find("Save changes?")!=null };click("Discard");Unit
     }
     @Test fun taskReminderSectionFollowsTheEventLayout() = runBlocking {
         cleanFixture("QA six chips")
@@ -314,7 +318,7 @@ class SixTaskFeaturesUiTest {
         val expected=java.time.LocalDate.now().plusDays(1).atTime(9,0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         reveal { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ")==true } };screenshot("task-reminder-set")
         assertNull("chips hidden while a reminder is set",find("Tomorrow 09:00"))
-        click("Save")
+        saveAndClose()
         await { data().tasks.any { it.title=="QA six chips" } }
         assertEquals(expected,data().tasks.single { it.title=="QA six chips" }.reminderAt)
         cleanFixture("QA six chips");Unit
@@ -341,7 +345,7 @@ class SixTaskFeaturesUiTest {
         reveal { nodes().any { it.isEditable && it.text?.toString()==longItem && it.isVisibleToUser } }
         assertTrue("checklist box grew (${heightOf(longItem)} > $shortItem)", heightOf(longItem) > shortItem*1.5)
         screenshot("long-text-grows-$textSize")
-        click("Save")
+        saveAndClose()
         await { data().tasks.any { it.title==long } }
         assertEquals(longItem, data().tasks.single { it.title==long }.checklist.single().text)
         cleanFixture("QA six grow"); app.settings.setTextSizePercent(TextSize.DEFAULT_PERCENT)
@@ -358,7 +362,7 @@ class SixTaskFeaturesUiTest {
             fresh();click("Add menu");click("Add task");click("To-do task")
             field("Task title","QA six document")
             click("Attach file");click("QA-six-document.txt")
-            reveal { find("QA-six-document.txt")!=null && find("Save")!=null };screenshot("task-document-attached");click("Save")
+            reveal { find("QA-six-document.txt")!=null && find("Save")!=null };screenshot("task-document-attached");saveAndClose()
             await { data().tasks.any { it.title=="QA six document" } }
             val attachment=data().tasks.single { it.title=="QA six document" }.attachments.single()
             assertEquals("QA document bytes for task attachment\n",app.attachmentStore.fileFor(attachment.fileName).readText())
@@ -371,14 +375,15 @@ class SixTaskFeaturesUiTest {
         fresh();click("QA six edit original")
         field("Task title","QA six edit recovered")
         field("Notes (optional)","Recovered edited notes")
-        back();await { find("AGENDA")!=null }
+        // Leaving without Close keeps the draft (Close or Back would ask "Save changes?"): restart the app.
+        open();await { find("AGENDA")!=null }
         assertEquals(task,data().tasks.single { it.id==task.id })
         assertNotNull(TaskDraftStore(context).read(task.id))
     }
     @HarnessStage @Test fun resumeExistingTaskDraft() = runBlocking {
         open();click("QA six edit original");click("Resume draft")
         reveal { find("QA six edit recovered")!=null };reveal { find("Recovered edited notes")!=null }
-        click("Save")
+        saveAndClose()
         await { data().tasks.any { it.title=="QA six edit recovered" } }
         assertEquals("Recovered edited notes",data().tasks.single { it.title=="QA six edit recovered" }.notes)
     }

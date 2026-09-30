@@ -82,8 +82,8 @@ class CodebaseOptimizationUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("AGENDA")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("AGENDA")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }

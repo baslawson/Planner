@@ -81,6 +81,9 @@ class BillTaskWorkflowUiTest {
             node?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
         };Thread.sleep(350)
     }
+    // Save keeps the editor open on the saved bill; nothing is unsaved then, so Close leaves at once.
+    private fun saveAndClose() { click("Save"); click("Close") }
+    private fun enabled(text:String):Boolean? { var node=find(text);while(node!=null && !node.isClickable)node=node.parent;return node?.isEnabled }
     private fun setText(old:String,value:String) {
         reveal { pickEditable(nodes(),old)!=null }
         val node=pickEditable(nodes(),old)!!
@@ -132,7 +135,7 @@ class BillTaskWorkflowUiTest {
         await { find("New bill task") != null }
         assertNotNull(find("Bill title")); assertNull(find("What are you doing?"))
         setText(nodes().first { it.isEditable }.text.toString(), title); setText("", "125.50")
-        screenshot("bill-task-editor"); click("Save")
+        screenshot("bill-task-editor"); saveAndClose()
         await { data().items.any { it.title == title } }
         val saved = data().items.single { it.title == title }
         assertEquals("Bills", saved.category); assertEquals(12550L, saved.billAmountMinor)
@@ -141,7 +144,7 @@ class BillTaskWorkflowUiTest {
         reveal { find(title) != null }; assertNotNull(find("Bill payment · Task"))
         screenshot("bill-task-card"); click(title)
         await { find("Edit bill task") != null }
-        click("Record payment"); setText("", "25.50"); click("Add payment"); click("Save")
+        click("Record payment"); setText("", "25.50"); click("Add payment"); saveAndClose()
         await { data().items.single { it.id == saved.id }.payments.size == 1 }
         val partial = data().items.single { it.id == saved.id }
         assertEquals(2550L, Payments.total(partial.payments)); assertFalse(partial.paid)
@@ -173,7 +176,9 @@ class BillTaskWorkflowUiTest {
         app.settings.setAgendaRange(AgendaRange.TODAY)
         // The Overdue label is at the foot of the card, which can start near the bottom of the screen.
         open(); reveal { find(title) != null && find("Overdue") != null }; screenshot("overdue-bill-in-today")
-        click(title); await { find("Edit bill task") != null }; click("Save")
+        click(title); await { find("Edit bill task") != null }
+        // Nothing edited: Save is greyed out and Close leaves without asking.
+        assertEquals(false, enabled("Save")); click("Close")
         await { find("Edit bill task") == null }
         assertEquals(before, data().items.single { it.id == before.id }.copy(draftToken = before.draftToken))
         assertEquals(reminders, data().reminders.filter { it.itemId == before.id })
@@ -182,7 +187,7 @@ class BillTaskWorkflowUiTest {
         click("Search"); click("Tasks"); setText("",title)
         reveal { find(title) != null }; screenshot("bill-task-search")
         click(title); await { find("Edit bill task") != null }
-        click("Delete"); await { find("Delete bill?") != null }; click("Cancel"); click("Discard"); click("Back")
+        click("Delete"); await { find("Delete bill?") != null }; click("Cancel"); click("Close"); click("Back")
         val calendarTitle = "QA bill task flow calendar"
         cleanFixture(calendarTitle)
         app.repository.saveItem(ItineraryItem(tripId=0,date=LocalDate.now(),startTime=null,title=calendarTitle,category="Bills",billAmountMinor=5000))
@@ -190,6 +195,6 @@ class BillTaskWorkflowUiTest {
         await { find("CALENDAR") != null }
         if (find("Collapse") != null) click("Collapse")
         reveal { find(calendarTitle) != null }; click(calendarTitle)
-        await { find("Edit bill task") != null }; click("Discard")
+        await { find("Edit bill task") != null }; click("Close")
     }
 }

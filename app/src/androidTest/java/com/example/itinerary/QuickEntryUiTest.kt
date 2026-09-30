@@ -63,6 +63,8 @@ class QuickEntryUiTest {
             }
         }
     }
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
     private fun click(text:String) {
         if (text == "Add bill") {
             if (find("Add task") == null && find("Bill payment") == null) click("Add menu")
@@ -91,8 +93,8 @@ class QuickEntryUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("Add menu")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("Add menu")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -129,7 +131,7 @@ class QuickEntryUiTest {
         val saved=data().items.single { it.title=="QA quick dentist" }
         assertEquals(java.time.LocalTime.of(15,0),saved.startTime);assertEquals(45,saved.durationMinutes)
         assertEquals(LocalDate.now().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.FRIDAY)),saved.date)
-        assertEquals(before+1,data().items.size);assertNull(find("Discard"))
+        assertEquals(before+1,data().items.size);assertNull(find("New event"))
     }
     @Test fun tasksCanBeUndatedOrDueTomorrowAndNeverLoseTimedInput()=runBlocking {
         val before=data().tasks.size
@@ -202,8 +204,8 @@ class QuickEntryUiTest {
         click("Set time")
         // Default picker time is 09:00; committing it resolves the ambiguous input.
         click("More options");click("Open in full editor")
-        reveal { find("Discard")!=null };screenshot("event-more-details")
-        click("Save");await { data().items.any { it.title=="QA quick clock" } }
+        reveal { find("Close")!=null };screenshot("event-more-details")
+        saveAndClose();await { data().items.any { it.title=="QA quick clock" } }
         assertEquals(java.time.LocalTime.of(9,0),data().items.single { it.title=="QA quick clock" }.startTime)
         click("Quick entry");click("Task");setText("","QA quick date")
         click("No due date");await { find("Select date")!=null };click("Set date")
@@ -216,7 +218,7 @@ class QuickEntryUiTest {
         await { nodes().any { it.isEditable && it.text?.toString()=="Call plumber" } && nodes().any { it.isEditable && it.text?.toString()=="tmr" } }
         setText("Call plumber","QA detailed task");click("More options");click("Open in full editor")
         reveal { find("Save task")!=null || find("Save")!=null };screenshot("task-more-details")
-        click(if(find("Save task")!=null) "Save task" else "Save")
+        if(find("Save task")!=null) click("Save task") else saveAndClose()
         await { data().tasks.any { it.title=="QA detailed task" } }
         assertEquals(LocalDate.now().plusDays(1),data().tasks.single { it.title=="QA detailed task" }.dueDate)
     }
@@ -253,7 +255,7 @@ class QuickEntryUiTest {
         assertEquals(java.time.LocalTime.of(14,0),direct.startTime)
         assertEquals(90,direct.durationMinutes);assertEquals("Riverside Cafe",direct.location)
         click("Quick entry");setText("","QA natural study tomorrow 3pm for 1h 30m at Library")
-        click("More options");click("Open in full editor");reveal { find("Discard")!=null };click("Save")
+        click("More options");click("Open in full editor");reveal { find("Close")!=null };saveAndClose()
         await { data().items.any { it.title=="QA natural study" } }
         val detailed=data().items.single { it.title=="QA natural study" }
         assertEquals(90,detailed.durationMinutes);assertEquals("Library",detailed.location)

@@ -136,7 +136,7 @@ class OptimizationUiTest {
                 ItineraryTheme { ItemEditorSheet(
                     ItineraryItem(tripId = 0, date = LocalDate.of(2000, 1, 1), startTime = null, title = "Draft benchmark"),
                     emptyList(), emptyList(), mapOf("Food" to tick.intValue), emptySet(), {}, {}, {},
-                    onSave = { _, _, _, _, _, _ -> }, onDelete = { _, _ -> }) }
+                    onSave = { _, _, _, _, _, _ -> 0L }, onDelete = { _, _ -> }) }
             } }
             await { store.read()?.getJSONObject("item")?.getString("title") == "Draft benchmark" }
             Thread.sleep(300)

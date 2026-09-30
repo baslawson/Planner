@@ -53,6 +53,10 @@ class ScanBillUiTest {
             }
         }
     }
+    // Save keeps the editor open on the saved bill; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes (added scan pages, a recovered draft) asks first; Discard abandons them.
+    private fun closeAndDiscard() { click("Close");await { find("Save changes?")!=null };click("Discard") }
     private fun click(text:String) {
         if (text == "Add bill") {
             if (find("Add task") == null && find("Bill payment") == null) click("Add menu")
@@ -80,8 +84,8 @@ class ScanBillUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> nodes().any { it.contentDescription?.toString() == "Shutter" || it.viewIdResourceName?.endsWith(":id/shutter_button") == true }
-                null -> find("AGENDA")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("AGENDA")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -148,7 +152,7 @@ class ScanBillUiTest {
         click("Cancel")
         setText("", "QA camera bill retest")
         await { nodes().any { it.isEditable && it.text?.toString() == "QA camera bill retest" } }
-        click("Save")
+        saveAndClose()
         await { data().items.any { it.title == "QA camera bill retest" } }
         val saved = data().items.single { it.title == "QA camera bill retest" }
         assertEquals("Bills", saved.category)
@@ -181,7 +185,8 @@ class ScanBillUiTest {
         assertTrue(draft.getJSONObject("state").getBoolean("scanningPdf"))
         assertEquals(before,data())
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-        await { find("Take page")!=null };click("Cancel");click("Discard")
+        // No page was taken, so the new bill is unchanged and Close leaves at once.
+        await { find("Take page")!=null };click("Cancel");click("Close")
         assertEquals(before,data());assertNull(EditorDraftStore(context).read())
     }
 
@@ -204,7 +209,7 @@ class ScanBillUiTest {
         assertEquals(files,DraftCodec.attachments(EditorDraftStore(context).read()!!.optJSONArray("added")))
         click("Use due date");click("Apply selected")
         assertEquals(before,data().items.size)
-        click("Save");await { data().items.any { it.title=="Acme Energy" } }
+        saveAndClose();await { data().items.any { it.title=="Acme Energy" } }
         val saved=data().items.single { it.title=="Acme Energy" }
         assertEquals("Bills",saved.category);assertEquals(12345L,saved.billAmountMinor)
         assertEquals("AUD",saved.billCurrency);assertEquals(LocalDate.of(2026,10,30),saved.date)
@@ -226,7 +231,7 @@ class ScanBillUiTest {
         val draft=EditorDraftStore(context).read()!!
         assertEquals("",draft.getJSONObject("item").getString("title"))
         assertEquals(2,DraftCodec.attachments(draft.optJSONArray("added")).size)
-        launch();await { find("Discard")!=null };assertNull(find("Review bill details"));click("Discard")
+        launch();await { find("Close")!=null };assertNull(find("Review bill details"));closeAndDiscard()
         assertEquals(before,data())
     }
 
@@ -237,7 +242,7 @@ class ScanBillUiTest {
         click("Read details")
         await { find("Review bill details")!=null }
         assertNotNull(find("No readable text was found. You can enter the details here, or cancel and scan again."))
-        screenshot("empty-scan-review");click("Cancel");click("Discard")
+        screenshot("empty-scan-review");click("Cancel");closeAndDiscard()
         assertEquals(before,data())
     }
     @Test fun skippingReviewKeepsScanAndAllowsManualReviewLater()=runBlocking {
@@ -253,12 +258,12 @@ class ScanBillUiTest {
         assertTrue(app.attachmentStore.fileFor(files.single().fileName).isFile)
         assertEquals("",draft.getJSONObject("item").getString("title"))
         assertEquals(before,data())
-        launch();await { find("Discard")!=null }
+        launch();await { find("Close")!=null }
         assertNull(find("Read details from this scan?"));assertNull(find("Review bill details"))
         assertEquals(files,DraftCodec.attachments(EditorDraftStore(context).read()!!.optJSONArray("added")))
         click("Suggest bill details");await { find("Review bill details")!=null }
         assertNull(find("Read details from this scan?"))
-        click("Cancel");click("Discard");assertEquals(before,data())
+        click("Cancel");closeAndDiscard();assertEquals(before,data())
     }
 
 }

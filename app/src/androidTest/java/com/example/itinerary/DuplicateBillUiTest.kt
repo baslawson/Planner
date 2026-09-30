@@ -39,6 +39,18 @@ class DuplicateBillUiTest {
         while (node != null && !node.isClickable) node = node.parent
         assertTrue(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
     }
+    private fun editable(node: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (node.isEditable && node.text?.toString() == text) return node
+        for (i in 0 until node.childCount) editable(node.getChild(i), text)?.let { return it }
+        return null
+    }
+    private fun setText(old: String, value: String) {
+        await { editable(ins.uiAutomation.freshRoot, old) != null }
+        assertTrue(editable(ins.uiAutomation.freshRoot, old)!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
+        await { editable(ins.uiAutomation.freshRoot, value) != null }
+    }
     private fun show(item: ItineraryItem, saves: AtomicInteger): MainActivity {
         EditorDraftStore(ins.targetContext).clear()
         val activity = ins.startActivitySync(Intent(ins.targetContext, MainActivity::class.java)
@@ -46,8 +58,7 @@ class DuplicateBillUiTest {
         ins.runOnMainSync { activity.setContent {
             ItineraryTheme { ItemEditorSheet(item, emptyList(), emptyList(), emptyMap(), emptySet(), {}, {}, {},
                 onSave = { event, added, removed, reminders, removedReminders, options ->
-                    app.repository.saveItem(event, added, removed, reminders, removedReminders, options)
-                    saves.incrementAndGet()
+                    app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also { saves.incrementAndGet() }
                 }, onDelete = { _, _ -> }) }
         } }
         return activity
@@ -82,6 +93,9 @@ class DuplicateBillUiTest {
             await { saves.get() == 1 }
             assertEquals(before.items.size + 1, repo.snapshot().items.size)
             assertNull(EditorDraftStore(ins.targetContext).read())
+            // The editor stays open on the saved copy; with nothing unsaved no draft is written again.
+            await { visible("Edit bill task") }
+            assertNull(EditorDraftStore(ins.targetContext).read())
         } finally { ins.runOnMainSync { activity.finish() } }
     }
 
@@ -93,6 +107,8 @@ class DuplicateBillUiTest {
         val saves = AtomicInteger()
         val activity = show(before.items.single { it.title == "QA unique edit" }, saves)
         try {
+            // Save needs a change; the same title in other letter case still matches this bill, so only its id keeps it apart.
+            setText("QA unique edit", "QA Unique Edit")
             click("Save")
             await { saves.get() == 1 }
             assertFalse(visible("Possible duplicate bill"))

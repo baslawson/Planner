@@ -67,6 +67,10 @@ class EighthFeaturesUiTest {
             node?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
         };Thread.sleep(350)
     }
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes asks "Save changes?"; Discard there abandons them.
+    private fun closeAndDiscard() { click("Close");await { find("Save changes?")!=null };click("Discard") }
     private fun setText(old:String,value:String) {
         reveal { pickEditable(nodes(),old)!=null }
         val node=pickEditable(nodes(),old)!!
@@ -80,8 +84,8 @@ class EighthFeaturesUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> nodes().any { it.isVisibleToUser && (it.contentDescription?.toString()=="Shutter" || it.viewIdResourceName?.endsWith(":id/shutter_button")==true) }
-                null -> find("AGENDA")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("AGENDA")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -95,7 +99,7 @@ class EighthFeaturesUiTest {
         await { find("QA dentist")!=null };screenshot("quick-entry-preview")
         click("More options");click("Open in full editor")
         assertEquals(before,data().items.size)
-        click("Save")
+        saveAndClose()
         await { data().items.any { it.title=="QA dentist" } }
         val saved=data().items.single { it.title=="QA dentist" }
         assertEquals(LocalDate.now().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.TUESDAY)),saved.date)
@@ -129,16 +133,16 @@ class EighthFeaturesUiTest {
         val count=data().items.size
         open(EntryShortcuts.ADD_BILL)
         reveal { find("3 days before")!=null };screenshot("shortcut-bill")
-        click("Discard");assertEquals(count,data().items.size)
+        click("Close");assertEquals(count,data().items.size)
         open(EntryShortcuts.SCAN);screenshot("shortcut-scan")
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-        await { find("Take page")!=null };click("Cancel");click("Discard")
+        await { find("Take page")!=null };click("Cancel");click("Close")
         open(EntryShortcuts.ADD_EVENT);setText("","QA protected draft")
         await { EditorDraftStore(context).read()?.getJSONObject("item")?.getString("title")=="QA protected draft" }
         open(EntryShortcuts.ADD_BILL)
         await { find("QA protected draft")!=null };screenshot("shortcut-protected-draft")
         assertEquals("Other",EditorDraftStore(context).read()!!.getJSONObject("item").getString("category"))
-        click("Discard");assertEquals(count,data().items.size)
+        closeAndDiscard();assertEquals(count,data().items.size)
     }
 
     @Test fun ocrBillSuggestionsAreReviewedAppliedAndSaved()=runBlocking {
@@ -165,7 +169,7 @@ class EighthFeaturesUiTest {
         click("Use due date")
         click("Apply selected")
         assertEquals(before,data().items.size)
-        click("Save")
+        saveAndClose()
         await { data().items.any { it.title=="Acme Energy" } }
         val bill=data().items.single { it.title=="Acme Energy" }
         assertEquals("Bills",bill.category);assertEquals(12345L,bill.billAmountMinor)
@@ -185,8 +189,8 @@ class EighthFeaturesUiTest {
         screenshot("add-menu")
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         await { find("Add menu")!=null };assertNull(find("Add bill"))
-        click("Add event");await { find("New event")!=null };click("Discard")
-        click("Add bill");reveal { find("3 days before")!=null };click("Discard")
+        click("Add event");await { find("New event")!=null };click("Close")
+        click("Add bill");reveal { find("3 days before")!=null };click("Close")
         click("Quick entry");click("Close")
         assertEquals(before.items,data().items);assertEquals(before.reminders,data().reminders)
         assertNull(EditorDraftStore(context).read())
@@ -204,7 +208,7 @@ class EighthFeaturesUiTest {
         screenshot("calendar-add-menu")
         click("Add event");await { find("New event")!=null }
         setText("","QA calendar plus")
-        click("Save")
+        saveAndClose()
         await { data().items.any { it.title=="QA calendar plus" } }
         assertEquals(day,data().items.single { it.title=="QA calendar plus" }.date)
     }

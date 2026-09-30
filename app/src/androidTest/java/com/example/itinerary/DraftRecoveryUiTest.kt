@@ -119,6 +119,8 @@ class DraftRecoveryUiTest {
         assertEquals(bills.first().date.plusWeeks(22),bills.last().date)
         assertNull(EditorDraftStore(context).read())
         assertFalse(File(context.filesDir,"draft-scan").exists())
+        // Save keeps the editor open on the saved bill (a recovered draft saved, nothing unsaved now): Close leaves at once.
+        click("Close");await { find("Edit bill task")==null }
         click("Actions for QA recovered bill");click("Mark paid")
         await { snapshot().items.count { it.title=="QA recovered bill" && it.paid }==1 }
         assertNotNull(find("Paid"))

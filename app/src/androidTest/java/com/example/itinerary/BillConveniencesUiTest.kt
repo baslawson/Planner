@@ -85,7 +85,7 @@ class BillConveniencesUiTest {
         open();click("Add bill")
         setText("","QA quick bill")
         reveal { find("3 days before")!=null };screenshot("quick-bill-reminder")
-        click("Save")
+        click("Save");click("Close") // Save keeps the editor open; nothing is unsaved, so Close leaves at once
         await { data().items.any { it.title=="QA quick bill" } }
         val bill=data().items.single { it.title=="QA quick bill" }
         assertEquals("Bills",bill.category)
@@ -96,7 +96,7 @@ class BillConveniencesUiTest {
         click("Undo");await { !data().items.single { it.id==bill.id }.paid }
         screenshot("payment-undone")
         // A second quick entry can be discarded without leaving a saved bill or reminder.
-        val before=data();click("Add bill");click("Discard")
+        val before=data();click("Add bill");click("Close")
         assertEquals(before.items,data().items);assertEquals(before.reminders,data().reminders)
     }
 

@@ -54,6 +54,10 @@ class SeventhFeaturesUiTest {
             }
         }
     }
+    // Save keeps the editor open on the saved record; Close then leaves at once, as nothing is unsaved.
+    private fun saveAndClose() { click("Save");click("Close") }
+    // Close with unsaved changes asks first; Discard abandons them.
+    private fun closeAndDiscard() { click("Close");await { find("Save changes?")!=null };click("Discard") }
     private fun click(text:String) {
         if (text == "Settings" && find(text) == null && find("More options") != null) click("More options")
         reveal {
@@ -87,12 +91,12 @@ class SeventhFeaturesUiTest {
         open();click("QA power bill");click("QA power bill")
         click("Save as template");setText("QA power bill","Power bill preset");click("Save template")
         await { data().templates.any { it.name=="Power bill preset" } }
-        click("Discard") // a bill opens from the agenda, so Discard returns there
+        click("Close") // nothing changed in the bill; a bill opens from the agenda, so Close returns there
         // Bill templates are offered only in the bill editor.
         click("Add menu");click("Add task");click("Bill payment");click("Use template");click("Apply Power bill preset")
         setText("QA power bill","QA templated bill");setText("123.45","222.22")
         screenshot("template-applied")
-        click("Save")
+        saveAndClose()
         await { data().items.count { it.title=="QA templated bill" }==3 }
         val copies=data().items.filter { it.title=="QA templated bill" }
         assertTrue(copies.all { it.billAmountMinor==22222L && !it.paid && !it.skipped && it.checklist.none { task->task.done } })
@@ -124,10 +128,10 @@ class SeventhFeaturesUiTest {
         val item=data().items.single { it.title=="QA receipt" };val original=file.readBytes()
         open();click("QA receipt");click("QA receipt");click("Read text")
         click("View text");await { nodes().any { it.text?.toString()?.contains("ORCHID")==true } };screenshot("recognised-text")
-        click("Close");click("Discard")
+        click("Close");closeAndDiscard() // the text preview's Close, then the editor's: the read text is unsaved
         assertTrue(file.exists());assertArrayEquals(original,file.readBytes())
         assertTrue(data().attachments.single { it.itemId==item.id }.recognizedText.isEmpty())
-        click("QA receipt");click("Read text");click("View text");click("Close");click("Save")
+        click("QA receipt");click("Read text");click("View text");click("Close");saveAndClose()
         await { data().attachments.single { it.itemId==item.id }.recognizedText.contains("ORCHID") }
         assertArrayEquals(original,file.readBytes())
         click("Switch to Agenda view");click("Search") // saved from the calendar, which has no Back button

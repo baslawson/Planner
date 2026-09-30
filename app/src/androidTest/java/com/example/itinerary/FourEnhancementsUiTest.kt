@@ -39,7 +39,7 @@ class FourEnhancementsUiTest {
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("duration-overlap")
-        click("Save")
+        saveAndClose()
         await { snapshot().items.single { it.title == "QA duration" }.durationMinutes == 120 }
         click("Switch to Agenda view") // saving from the calendar returns there
         await { find("AGENDA") != null }
@@ -80,6 +80,8 @@ class FourEnhancementsUiTest {
         screenshot("failure")
         throw AssertionError("Timed out. Visible text: " + nodes().mapNotNull { it.text?.toString() }.joinToString(" | "))
     }
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save"); click("Close") }
     private fun click(text: String) {
         var attempts = 0
         var forward = true

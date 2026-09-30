@@ -103,7 +103,7 @@ class FourAdditionsUiTest {
         ins.runOnMainSync { activity.setContent {
             com.example.itinerary.ui.theme.ItineraryTheme {
                 com.example.itinerary.ui.ItemEditorSheet(item,emptyList(),emptyList(),emptyMap(),emptySet(),{},{},{},
-                    onSave={ event,added,removed,reminders,removedReminders,options -> app.repository.saveItem(event,added,removed,reminders,removedReminders,options) },
+                    onSave={ event,added,removed,reminders,removedReminders,options -> app.repository.saveItemId(event,added,removed,reminders,removedReminders,options) },
                     onDelete={_,_->})
             }
         } }

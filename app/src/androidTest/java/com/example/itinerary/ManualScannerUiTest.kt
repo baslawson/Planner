@@ -57,7 +57,7 @@ class ManualScannerUiTest {
         await { nodes().any { it.text?.toString()?.startsWith("Page 1 of 2 ·") == true } }
         click("Preview scan");click("Attach scan")
         await { find("Save") != null }
-        click("Save")
+        saveAndClose()
         await { snapshot().attachments.any { it.itemId == item.id } }
         val pdf = snapshot().attachments.single { it.itemId == item.id }
         assertEquals("application/pdf",pdf.mimeType)
@@ -67,16 +67,16 @@ class ManualScannerUiTest {
         click("QA manual scan");click("Take photo")
         capturePage(scanning = false)
         await { find("Save") != null }
-        click("Save")
+        saveAndClose()
         await { snapshot().attachments.count { it.itemId == item.id } == 2 }
         val jpeg = snapshot().attachments.single { it.itemId == item.id && it.mimeType == "image/jpeg" }
         val bitmap = android.graphics.BitmapFactory.decodeFile(app.attachmentStore.fileFor(jpeg.fileName).path)
         assertNotNull(bitmap);assertTrue(bitmap.width > 100);bitmap.recycle()
-        // Capture another page, discard only the scan, then discard the edit: no extra attachment.
+        // Capture another page, discard only the scan, then close the unchanged editor: no extra attachment.
         click("QA manual scan");click("Scan document");capturePage()
         click("Cancel");click("Discard")
         await { find("Save") != null }
-        click("Discard")
+        click("Close") // the scan was discarded, so nothing is unsaved and it closes at once
         await { find("Save") == null && find("QA manual scan") != null }
         assertEquals(2,snapshot().attachments.count { it.itemId == item.id })
         await {
@@ -128,6 +128,8 @@ class ManualScannerUiTest {
         screenshot("failure")
         throw AssertionError("Timed out. Visible text: " + nodes().mapNotNull { it.text?.toString() }.joinToString(" | "))
     }
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save"); click("Close") }
     private fun click(text: String) {
         var attempts = 0
         var forward = true

@@ -97,6 +97,8 @@ class PlanningFiveUiTest {
     }
 
 
+    // Save keeps an editor open on what it saved; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save");click("Close") }
     private fun back() {
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         Thread.sleep(350)
@@ -140,7 +142,7 @@ class PlanningFiveUiTest {
             click("Duplicate task")
             reveal { find("Choose due date") != null }
             screenshot("duplicate-task")
-            click("Save")
+            saveAndClose() // the duplicate's editor stays open after Save; Close returns to the original task
             await { data().tasks.count { it.title == task.title } == 2 }
             val duplicate = data().tasks.single { it.title == task.title && it.id != task.id }
             assertNull(duplicate.dueDate); assertFalse(duplicate.checklist.single().done)
@@ -155,11 +157,11 @@ class PlanningFiveUiTest {
             screenshot("footer-bounds")
             assertTrue("Save must be visible without scrolling the editor: $saveBounds / ${context.resources.displayMetrics.heightPixels}", saveBounds.height() > 0 && saveBounds.bottom <= context.resources.displayMetrics.heightPixels)
             screenshot("linked-event-editor")
-            click("Save")
+            saveAndClose() // Close returns to the task editor
             await { data().items.any { it.linkedTaskId == task.id } }
             assertEquals(60, data().items.single { it.linkedTaskId == task.id }.durationMinutes)
             assertEquals(task.dueDate, data().tasks.single { it.id == task.id }.dueDate)
-            click("Discard")
+            click("Close") // the task itself is unchanged, so it closes at once
             // A fixture invitation reaches the same review UI as the document picker and external VIEW intent.
             val file = File(context.cacheDir, "qa-planning-invite.ics")
             file.writeText("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nDTSTART:20261001T090000\r\nDURATION:PT30M\r\nSUMMARY:QA imported meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
@@ -170,7 +172,7 @@ class PlanningFiveUiTest {
             await { find("QA imported meeting") != null }
             click("Edit")
             screenshot("import-editor")
-            click("Save")
+            saveAndClose() // Close returns to the import review
             await { data().items.any { it.title == "QA imported meeting" } }
             assertEquals(30, data().items.single { it.title == "QA imported meeting" }.durationMinutes)
             screenshot("import-duplicate-warning")

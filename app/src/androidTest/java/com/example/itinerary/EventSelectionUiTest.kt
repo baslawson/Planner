@@ -82,8 +82,8 @@ class EventSelectionUiTest {
         await {
             when(action) {
                 EntryShortcuts.SCAN -> find("How would you like to save the scan?")!=null
-                null -> find("AGENDA")!=null || find("Discard")!=null
-                else -> find("Discard")!=null
+                null -> find("AGENDA")!=null || find("Close")!=null
+                else -> find("Close")!=null
             }
         }
     }
@@ -139,7 +139,7 @@ class EventSelectionUiTest {
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         await { find("1 selected")==null && find("2 selected")==null }
         // Plain tap still opens the editor after leaving selection mode.
-        click("QA select timed");await { find("Discard")!=null };click("Discard")
+        click("QA select timed");await { find("Edit event")!=null };click("Close") // nothing changed, so it closes at once
         click("Search");await { find("Search events and tasks")!=null };setText("", "QA select")
         click("Show completed tasks") // the paid bill, as on the agenda
         longTouch("QA select overnight");click("QA select paid");await { find("2 selected")!=null }

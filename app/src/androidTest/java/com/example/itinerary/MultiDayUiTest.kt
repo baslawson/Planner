@@ -92,6 +92,8 @@ class MultiDayUiTest {
     }
 
 
+    // Save keeps the editor open on the saved event; Close then leaves (nothing is unsaved).
+    private fun saveAndClose() { click("Save");click("Close") }
     private fun back() {
         ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
         Thread.sleep(350)
@@ -106,11 +108,11 @@ class MultiDayUiTest {
         click("Multiple days");await { find("Set dates")!=null };screenshot("range-picker")
         click("Set dates") // the picker opens on today – tomorrow
         reveal { nodes().any { it.text?.toString()?.contains("· 2 days")==true } };screenshot("editor-two-days")
-        click("Save")
+        saveAndClose()
         await { data().items.single { it.title=="QA span editor" }.endDate==today.plusDays(1) }
         // Switching Multiple days off makes it one day again.
         click("QA span editor");await { find("Multiple days")!=null }
-        click("Multiple days");click("Save")
+        click("Multiple days");saveAndClose()
         await { data().items.single { it.title=="QA span editor" }.endDate==null }
     }
 

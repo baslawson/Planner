@@ -38,7 +38,7 @@ class BugFixUiTest {
             else { nodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
         }
         screenshot("overnight-editor")
-        click("Discard")
+        click("Close")
         repo.deleteItem(snapshot().items.single { it.title == "QA overnight label" })
     }
 
