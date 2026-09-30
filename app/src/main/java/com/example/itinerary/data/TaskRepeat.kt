@@ -42,7 +42,7 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
         TaskRepeat.NONE -> return null
         TaskRepeat.AFTER_COMPLETION -> today.plusDays(repeatDays.toLong())
         TaskRepeat.EVERY_N_DAYS, TaskRepeat.EVERY_N_WEEKS, TaskRepeat.EVERY_N_MONTHS, TaskRepeat.DAYS_OF_WEEK, TaskRepeat.MONTHLY_WEEKDAY ->
-            RepeatRule.valueOf(repeat).nextAfter(base, maxOf(base, today))
+            RepeatRule.valueOf(repeat).nextAfter(base, maxOf(base, today), anchor)
         TaskRepeat.WEEKDAYS -> generateSequence(maxOf(base, today).plusDays(1)) { it.plusDays(1) }.first { it.dayOfWeek.value <= 5 }
         TaskRepeat.DAILY, TaskRepeat.WEEKLY, TaskRepeat.FORTNIGHTLY -> {
             val step = when (rule) {

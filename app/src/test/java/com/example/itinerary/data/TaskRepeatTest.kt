@@ -35,6 +35,18 @@ class TaskRepeatTest {
         assertEquals(LocalDate.of(2028, 2, 29), february.dueDate)
         assertEquals(LocalDate.of(2028, 3, 31), february.nextOccurrence(LocalDate.of(2028, 2, 29))!!.dueDate)
     }
+    // 1 Oct bug hunt #3: "every few months" comes back to the 31st after a shorter month, as Monthly does.
+    @Test fun everyFewMonthsKeepsTheAnchorAcrossShortMonths() {
+        val january = PlannerTask(title = "Quarterly", dueDate = LocalDate.of(2027, 1, 31), repeat = "EVERY_N_MONTHS:3")
+        val april = january.nextOccurrence(LocalDate.of(2027, 1, 31))!!
+        assertEquals(LocalDate.of(2027, 4, 30), april.dueDate)
+        assertEquals(31, april.repeatAnchorDay)
+        assertEquals(LocalDate.of(2027, 7, 31), april.nextOccurrence(LocalDate.of(2027, 4, 30))!!.dueDate)
+        // A task on an ordinary day is unchanged; events' own series still step from their start.
+        assertEquals(LocalDate.of(2027, 7, 15), PlannerTask(title = "Mid", dueDate = LocalDate.of(2027, 4, 15), repeat = "EVERY_N_MONTHS:3")
+            .nextOccurrence(LocalDate.of(2027, 4, 15))!!.dueDate)
+        assertEquals(LocalDate.of(2027, 4, 30), RepeatRule.everyMonths(3).nextAfter(LocalDate.of(2027, 1, 31), LocalDate.of(2027, 1, 31)))
+    }
     @Test fun lateWeeklyCompletionSkipsMissedDatesAndKeepsWeekday() {
         val task = PlannerTask(title = "Weekly", dueDate = LocalDate.of(2026, 9, 1), repeat = "WEEKLY")
         assertEquals(LocalDate.of(2026, 9, 29), task.nextOccurrence(LocalDate.of(2026, 9, 26))!!.dueDate)

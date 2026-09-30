@@ -85,13 +85,15 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
         else -> true
     }
 
-    /** For the newer rules: the first date of the series from [start] that is after [after]. */
-    fun nextAfter(start: LocalDate, after: LocalDate): LocalDate = when (kind) {
+    /** For the newer rules: the first date of the series from [start] that is after [after]. Every few months falls on
+     *  [anchorDay], or the month's last day when it's shorter (a series that began on the 31st keeps coming back to it). */
+    fun nextAfter(start: LocalDate, after: LocalDate, anchorDay: Int = start.dayOfMonth): LocalDate = when (kind) {
         Kind.EVERY_N_DAYS, Kind.EVERY_N_WEEKS -> {
             val step = every.toLong() * if (kind == Kind.EVERY_N_WEEKS) 7 else 1
             start.plusDays((maxOf(0L, ChronoUnit.DAYS.between(start, after)) / step + 1) * step)
         }
-        Kind.EVERY_N_MONTHS -> generateSequence(1L) { it + 1 }.map { start.plusMonths(it * every) }.first { it > after }
+        Kind.EVERY_N_MONTHS -> generateSequence(1L) { it + 1 }.map { YearMonth.from(start).plusMonths(it * every) }
+            .map { it.atDay(minOf(anchorDay, it.lengthOfMonth())) }.first { it > after }
         Kind.DAYS_OF_WEEK -> generateSequence(after.plusDays(1)) { it.plusDays(1) }.first { it.dayOfWeek in days }
         Kind.MONTHLY_WEEKDAY -> generateSequence(YearMonth.from(after)) { it.plusMonths(1) }.map(::inMonth).first { it > after }
         else -> error("Only for the newer repeat rules")
