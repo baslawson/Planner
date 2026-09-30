@@ -39,7 +39,7 @@ class FourEnhancementsDataTest {
         db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
         db.openHelper.writableDatabase.execSQL("INSERT INTO sqlite_sequence(name, seq) VALUES ('reminders', 910000000)")
         val store = AttachmentStore(context)
-        repo = Repository(db, store, ReminderScheduler(context)) { changes++ }
+        repo = Repository(db, store, ReminderScheduler(context), onChanged = { changes++ })
         settings = SettingsRepository(context)
         backup = BackupManager(context, repo, store, settings)
     }

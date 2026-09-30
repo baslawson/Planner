@@ -39,7 +39,7 @@ class BugFixRegressionTest {
         db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
         db.openHelper.writableDatabase.execSQL("INSERT INTO sqlite_sequence(name, seq) VALUES ('reminders', 910000000)")
         val store = AttachmentStore(context)
-        repo = Repository(db, store, ReminderScheduler(context)) { changes++ }
+        repo = Repository(db, store, ReminderScheduler(context), onChanged = { changes++ })
         settings = SettingsRepository(context)
         backup = BackupManager(context, repo, store, settings)
     }
@@ -53,10 +53,10 @@ class BugFixRegressionTest {
         var updates = 0
         val store = AttachmentStore(context)
         store.writableFileFor("saved.txt").writeText("Keep me")
-        val failing = Repository(db, store, ReminderScheduler(context)) {
+        val failing = Repository(db, store, ReminderScheduler(context), onChanged = {
             updates++
             if (broken) throw IllegalStateException("Injected widget error")
-        }
+        })
         failing.saveItem(event(), added = listOf(Attachment(itemId = 0, name = "Saved", fileName = "saved.txt", mimeType = "text/plain")))
         assertEquals(1, failing.snapshot().items.size)
         assertEquals(setOf("widget"), failing.maintenanceIssues.value)
@@ -81,7 +81,7 @@ class BugFixRegressionTest {
         repo.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
         settings.setAgendaRange(AgendaRange.TODAY)
         settings.setCalendarCollapsed(true)
-        val failing = Repository(db, store, ReminderScheduler(context)) { error("Injected widget error") }
+        val failing = Repository(db, store, ReminderScheduler(context), onChanged = { error("Injected widget error") })
         val failingSettings = SettingsRepository(context) { error("Injected settings widget error") }
         BackupManager(context, failing, store, failingSettings).restore(staged)
         assertEquals(original, failing.snapshot())
@@ -109,7 +109,7 @@ class BugFixRegressionTest {
     @Test fun removingBillsClearsPaidStateAndReconcilesOnlyAffectedReminders() = runBlocking {
         val alarms = FakeAlarms().apply { broken = false }
         var widgets = 0
-        val repository = Repository(db, AttachmentStore(context), alarms) { widgets++ }
+        val repository = Repository(db, AttachmentStore(context), alarms, onChanged = { widgets++ })
         for (item in listOf(
             event().copy(title = "Paid", category = "Bills", paid = true),
             event().copy(title = "Skipped", category = "Bills", paid = true, skipped = true, seriesId = "series"),
@@ -137,7 +137,7 @@ class BugFixRegressionTest {
     @Test fun reminderFailureDoesNotStopOtherWorkAndRetryUsesCurrentEvent() = runBlocking {
         val alarms = FakeAlarms()
         var widgets = 0
-        val failing = Repository(db, AttachmentStore(context), alarms) { widgets++ }
+        val failing = Repository(db, AttachmentStore(context), alarms, onChanged = { widgets++ })
         failing.saveItem(event(), addedReminders = listOf(
             Reminder(itemId = 0, amount = 5, unit = ReminderUnit.MINUTES),
             Reminder(itemId = 0, amount = 10, unit = ReminderUnit.MINUTES)))
