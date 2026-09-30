@@ -107,6 +107,42 @@ class ReminderSeriesFixesDataTest {
         assertEquals(3, after.reminders.size)
     }
 
+    // Second bug hunt B1: adding a file or reminder to the entire series, or reading one occurrence's receipt, keeps the
+    // other occurrences' own receipts and reminders. B4: a bill paid then unticked follows the series' new amount.
+    @Test fun entireSeriesAttachmentChangesKeepEachOccurrencesOwnFiles() = fixture { repo, _, store ->
+        repo.saveItem(event(), options = EventSaveOptions(RepeatRule.WEEKLY, 3))
+        val items = repo.snapshot().items.sortedBy { it.date }
+        val receipts = items.mapIndexed { i, item -> Attachment(itemId = item.id, name = "r$i.pdf", fileName = "r$i-${System.nanoTime()}.pdf", mimeType = "application/pdf") }
+        receipts.forEachIndexed { i, r -> store.writableFileFor(r.fileName).writeText("receipt $i"); repo.saveItem(items[i], added = listOf(r), addedReminders = listOf(Reminder(itemId = 0, amount = i + 1, unit = ReminderUnit.DAYS))) }
+        val shared = Attachment(itemId = 0, name = "plan.pdf", fileName = "plan-${System.nanoTime()}.pdf", mimeType = "application/pdf")
+        store.writableFileFor(shared.fileName).writeText("plan")
+        repo.saveItem(items[0], added = listOf(shared), addedReminders = listOf(reminder()), options = EventSaveOptions(entireSeries = true))
+        var after = repo.snapshot()
+        items.forEachIndexed { i, item ->
+            assertEquals(setOf(receipts[i].fileName, shared.fileName), after.attachments.filter { it.itemId == item.id }.map { it.fileName }.toSet())
+            assertEquals(setOf((i + 1) * 1440L, 60L), after.reminders.filter { it.itemId == item.id }.map { it.offsetMinutes }.toSet())
+        }
+        assertTrue(receipts.all { store.fileFor(it.fileName).exists() })
+        // "Read text" on the first receipt: removed and added again with its text, for the entire series.
+        val old = after.attachments.single { it.fileName == receipts[0].fileName }
+        repo.saveItem(items[0], added = listOf(old.copy(id = 0, itemId = 0, recognizedText = "total", textStatus = "INDEXED")), removed = listOf(old),
+            options = EventSaveOptions(entireSeries = true))
+        after = repo.snapshot()
+        items.forEachIndexed { i, item -> assertEquals(setOf(receipts[i].fileName, shared.fileName), after.attachments.filter { it.itemId == item.id }.map { it.fileName }.toSet()) }
+        assertTrue(receipts.all { store.fileFor(it.fileName).exists() })
+        // Removing the shared file from the entire series removes it everywhere, and only it.
+        val sharedHere = after.attachments.single { it.itemId == items[0].id && it.fileName == shared.fileName }
+        repo.saveItem(items[0], removed = listOf(sharedHere), options = EventSaveOptions(entireSeries = true))
+        after = repo.snapshot()
+        items.forEachIndexed { i, item -> assertEquals(listOf(receipts[i].fileName), after.attachments.filter { it.itemId == item.id }.map { it.fileName }) }
+    }
+    @Test fun billPaidThenUntickedFollowsTheSeriesAmount() = fixture { repo, _, _ ->
+        repo.saveItem(event().copy(category = "Bills", billAmountMinor = 1000), options = EventSaveOptions(RepeatRule.MONTHLY, 3))
+        val items = repo.snapshot().items.sortedBy { it.date }
+        repo.setPaid(items[1].id, true); repo.setPaid(items[1].id, false)
+        repo.saveItem(items[0].copy(billAmountMinor = 1500), options = EventSaveOptions(entireSeries = true))
+        assertTrue(repo.snapshot().items.all { it.billAmountMinor == 1500L })
+    }
     @Test fun seriesBillWithPaymentsKeepsItsAmountWhenTheSeriesChanges() = fixture { repo, _, _ ->
         repo.saveItem(event().copy(category = "Bills", billAmountMinor = 1000), options = EventSaveOptions(RepeatRule.MONTHLY, 3))
         val items = repo.snapshot().items.sortedBy { it.date }
