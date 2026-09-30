@@ -17,9 +17,9 @@ import java.time.LocalDate
 // The Settings page with everything it opens: backup export and import, Nextcloud, and their progress and
 // confirmation dialogs. Shared by Agenda and Calendar. Call it last inside a full-screen Box so the page
 // is drawn over the screen. The backup pickers are registered here rather than in the settings page, so a result
-// still arrives after a rotation.
+// still arrives after a rotation. The Calendars pop-up is held by the caller: the sync icon opens it too.
 @Composable
-fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
+fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit, showCalendars: Boolean, onShowCalendars: (Boolean) -> Unit) {
     val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val timeFormat by vm.timeFormat.collectAsStateWithLifecycle()
     val addButtonSeeThrough by vm.addButtonSeeThrough.collectAsStateWithLifecycle()
@@ -31,7 +31,6 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
     val textSizePercent by vm.textSizePercent.collectAsStateWithLifecycle()
     var showNextcloud by rememberSaveable { mutableStateOf(false) }
     var showDeleted by rememberSaveable { mutableStateOf(false) }
-    var showCalendars by rememberSaveable { mutableStateOf(false) }
     val cloud by vm.cloud.collectAsStateWithLifecycle()
     LaunchedEffect(showNextcloud) { if (showNextcloud) vm.loadNextcloud() }
 
@@ -79,11 +78,11 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit) {
             onNextcloud = { showNextcloud = true },
             onDismiss = onDismiss,
             onRecentlyDeleted = { showDeleted = true },
-            onCalendars = { showCalendars = true },
+            onCalendars = { onShowCalendars(true) },
         )
     }
     // Before the Nextcloud pop-up, so "Connect Nextcloud" opens the login on top of it.
-    if (showCalendars) CalendarsDialog(nextcloudOpen = showNextcloud, onConnect = { showNextcloud = true }, onDismiss = { showCalendars = false })
+    if (showCalendars) CalendarsDialog(nextcloudOpen = showNextcloud, onConnect = { showNextcloud = true }, onDismiss = { onShowCalendars(false) })
     if (showNextcloud) {
         NextcloudDialog(
             state = cloud,

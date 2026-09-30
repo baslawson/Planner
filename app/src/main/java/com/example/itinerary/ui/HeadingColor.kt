@@ -1,6 +1,9 @@
 package com.example.itinerary.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -59,8 +62,24 @@ fun HeadingText(
     fontWeight: FontWeight? = null,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
+    // One line that steps its size down (to 70% at most) rather than being cut, e.g. a screen title beside icons.
+    shrinkToFit: Boolean = false,
 ) {
-    Text(
+    if (shrinkToFit) BoxWithConstraints(modifier) {
+        var scale by remember(text, style, maxWidth) { mutableFloatStateOf(1f) }
+        var fits by remember(text, style, maxWidth) { mutableStateOf(false) }
+        Text(
+            text,
+            modifier = Modifier.drawWithContent { if (fits) drawContent() },
+            color = headingTextColor(),
+            style = style.copy(fontSize = style.fontSize * scale),
+            fontWeight = fontWeight,
+            maxLines = 1,
+            softWrap = false,
+            overflow = overflow,
+            onTextLayout = { if (it.hasVisualOverflow && scale > 0.7f) scale = (scale - 0.05f).coerceAtLeast(0.7f) else fits = true },
+        )
+    } else Text(
         text,
         modifier = modifier,
         color = headingTextColor(),

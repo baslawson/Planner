@@ -250,10 +250,12 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 )
                 var showSettings by rememberSaveable { mutableStateOf(false) }
                 var settingsOpened by rememberSaveable { mutableStateOf(false) }
+                var showCalendars by rememberSaveable { mutableStateOf(false) }
                 Box(Modifier.fillMaxSize()) {
                     ItineraryScreen(
                         vm = vm,
                         onOpenSettings = { settingsOpened = true; showSettings = true },
+                        onOpenCalendars = { settingsOpened = true; showCalendars = true },
                         onOpenSearch = { nav.navigateFrom(entry, "search") },
                         onAgenda = {
                             if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
@@ -266,7 +268,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     // Once opened, keep the host for outstanding picker/backup results even after closing it.
                     if (settingsOpened) {
                         val settingsVm: TripsViewModel = viewModel(factory = tripsFactory)
-                        SettingsHost(vm = settingsVm, show = showSettings, onDismiss = { showSettings = false })
+                        SettingsHost(vm = settingsVm, show = showSettings, onDismiss = { showSettings = false },
+                            showCalendars = showCalendars, onShowCalendars = { showCalendars = it })
                     }
                 }
             }

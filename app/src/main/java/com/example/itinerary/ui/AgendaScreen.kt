@@ -93,6 +93,7 @@ fun AgendaScreen(
 
     // Kept across rotation and while another screen is on top, so coming back finds the agenda as it was left.
     var showSettings by rememberSaveable { mutableStateOf(value = false) }
+    var showCalendars by rememberSaveable { mutableStateOf(value = false) }
     val overlayMenu = remember { OverlayMenuState() }
     var showThemes by remember { mutableStateOf(false) }
     val planningTools = remember { PlanningToolsState() }
@@ -149,9 +150,11 @@ fun AgendaScreen(
                             "AGENDA",
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Bold,
+                            shrinkToFit = true,
                         )
                     },
                     actions = {
+                        SyncIndicator(onOpenCalendars = { showCalendars = true })
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
@@ -304,7 +307,7 @@ fun AgendaScreen(
             val task = tasks.find { it.id == id }
             if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
         }
-        SettingsHost(vm = vm, show = showSettings, onDismiss = { showSettings = false })
+        SettingsHost(vm = vm, show = showSettings, onDismiss = { showSettings = false }, showCalendars = showCalendars, onShowCalendars = { showCalendars = it })
     }
 
 }
