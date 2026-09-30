@@ -106,6 +106,13 @@ object QuickEntry {
     private const val bareOrdinal = "$bareOrdinalValue(?=\\s*,?\\s*(?:at\\s+|@\\s*)?\\d)" +
         "(?!\\s*,?\\s*\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:$months)\\b|\\s*,?\\s*(?:\\d{1,2}/|\\d{1,2}\\.\\d{1,2}\\.|\\d{4}[-/.])\\d)"
     private val moneyAmounts = Regex("(?<=[£€¥$]\\s?)\\d[\\d,]*(?:\\.\\d+)?")
+    // "Call 0491 570 156", "+61 491 570 156", "(08) 5550 1234", "0491-570-156": a phone number, never a time or date. At least
+    // nine digits, so "Oct 12 2026 10am" and "0800 1400" keep their dates and times; see parse.
+    private val phoneNumbers = Regex("(?<![\\w.:/+(-])(?:\\+\\d{1,3}(?:[ -]\\d{1,5}){2,}|\\(0\\d\\)\\s?\\d{3,4}[ -]?\\d{3,4}|\\d{2,5}(?: \\d{2,5}){2,}|0\\d{2,4}(?:-\\d{3,4}){2})(?![\\w.:/-])")
+    // "Bus 2 - 3pm", "Ferry 12 till 10am": a number naming a bus, room or gate stays in the title rather than starting a range.
+    // Written tight against the dash ("Court 1-2pm") it is still a range.
+    private const val numberLabels = "bus|route|ferry|train|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|row|seat|line|no\\.?|number"
+    private val labelledNumbers = rx("(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
     private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
@@ -166,8 +173,11 @@ object QuickEntry {
     private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-\\d.]+|$countWords|half|a quarter))?\\s*$")
     // "Table for 4 Saturday", "Dinner for two Friday": a whole number after "for", with the when after it, is how many people:
     // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed.
-    // Only 1–20: a larger number ("Study for 45 Monday") may be a length still missing its unit, so it keeps asking.
-    private val partySize = rx("for\\s+(?:[1-9]|1\\d|20|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*")
+    // Only 1–20: a larger number ("Study for 45 Monday") may be a length still missing its unit, so it keeps asking. 10–20 as
+    // digits only after a booking or meal word ("Party for 20", "BBQ for 12"): "Practice for 15 tomorrow" may be minutes.
+    private val partySize = rx("for\\s+(?:[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*")
+    private val largePartySize = rx("for\\s+(?:1\\d|20)\\s*")
+    private val bookingWord = rx("\\b(?:table|booking|book|reservation|reserve|restaurant|dinner|lunch|breakfast|brunch|party|bbq|barbecue|catering|cook|pizza|tickets?)\\s+$")
     private val quote = Regex("\"[^\"]*\"")
     private val at = rx(atWord)
     private const val pluralWeekdays = "mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays"
@@ -305,6 +315,10 @@ object QuickEntry {
         literalRanges.filter { it.first >= 0 && it.last < text.length && !it.isEmpty() }.forEach { mask(it, '\uE000') }
         // "Rent $450pm", "Gym $120 pm": a number right after a currency sign is an amount, never a time or date.
         moneyAmounts.findAll(remaining).toList().forEach { mask(it.range, '\uE000') }
+        phoneNumbers.findAll(remaining).filter { m ->
+            m.value.count { it.isDigit() } >= 9 && !rx("\\b(?:$months)\\.?,?\\s*$").containsMatchIn(remaining.substring(0, m.range.first))
+        }.toList().forEach { mask(it.range, '\uE000') }
+        labelledNumbers.findAll(remaining).toList().forEach { mask(it.range, '\uE000') }
         // A space masked with \uE001 keeps the words on either side apart: see yearAfterMonth and hoursBeforeMonthDay.
         fun separate(range: IntRange) = range.filter { remaining[it].isWhitespace() }.forEach { mask(it..it, '\uE001') }
         // A year from last year to 2100; any other four digits after a month-name date are a 24-hour time.
@@ -1151,7 +1165,8 @@ object QuickEntry {
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))
             return error("Finish the duration, for example for 1 hour and 30 minutes.")
         if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+(?:$amount|half)\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
-            unfinished.findAll(remaining).any { m -> !((m.value.trim() in setOf("in", "at", "on") || partySize.matches(m.value)) &&
+            unfinished.findAll(remaining).any { m -> !((m.value.trim() in setOf("in", "at", "on") || partySize.matches(m.value) ||
+                    largePartySize.matches(m.value) && bookingWord.containsMatchIn(remaining.substring(0, m.range.first))) &&
                 text.substring(m.range.first + m.value.trimEnd().length).isNotBlank()) } ||
             rx("(?:[-–—]\\s*$|\\b(?:to|until)\\s+\\d)").containsMatchIn(remaining))
             return error("Finish the date, time or duration, or put literal title text in quotes.")
