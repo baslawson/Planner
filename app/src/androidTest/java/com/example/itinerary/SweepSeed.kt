@@ -47,7 +47,7 @@ class SweepSeed {
         repo.saveTask(PlannerTask(title = "Water the plants", dueDate = today.plusDays(1), repeat = "DAILY"))
     }
 
-    /** Sets the app's own text size and theme for a sweep pass: `-e textSize 150 -e theme HIGH_CONTRAST`. */
+    /** Sets the app's own text size and theme for a sweep pass: `-e textSize 125 -e theme HIGH_CONTRAST`. */
     @HarnessStage @Test fun applyLayoutSettings() {
         val ins = InstrumentationRegistry.getInstrumentation()
         val settings = (ins.targetContext.applicationContext as ItineraryApp).settings

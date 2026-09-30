@@ -79,7 +79,7 @@ fun DateFormatChoice.numericDayFirst(locale: java.util.Locale = java.util.Locale
 // All text in the app can be made smaller or larger; 100 is normal.
 object TextSize {
     const val MIN_PERCENT = 80
-    const val MAX_PERCENT = 150
+    const val MAX_PERCENT = 125
     const val STEP_PERCENT = 5
     const val DEFAULT_PERCENT = 100
 }

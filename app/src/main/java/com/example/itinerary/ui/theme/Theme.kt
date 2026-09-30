@@ -137,7 +137,7 @@ internal fun plannerHeadingColor(theme: AppTheme, colors: androidx.compose.mater
 
 val LocalColourBlindFriendly = compositionLocalOf { false }
 val LocalHighContrast = compositionLocalOf { false }
-// The app's own text size (Settings, 80–150 %), on top of the system font size; see LimitTextScale.
+// The app's own text size (Settings, 80–125 %), on top of the system font size; see LimitTextScale.
 val LocalTextSizePercent = compositionLocalOf { TextSize.DEFAULT_PERCENT }
 @Composable
 fun controlBorderWidth() = if (LocalHighContrast.current) 2.dp else 1.dp
