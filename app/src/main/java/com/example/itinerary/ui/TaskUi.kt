@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -92,7 +93,10 @@ private fun taskReminderLabel(timestamp: Long): String {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
+// [closeRequested]: something else wants this editor closed (a second task tapped on the widget, E4). It closes like
+// Close: at once with nothing unsaved, otherwise after "Save changes?"; Keep editing there calls [onCloseCancelled].
+fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
+               onDismiss: () -> Unit) {
     val context = LocalContext.current
     val store = remember { TaskDraftStore(context) }
     val draftKey = if (creating) "new" else initial.id
@@ -117,11 +121,13 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
                 // Only unsaved edits made after that save (kept across recreation) are in its draft.
                 val draft = remember { runCatching { store.read(task.id) }.getOrNull() }
                 CompositionLocalProvider(LocalEditingTaskId provides task.id) {
-                    TaskEditorContent(task, false, draft, task.id, store, onDismiss, onSaved)
+                    TaskEditorContent(task, false, draft, task.id, store, onDismiss, onSaved, closeRequested, onCloseCancelled)
                 }
             }
         }
     } else if (decision == "ask") {
+        // Nothing is edited yet and the draft stays for next time, as when this question is dismissed.
+        if (closeRequested) LaunchedEffect(Unit) { onDismiss() }
         PlannerDialog("Unfinished task", onDismissRequest = onDismiss,
             primary = DialogAction("Resume draft") { decision = "resume" },
             dismiss = DialogAction("Discard draft", danger = true) {
@@ -142,7 +148,7 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
             if (creating && draft != null) initial.copy(id = draft.getString("id")) else initial
         }
         CompositionLocalProvider(LocalEditingTaskId provides source.id) {
-            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved)
+            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved, closeRequested, onCloseCancelled)
         }
     }
 }
@@ -150,7 +156,8 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JSONObject?, draftKey: String,
-                              draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit) {
+                              draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit,
+                              closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -245,6 +252,10 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     }
     // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first.
     fun close() { if (unsaved) askingToSave = true else discard() }
+    // Asked from outside: the same as Close, once any save under way has finished.
+    LaunchedEffect(closeRequested) {
+        if (closeRequested) { snapshotFlow { busy }.first { !it }; if (!askingToSave) close() }
+    }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             busy = true
@@ -399,9 +410,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         })
     duplicate?.let { TaskEditor(it, true) { duplicate = null } }
     if (schedule) ScheduleTaskDialog(initial) { schedule = false }
-    if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
+    if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false; onCloseCancelled() },
         primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(close = true) },
-        dismiss = DialogAction("Keep editing") { askingToSave = false },
+        dismiss = DialogAction("Keep editing") { askingToSave = false; onCloseCancelled() },
         extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
         Text(if (canSave || busy) "This task has changes that aren't saved yet."
             else "This task has changes that can't be saved as they are. Keep editing to fix them, or discard them.")

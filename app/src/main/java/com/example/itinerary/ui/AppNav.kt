@@ -71,12 +71,30 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
     if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) }
-    if (widgetTaskId != null) {
+    // The task open from the widget. A second widget task (a new [widgetTaskId]) waits until this one's editor has
+    // closed the usual way, "Save changes?" included; Keep editing there drops it (E4: the editor used to be reused).
+    var widgetTaskOpen by remember { mutableStateOf<String?>(null) }
+    // Read when the editor closes, which can be after a save that began before another task was tapped.
+    val widgetTaskWanted by rememberUpdatedState(widgetTaskId)
+    LaunchedEffect(widgetTaskId, widgetTaskOpen) { if (widgetTaskOpen == null && widgetTaskId != null) widgetTaskOpen = widgetTaskId }
+    widgetTaskOpen?.let { openId ->
+        val switching = widgetTaskId != null && widgetTaskId != openId
+        val closeWidgetTask = {
+            widgetTaskOpen = null
+            // With another task waiting it opens next; otherwise the request is done.
+            if (widgetTaskWanted == null || widgetTaskWanted == openId) onWidgetTaskOpened()
+        }
         val widgetTasks by app.repository.tasks.collectAsStateWithLifecycle(initialValue = null)
-        val task = widgetTasks?.find { it.id == widgetTaskId }
-        if (task != null) PlanningOverlay(onWidgetTaskOpened) { TaskEditor(task, false, onWidgetTaskOpened) }
-        else if (widgetTasks != null) PlannerDialog("Task unavailable", onDismissRequest = onWidgetTaskOpened,
-            dismiss = DialogAction("Close", onClick = onWidgetTaskOpened)) { Text("This task may have been deleted.") }
+        val task = widgetTasks?.find { it.id == openId }
+        key(openId) {
+            if (task != null) PlanningOverlay(closeWidgetTask) {
+                TaskEditor(task, false, closeRequested = switching, onCloseCancelled = { if (widgetTaskWanted != null && widgetTaskWanted != openId) onWidgetTaskOpened() }, onDismiss = closeWidgetTask)
+            } else if (widgetTasks != null) {
+                if (switching) LaunchedEffect(Unit) { closeWidgetTask() }
+                PlannerDialog("Task unavailable", onDismissRequest = closeWidgetTask,
+                    dismiss = DialogAction("Close", onClick = closeWidgetTask)) { Text("This task may have been deleted.") }
+            }
+        }
     }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(nav) {

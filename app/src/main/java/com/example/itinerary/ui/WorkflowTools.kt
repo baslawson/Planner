@@ -124,7 +124,7 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
     }
     content.getOrNull()?.let { shared ->
         if (destination == "task") PlanningOverlay(onDismiss) {
-            TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss)
+            TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss = onDismiss)
         }
         if (destination == "event") NewPlanningEventEditor(ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null,
                 title = shared.title, notes = shared.notes), onDismiss)
