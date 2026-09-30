@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -64,11 +65,11 @@ fun NextcloudDialog(
                 if (!state.connected) {
                     Text("Connect to save all events, tasks, reminders, attachments and settings to your Nextcloud.")
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(server, { server = it }, label = { Text("Server address") },
-                        singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                    OutlinedTextField(username, { username = it }, label = { Text("Username") },
-                        singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(server, { server = it.filterNot { c -> c == '\n' } }, label = { Text("Server address") },
+                        enabled = !busy, modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
+                    OutlinedTextField(username, { username = it.filterNot { c -> c == '\n' } }, label = { Text("Username") },
+                        enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
                     OutlinedTextField(password, { password = it }, label = { Text("App password") },
                         singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth(),
                         visualTransformation = PasswordVisualTransformation(),
@@ -86,8 +87,8 @@ fun NextcloudDialog(
                 } else {
                     Text(state.server)
                     Text("Account: ${state.username}")
-                    OutlinedTextField(folderPath, { folderPath = it }, label = { Text("Backup folder") },
-                        singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(folderPath, { folderPath = it.filterNot { c -> c == '\n' } }, label = { Text("Backup folder") },
+                        enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
                     Text("Path inside your Nextcloud Files, e.g. Backups/Planner. Missing folders are created when you back up.",
                         style = MaterialTheme.typography.bodySmall)
                     if (folderChanged) {

@@ -25,9 +25,9 @@ fun ChecklistSection(entries: List<ChecklistEntry>, onChange: (List<ChecklistEnt
                     onChange(entries.map { if (it.id == task.id) it.copy(done = done) else it })
                 }, modifier = Modifier.semantics { contentDescription = "Complete task ${index + 1}" })
                 OutlinedTextField(value = task.text, onValueChange = { value ->
-                    onChange(entries.map { if (it.id == task.id) it.copy(text = value) else it })
+                    onChange(entries.map { if (it.id == task.id) it.copy(text = value.replace('\n', ' ')) else it })
                 }, label = { Text("Task ${index + 1}") }, modifier = Modifier.weight(1f),
-                    isError = task.text.isBlank(), singleLine = true)
+                    isError = task.text.isBlank(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
                 IconButton(onClick = { onChange(entries.filterNot { it.id == task.id }) }) {
                     Icon(Icons.Default.Close, contentDescription = "Remove task ${index + 1}")
                 }

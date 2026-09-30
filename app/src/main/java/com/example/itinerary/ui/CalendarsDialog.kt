@@ -249,11 +249,11 @@ private fun AddLinkDialog(onDismiss: () -> Unit) {
         },
         dismiss = DialogAction("Cancel", enabled = !busy, onClick = onDismiss),
         properties = androidx.compose.ui.window.DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn)) {
-        androidx.compose.material3.OutlinedTextField(link, { link = it; error = null }, label = { Text("Link (https:// or webcal://)") },
-            singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri))
-        androidx.compose.material3.OutlinedTextField(name, { name = it }, label = { Text("Name (optional)") },
-            singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+        androidx.compose.material3.OutlinedTextField(link, { link = it.filterNot { c -> c == '\n' }; error = null }, label = { Text("Link (https:// or webcal://)") },
+            enabled = !busy, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Next))
+        androidx.compose.material3.OutlinedTextField(name, { name = it.replace('\n', ' ') }, label = { Text("Name (optional)") },
+            enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
         Text("Planner only reads it. A private link (such as a calendar's secret address) stays on this phone and in your backups.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

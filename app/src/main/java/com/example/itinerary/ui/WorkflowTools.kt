@@ -37,7 +37,8 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
             if (update(saved.filterNot { it.name.equals(value.name, true) } + value)) naming = false
         },
         dismiss = DialogAction("Cancel") { naming = false }) {
-            OutlinedTextField(name, { name = it.take(80) }, label = { Text("Search name") }, singleLine = true)
+            OutlinedTextField(name, { name = it.replace('\n', ' ').take(80) }, label = { Text("Search name") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
             Text("Keeps your query, categories and completed filter. Relative dates update each time you open it.")
             if (saved.any { it.name.equals(name.trim(), true) }) Text("This replaces the saved search with this name.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -83,7 +84,8 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
         }
         PlannerDialog("Choose prerequisite", onDismissRequest = { choosing = false },
             dismiss = DialogAction("Cancel") { choosing = false }, scroll = null) {
-                OutlinedTextField(query, { query = it }, label = { Text("Find task") }, singleLine = true)
+                OutlinedTextField(query, { query = it.replace('\n', ' ') }, label = { Text("Find task") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
                 if (choices.isEmpty()) Text("No matching tasks. Tasks that would create a loop are excluded.")
                 LazyScrollHints(Modifier.heightIn(max = 340.dp)) { hintState -> LazyColumn(Modifier.fillMaxWidth(), state = hintState) { items(choices, key = { it.id }) { candidate ->
                     TextButton(onClick = { onChange(ids + candidate.id); choosing = false }) {

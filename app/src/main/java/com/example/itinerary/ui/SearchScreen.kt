@@ -151,9 +151,9 @@ fun SearchScreen(
             Column(Modifier.fillMaxSize().padding(inner).imePadding()) {
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = { query = it.replace('\n', ' ') },
                     label = { Text("Search events and tasks") },
-                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                     isError = outcome.invalidDates.isNotEmpty(),
                     trailingIcon = {
                         if (query.isNotEmpty()) {

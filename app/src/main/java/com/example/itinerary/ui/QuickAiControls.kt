@@ -94,9 +94,9 @@ fun QuickAiSetup(onDismiss: () -> Unit) {
                         singleLine = true, visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false))
-                    OutlinedTextField(model, { if (it.length <= 110) model = it }, enabled = !loading,
-                        label = { Text("${provider.label} model") }, singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(autoCorrectEnabled = false))
+                    OutlinedTextField(model, { if (it.length <= 110) model = it.filterNot { c -> c == '\n' } }, enabled = !loading,
+                        label = { Text("${provider.label} model") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(autoCorrectEnabled = false, imeAction = androidx.compose.ui.text.input.ImeAction.Done))
                     TextButton(enabled = !loading && (key.isNotBlank() || saved != null) && model.isNotBlank(), onClick = {
                         change {
                             val value = QuickAiConnection.create(key.ifBlank { saved?.apiKey.orEmpty() }, model,

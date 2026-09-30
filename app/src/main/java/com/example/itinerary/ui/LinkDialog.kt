@@ -49,7 +49,6 @@ fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: String) 
                     onValueChange = { link = it.replace('\n', ' ').take(Links.MAX_URL_LENGTH) },
                     label = { Text("Link") },
                     placeholder = { Text("example.com") },
-                    singleLine = true,
                     // Only complain once something has been typed, and only if it can't be a web address.
                     isError = link.isNotBlank() && url == null,
                     supportingText = { if (link.isNotBlank() && url == null) Text("Enter a web address like example.com") },
@@ -60,7 +59,6 @@ fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: String) 
                     value = name,
                     onValueChange = { name = it.replace('\n', ' ').take(Links.MAX_NAME_LENGTH) },
                     label = { Text("Name (optional)") },
-                    singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )

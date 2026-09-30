@@ -231,7 +231,7 @@ fun QuickEntryEditor(
     fun edit(value: String) = editField(TextFieldValue(value, TextRange(value.length)))
     fun editTitle(value: TextFieldValue) {
         if (value.text != title) { aiJson = null; settled = false; attempted = false; baseDate = LocalDate.now() }
-        titleField = value
+        titleField = value.copy(text = value.text.replace('\n', ' '))
     }
     val completions = if (fieldFocused && field.selection.collapsed && !busy)
         quickCompletions(text, field.selection.start, literalRanges, task) else emptyList()
@@ -305,7 +305,7 @@ fun QuickEntryEditor(
                 if (baseDate != LocalDate.now()) Text("Dates based on ${baseDate.fullLabel()}", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(titleField, ::editTitle, enabled = !busy,
                     label = { Text("Title") }, placeholder = { Text(if (task) "Buy groceries" else "Gym") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                     keyboardActions = KeyboardActions(onNext = { focus.requestFocus() }))
                 OutlinedTextField(field, ::editField, enabled = !busy,
@@ -313,7 +313,7 @@ fun QuickEntryEditor(
                     placeholder = { Text(if (title.isNotBlank()) (if (task) "tmr" else "every Monday 6pm") else if (task) "Buy groceries tmr" else "Gym every Monday 6pm") },
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.onGloballyPositioned { fieldReady = true }, visualTransformation = highlight,
                     keyboardOptions = KeyboardOptions(capitalization = if (title.isNotBlank()) KeyboardCapitalization.None else KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { add() }), maxLines = 3)
+                    keyboardActions = KeyboardActions(onDone = { add() }))
                 // AI gets title and when as one line, the title quoted; a typed title replaces the AI's title.
                 if (ai == null) QuickAiAction(currentInput.copy(text = currentInput.entryText, title = ""), enabled = !busy && !inputBlocked,
                     onWorking = { aiBusy = it }, onResult = { entries -> keyboard?.hide()
@@ -321,9 +321,9 @@ fun QuickEntryEditor(
                 if (ai != null) {
                     Text(if (aiEnabled) "AI preview · check the details. Editing the original text returns to offline parsing." else "Check the details. Editing the original text creates a new preview.", style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(ai.title, { if (it.length <= 500) aiJson = ai.copy(title = it.filterNot { c -> c.isISOControl() }).json().toString() }, enabled = !busy,
-                        label = { Text("Entry title") }, singleLine = true)
+                        label = { Text("Entry title") }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
                     OutlinedTextField(ai.location, { if (it.length <= 500) aiJson = ai.copy(location = it.filterNot { c -> c.isISOControl() }).json().toString() }, enabled = !busy,
-                        label = { Text("Location") }, singleLine = true)
+                        label = { Text("Location") }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
                     if (aiEnabled) TextButton(enabled = !busy, onClick = { aiJson = null }) { Text("Use offline interpretation") }
                 }
                 if (completions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

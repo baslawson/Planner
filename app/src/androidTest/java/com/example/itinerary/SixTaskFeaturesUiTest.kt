@@ -319,6 +319,33 @@ class SixTaskFeaturesUiTest {
         assertEquals(expected,data().tasks.single { it.title=="QA six chips" }.reminderAt)
         cleanFixture("QA six chips");Unit
     }
+    // Text boxes grow to show all their text instead of scrolling sideways.
+    @Test fun longTitleAndChecklistTextWrapAndGrow() = longTextGrows(100)
+    @Test fun longTitleAndChecklistTextWrapAndGrowAtLargestTextSize() = longTextGrows(TextSize.MAX_PERCENT)
+    private fun longTextGrows(textSize: Int) = runBlocking {
+        cleanFixture("QA six grow")
+        app.settings.setTextSizePercent(textSize)
+        fresh(); click("Add menu"); click("Add task"); click("To-do task")
+        fun heightOf(text:String):Int { val n=nodes().first { it.isEditable && it.text?.toString()==text }; val r=android.graphics.Rect(); n.getBoundsInScreen(r); return r.height() }
+        field("Task title", "QA six grow")
+        val short=heightOf("QA six grow")
+        val long="QA six grow — pick up the dry cleaning, then the parcel from the post office, then groceries for the weekend"
+        setText("QA six grow", long)
+        await { nodes().any { it.isEditable && it.text?.toString()==long } }
+        assertTrue("title box grew (${heightOf(long)} > $short)", heightOf(long) > short*1.5)
+        click("Add task"); field("Task 1", "Short")
+        val shortItem=heightOf("Short")
+        val longItem="Bring the signed lease, two forms of ID, the bond receipt and the spare key for the letterbox"
+        setText("Short", longItem)
+        await { nodes().any { it.isEditable && it.text?.toString()==longItem } }
+        reveal { nodes().any { it.isEditable && it.text?.toString()==longItem && it.isVisibleToUser } }
+        assertTrue("checklist box grew (${heightOf(longItem)} > $shortItem)", heightOf(longItem) > shortItem*1.5)
+        screenshot("long-text-grows-$textSize")
+        click("Save")
+        await { data().tasks.any { it.title==long } }
+        assertEquals(longItem, data().tasks.single { it.title==long }.checklist.single().text)
+        cleanFixture("QA six grow"); app.settings.setTextSizePercent(TextSize.DEFAULT_PERCENT)
+    }
     @Test fun taskDocumentImportCopiesBytes() = runBlocking {
         // The document the system picker offers, put in Downloads for this test and removed afterwards.
         val resolver=context.contentResolver

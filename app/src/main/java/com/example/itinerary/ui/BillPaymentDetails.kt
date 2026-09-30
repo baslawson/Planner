@@ -22,7 +22,7 @@ fun BillPaymentDetails(link: String, reference: String, biller: String, bpayRefe
     HeadingText("Payment details (optional)", style = MaterialTheme.typography.titleMedium)
     @Composable fun field(label: String, value: String, limit: Int, change: (String) -> Unit) {
         OutlinedTextField(value, onValueChange = { if (it.length <= limit) change(it.replace('\n', ' ')) },
-            label = { Text(label) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            label = { Text(label) }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth())
         if (value.isNotBlank()) TextButton(onClick = {
             (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, value))
         }) { Text("Copy $label") }

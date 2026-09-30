@@ -110,7 +110,6 @@ fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: 
                 onValueChange = { text = it.replace('\n', ' ').take(Categories.MAX_LENGTH) },
                 label = { Text("Category name") },
                 supportingText = if (bills) { { Text(Categories.BILLS_BY_NAME_MESSAGE) } } else null,
-                singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { name?.let(onConfirm) }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),

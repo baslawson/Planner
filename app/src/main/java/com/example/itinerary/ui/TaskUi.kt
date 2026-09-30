@@ -229,7 +229,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
             ) {
                 HeadingText(if (creating) "Add task" else "Edit task", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(title, onValueChange = { if (it.length <= 500) title = it.replace('\n', ' ') },
-                    label = { Text("Task title") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    label = { Text("Task title") }, enabled = !busy, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth())
                 if (!creating) {
                     TextButton(enabled = !busy && title.isNotBlank(), onClick = {
                         duplicate = initial.copy(title = title, notes = notes, priority = TaskPriority.valueOf(priority),
@@ -295,7 +295,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     }
                 }
                 OutlinedTextField(notes, onValueChange = { if (it.length <= 20_000) notes = it }, label = { Text("Notes (optional)") },
-                    enabled = !busy, minLines = 4, maxLines = 8, modifier = Modifier.fillMaxWidth())
+                    enabled = !busy, minLines = 4, modifier = Modifier.fillMaxWidth())
                 TaskPrerequisites(initial.id, prerequisiteIds, enabled = !busy, onChange = { prerequisiteIds = it })
                 ChecklistSection(checklist, onChange = { if (!busy) checklist = it })
                 HorizontalDivider()

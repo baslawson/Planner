@@ -45,7 +45,8 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
             }
         },
         dismiss = DialogAction("Cancel", enabled = !busy) { saving = false }) {
-            OutlinedTextField(value = name, onValueChange = { name = it.take(80) }, label = { Text("Template name") }, singleLine = true)
+            OutlinedTextField(value = name, onValueChange = { name = it.replace('\n', ' ').take(80) }, label = { Text("Template name") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
             Text("Saves details, checklist, amount, repeats and reminders. Dates, paid status and attachments aren't copied.")
             if (templates.any { it.name.equals(name.trim(), true) }) Text("The template with this name will be replaced.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
