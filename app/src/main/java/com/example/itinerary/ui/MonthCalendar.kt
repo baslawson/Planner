@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -174,6 +175,9 @@ private fun weeksIn(month: YearMonth, firstDow: DayOfWeek): Int {
     return (leadingBlanks + month.lengthOfMonth() + 6) / 7
 }
 
+// Plain fields, not Compose state: they are read by the settled-page collector, not by the layout.
+private class ScrollRequest(var month: YearMonth) { var target: Int? = null }
+
 @Composable
 private fun MonthPager(
     month: YearMonth,
@@ -188,17 +192,33 @@ private fun MonthPager(
     val currentMonth by rememberUpdatedState(month)
     val currentOnMonthChange by rememberUpdatedState(onMonthChange)
 
-    // Swiping to a new month reports it once the page has settled...
+    // The page the pager is being moved to for a month set some other way (arrows, Today), until it gets there. Set
+    // as the new month is applied, before any settled page from the interrupted animation can be reported (D5).
+    val request = remember { ScrollRequest(month) }
+    SideEffect {
+        if (request.month != month) { request.month = month; request.target = pageOf(month) }
+    }
+
+    // Swiping to a new month reports it once the page has settled. A page passed on the way to a requested month
+    // is not a swipe: e.g. a second arrow tap stops the first animation between two months and starts another.
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
             val landed = monthOfPage(page)
-            if (landed != currentMonth) currentOnMonthChange(landed)
+            if (request.target == null && landed != currentMonth) currentOnMonthChange(landed)
         }
     }
-    // ...and when the month is changed some other way (arrows, Today) the pager follows.
+    // ...and when the month is changed some other way (arrows, Today) the pager follows, and ends snapped on it.
     LaunchedEffect(month) {
         val target = pageOf(month)
-        if (pagerState.currentPage != target) pagerState.animateScrollToPage(target)
+        try {
+            if (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f) {
+                request.target = target
+                pagerState.animateScrollToPage(target)
+            }
+        } finally {
+            // Done, or stopped by a swipe (whose page then counts); left alone when a newer month has set its own target.
+            if (request.target == target) request.target = null
+        }
     }
 
     // The pager is as tall as the current month needs (4 to 6 weeks), so short months don't leave a gap.

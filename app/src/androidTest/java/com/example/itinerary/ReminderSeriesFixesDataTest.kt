@@ -157,6 +157,30 @@ class ReminderSeriesFixesDataTest {
         assertEquals(emptySet<String?>(), linksOf(items[0].id))
         items.drop(1).forEachIndexed { i, item -> assertEquals(setOf(own[i + 1]), linksOf(item.id)) }
     }
+    // Fourth bug hunt D8: making a single event weekly keeps its OWN reminder (same id, snooze intact) and file (same
+    // id, recognized text intact); only the new occurrences get copies, without the snooze.
+    @Test fun makingASeriesKeepsTheEditedEventsOwnReminderAndFile() = fixture { repo, _, store ->
+        val file = Attachment(itemId = 0, name = "plan.pdf", fileName = "plan-${System.nanoTime()}.pdf", mimeType = "application/pdf",
+            recognizedText = "gate 12", textStatus = "INDEXED")
+        store.writableFileFor(file.fileName).writeText("plan")
+        repo.saveItem(event(), added = listOf(file), addedReminders = listOf(reminder()))
+        val item = repo.snapshot().items.single()
+        val alarm = repo.snapshot().reminders.single()
+        val until = System.currentTimeMillis() + 600_000
+        repo.snoozeReminder(alarm.id, until)
+        val ownFile = repo.snapshot().attachments.single()
+        repo.saveItem(item, options = EventSaveOptions(RepeatRule.WEEKLY, 4))
+        val after = repo.snapshot()
+        assertEquals(4, after.items.size)
+        val kept = after.reminders.single { it.itemId == item.id }
+        assertEquals(alarm.id, kept.id); assertEquals(until, kept.snoozedUntil)
+        assertEquals(ownFile, after.attachments.single { it.itemId == item.id })
+        after.items.filter { it.id != item.id }.forEach { copy ->
+            assertNull(after.reminders.single { it.itemId == copy.id }.snoozedUntil)
+            assertEquals("gate 12", after.attachments.single { it.itemId == copy.id }.recognizedText)
+        }
+        assertTrue(store.fileFor(file.fileName).exists())
+    }
     @Test fun billPaidThenUntickedFollowsTheSeriesAmount() = fixture { repo, _, _ ->
         repo.saveItem(event().copy(category = "Bills", billAmountMinor = 1000), options = EventSaveOptions(RepeatRule.MONTHLY, 3))
         val items = repo.snapshot().items.sortedBy { it.date }

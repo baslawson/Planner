@@ -18,6 +18,16 @@ object Categories {
         return (BUILT_IN + OTHER + inUse).firstOrNull { it.equals(text, ignoreCase = true) } ?: text
     }
 
+    // "Bills" is not a category you can type: a bill has its own form (amount, payments, no chips), so typing it
+    // would turn the event into a bill with no way back (D9). Shown instead of adding it.
+    const val BILLS_BY_NAME_MESSAGE = "Use the Bill button to make a bill"
+
+    // Your own category's name to store, or null when there is nothing to add, including "Bills" in any case.
+    fun ownCategory(input: String, inUse: Collection<String> = emptyList()): String? =
+        clean(input, inUse)?.takeUnless { isBillsName(it) }
+
+    fun isBillsName(input: String): Boolean = clean(input) == "Bills"
+
     // The categories to offer as chips, most used first. Ties keep the built-in order, then the user's own
     // in alphabetical order. Other is left out because it has its own button. A built-in the user removed
     // (in [hidden]) stays out, unless some event still has it.

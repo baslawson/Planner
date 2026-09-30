@@ -200,7 +200,8 @@ fun ItemEditorSheet(
     }
 
     DisposableEffect(Unit) {
-        onDispose { disposed = true }
+        EditorDraftStore.editorOpened()
+        onDispose { disposed = true; EditorDraftStore.editorClosed() }
     }
 
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
@@ -759,7 +760,8 @@ fun ItemEditorSheet(
                     }
                 },
                 onViewText = { textPreview = it },
-                onSuggestBill = { billSuggestion = it },
+                // A task's time block can't be a bill (D9), so it isn't offered bill details.
+                onSuggestBill = if (initial.linkedTaskId != null && !duplicating) null else { attachment -> billSuggestion = attachment },
                 store = store,
                 onTakePhoto = {
                     val file = store.newPhotoFile()

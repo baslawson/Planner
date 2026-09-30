@@ -2,6 +2,10 @@ package com.example.itinerary.data
 
 import android.content.Context
 import android.util.AtomicFile
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -19,6 +23,15 @@ class EditorDraftStore(context: Context) {
         catch (e: Throwable) { file.failWrite(stream); throw e }
     }
     @Synchronized fun clear() { file.delete() }
+
+    companion object {
+        // How many event editors are on screen now (D10). A widget tap waits while one is open, because moving to
+        // another screen would drop the editor without saving or discarding it.
+        private val open = MutableStateFlow(0)
+        val openEditors: StateFlow<Int> = open.asStateFlow()
+        fun editorOpened() = open.update { it + 1 }
+        fun editorClosed() = open.update { (it - 1).coerceAtLeast(0) }
+    }
 }
 
 object DraftCodec {

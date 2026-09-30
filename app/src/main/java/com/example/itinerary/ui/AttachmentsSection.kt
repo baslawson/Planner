@@ -58,7 +58,8 @@ fun AttachmentsSection(
     readingText: Boolean = false,
     onReadText: (Attachment) -> Unit = {},
     onViewText: (Attachment) -> Unit = {},
-    onSuggestBill: (Attachment) -> Unit = {},
+    // Null hides "Suggest bill details", e.g. in a task's time block, which can't be a bill.
+    onSuggestBill: ((Attachment) -> Unit)? = {},
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -105,7 +106,7 @@ fun AttachmentsSection(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     com.example.itinerary.ui.MatrixTextButton(enabled = !readingText, onClick = { onReadText(attachment) }) { Text(if (attachment.textStatus == "NOT_INDEXED") "Read text" else "Read text again") }
                     if (attachment.recognizedText.isNotBlank()) com.example.itinerary.ui.MatrixTextButton(onClick = { onViewText(attachment) }) { Text("View text") }
-                    if (attachment.recognizedText.isNotBlank()) com.example.itinerary.ui.MatrixTextButton(enabled = !readingText, onClick = { onSuggestBill(attachment) }) { Text("Suggest bill details") }
+                    if (attachment.recognizedText.isNotBlank() && onSuggestBill != null) com.example.itinerary.ui.MatrixTextButton(enabled = !readingText, onClick = { onSuggestBill(attachment) }) { Text("Suggest bill details") }
                 }
             }
         }

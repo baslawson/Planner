@@ -399,13 +399,13 @@ class Repository(
             }
             val seriesSave = options.entireSeries && original?.seriesId != null
             val newSeries = !seriesSave && item.id != 0L && targets.size > 1
-            // A new series copies this event's files and reminders. An entire-series save gives the other occurrences
-            // only this edit's changes (seriesSiblingChanges): each keeps its own, e.g. its receipts.
-            val attachmentsByItem = if (newSeries)
-                readIds(targets.filter { it.id != 0L }.map { it.id }, attachmentDao::forItems).groupBy { it.itemId }
-                else emptyMap()
+            // A new series copies this event's files and reminders to the NEW occurrences; the edited event keeps its own
+            // records and takes only this edit's changes, like a plain save (D8: a snooze, a due-but-undelivered or ringing
+            // alarm and text being recognized stay). An entire-series save gives the other occurrences only this edit's
+            // changes (seriesSiblingChanges): each keeps its own, e.g. its receipts.
+            val ownAttachments = if (newSeries) attachmentDao.forItem(item.id) else emptyList()
             // By id: text recognition or a snooze may have changed the record since the editor read it.
-            val selectedAttachments = attachmentsByItem[item.id].orEmpty().filter { old -> removed.none { it.id == old.id } } + added
+            val selectedAttachments = ownAttachments.filter { old -> removed.none { it.id == old.id } } + added
             val selectedReminders = if (newSeries) {
                 reminderDao.forItem(item.id).filter { old -> removedReminders.none { it.id == old.id } } + addedReminders
             } else emptyList()
@@ -429,8 +429,7 @@ class Repository(
                 }
                 val rowId = itemDao.upsert(normalized)
                 val saved = normalized.copy(id = if (rowId > 0) rowId else target.id)
-                if (newSeries) {
-                    attachmentsByItem[saved.id].orEmpty().forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
+                if (newSeries && saved.id != item.id) {
                     selectedAttachments.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                 } else if (seriesSave && saved.id != item.id) {
                     val (drop, add) = seriesSiblingAttachments(attachmentDao.forItem(saved.id), added, removed)
@@ -441,8 +440,7 @@ class Repository(
                     removed.filter { it.itemId == saved.id }.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
                 }
                 // A reminder copied from the editor (e.g. after toggling "ring until dismissed") must not keep an old snooze.
-                if (newSeries) {
-                    reminderDao.forItem(saved.id).forEach { reminderDao.delete(it); cancelled.add(it) }
+                if (newSeries && saved.id != item.id) {
                     selectedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                 } else if (seriesSave && saved.id != item.id) {
                     val (drop, add) = seriesSiblingReminders(reminderDao.forItem(saved.id), addedReminders, removedReminders)

@@ -90,11 +90,13 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
 }
 
 // Asks for the name of a category the user is making up. [inUse] are the categories already on offer,
-// so typing "food" picks Food instead of making a second one. Confirms with the name to store.
+// so typing "food" picks Food instead of making a second one. "Bills" is refused (a bill is made with its own button).
+// Confirms with the name to store.
 @Composable
 fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    val name = Categories.clean(text, inUse)
+    val name = Categories.ownCategory(text, inUse)
+    val bills = Categories.isBillsName(text)
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
@@ -107,6 +109,7 @@ fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: 
                 value = text,
                 onValueChange = { text = it.replace('\n', ' ').take(Categories.MAX_LENGTH) },
                 label = { Text("Category name") },
+                supportingText = if (bills) { { Text(Categories.BILLS_BY_NAME_MESSAGE) } } else null,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { name?.let(onConfirm) }),
