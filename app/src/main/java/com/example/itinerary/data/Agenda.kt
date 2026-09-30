@@ -12,8 +12,8 @@ enum class AgendaRange(val label: String) {
     ALL("All"),
 }
 
-// One event card on the agenda. [continuing] marks a multi-day event shown again under Today while it is under way
-// ("Day 3 of 5"); it is listed in full under its first day.
+// One event card on the agenda. [continuing] marks an event shown under Today while it is under way: a multi-day one
+// ("Day 3 of 5") or a timed one from yesterday running past midnight; All also lists it in full under its first day.
 data class AgendaEntry(val event: PlanEvent, val continuing: Boolean = false)
 
 // One day on the agenda: its date and every event on it, in order.
@@ -37,29 +37,27 @@ object Agenda {
     ): List<AgendaDay> {
         val needle = Search.normalize(text.trim())
         val weekEnd = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        val matches = { event: PlanEvent -> needle.isEmpty() || Search.normalize(event.title).contains(needle) }
         val listed = events.asSequence()
             .filter { it.category != "Bills" }
             .filter { event ->
-                val continuesToday = event.date < today && event.startTime != null && event.durationMinutes != null &&
-                    event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong()) > today.atStartOfDay()
                 when (range) {
-                    AgendaRange.TODAY -> event.date == today || continuesToday
-                    AgendaRange.THIS_WEEK -> event.date in today..weekEnd || continuesToday
-                    AgendaRange.UPCOMING -> !event.date.isBefore(today) || continuesToday
+                    AgendaRange.TODAY -> event.date == today
+                    AgendaRange.THIS_WEEK -> event.date in today..weekEnd
+                    AgendaRange.UPCOMING -> !event.date.isBefore(today)
                     AgendaRange.ALL -> true
                 }
             }
-            .filter { event ->
-                needle.isEmpty() ||
-                    Search.normalize(event.title).contains(needle)
-            }
+            .filter(matches)
             .sortedWith(order)
             .map { AgendaEntry(it) }
             .toList()
-        // A multi-day event that started before today and is still under way also shows under Today, first.
+        // An event that started before today and is still under way also shows under Today, first: a multi-day one, or a
+        // timed one running past midnight ("Started yesterday").
         val underWay = events.filter { event ->
-            event.category != "Bills" && event.endDate != null && event.date < today && event.covers(today) &&
-                (needle.isEmpty() || Search.normalize(event.title).contains(needle))
+            event.category != "Bills" && event.date < today && matches(event) && (event.endDate != null && event.covers(today) ||
+                event.endDate == null && event.startTime != null && event.durationMinutes != null &&
+                event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong()) > today.atStartOfDay())
         }.sortedWith(order).map { AgendaEntry(it, continuing = true) }
         val byDay = listed.groupBy { it.event.date }.toMutableMap()
         if (underWay.isNotEmpty()) byDay[today] = underWay + byDay[today].orEmpty()

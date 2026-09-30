@@ -59,6 +59,35 @@ class OptimizationUiTest {
         } finally { ins.runOnMainSync { activity.finish() } }
     }
 
+    // A data change (a new index) for the same search keeps the last result on screen instead of "Searching…".
+    @Test fun aNewIndexKeepsTheLastResultUntilTheNewOneIsReady() {
+        val ins = InstrumentationRegistry.getInstrumentation()
+        val activity = ins.startActivitySync(Intent(ins.targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val day = LocalDate.of(2000, 1, 1)
+        fun index(count: Long) = Search.prepare(listOf(Trip(id = 1, name = "Fixture", destination = "", startDate = day, endDate = day)),
+            (1L..count).map { ItineraryItem(id = it, tripId = 1, date = day, startTime = null, title = "needle $it",
+                notes = "billing document details ".repeat(20)) }, emptyList())
+        val current = mutableStateOf(index(1))
+        val seen = java.util.concurrent.CopyOnWriteArrayList<Int>() // hit counts; -1 = "Searching…"
+        try {
+            ins.runOnMainSync { activity.setContent {
+                ItineraryTheme {
+                    val result = rememberSearchOutcome("needle", emptySet(), current.value, day)
+                    SideEffect { seen.add(if (result === SearchOutcome.LOADING) -1 else result.hits.size) }
+                    Text("${result.hits.size}")
+                }
+            } }
+            fun awaitHits(n: Int) { val deadline = SystemClock.elapsedRealtime() + 15000
+                while (seen.lastOrNull() != n && SystemClock.elapsedRealtime() < deadline) Thread.sleep(20); assertEquals(n, seen.lastOrNull()) }
+            awaitHits(1)
+            val before = seen.size
+            ins.runOnMainSync { current.value = index(3000) }
+            awaitHits(3000)
+            assertFalse(seen.drop(before).contains(-1))
+        } finally { ins.runOnMainSync { activity.finish() } }
+    }
+
     /** Run only after the editor test and an external force-stop with a confirmed missing PID. */
     // Second step: only meaningful after unrelatedEditorUpdates… has left its draft and the app process was then
     // killed from outside, so it runs on its own with the harness (am instrument -e class …#recoverDurableDraftAfterProcessDeath).

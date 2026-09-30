@@ -25,6 +25,15 @@ class CalendarFileImportTest {
         assertEquals(LocalTime.of(17, 0), single("DTSTART;TZID=Europe/London:20260928T100000\r\nDURATION:PT30M", zone = perth).item.startTime)
     }
 
+    @Test fun semicolonInsideAQuotedParameterIsRead() {
+        val p = Ics.property("ATTENDEE;CN=\"Smith; Jane\";ROLE=REQ-PARTICIPANT:mailto:jane@example.com")
+        assertEquals(mapOf("CN" to "Smith; Jane", "ROLE" to "REQ-PARTICIPANT"), p.params)
+        assertEquals("mailto:jane@example.com", p.value)
+        assertEquals("Lunch", single("DTSTART:20260928T100000\r\nSUMMARY:Lunch\r\nATTENDEE;CN=\"Smith; Jane\":mailto:jane@example.com").item.title)
+        // The parameter after the quoted one still counts: 10:00 in London (summer time) is 09:00 UTC.
+        assertEquals(LocalTime.of(9, 0), single("DTSTART;X-NOTE=\"a;b:c\";TZID=Europe/London:20260928T100000").item.startTime)
+    }
+
     @Test fun exclusiveAllDayEndAndFloatingTime() {
         val trip = single("DTSTART;VALUE=DATE:20260928\r\nDTEND;VALUE=DATE:20260930").item
         assertEquals(LocalDate.of(2026, 9, 28), trip.date); assertEquals(LocalDate.of(2026, 9, 29), trip.endDate); assertNull(trip.startTime)
@@ -119,6 +128,10 @@ class CalendarFileImportTest {
         val existing = CalendarFileImport.existingKeys(listOf(ItineraryItem(tripId = 1, date = LocalDate.of(2026, 10, 1), startTime = LocalTime.of(9, 0), title = "Soon")))
         assertTrue(CalendarFileImport.duplicate(file.entries.single { it.item.title == "Soon" }, existing, today, false))
         assertFalse(CalendarFileImport.duplicate(weekly, existing, today, false))
+        // "Select all" never ticks one already in Planner (it would be added twice), nor a past one unless included.
+        val soon = file.entries.single { it.item.title == "Soon" }
+        assertEquals(setOf(weekly.id), CalendarFileImport.selectAll(file.entries, today, includePast = false, duplicates = setOf(soon.id)))
+        assertEquals(setOf(weekly.id, old.id), CalendarFileImport.selectAll(file.entries, today, includePast = true, duplicates = setOf(soon.id)))
         val saved = CalendarFileImport.events(listOf(weekly, old), today, includePast = false)
         assertEquals(4, saved.size) // the past event has nothing to import unless past events are included
         assertEquals(1, saved.map { it.seriesId }.distinct().size)

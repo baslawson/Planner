@@ -335,7 +335,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(enabled = !busy, onClick = {
-                    ticked = entries.filter { it.datesFor(today, includePast).isNotEmpty() }.mapTo(HashSet()) { it.id }
+                    ticked = CalendarFileImport.selectAll(entries, today, includePast, duplicates)
                 }) { Text("Select all") }
                 TextButton(enabled = !busy, onClick = { ticked = emptySet() }) { Text("Select none") }
             }

@@ -267,12 +267,13 @@ fun AgendaScreen(
                             items(datedTasks[date].orEmpty(), key = { "task-${it.id}" }, contentType = { "task" }) { task ->
                                 TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
                             }
-                            // A trip under way appears twice (its first day and Today), so its Today card needs its own key.
+                            // An event under way (a trip, or one from yesterday past midnight) can appear twice (its first
+                            // day and Today), so its Today card needs its own key.
                             items(eventsByDate[date]?.entries.orEmpty(), key = { if (it.continuing) "under-way-${it.event.id}" else it.event.id },
                                 contentType = { "event" }) { entry ->
                                 AgendaEventCard(entry, today, selection,
                                     onMove = { vm.moveToTomorrow(entry.event.id) }) {
-                                    // A trip shown under Today opens the calendar on today, the day it was shown under.
+                                    // One under way shown under Today opens the calendar on today, the day it was shown under.
                                     if (selection.active) { if (!OutsideCalendars.isOutside(entry.event.id)) selection.toggle(entry.event.id) }
                                     else onOpenEvent(if (entry.continuing) today else entry.event.date)
                                 }
@@ -396,7 +397,8 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
             if (event.linkedTaskId != null) Text("Task time block", style = MaterialTheme.typography.labelSmall)
             if (event.checklist.isNotEmpty()) Text(checklistProgress(event.checklist), style = MaterialTheme.typography.bodySmall)
             if (event.durationMinutes != null && event.startTime != null) Text(
-                eventEndLabel(event.date, event.startTime, event.durationMinutes, LocalTimeFormat.current, LocalContext.current),
+                eventEndLabel(event.date, event.startTime, event.durationMinutes, LocalTimeFormat.current, LocalContext.current,
+                    if (entry.continuing) today else event.date),
                 style = MaterialTheme.typography.bodySmall,
             )
             event.endDate?.let { end -> Text(spanLabel(event.date, end, if (entry.continuing) today else event.date),

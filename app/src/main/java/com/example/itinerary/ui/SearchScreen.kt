@@ -58,10 +58,16 @@ import com.example.itinerary.data.OutsideCalendars
 import com.example.itinerary.data.SearchOutcome
 import java.time.LocalDate
 import androidx.compose.runtime.key
-import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+
+internal data class SearchRequest(val query: String, val categories: Set<String>, val today: LocalDate)
+
+// What a search shows: the latest finished result if it answers this very request ([last] says which it answered),
+// else "Searching…". A new index alone (any data change) keeps the last result on screen until the new one is ready.
+internal fun shownOutcome(request: SearchRequest, last: Pair<SearchRequest, SearchOutcome>?): SearchOutcome =
+    last?.takeIf { it.first == request }?.second ?: SearchOutcome.LOADING
 
 @Composable
 internal fun rememberSearchOutcome(
@@ -69,15 +75,19 @@ internal fun rememberSearchOutcome(
     categories: Set<String>,
     index: Search.Index,
     today: LocalDate = rememberCurrentDate(),
-): SearchOutcome = key(query, categories, index, today) {
-    // Each request owns its state, so a slow obsolete result can never replace a newer query.
-    val result by produceState(SearchOutcome.LOADING) {
-        value = withContext(Dispatchers.Default) {
+): SearchOutcome {
+    val request = SearchRequest(query, categories, today)
+    var last by remember { mutableStateOf<Pair<SearchRequest, SearchOutcome>?>(null) }
+    // Restarted (the old run cancelled) whenever the request or the index changes, so a slow obsolete result can never
+    // replace a newer one.
+    LaunchedEffect(request, index) {
+        val result = withContext(Dispatchers.Default) {
             val workerContext = coroutineContext
             index.run(query, categories, today) { workerContext.ensureActive() }
         }
+        last = request to result
     }
-    result
+    return shownOutcome(request, last)
 }
 
 private val WORD = Regex("[\\p{L}\\p{N}]+")

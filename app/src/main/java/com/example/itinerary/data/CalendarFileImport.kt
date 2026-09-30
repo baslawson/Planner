@@ -193,6 +193,10 @@ object CalendarFileImport {
     fun duplicate(entry: Entry, existing: Set<Triple<String, LocalDate, LocalTime?>>, today: LocalDate, includePast: Boolean): Boolean =
         entry.datesFor(today, includePast).ifEmpty { entry.dates }.any { Triple(entry.item.title, it, entry.item.startTime) in existing }
 
+    // "Select all": every row with a date to import, except the ones already in Planner ([duplicates]).
+    fun selectAll(entries: List<Entry>, today: LocalDate, includePast: Boolean, duplicates: Set<Int>): Set<Int> =
+        entries.filter { it.id !in duplicates && it.datesFor(today, includePast).isNotEmpty() }.mapTo(HashSet()) { it.id }
+
     fun existingKeys(items: List<ItineraryItem>): Set<Triple<String, LocalDate, LocalTime?>> =
         items.mapTo(HashSet()) { Triple(it.title, it.date, it.startTime) }
 }

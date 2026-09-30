@@ -88,6 +88,12 @@ class CalendarFileImportUiTest {
             await { find("Add 4 events") != null }
             click("Include past events (1)")
             await { find("Add 3 events") != null }
+            // Select all never ticks the one already in Planner (it would be added twice).
+            click("Select none")
+            await { find("Add 0 events") != null }
+            click("Select all")
+            await { find("Add 3 events") != null }
+            reveal { ticked("QA Import duplicate") == false }
             click("QA Import untick")
             await { find("Add 2 events") != null }
             screenshot("chosen")

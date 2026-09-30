@@ -1,6 +1,7 @@
 package com.example.itinerary.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalTime
@@ -57,6 +58,25 @@ class AgendaTest {
         for (range in listOf(AgendaRange.TODAY, AgendaRange.THIS_WEEK, AgendaRange.UPCOMING)) {
             assertEquals(listOf("Overnight"), titles(Agenda.days(listOf(overnight, midnight), range, "", today)))
         }
+    }
+
+    @Test fun overnightFromYesterdayIsListedUnderTodayAsContinuing() {
+        val overnight = event(10, 1, today.minusDays(1), LocalTime.of(23, 30), "Overnight").copy(durationMinutes = 120)
+        val later = event(12, 1, today, LocalTime.of(9, 0), "Later")
+        for (range in listOf(AgendaRange.TODAY, AgendaRange.THIS_WEEK, AgendaRange.UPCOMING)) {
+            val days = Agenda.days(listOf(later, overnight), range, "", today)
+            // Once, under Today and first, like a multi-day event under way; not under yesterday's heading.
+            assertEquals(range.name, listOf(today), days.map { it.date })
+            assertEquals(range.name, listOf("Overnight" to true, "Later" to false), days.single().entries.map { it.event.title to it.continuing })
+        }
+        // All keeps it under its own day too, as it does a multi-day event.
+        val all = Agenda.days(listOf(later, overnight), AgendaRange.ALL, "", today)
+        assertEquals(listOf(today.minusDays(1), today), all.map { it.date })
+        assertEquals(listOf("Overnight" to false), all.first().entries.map { it.event.title to it.continuing })
+        assertEquals(listOf("Overnight" to true, "Later" to false), all.last().entries.map { it.event.title to it.continuing })
+        // The text filter applies; once it has ended it is gone from Today.
+        assertTrue(Agenda.days(listOf(overnight), AgendaRange.TODAY, "later", today).isEmpty())
+        assertTrue(Agenda.days(listOf(overnight), AgendaRange.TODAY, "", today.plusDays(1)).isEmpty())
     }
 
     @Test fun thisWeekIncludesTodayThroughSundayAndAppliesTitleFilter() {
