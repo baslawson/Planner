@@ -69,11 +69,15 @@ class ItineraryViewModel(
     private val _selected = MutableStateFlow(restoredDate ?: startDate ?: settings.lastCalendarDate ?: LocalDate.now())
     val selected: StateFlow<LocalDate> = _selected.asStateFlow()
 
-    private val _month = MutableStateFlow(
+    // Always a month the Calendar can show (CalendarMonths). A saved month outside it (it crashed the old pager on
+    // every start, E1) is replaced by this month.
+    private val _month = MutableStateFlow(CalendarMonths.clamp(
         savedState.get<String>("displayedMonth")?.let { runCatching { YearMonth.parse(it) }.getOrNull() }
+            ?.let { if (CalendarMonths.inRange(it)) it else YearMonth.now() }
             ?: startDate?.takeIf { restoredDate == null }?.let(YearMonth::from)
-            ?: settings.lastCalendarMonth ?: YearMonth.from(_selected.value),
-    )
+            ?: settings.lastCalendarMonth?.let { if (CalendarMonths.inRange(it)) it else YearMonth.now() }
+            ?: YearMonth.from(_selected.value),
+    ))
     val month: StateFlow<YearMonth> = _month.asStateFlow()
 
     init {
@@ -89,7 +93,8 @@ class ItineraryViewModel(
         savedState["selectedDate"] = date.toString()
     }
 
-    fun showMonth(month: YearMonth) {
+    fun showMonth(requested: YearMonth) {
+        val month = CalendarMonths.clamp(requested)
         _month.value = month
         settings.lastCalendarMonth = month
         savedState["displayedMonth"] = month.toString()

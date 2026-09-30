@@ -60,7 +60,6 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle as NameStyle
-import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.time.temporal.WeekFields
 import java.util.Locale
@@ -85,6 +84,9 @@ fun MonthCalendar(
 ) = CompositionLocalProvider(LocalCalendarRowHeight provides rowHeight) {
     val firstDow = remember { WeekFields.of(Locale.getDefault()).firstDayOfWeek }
     val today = rememberCurrentDate()
+    // The arrows stop at the ends of the Calendar's range (January 1 and December 9999).
+    val previous = if (collapsed) YearMonth.from(selected.minusWeeks(1)) else month.minusMonths(1)
+    val next = if (collapsed) YearMonth.from(selected.plusWeeks(1)) else month.plusMonths(1)
 
     // Seven fixed columns: past the limit, two-digit days and weekday names no longer fit.
     LimitTextScale { Column(modifier.padding(horizontal = 8.dp).animateContentSize()) {
@@ -93,6 +95,7 @@ fun MonthCalendar(
                 onClick = {
                     if (collapsed) onSelect(selected.minusWeeks(1)) else onMonthChange(month.minusMonths(1))
                 },
+                enabled = CalendarMonths.inRange(previous),
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowLeft,
@@ -109,6 +112,7 @@ fun MonthCalendar(
                 onClick = {
                     if (collapsed) onSelect(selected.plusWeeks(1)) else onMonthChange(month.plusMonths(1))
                 },
+                enabled = CalendarMonths.inRange(next),
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -143,7 +147,7 @@ fun MonthCalendar(
             )
         } else {
             MonthPager(
-                month = month,
+                month = CalendarMonths.clamp(month),
                 firstDow = firstDow,
                 selected = selected,
                 today = today,
@@ -156,14 +160,12 @@ fun MonthCalendar(
 }
 
 // Months are pages of a vertical pager: swipe up for the next month, down for the previous one.
-// Page numbers count months from January 1900, which is far more range than a trip planner needs.
-private val PAGER_EPOCH: YearMonth = YearMonth.of(1900, 1)
+// Page numbers count months from January of the year 1 (see CalendarMonths).
 private val LocalCalendarRowHeight = compositionLocalOf { 48.dp }
-private const val PAGER_MONTHS = 12 * 400
 
-private fun pageOf(month: YearMonth): Int = ChronoUnit.MONTHS.between(PAGER_EPOCH, month).toInt()
+private fun pageOf(month: YearMonth): Int = CalendarMonths.pageOf(month)
 
-private fun monthOfPage(page: Int): YearMonth = PAGER_EPOCH.plusMonths(page.toLong())
+private fun monthOfPage(page: Int): YearMonth = CalendarMonths.monthOfPage(page)
 
 private fun monthCells(month: YearMonth, firstDow: DayOfWeek): List<LocalDate?> {
     val leadingBlanks = (month.atDay(1).dayOfWeek.value - firstDow.value + 7) % 7
@@ -188,7 +190,7 @@ private fun MonthPager(
     onSelect: (LocalDate) -> Unit,
     onMonthChange: (YearMonth) -> Unit,
 ) {
-    val pagerState = rememberPagerState(initialPage = pageOf(month)) { PAGER_MONTHS }
+    val pagerState = rememberPagerState(initialPage = pageOf(month)) { CalendarMonths.COUNT }
     val currentMonth by rememberUpdatedState(month)
     val currentOnMonthChange by rememberUpdatedState(onMonthChange)
 
