@@ -92,4 +92,78 @@ class ServerEventsTest {
             assertEquals("l", parsed.uid)
         }
     }
+
+    // 1 Oct bug hunt #1: text longer than Planner takes stays read-only instead of being cut short and written back
+    // shorter; exactly the limit is still editable.
+    @Test fun textLongerThanPlannerTakesStaysReadOnly() {
+        fun event(summary: String = "Talk", location: String = "", notes: String = "") = file(*listOfNotNull("UID:t",
+            "DTSTART:20261005T010000Z", "SUMMARY:$summary", location.takeIf { it.isNotEmpty() }?.let { "LOCATION:$it" },
+            notes.takeIf { it.isNotEmpty() }?.let { "DESCRIPTION:$it" }).toTypedArray())
+        assertEquals(20_000, ServerEvents.parse(event(notes = "n".repeat(20_000)), utc).item!!.notes.length)
+        assertNotNull(ServerEvents.parse(event(summary = "s".repeat(500), location = "l".repeat(2000)), utc).item)
+        listOf(event(notes = "n".repeat(20_001)), event(summary = "s".repeat(501)), event(location = "l".repeat(2001))).forEach {
+            val parsed = ServerEvents.parse(it, utc)
+            assertNull(parsed.item); assertEquals("t", parsed.uid)
+        }
+    }
+
+    // An event linked before that fix holds the notes cut short: a title-only edit keeps Nextcloud's full notes.
+    @Test fun anEditKeepsTextAnOlderPlannerCutShort() {
+        val notes = "x".repeat(20_000) + " IMPORTANT TAIL"
+        val original = file("UID:t", "DTSTART:20261005T010000Z", "DTEND:20261005T020000Z", "SUMMARY:Talk", "DESCRIPTION:$notes")
+        val held = ItineraryItem(tripId = 0, date = LocalDate.of(2026, 10, 5), startTime = LocalTime.of(1, 0), durationMinutes = 60,
+            title = "Talk (moved)", notes = notes.take(20_000))
+        val patched = ServerEvents.patch(original, held, utc, Instant.parse("2026-10-01T08:00:00Z"))
+        assertTrue(patched.contains("SUMMARY:Talk (moved)"))
+        assertTrue(patched.replace("\r\n ", "").contains("DESCRIPTION:$notes\r\n"))
+        // Notes edited in Planner are Planner's to write.
+        val edited = ServerEvents.patch(original, held.copy(notes = "Short now"), utc, Instant.parse("2026-10-01T08:00:00Z"))
+        assertTrue(edited.contains("DESCRIPTION:Short now")); assertFalse(edited.contains("IMPORTANT TAIL"))
+    }
+
+    // What Planner didn't change stays as Nextcloud wrote it: its time zone, parameters and escaping included.
+    @Test fun patchingKeepsTheLinesOfUnchangedProperties() {
+        val original = file("UID:k", "DTSTART;TZID=Europe/London:20261005T090000", "DTEND;TZID=Europe/London:20261005T100000",
+            "SUMMARY:Meeting", "LOCATION;ALTREP=\"http://example.com\":Room 4", "DESCRIPTION;LANGUAGE=en:Agenda",
+            extra = "BEGIN:VTIMEZONE\r\nTZID:Europe/London\r\nEND:VTIMEZONE\r\n")
+        val london = ZoneId.of("Europe/London")
+        val item = ServerEvents.parse(original, london).item!!.copy(title = "Meeting (renamed)")
+        val patched = ServerEvents.patch(original, item, london, Instant.parse("2026-10-01T08:00:00Z"))
+        listOf("DTSTART;TZID=Europe/London:20261005T090000", "DTEND;TZID=Europe/London:20261005T100000",
+            "LOCATION;ALTREP=\"http://example.com\":Room 4", "DESCRIPTION;LANGUAGE=en:Agenda", "SUMMARY:Meeting (renamed)")
+            .forEach { assertTrue("Kept: $it", patched.contains(it)) }
+        assertEquals(1, Regex("DTSTART").findAll(patched).count()); assertEquals(1, Regex("SUMMARY").findAll(patched).count())
+        assertEquals(item, ServerEvents.parse(patched, london).item)
+        // A file with no title still has none after a notes edit (not "(No title)").
+        val untitled = file("UID:u", "DTSTART:20261005T010000Z")
+        val noTitle = ServerEvents.patch(untitled, ServerEvents.parse(untitled, utc).item!!.copy(notes = "n"), utc, Instant.EPOCH)
+        assertFalse(noTitle.contains("SUMMARY"))
+    }
+
+    // 1 Oct bug hunt #2: Planner's minutes are clock minutes, so an event across a daylight-saving change keeps its end.
+    @Test fun anEventAcrossADaylightSavingChangeKeepsItsEnd() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        // Clocks go forward at 02:00 on 4 Oct 2026: 01:30 to 03:30 on the clock is one hour.
+        val forward = file("UID:d", "DTSTART:20261003T153000Z", "DTEND:20261003T163000Z", "SUMMARY:Night shift")
+        val item = ServerEvents.parse(forward, sydney).item!!
+        assertEquals(listOf(LocalTime.of(1, 30), 120), listOf(item.startTime, item.durationMinutes))
+        val renamed = ServerEvents.patch(forward, item.copy(title = "Night shift 2"), sydney, Instant.EPOCH)
+        assertTrue(renamed.contains("DTEND:20261003T163000Z")); assertFalse(renamed.contains("T173000Z"))
+        // Written afresh (moved, or a new file): the end is still that clock time.
+        val moved = ServerEvents.patch(forward, item.copy(startTime = LocalTime.of(1, 0)), sydney, Instant.EPOCH)
+        assertTrue(moved.contains("DTSTART:20261003T150000Z")); assertTrue(moved.contains("DTEND:20261003T160000Z"))
+        assertEquals(item.copy(startTime = LocalTime.of(1, 0)), ServerEvents.parse(moved, sydney).item)
+        assertTrue(CalendarExport.encode(item, "d", sydney, Instant.EPOCH).contains("DTEND:20261003T163000Z"))
+        // Clocks go back at 03:00 on 5 Apr 2026: 02:30 (before) to 03:00 (after) is 30 clock minutes but 90 real ones; an
+        // untouched time keeps the file's own lines, which say which 02:30 was meant.
+        val back = file("UID:b", "DTSTART:20260404T153000Z", "DTEND:20260404T170000Z", "SUMMARY:Late")
+        val late = ServerEvents.parse(back, sydney).item!!
+        val kept = ServerEvents.patch(back, late.copy(notes = "n"), sydney, Instant.EPOCH)
+        assertTrue(kept.contains("DTSTART:20260404T153000Z")); assertTrue(kept.contains("DTEND:20260404T170000Z"))
+        // Elsewhere nothing changes: Perth on the same night.
+        val perth = ZoneId.of("Australia/Perth")
+        val plain = ServerEvents.parse(forward, perth).item!!
+        assertEquals(60, plain.durationMinutes)
+        assertTrue(CalendarExport.encode(plain, "p", perth, Instant.EPOCH).contains("DTEND:20261003T163000Z"))
+    }
 }
