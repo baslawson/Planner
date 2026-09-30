@@ -129,8 +129,9 @@ object QuickEntry {
     // "12 noon", "12 midnight": the 12 is part of the word.
     private const val noonOrMidnight = "(?:12\\s*)?(?:$noonWords|midnight)"
     private const val clock = "(?:$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.h]\\d{2})?(?:\\s*$meridiem)?)"
-    // "630-830pm", "930-1030am": an hour and minutes without a colon or am/pm start a range whose end has am/pm.
-    private const val rangeStartAmPm = "[1-9][0-5]\\d(?=\\s*(?:[-–—]|to|until|till?|'til)\\s*(?:$clockAmPm|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem)(?![\\w]))"
+    // "630-830pm", "930-1030am": an hour and minutes without a colon or am/pm start a range whose end has am/pm, but only
+    // written tight against the dash. With a space or a range word it is title text: "Bus 150 - 3pm", "room 204 till 3pm".
+    private const val rangeStartAmPm = "[1-9][0-5]\\d(?=[-–—](?:$clockAmPm|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem)(?![\\w]))"
     // Groups 1–2 "between 2 and 4", 3–4 every other form; see rangeEnds.
     private val ranges = rx("\\b(?:between\\s+($clock)\\s+and\\s+($clock)|(?:(?:from|at)\\s+)?($clock|$rangeStartAmPm)\\s*(?:[-–—]|to|until|till?|'til)\\s*($clock))(?![\\w])")
     private fun rangeEnds(match: MatchResult): Pair<String, String> = match.groupValues.let { g -> if (g[1].isNotEmpty()) g[1] to g[2] else g[3] to g[4] }
@@ -165,7 +166,8 @@ object QuickEntry {
     private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-\\d.]+|$countWords|half|a quarter))?\\s*$")
     // "Table for 4 Saturday", "Dinner for two Friday": a whole number after "for", with the when after it, is how many people:
     // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed.
-    private val partySize = rx("for\\s+(?:\\d+|(?!an?\\b)(?:$countWords))\\s*")
+    // Only 1–20: a larger number ("Study for 45 Monday") may be a length still missing its unit, so it keeps asking.
+    private val partySize = rx("for\\s+(?:[1-9]|1\\d|20|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*")
     private val quote = Regex("\"[^\"]*\"")
     private val at = rx(atWord)
     private const val pluralWeekdays = "mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays"
@@ -742,7 +744,8 @@ object QuickEntry {
         }
         val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
             .filterNot(::hoursNotDate).toList()
-        dropBareOrdinals(numeric.isNotEmpty())
+        // Not beside a range that could be 24-hour hours: "Workshop 5th 10-14" has two dates, so it asks for one.
+        dropBareOrdinals(numeric.any { n -> !(Regex("\\d{1,2}-\\d{1,2}").matches(n.value) && n.value.split('-').all { it.toInt() <= 23 }) })
         // A weekday beside a calendar date is a cross-check, not a second date: Friday 2 October, Fri 3/10.
         var weekdayCheck: DayOfWeek? = null
         (ds + numeric).sortedBy { it.range.first }.takeIf { it.size == 2 }?.let { (a, b) ->
