@@ -19,7 +19,13 @@ import java.util.Locale
 
 /** The alarms Planner has set and not yet seen go off (see MissedReminders). Kept outside Android, which forgets them at a reboot. */
 class AlarmLedger(private val prefs: SharedPreferences) {
-    constructor(context: Context) : this(context.getSharedPreferences("pending_alarms", Context.MODE_PRIVATE))
+    constructor(context: Context) : this(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
+
+    companion object {
+        // Left out of Android's backup and device transfer (res/xml/backup_rules.xml, data_extraction_rules.xml): these
+        // alarms were set on this phone only.
+        const val PREFS = "pending_alarms"
+    }
 
     fun set(key: String, trigger: Long) { if (prefs.getLong(key, 0L) != trigger) prefs.edit().putLong(key, trigger).apply() }
     fun remove(key: String) { if (prefs.contains(key)) prefs.edit().remove(key).apply() }

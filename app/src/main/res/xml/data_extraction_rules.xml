@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android Auto Backup and device-to-device transfer, Android 12 and later (android:dataExtractionRules). The same as
+    backup_rules.xml: only exclusions, so everything else goes as before these rules. pending_alarms stays on this phone:
+    its reminders were set here, and a copy on another phone would show ones already seen as "Missed" after a reboot.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="pending_alarms.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="pending_alarms.xml" />
+    </device-transfer>
+</data-extraction-rules>
