@@ -33,6 +33,8 @@ object Payments {
     }
 
     fun total(payments: List<BillPayment>): Long = payments.filterNot { it.reversed }.sumOf { it.amount }
+    // Payments that still count: unticking "paid" keeps them only as reversed history.
+    fun anyLive(payments: List<BillPayment>): Boolean = payments.any { !it.reversed }
     fun validate(payments: List<BillPayment>) {
         if (payments.size > MAX_ENTRIES) throw PaymentUpdateException(LIMIT_MESSAGE)
         require(payments.map { it.id }.toSet().size == payments.size)

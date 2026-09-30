@@ -76,7 +76,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, onEdi
                     color = if (!task.done && due < today) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 else Text("No due date", style = MaterialTheme.typography.bodySmall)
                 if (!task.done) task.activeReminderAt?.let { timestamp ->
-                    Text("Reminder: ${if (task.snoozedUntil != null) "snoozed until " else ""}${taskReminderLabel(timestamp)}",
+                    Text("Reminder: ${if (task.snoozedAt(System.currentTimeMillis()) != null) "snoozed until " else ""}${taskReminderLabel(timestamp)}",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -270,7 +270,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 }
                 if (reminderAt != null) {
                     // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
-                    val snoozed = initial.snoozedUntil
+                    val snoozed = initial.snoozedAt(System.currentTimeMillis())
                     if (snoozed != null && !initial.done && reminderAt == initial.reminderAt)
                         Text("Snoozed until ${taskReminderLabel(snoozed)}. Changing the reminder ends the snooze.")
                     TextButton(enabled = !busy, onClick = { reminderAt = null }) { Text("Remove reminder") }

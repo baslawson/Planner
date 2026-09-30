@@ -34,6 +34,9 @@ data class PlannerTask(
 /** When the reminder is due now: the snooze if there is one, else [PlannerTask.reminderAt]. Removing the reminder ends the snooze. */
 val PlannerTask.activeReminderAt: Long? get() = reminderAt?.let { snoozedUntil ?: it }
 
+/** The snooze time while it is still ahead of [now]; once passed (e.g. its notification was swiped away) it is null. */
+fun PlannerTask.snoozedAt(now: Long): Long? = snoozedUntil?.takeIf { reminderAt != null && it > now }
+
 @Dao
 interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY id") fun observe(): Flow<List<PlannerTask>>

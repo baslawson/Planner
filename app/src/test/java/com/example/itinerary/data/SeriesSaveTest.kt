@@ -43,4 +43,12 @@ class SeriesSaveTest {
         assertEquals(listOf(ChecklistEntry("a", "Transfer (renamed)", false), ChecklistEntry("b", "Receipt", true), ChecklistEntry("new", "File it", false)), saved.checklist)
         assertEquals(emptyList<ChecklistEntry>(), keepChecklistTicks(emptyList(), sibling.checklist))
     }
+
+    @Test fun siblingWithOnlyReversedPaymentsFollowsMoneyEdits() {
+        val unticked = bill(2, day.plusMonths(1), payments = listOf(BillPayment(amount = 1000, reversed = true)))
+        val saved = seriesOccurrence(bill(1, day, amount = 1200).copy(billCurrency = "EUR", category = "Other"), unticked, unticked.date, false, RepeatRule.MONTHLY)
+        assertEquals(1200L, saved.billAmountMinor); assertEquals("EUR", saved.billCurrency); assertEquals("Other", saved.category)
+        assertFalse(saved.paid); assertEquals(unticked.payments, saved.payments)
+        assertFalse(Payments.anyLive(unticked.payments)); assertTrue(Payments.anyLive(listOf(BillPayment(amount = 5))))
+    }
 }

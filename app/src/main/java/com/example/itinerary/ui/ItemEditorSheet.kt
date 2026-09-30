@@ -185,7 +185,7 @@ fun ItemEditorSheet(
     // Longest lead time first, so the list keeps its order when a reminder is changed.
     val shownReminders by remember(existingReminders) {
         derivedStateOf {
-            (existingReminders.filter { it !in removedReminders } + addedReminders)
+            (EditorRules.keptReminders(existingReminders, removedReminders) + addedReminders)
                 .sortedByDescending { it.offsetMinutes }
         }
     }

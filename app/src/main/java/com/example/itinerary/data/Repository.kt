@@ -103,8 +103,7 @@ class Repository(
             work["reminders:$id"] = {
                 val reminder = reminderDao.byId(id)
                 val event = reminder?.let { itemDao.byId(it.itemId) }
-                if (event == null || id in cancelFirst) scheduler.cancel(id)
-                if (event != null) { if (event.paid || event.skipped) scheduler.cancel(id) else if (!deliveredAlready(event, reminder)) scheduler.schedule(event, reminder) }
+                updateReminderAlarm(scheduler, id, event, reminder, id in cancelFirst, ::deliveredAlready)
             }
         }
         taskIds.distinct().forEach { id ->
@@ -400,16 +399,14 @@ class Repository(
             }
             val seriesSave = options.entireSeries && original?.seriesId != null
             val newSeries = !seriesSave && item.id != 0L && targets.size > 1
-            // An entire-series save gives the other occurrences this one's files and reminders only when this save changed
-            // them; otherwise each keeps its own (a receipt replaced here would be deleted for good).
-            val replaceAttachments = newSeries || seriesSave && (added.isNotEmpty() || removed.isNotEmpty())
-            val replaceReminders = newSeries || seriesSave && (addedReminders.isNotEmpty() || removedReminders.isNotEmpty())
-            val attachmentsByItem = if (replaceAttachments)
+            // A new series copies this event's files and reminders. An entire-series save gives the other occurrences
+            // only this edit's changes (seriesSiblingChanges): each keeps its own, e.g. its receipts.
+            val attachmentsByItem = if (newSeries)
                 readIds(targets.filter { it.id != 0L }.map { it.id }, attachmentDao::forItems).groupBy { it.itemId }
                 else emptyMap()
             // By id: text recognition or a snooze may have changed the record since the editor read it.
             val selectedAttachments = attachmentsByItem[item.id].orEmpty().filter { old -> removed.none { it.id == old.id } } + added
-            val selectedReminders = if (replaceReminders) {
+            val selectedReminders = if (newSeries) {
                 reminderDao.forItem(item.id).filter { old -> removedReminders.none { it.id == old.id } } + addedReminders
             } else emptyList()
             for (target in targets) {
@@ -417,7 +414,7 @@ class Repository(
                 require(target.category != "Bills" || paymentTotal == 0L || target.billAmountMinor != null && paymentTotal <= target.billAmountMinor) {
                     "\"${target.title}\" on ${target.date} has payments of more than its amount. Raise the amount or remove payments first." }
                 val previous = previousById[target.id]
-                require(previous == null || previous.payments.isEmpty() || target.category != "Bills" || previous.billCurrency == target.billCurrency) {
+                require(previous == null || !Payments.anyLive(previous.payments) || target.category != "Bills" || previous.billCurrency == target.billCurrency) {
                     "\"${target.title}\" on ${target.date} has payments in ${previous?.billCurrency}. Remove them before changing the currency." }
                 val normalized = target.copy(paid = target.category == "Bills" && (if (target.payments.any { !it.reversed })
                     target.billAmountMinor != null && paymentTotal >= target.billAmountMinor else target.paid),
@@ -432,17 +429,25 @@ class Repository(
                 }
                 val rowId = itemDao.upsert(normalized)
                 val saved = normalized.copy(id = if (rowId > 0) rowId else target.id)
-                if (replaceAttachments) {
+                if (newSeries) {
                     attachmentsByItem[saved.id].orEmpty().forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
                     selectedAttachments.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
+                } else if (seriesSave && saved.id != item.id) {
+                    val (drop, add) = seriesSiblingAttachments(attachmentDao.forItem(saved.id), added, removed)
+                    drop.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
+                    add.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                 } else {
                     added.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                     removed.filter { it.itemId == saved.id }.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
                 }
                 // A reminder copied from the editor (e.g. after toggling "ring until dismissed") must not keep an old snooze.
-                if (replaceReminders) {
+                if (newSeries) {
                     reminderDao.forItem(saved.id).forEach { reminderDao.delete(it); cancelled.add(it) }
                     selectedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
+                } else if (seriesSave && saved.id != item.id) {
+                    val (drop, add) = seriesSiblingReminders(reminderDao.forItem(saved.id), addedReminders, removedReminders)
+                    drop.forEach { reminderDao.delete(it); cancelled.add(it) }
+                    add.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                 } else {
                     addedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                     removedReminders.filter { it.itemId == saved.id }.forEach { reminderDao.delete(it); cancelled.add(it) }
@@ -766,7 +771,7 @@ class Repository(
 
 /**
  * One occurrence [old] of an entire-series save: it takes the edited occurrence's details, moved to [date], but keeps its
- * own paid state, payments, skip and checklist ticks. A bill with payments also keeps its amount, currency and category:
+ * own paid state, payments, skip and checklist ticks. A bill with live (not reversed) payments also keeps its amount, currency and category:
  * the payments were made against those, and a new amount would un-pay it or leave it paid for more than it costs.
  */
 internal fun seriesOccurrence(edited: ItineraryItem, old: ItineraryItem, date: java.time.LocalDate, changeRepeat: Boolean, repeat: RepeatRule): ItineraryItem {
@@ -775,11 +780,43 @@ internal fun seriesOccurrence(edited: ItineraryItem, old: ItineraryItem, date: j
         repeatRule = if (changeRepeat) repeat.name else old.repeatRule)
     if (old.id == edited.id) return moved
     val own = moved.copy(paid = old.paid, payments = old.payments, checklist = keepChecklistTicks(edited.checklist, old.checklist))
-    return if (old.payments.isEmpty()) own else own.copy(billAmountMinor = old.billAmountMinor, billCurrency = old.billCurrency, category = old.category)
+    return if (!Payments.anyLive(old.payments)) own else own.copy(billAmountMinor = old.billAmountMinor, billCurrency = old.billCurrency, category = old.category)
 }
 
 /** The edited list (entries added, removed, renamed), each ticked only if the same entry was ticked in [own]. */
 internal fun keepChecklistTicks(edited: List<ChecklistEntry>, own: List<ChecklistEntry>): List<ChecklistEntry> {
     val done = own.associate { it.id to it.done }
     return edited.map { it.copy(done = done[it.id] ?: false) }
+}
+
+/**
+ * An entire-series save reaches each other occurrence's own attachments or reminders as a diff; returns (delete, insert).
+ * One removed here goes only where the [same] one is held; one [added] in the [slot] of a removed one (text read into a
+ * file, "ring until dismissed" toggled) replaces it only there; any other added one goes everywhere its slot is free.
+ */
+private fun <T> seriesSiblingChanges(own: List<T>, added: List<T>, removed: List<T>, same: (T, T) -> Boolean, slot: (T, T) -> Boolean): Pair<List<T>, List<T>> {
+    val delete = own.filter { o -> removed.any { same(it, o) } }
+    val insert = added.filter { a ->
+        val replaced = removed.filter { slot(it, a) }
+        if (replaced.isEmpty()) own.none { slot(it, a) } else delete.any { o -> replaced.any { same(it, o) } }
+    }
+    return delete to insert
+}
+
+internal fun seriesSiblingAttachments(own: List<Attachment>, added: List<Attachment>, removed: List<Attachment>) =
+    seriesSiblingChanges(own, added, removed, { a, b -> a.fileName == b.fileName }, { a, b -> a.fileName == b.fileName })
+
+internal fun seriesSiblingReminders(own: List<Reminder>, added: List<Reminder>, removed: List<Reminder>) =
+    seriesSiblingChanges(own, added, removed, { a, b -> a.offsetMinutes == b.offsetMinutes && a.ringUntilDismissed == b.ringUntilDismissed },
+        { a, b -> a.offsetMinutes == b.offsetMinutes })
+
+/**
+ * One event reminder's alarm after a commit. It is reconciled, so an alarm that is due but not yet delivered (inexact
+ * alarms, Doze, an eastward time-zone change) survives an unrelated save; a changed schedule ([reset]), a deleted
+ * reminder or event, and a paid or skipped event cancel it.
+ */
+internal suspend fun updateReminderAlarm(scheduler: ReminderAlarms, id: Long, event: ItineraryItem?, reminder: Reminder?, reset: Boolean,
+                                          delivered: suspend (ItineraryItem, Reminder) -> Boolean) {
+    if (event == null || reset) scheduler.cancel(id)
+    if (event != null && reminder != null) { if (event.paid || event.skipped) scheduler.cancel(id) else if (!delivered(event, reminder)) scheduler.reconcile(event, reminder) }
 }

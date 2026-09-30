@@ -72,4 +72,13 @@ class EditorRulesTest {
         assertEquals(oct7, EditorRules.followDate(moved, oct3))
         assertNull(EditorRules.followDate(moved, oct7))
     }
+
+    // B16: a snooze while the editor is open changes the record, not its id.
+    @Test fun removedReminderStaysRemovedAfterASnooze() {
+        val kept = com.example.itinerary.data.Reminder(id = 1, itemId = 9, amount = 1, unit = com.example.itinerary.data.ReminderUnit.DAYS)
+        val removed = com.example.itinerary.data.Reminder(id = 2, itemId = 9, amount = 1, unit = com.example.itinerary.data.ReminderUnit.HOURS)
+        val snoozed = removed.copy(snoozedUntil = 1_000L)
+        assertEquals(listOf(kept), EditorRules.keptReminders(listOf(kept, snoozed), listOf(removed)))
+        assertEquals(listOf(kept, snoozed), EditorRules.keptReminders(listOf(kept, snoozed), emptyList()))
+    }
 }

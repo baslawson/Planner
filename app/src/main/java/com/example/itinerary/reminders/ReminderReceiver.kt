@@ -27,7 +27,7 @@ class ReminderReceiver : BroadcastReceiver() {
     private fun show(context: Context, intent: Intent) {
         val id = intent.getLongExtra(ReminderScheduler.EXTRA_REMINDER_ID, 0L)
         val content = reminderContent(context, intent.extras) ?: return
-        if (intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false)) {
+        if (intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false) && ringingAlarmsEnabled(context)) {
             try {
                 ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java).putExtras(intent))
                 return

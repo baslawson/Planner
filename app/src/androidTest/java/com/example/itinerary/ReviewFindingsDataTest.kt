@@ -78,13 +78,13 @@ class ReviewFindingsDataTest {
         val stale = eventReminderToken(item, repo.snapshot().reminders.single())
         alarms.calls.clear()
         repo.saveItem(item.copy(date=item.date.plusDays(1)))
-        assertEquals(listOf("cancel:${r.id}", "schedule:${r.id}"), alarms.calls)
+        assertEquals(listOf("cancel:${r.id}", "reconcile:${r.id}"), alarms.calls)
         assertNull(repo.snapshot().reminders.single().snoozedUntil)
         assertFalse(repo.snoozeReminder(r.id, System.currentTimeMillis()+3_600_000, stale))
         item = repo.snapshot().items.single()
         alarms.calls.clear()
         repo.saveItem(item.copy(startTime=LocalTime.NOON))
-        assertEquals(listOf("cancel:${r.id}", "schedule:${r.id}"), alarms.calls)
+        assertEquals(listOf("cancel:${r.id}", "reconcile:${r.id}"), alarms.calls)
     }
     @Test fun reconciliationAndTitleOnlyEditPreserveNotificationButSnoozeCannotBeReused() = fixture { repo, alarms ->
         repo.saveItem(bill().copy(category="Other"), addedReminders=listOf(reminder()))
@@ -93,7 +93,7 @@ class ReviewFindingsDataTest {
         alarms.calls.clear(); repo.rescheduleAllReminders()
         assertEquals(listOf("reconcile:${r.id}"), alarms.calls)
         alarms.calls.clear(); repo.saveItem(item.copy(title="New title"))
-        assertEquals(listOf("schedule:${r.id}"), alarms.calls)
+        assertEquals(listOf("reconcile:${r.id}"), alarms.calls)
         assertTrue(repo.snoozeReminder(r.id, System.currentTimeMillis()+3_600_000, token))
         assertFalse(repo.snoozeReminder(r.id, System.currentTimeMillis()+7_200_000, token))
     }

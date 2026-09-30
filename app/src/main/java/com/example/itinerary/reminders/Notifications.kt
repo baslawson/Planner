@@ -72,6 +72,15 @@ fun notificationsEnabled(context: Context): Boolean {
     return true
 }
 
+// A ringing alarm is stopped only from its notification, so it rings only when that notification can show: otherwise it
+// would ring for ten minutes with no way to stop it. The reminder then falls back to a normal notification.
+internal fun ringsAsAlarm(appNotifications: Boolean, alarmChannelImportance: Int?): Boolean =
+    appNotifications && alarmChannelImportance != NotificationManager.IMPORTANCE_NONE
+
+fun ringingAlarmsEnabled(context: Context): Boolean = ringsAsAlarm(
+    NotificationManagerCompat.from(context).areNotificationsEnabled(),
+    context.getSystemService(NotificationManager::class.java).getNotificationChannel(ALARM_CHANNEL_ID)?.importance)
+
 // Returns false if it could not be shown because notifications are off.
 fun postReminderNotification(
     context: Context,

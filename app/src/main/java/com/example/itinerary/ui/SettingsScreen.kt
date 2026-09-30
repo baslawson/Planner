@@ -54,6 +54,7 @@ import com.example.itinerary.data.TimeFormat
 import com.example.itinerary.reminders.AlarmService
 import com.example.itinerary.reminders.openAppSettings
 import com.example.itinerary.reminders.sendTestNotification
+import androidx.core.app.NotificationManagerCompat
 
 // The Settings page, full screen: a title bar with a back arrow, the settings in a scrolling column with a scroll bar
 // (ScrollHints), and a big Save button pinned at the bottom. It is drawn over the current screen
@@ -212,7 +213,12 @@ fun SettingsScreen(
                             Toast.makeText(context, "Notifications are off", Toast.LENGTH_SHORT).show()
                         }
                     }
-                    StackedButton("Test alarm (rings until stopped)") { AlarmService.startTest(context) }
+                    StackedButton("Test alarm (rings until stopped)") {
+                        if (!AlarmService.startTest(context)) {
+                            val reason = if (NotificationManagerCompat.from(context).areNotificationsEnabled()) "Ringing alarms are off" else "Notifications are off"
+                            Toast.makeText(context, reason, Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "Not arriving? Some phones stop background alarms to save battery. " +

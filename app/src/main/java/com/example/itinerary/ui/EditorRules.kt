@@ -2,6 +2,7 @@ package com.example.itinerary.ui
 
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.MultiDay
+import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.RepeatRule
 import com.example.itinerary.data.eventsOnDay
 import java.time.LocalDate
@@ -39,4 +40,8 @@ object EditorRules {
     // the morning after an overnight event); otherwise it follows the event to its first day.
     fun followDate(item: ItineraryItem, selected: LocalDate): LocalDate? =
         item.date.takeIf { eventsOnDay(listOf(item), selected).isEmpty() }
+
+    // Removed saved reminders are matched by id: a snooze while the editor is open changes the record.
+    fun keptReminders(existing: List<Reminder>, removed: List<Reminder>): List<Reminder> =
+        existing.filter { kept -> removed.none { it.id == kept.id } }
 }

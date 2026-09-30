@@ -235,7 +235,9 @@ class AlarmService : Service() {
         private const val NOTIFICATION_ID = 1_000_000_001
 
         // Rings a sample alarm so the sound, vibration and buttons can be checked from Settings.
-        fun startTest(context: Context) {
+        // False when it can't ring: its notification (the only way to stop it) couldn't show.
+        fun startTest(context: Context): Boolean {
+            if (!ringingAlarmsEnabled(context)) return false
             val intent = Intent(context, AlarmService::class.java)
                 .putExtra(ReminderScheduler.EXTRA_REMINDER_ID, 0L)
                 .putExtra(ReminderScheduler.EXTRA_TITLE, "Test alarm")
@@ -245,6 +247,7 @@ class AlarmService : Service() {
                 .putExtra(ReminderScheduler.EXTRA_OFFSET_LABEL, "Test")
                 .putExtra(ReminderScheduler.EXTRA_RING, true)
             ContextCompat.startForegroundService(context, intent)
+            return true
         }
     }
 }

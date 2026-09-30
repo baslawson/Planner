@@ -51,7 +51,7 @@ class CodebaseOptimizationDataTest {
         repo.rescheduleAllReminders()
         repo.deleteWithUndo(event(8))
         assertNoWholeEventRead(queries)
-        assertEquals(listOf(7L),reconciled)
+        assertEquals(listOf(7L,7L),reconciled)
         assertEquals("Updated",db.itemDao().byId(7)!!.title)
         assertEquals(499,db.itemDao().all().size)
         assertNull(db.itemDao().byId(8))

@@ -32,4 +32,14 @@ class TaskSnoozeTest {
         assertEquals(1_000L, PlannerTask(title = "Call", reminderAt = 1_000L).activeReminderAt)
         assertThrows(IllegalArgumentException::class.java) { Tasks.validate(PlannerTask(title = "Call", snoozedUntil = 0L)) }
     }
+
+    // B17: once the snooze time has passed (e.g. the snoozed notification was swiped away) it is no longer "snoozed".
+    @Test fun snoozeCountsOnlyUntilItsTime() {
+        val today = LocalDate.of(2026, 9, 30)
+        val task = PlannerTask(title = "Pills", reminderAt = at(today, 8), snoozedUntil = at(today, 9))
+        assertEquals(at(today, 9), task.snoozedAt(at(today, 8)))
+        assertNull(task.snoozedAt(at(today, 9)))
+        assertNull(task.snoozedAt(at(today, 10)))
+        assertNull(task.copy(reminderAt = null).snoozedAt(at(today, 8)))
+    }
 }
