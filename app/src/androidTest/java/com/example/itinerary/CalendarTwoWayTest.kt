@@ -416,4 +416,69 @@ class CalendarTwoWayTest {
         assertTrue(plannerFile("QA Offline").value.second.contains("LOCATION:Later"))
         assertOtherCalendarUntouched()
     }
+
+    // E6: a second save while the first one's write is still on its way to Nextcloud (Save keeps the editor open, so this
+    // is common). The write in flight isn't cancelled: before, its new version went unrecorded, the next pass was refused
+    // (412) and the pull made Planner's own edit a conflict. Now the second edit follows it, and nothing is to choose.
+    @Test fun aSaveDuringASlowWriteIsSentAfterItWithoutAConflict() = runBlocking {
+        save("QA Slow")
+        start()
+        val putting = java.util.concurrent.CountDownLatch(1)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+                if (request.method == "PUT") { putting.countDown(); Thread.sleep(3000) }
+                return dav.dispatch(request)
+            }
+        }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        // As the app has it: sending a few seconds after each change (requestSend), with a scope to do it in.
+        val app = CalendarSync(database, NextcloudAccountStore(context, alias), sync.client, now = { clock }, zone = { zone },
+            planner = repo.asPlannerStore(), scope = scope)
+        fun settled(title: String): Boolean {
+            val file = dav.files.entries.singleOrNull { it.key.startsWith(synced) }?.value ?: return false
+            val row = rows().single()
+            return file.second.contains("SUMMARY:$title") && row.problem == null && row.etag == file.first &&
+                row.fingerprint == CalendarSync.fingerprint(item(title))
+        }
+        try {
+            repo.saveItem(item("QA Slow").copy(title = "QA Slow 1"))
+            app.requestSend()
+            assertTrue("The first write never started", putting.await(30, java.util.concurrent.TimeUnit.SECONDS))
+            repo.saveItem(item("QA Slow 1").copy(title = "QA Slow 2")) // while that write is under way
+            app.requestSend()
+            val end = System.currentTimeMillis() + 60_000
+            while (System.currentTimeMillis() < end && !settled("QA Slow 2")) Thread.sleep(200)
+            assertTrue("Not settled: ${rows()}", settled("QA Slow 2"))
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            server.dispatcher = dav
+        }
+        syncAgain()
+        assertEquals(emptyList<SentEvent>(), conflicts())
+        assertEquals(listOf("QA Slow 2"), items().map { it.title })
+        assertEquals(1, plannerFiles().size)
+        // Both edits were written, one after the other; neither was refused.
+        assertEquals(2, dav.requests.count { it.first == "PUT" && it.third != null })
+        assertOtherCalendarUntouched()
+    }
+
+    // E6 safety net: a write that reached Nextcloud but wasn't recorded (the app stopped on the way): the next pass is
+    // refused (412), finds Planner's own event already there, and takes it as synced instead of a change or conflict.
+    @Test fun anUnrecordedWriteOfPlannersOwnEditIsTakenAsSynced() = runBlocking {
+        save("QA Unrecorded")
+        start()
+        val (path, file) = plannerFile("QA Unrecorded")
+        val edited = item("QA Unrecorded").copy(title = "QA Unrecorded (moved)", startTime = LocalTime.of(14, 0))
+        // What Planner's write would have left there, at a version Planner never heard of.
+        dav.edit(path) { ServerEvents.patch(file.second, edited, zone, Instant.ofEpochMilli(clock)) }
+        repo.saveItem(edited)
+        sync.send()
+        assertNull(rows().single().problem)
+        assertEquals(dav.files[path]!!.first, rows().single().etag)
+        syncAgain()
+        assertEquals(emptyList<SentEvent>(), conflicts())
+        assertEquals("QA Unrecorded (moved)", items().single().title)
+        assertEquals(1, plannerFiles().size)
+        assertOtherCalendarUntouched()
+    }
 }

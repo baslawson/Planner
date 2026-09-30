@@ -165,4 +165,43 @@ class CalendarSyncRulesTest {
         assertEquals(mapOf(gymFiles[2].first to 3L), CalendarSync.editedFiles(gymFiles, listOf(moved), gym - gym[2],
             gymNoted + (3L to CalendarSync.zonedFingerprint(gym[2], perth)), perth))
     }
+
+    // E6: a change while a pass is sending never cancels it (its write would reach Nextcloud unrecorded); another pass
+    // follows. While waiting, a change restarts the wait as before.
+    @Test fun aChangeDuringASendQueuesAnotherPassInsteadOfCancellingIt() {
+        val debounce = SendDebounce()
+        assertTrue(debounce.request()) // idle: start the wait
+        assertTrue(debounce.request()) // still waiting: restart it
+        debounce.started()
+        assertFalse(debounce.request()) // sending: not cancelled…
+        assertFalse(debounce.request())
+        assertTrue(debounce.finished()) // …one more pass afterwards, however many changes came in
+        assertTrue(debounce.request())
+        debounce.started()
+        assertFalse(debounce.finished()) // nothing came in: done
+        assertTrue(debounce.request())
+        // A change that came during the wait is sent by that same pass.
+        debounce.started(); assertFalse(debounce.finished())
+    }
+
+    // E6 safety net: a file at a version Planner didn't record that already holds Planner's event as it is now (its own
+    // write, unrecorded) is taken as synced, not a change there or a conflict. Anything else still is.
+    @Test fun aFileAlreadyHoldingPlannersEventIsTakenAsSynced() {
+        val utc = ZoneOffset.UTC
+        val before = event(1, "Dentist")
+        val now = before.copy(title = "Dentist (moved)", startTime = LocalTime.of(11, 0), checklist = listOf(ChecklistEntry("c", "Only in Planner", false)))
+        val row = SentEvent(id = 5, itemId = 1, account = "a", calendar = "/c/", uid = "u1", href = "/c/u1.ics", etag = "\"e1\"",
+            ics = "old", fingerprint = CalendarSync.fingerprint(before), problem = SentEvent.CHANGED, conflict = "x")
+        // Planner's latest version, with the file's own extras (an attendee): taken, whatever the row said.
+        val written = ServerEvents.patch(CalendarExport.encode(before, "u1", utc, Instant.EPOCH).replace("END:VEVENT", "ATTENDEE:mailto:a@example.com\r\nEND:VEVENT"),
+            now, utc, Instant.EPOCH)
+        val taken = CalendarSync.alreadyThere(row, ServerFile("/c/u1.ics", "\"e2\"", written), now, utc)!!
+        assertEquals("\"e2\"", taken.etag); assertEquals(written, taken.ics); assertEquals(CalendarSync.fingerprint(now), taken.fingerprint)
+        assertNull(taken.problem); assertNull(taken.conflict)
+        // Changed there to something else, or an earlier version of Planner's: still compared.
+        assertNull(CalendarSync.alreadyThere(row, ServerFile("/c/u1.ics", "\"e2\"", CalendarExport.encode(now.copy(title = "Web"), "u1", utc, Instant.EPOCH)), now, utc))
+        assertNull(CalendarSync.alreadyThere(row, ServerFile("/c/u1.ics", "\"e2\"", CalendarExport.encode(before, "u1", utc, Instant.EPOCH)), now, utc))
+        // A file Planner can't hold isn't taken.
+        assertNull(CalendarSync.alreadyThere(row, ServerFile("/c/u1.ics", "\"e2\"", "garbage"), now, utc))
+    }
 }

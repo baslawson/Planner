@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -56,6 +57,7 @@ class CalendarSync(
     val sendState = _sendState.asStateFlow()
     val sent: Flow<List<SentEvent>> = db.sentDao().observe()
     private var sendJob: kotlinx.coroutines.Job? = null
+    private val debounce = SendDebounce()
     private val linkLock = Mutex()
     private var lastLinkAttempt = 0L
     private val _linkState = MutableStateFlow(State())
@@ -213,11 +215,21 @@ class CalendarSync(
         if (id != null) { sync(); send() }
     }
 
-    // Sends a few seconds after a change in Planner, so a burst of edits is one pass.
+    // Sends a few seconds after a change in Planner, so a burst of edits is one pass. A send already under way is never
+    // cancelled (a write that reached Nextcloud would go unrecorded and come back as a conflict with itself): it
+    // finishes, and another pass follows it a few seconds later.
     fun requestSend() {
         val scope = scope ?: return
-        sendJob?.cancel()
-        sendJob = scope.launch { kotlinx.coroutines.delay(SEND_DELAY_MS); send() }
+        synchronized(debounce) {
+            if (!debounce.request()) return
+            sendJob?.cancel()
+            sendJob = scope.launch {
+                kotlinx.coroutines.delay(SEND_DELAY_MS)
+                // From here on no request cancels this job (see SendDebounce); one that came first already has.
+                synchronized(debounce) { ensureActive(); debounce.started() }
+                try { send() } finally { if (synchronized(debounce) { debounce.finished() }) requestSend() }
+            }
+        }
     }
 
     // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
@@ -287,13 +299,17 @@ class CalendarSync(
                     val href = hrefOf(target, row)
                     // Change only what Planner manages in the file as last synced (fetched once if unknown).
                     val base = row.ics ?: client.getFile(account, target.href, href)?.let { file ->
-                        if (file.etag != row.etag) { sentDao.put(row.copy(problem = SentEvent.CHANGED)); null } else file.data
+                        if (file.etag == row.etag) file.data
+                        else { sentDao.put(alreadyThere(row, file, item, zone()) ?: row.copy(problem = SentEvent.CHANGED)); null }
                     }
                     if (base == null) { if (sentDao.all().none { it.id == row.id && it.problem != null }) sentDao.put(row.copy(problem = SentEvent.DELETED)); continue }
                     val body = ServerEvents.patch(base, item, zone(), java.time.Instant.ofEpochMilli(now()))
                     when (val result = client.putFile(account, target.href, href, body, row.etag)) {
                         is WriteResult.Ok -> sentDao.put(row.copy(etag = result.etag, ics = body, fingerprint = print))
-                        WriteResult.Changed -> sentDao.put(row.copy(problem = SentEvent.CHANGED))
+                        // Changed there: unless it already is Planner's event as it is now (an earlier write whose reply
+                        // never got recorded), the next pull compares.
+                        WriteResult.Changed -> sentDao.put(client.getFile(account, target.href, href)?.let { alreadyThere(row, it, item, zone()) }
+                            ?: row.copy(problem = SentEvent.CHANGED))
                         WriteResult.Missing -> sentDao.put(row.copy(problem = SentEvent.DELETED))
                     }
                 }
@@ -441,7 +457,9 @@ class CalendarSync(
                     val saved = db.itemDao().byId(item.id) ?: continue
                     sentDao.put(row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
                 }
-                else -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
+                // Changed in Planner too, but Nextcloud already has it as Planner has it now (Planner's own write, not
+                // recorded): nothing to choose.
+                else -> sentDao.put(alreadyThere(row, file, item, zone()) ?: row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
             }
         }
         // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile.
@@ -854,6 +872,16 @@ class CalendarSync(
             }
         }
 
+        // [file] (the event's file, at a version [row] doesn't know) already holds [item] as Planner has it now: the row
+        // takes it as synced (its version, content and fingerprint), clearing any problem. Null otherwise, or when Planner
+        // can't hold the file. What only one side has isn't compared: [item]'s Planner-only details, the file's extras.
+        internal fun alreadyThere(row: SentEvent, file: ServerFile, item: ItineraryItem, zone: ZoneId): SentEvent? {
+            val server = ServerEvents.parse(file.data, zone).item ?: return null
+            val print = fingerprint(item)
+            if (fingerprint(ServerEvents.apply(item, server)) != print) return null
+            return row.copy(etag = file.etag, ics = file.data, fingerprint = print, problem = null, conflict = null)
+        }
+
         // After the pull window, the date range (end exclusive) whose files are read only to link them to [unlinked]
         // events (send would write those again), when one lies there. Never before it: past events are only noted, and
         // one edited since is looked for around its own date when it is sent (lookupRanges), so a pull never depends on
@@ -927,4 +955,20 @@ class CalendarSync(
         // Which login a calendar belongs to: the server address and username, never the password.
         fun accountKey(account: NextcloudAccount): String = "${account.server}|${account.username}"
     }
+}
+
+// When Planner's changes are sent (CalendarSync.requestSend): a few seconds after the last change, and never by cancelling
+// a pass under way — a change during one is sent by another pass right after it. Called under its own lock.
+internal class SendDebounce {
+    private var sending = false
+    private var again = false
+
+    // A change in Planner. True: (re)start the wait now. False: a pass is sending; another one follows it.
+    fun request(): Boolean { if (sending) again = true; return !sending }
+
+    // The wait is over and the pass begins; from now on requests queue behind it.
+    fun started() { sending = true; again = false }
+
+    // The pass is over (sent, failed or stopped). True: changes came in meanwhile, so wait and send again.
+    fun finished(): Boolean { sending = false; return again.also { again = false } }
 }
