@@ -129,6 +129,9 @@ class BugFixRegressionTest {
         assertFalse(alarms.scheduled.single().paid)
         val foodId = before.items.single { it.title == "Food" }.id
         assertFalse(before.reminders.single { it.itemId == foodId }.id in alarms.cancelled)
+        // C9: nothing about the time changed, so the formerly paid bill's alarm is reconciled, not cancelled and reset first.
+        val paidId = before.items.single { it.title == "Paid" }.id
+        assertFalse(before.reminders.single { it.itemId == paidId }.id in alarms.cancelled)
         assertEquals(1, widgets)
         repository.removeCategories(emptySet())
         assertEquals(1, widgets)

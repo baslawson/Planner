@@ -33,6 +33,15 @@ import com.example.itinerary.ui.LocalTimeFormat
 import com.example.itinerary.ui.is24Hour
 import com.example.itinerary.ui.theme.ItineraryTheme
 
+/**
+ * Whether the intent that opened Planner is acted on (stop the ringing alarm; open the shared text, widget task or date,
+ * calendar file or shortcut). Only on a fresh launch: a rotation ([savedStateNull] false) and a reopen from Recents
+ * (FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY: Android re-delivers the task's old root intent) must not stop a newer alarm or
+ * replay an old share.
+ */
+internal fun actsOnLaunchIntent(flags: Int, savedStateNull: Boolean): Boolean =
+    savedStateNull && (flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
+
 class MainActivity : ComponentActivity() {
     private var sharedText by mutableStateOf<String?>(null)
     private var sharedSubject by mutableStateOf<String?>(null)
@@ -61,6 +70,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (!actsOnLaunchIntent(intent.flags, savedStateNull = true)) return
         readWidgetIntent(intent)
         stopAlarmIfRequested(intent)
     }
@@ -102,8 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Only on a fresh launch: a rotation re-delivers the same intent and mustn't stop a newer alarm.
-        if (savedInstanceState == null) { stopAlarmIfRequested(intent); readWidgetIntent(intent) }
+        if (actsOnLaunchIntent(intent?.flags ?: 0, savedInstanceState == null)) { stopAlarmIfRequested(intent); readWidgetIntent(intent) }
         if (savedInstanceState != null) {
             sharedText = savedInstanceState.getString("sharedText")
             sharedSubject = savedInstanceState.getString("sharedSubject")

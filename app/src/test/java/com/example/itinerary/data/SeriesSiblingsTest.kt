@@ -7,6 +7,8 @@ import org.junit.Test
 class SeriesSiblingsTest {
     private fun file(id: Long, itemId: Long, fileName: String, text: String = "") =
         Attachment(id = id, itemId = itemId, name = fileName, fileName = fileName, mimeType = "image/jpeg", recognizedText = text)
+    private fun link(id: Long, itemId: Long, url: String, name: String = url) =
+        Attachment(id = id, itemId = itemId, name = name, fileName = "", mimeType = Links.MIME_TYPE, url = url)
     private fun reminder(id: Long, itemId: Long, amount: Int, unit: ReminderUnit, ring: Boolean = false) =
         Reminder(id = id, itemId = itemId, amount = amount, unit = unit, ringUntilDismissed = ring)
 
@@ -33,6 +35,38 @@ class SeriesSiblingsTest {
         assertEquals(listOf(2L), delete.map { it.id }); assertEquals(listOf("Signed"), insert.map { it.recognizedText })
         val (delete2, insert2) = seriesSiblingAttachments(listOf(file(5, 3, "receipt-dec.jpg")), added, removed)
         assertEquals(emptyList<Attachment>(), delete2); assertEquals(emptyList<Attachment>(), insert2)
+    }
+
+    // C1: a web link has no file (fileName ""), so links are told apart by their url.
+    @Test fun removingALinkRemovesOnlyThatLinkWhereItIsHeld() {
+        val removed = listOf(link(1, 1, "https://a.example/tickets"))
+        val own = listOf(link(2, 2, "https://a.example/tickets"), link(3, 2, "https://b.example/menu"), file(4, 2, "receipt-nov.jpg"))
+        val (delete, insert) = seriesSiblingAttachments(own, emptyList(), removed)
+        assertEquals(listOf(2L), delete.map { it.id }); assertEquals(emptyList<Attachment>(), insert)
+        val (delete2, _) = seriesSiblingAttachments(listOf(link(5, 3, "https://b.example/menu")), emptyList(), removed)
+        assertEquals(emptyList<Attachment>(), delete2)
+    }
+
+    @Test fun addingALinkReachesOccurrencesThatHaveOtherLinks() {
+        val added = listOf(link(0, 0, "https://a.example/tickets"))
+        val (delete, insert) = seriesSiblingAttachments(listOf(link(2, 2, "https://b.example/menu")), added, emptyList())
+        assertEquals(emptyList<Attachment>(), delete); assertEquals(listOf("https://a.example/tickets"), insert.map { it.url })
+        // One that already holds the same url is not doubled.
+        val (_, again) = seriesSiblingAttachments(listOf(link(3, 3, "https://a.example/tickets")), added, emptyList())
+        assertEquals(emptyList<Attachment>(), again)
+    }
+
+    @Test fun renamingALinkRenamesItOnlyWhereItIsHeld() {
+        val removed = listOf(link(1, 1, "https://a.example/tickets")); val added = listOf(link(0, 0, "https://a.example/tickets", name = "Tickets"))
+        val (delete, insert) = seriesSiblingAttachments(listOf(link(2, 2, "https://a.example/tickets"), link(3, 2, "https://b.example/menu")), added, removed)
+        assertEquals(listOf(2L), delete.map { it.id }); assertEquals(listOf("Tickets"), insert.map { it.name })
+        val (delete2, insert2) = seriesSiblingAttachments(listOf(link(4, 3, "https://b.example/menu")), added, removed)
+        assertEquals(emptyList<Attachment>(), delete2); assertEquals(emptyList<Attachment>(), insert2)
+    }
+
+    @Test fun swappingOneLinkForAnotherAddsItWhereTheOldOneIsNotHeld() {
+        val (delete, insert) = seriesSiblingAttachments(listOf(file(2, 2, "receipt-nov.jpg")), listOf(link(0, 0, "https://a.example/x")), listOf(link(1, 1, "https://c.example/y")))
+        assertEquals(emptyList<Attachment>(), delete); assertEquals(listOf("https://a.example/x"), insert.map { it.url })
     }
 
     @Test fun addingAReminderKeepsEachOccurrencesOwn() {

@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
@@ -36,11 +37,13 @@ internal sealed interface SyncIndicatorState {
     }
 
     companion object {
-        // Conflicts and errors outrank a sync in progress: they need the user, and a retry may keep running.
-        fun of(sources: List<CalendarSource>, running: Boolean, error: Boolean, conflicts: Int): SyncIndicatorState? = when {
-            sources.none { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } -> null
+        // Conflicts and errors outrank a sync in progress: they need the user, and a retry may keep running. No Nextcloud
+        // login (a restored backup brings the send-here calendar but not the login) is a problem: nothing can sync.
+        // [loggedIn] null = not read yet: hidden rather than a guess.
+        fun of(sources: List<CalendarSource>, loggedIn: Boolean?, running: Boolean, error: Boolean, conflicts: Int): SyncIndicatorState? = when {
+            sources.none { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } || loggedIn == null -> null
             conflicts > 0 -> Conflicts(conflicts)
-            error -> Failed
+            error || !loggedIn -> Failed
             running -> Syncing
             else -> Synced
         }
@@ -55,7 +58,10 @@ fun SyncIndicator(onOpenCalendars: () -> Unit) {
     val state by sync.state.collectAsStateWithLifecycle()
     val sendState by sync.sendState.collectAsStateWithLifecycle()
     val conflicts by sync.conflicts.collectAsStateWithLifecycle(initialValue = emptyList())
-    val shown = SyncIndicatorState.of(sources, state.running || sendState.running, state.error || sendState.error, conflicts.size) ?: return
+    // Read off the main thread, again whenever the calendars or a sync change (connecting, disconnecting and restoring all
+    // change the calendar list or start a sync); keeps its last answer meanwhile, so the icon does not flicker.
+    val loggedIn by produceState<Boolean?>(null, sources, state, sendState) { value = sync.hasAccount() }
+    val shown = SyncIndicatorState.of(sources, loggedIn, state.running || sendState.running, state.error || sendState.error, conflicts.size) ?: return
     IconButton(onClick = onOpenCalendars) {
         when (shown) {
             is SyncIndicatorState.Conflicts -> BadgedBox(badge = { Badge { Text("${shown.count}") } }) {

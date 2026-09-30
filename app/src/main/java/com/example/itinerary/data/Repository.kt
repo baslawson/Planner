@@ -492,7 +492,9 @@ class Repository(
             itemDao.replaceCategories(names.toList(), Categories.OTHER)
             reminderDao.all().filter { it.itemId in affected }
         }
-        afterCommit(reminderIds = reminders.map { it.id }, cancelFirst = reminders.mapTo(hashSetOf()) { it.id })
+        // Reconciled, not reset (B8, C9): no date or time changed, so a due-but-undelivered, showing or ringing alarm stays;
+        // a bill that was paid is not paid any more and gets its alarms back.
+        afterCommit(reminderIds = reminders.map { it.id })
     }
 
     suspend fun deleteItem(item: ItineraryItem) = deleteWithUndo(item)
@@ -803,8 +805,11 @@ private fun <T> seriesSiblingChanges(own: List<T>, added: List<T>, removed: List
     return delete to insert
 }
 
+// A file is known by its stored file name; a web link has none (fileName ""), so it is known by its url.
+private fun Attachment.seriesKey(): Pair<String, String?> = if (fileName.isEmpty()) "link" to url else "file" to fileName
+
 internal fun seriesSiblingAttachments(own: List<Attachment>, added: List<Attachment>, removed: List<Attachment>) =
-    seriesSiblingChanges(own, added, removed, { a, b -> a.fileName == b.fileName }, { a, b -> a.fileName == b.fileName })
+    seriesSiblingChanges(own, added, removed, { a, b -> a.seriesKey() == b.seriesKey() }, { a, b -> a.seriesKey() == b.seriesKey() })
 
 internal fun seriesSiblingReminders(own: List<Reminder>, added: List<Reminder>, removed: List<Reminder>) =
     seriesSiblingChanges(own, added, removed, { a, b -> a.offsetMinutes == b.offsetMinutes && a.ringUntilDismissed == b.ringUntilDismissed },

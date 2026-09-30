@@ -136,6 +136,27 @@ class ReminderSeriesFixesDataTest {
         after = repo.snapshot()
         items.forEachIndexed { i, item -> assertEquals(listOf(receipts[i].fileName), after.attachments.filter { it.itemId == item.id }.map { it.fileName }) }
     }
+    // Third bug hunt C1: web links have no file (fileName ""), so the entire series tells them apart by url.
+    @Test fun entireSeriesLinkChangesKeepEachOccurrencesOwnLinks() = fixture { repo, _, _ ->
+        fun link(url: String) = Attachment(itemId = 0, name = url, fileName = "", mimeType = Links.MIME_TYPE, url = url)
+        suspend fun linksOf(id: Long) = repo.snapshot().attachments.filter { it.itemId == id }.map { it.url }.toSet()
+        repo.saveItem(event(), options = EventSaveOptions(RepeatRule.WEEKLY, 3))
+        val items = repo.snapshot().items.sortedBy { it.date }
+        val own = items.mapIndexed { i, _ -> "https://example.com/own-$i" }
+        items.forEachIndexed { i, item -> repo.saveItem(item, added = listOf(link(own[i]))) }
+        // Adding a link reaches occurrences that already have a (different) link.
+        repo.saveItem(items[0], added = listOf(link("https://example.com/shared")), options = EventSaveOptions(entireSeries = true))
+        items.forEachIndexed { i, item -> assertEquals(setOf(own[i], "https://example.com/shared"), linksOf(item.id)) }
+        // Removing it from the entire series removes only it; each occurrence keeps its own link.
+        val sharedHere = repo.snapshot().attachments.single { it.itemId == items[0].id && it.url == "https://example.com/shared" }
+        repo.saveItem(items[0], removed = listOf(sharedHere), options = EventSaveOptions(entireSeries = true))
+        items.forEachIndexed { i, item -> assertEquals(setOf(own[i]), linksOf(item.id)) }
+        // Removing the first occurrence's own link leaves the other occurrences' links alone.
+        val ownHere = repo.snapshot().attachments.single { it.itemId == items[0].id }
+        repo.saveItem(items[0], removed = listOf(ownHere), options = EventSaveOptions(entireSeries = true))
+        assertEquals(emptySet<String?>(), linksOf(items[0].id))
+        items.drop(1).forEachIndexed { i, item -> assertEquals(setOf(own[i + 1]), linksOf(item.id)) }
+    }
     @Test fun billPaidThenUntickedFollowsTheSeriesAmount() = fixture { repo, _, _ ->
         repo.saveItem(event().copy(category = "Bills", billAmountMinor = 1000), options = EventSaveOptions(RepeatRule.MONTHLY, 3))
         val items = repo.snapshot().items.sortedBy { it.date }
