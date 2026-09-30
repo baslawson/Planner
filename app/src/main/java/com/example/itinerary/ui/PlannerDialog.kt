@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 
@@ -50,7 +51,8 @@ fun PlannerDialog(
         title = if (title == null && header == null) null else {
             {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (title != null) HeadingText(title)
+                    // At most three lines: a long task or event name in the title must not push the buttons off screen.
+                    if (title != null) HeadingText(title, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     header?.invoke(this)
                 }
             }
