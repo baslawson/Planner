@@ -161,6 +161,30 @@ class QuickEntryUiTest {
         assertTrue(series.all { it.repeatRule=="EVERY_N_MONTHS:3" && it.seriesId==series.first().seriesId })
         assertEquals(listOf(0L,3L,6L),series.map { java.time.temporal.ChronoUnit.MONTHS.between(series.first().date,it.date) })
     }
+    // Parser round 7 in the real dialog: several times add one event each (a series each when repeating), and the full
+    // editor, which holds one event, is not offered for them.
+    @Test fun severalTimesAddAnEventAtEachTime()=runBlocking {
+        val before=data().items.size
+        start();setText("","QA r7 pills tomorrow 8am and 8pm")
+        await { find("Add 2 events")!=null }
+        click("More options")
+        reveal { find("Adds an event at each time. The full editor holds one event: choose one time to open it there.")!=null }
+        assertNull(find("Open in full editor"));screenshot("r7-two-times")
+        click("Add 2 events");await { data().items.count { it.title=="QA r7 pills" }==2 }
+        val pills=data().items.filter { it.title=="QA r7 pills" }.sortedBy { it.startTime }
+        assertEquals(listOf(java.time.LocalTime.of(8,0),java.time.LocalTime.of(20,0)),pills.map { it.startTime })
+        assertTrue(pills.all { it.date==LocalDate.now().plusDays(1) })
+        assertEquals(2,pills.map { it.draftToken }.toSet().size)
+        click("Quick entry");setText("","QA r7 meds 7am and 7pm daily for 3 times")
+        click("Add 6 events");await { data().items.count { it.title=="QA r7 meds" }==6 }
+        val meds=data().items.filter { it.title=="QA r7 meds" }
+        assertEquals(2,meds.map { it.seriesId }.toSet().size)
+        meds.groupBy { it.seriesId }.values.forEach { series ->
+            assertEquals(1,series.map { it.startTime }.toSet().size)
+            assertEquals(listOf(0L,1L,2L),series.sortedBy { it.date }.map { java.time.temporal.ChronoUnit.DAYS.between(series.minOf { s -> s.date },it.date) })
+        }
+        assertEquals(before+8,data().items.size)
+    }
     @Test fun ambiguousTimeUsesExistingClockAndDateCorrectionPersists()=runBlocking {
         start();setText("","QA quick clock tomorrow at 3")
         await { find("Morning or afternoon? Choose a time below, or type am or pm.")!=null }

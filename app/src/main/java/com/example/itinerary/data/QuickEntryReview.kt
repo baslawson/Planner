@@ -35,8 +35,17 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         endDate = endDate?.let { newDate.plusDays(java.time.temporal.ChronoUnit.DAYS.between(date, it)) },
         dateSpecified = dateOverride?.isNotEmpty() ?: dateSpecified,
         time = if (timeOverride != null) timeOverride.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) else time,
-        dateChoices = dates, ambiguousTime = ambiguous, error = problem)
+        dateChoices = dates, ambiguousTime = ambiguous, error = problem,
+        // A time chosen by hand is the one time: "8am and 8pm" then adds a single event.
+        extraTimes = if (timeOverride != null) emptyList() else extraTimes)
 }
+
+/** One suggestion per time: "8am and 8pm" adds an event at each. */
+fun QuickEntrySuggestion.eachTime(): List<QuickEntrySuggestion> =
+    if (extraTimes.isEmpty()) listOf(this) else (listOf(time) + extraTimes).map { copy(time = it, extraTimes = emptyList()) }
+
+/** The save token of an entry's [index]th event: the first keeps the draft's own token. */
+fun quickToken(token: String, index: Int) = if (index == 0) token else "$token-$index"
 
 /** Has a clock time, a vague time awaiting one, or a duration: an event rather than a task. */
 fun QuickEntrySuggestion.timed(): Boolean = phrases.any { it.kind == QuickPhraseKind.TIME || it.kind == QuickPhraseKind.DURATION }

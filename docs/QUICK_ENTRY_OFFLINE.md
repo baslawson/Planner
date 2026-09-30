@@ -39,7 +39,7 @@ Tasks use due dates; switch to Event for a time, or keep the words literally.
   (`Christmas lunch`, `Call on Christmas`), and never before shopping, costumes, prep, planning, decorations,
   cards, gifts or presents, which usually happen before the day. Another typed date always wins.
 
-Other unsupported schedules, such as every weekend, every other month, next week on its own or the end of the week,
+Other unsupported schedules, such as next week or next month on its own,
 still need a specific date, a supported repeat or literal text.
 
 **Title box (optional).** Words typed in Title are always the title and are never read as a date or time, so
@@ -102,6 +102,26 @@ More everyday wording:
 - `Dentist Friday 2 October 3pm` — the weekday is checked against the date; a mismatch asks you to correct it.
   `Fri 3/10` picks whichever reading is a Friday.
 - `weds` and `thur` are recognised.
+
+Several times, parts of the day, working hours and other time zones:
+
+- `Meds every day at 8am and 8pm`, `Tablets 8am, 2pm and 8pm daily`, `Pills tomorrow 9am and 9pm` — an event at
+  each time (up to three), each with the same date, repeat and reminder. `twice a day at 7am and 7pm` and
+  `three times a day at …` work too; without the times they ask for them. Each time needs am/pm or a 24-hour
+  clock, and a reminder must be `… before` rather than at a clock time. Choosing a time by hand keeps just that
+  one time; the full editor holds one event, so such an entry is added from Quick entry.
+- `Study all afternoon Saturday` — 1pm to 5pm. `all morning` is 9am to 12pm, `all arvo` the same as the
+  afternoon, `all evening` 6pm to 9pm. `all night` stays in the title.
+- `Work 9-5 weekdays`, `Work Monday 9-5`, `Shift tomorrow 10 till 2` — an end hour below the start is morning to
+  afternoon (9am to 5pm). A range such as `2-4` or `12-1` still asks morning or afternoon, and so does any entry
+  mentioning night (`Night shift 10-6`). Without a day or repeat, `9-5` is still a date.
+- `Webinar 9am Sydney time`, `Call 3pm London time tomorrow`, `Chat 6pm UK time` — converted to the phone's time
+  zone, daylight saving included. Recognised places: Sydney, Canberra, NSW, Melbourne, Vic, Brisbane, Queensland,
+  QLD, Adelaide, Perth, WA, Darwin, Hobart, Tasmania, Tas, Auckland, Wellington, NZ, New Zealand, London, UK, Paris,
+  Berlin, New York, NYC, NY, Los Angeles, LA, San Francisco, Tokyo, Japan, Singapore, Hong Kong, Bali, Dubai, India,
+  Delhi, Mumbai. Like AEST/AEDT/ACST/ACDT/AWST/UTC/GMT, they only count right after a time; `Webinar Sydney time`
+  keeps the words in the title. A repeat whose day would move is refused, and the time of a repeat is converted
+  once, for its first date.
 
 Four-digit 24-hour times work where they read as times: with a leading zero (`0600`, `0000`), after
 `at`/`from`/`until` or a date (`tomorrow 1500`, `Friday 1930`), with `hrs`/`h` (`1800hrs`), or in a range

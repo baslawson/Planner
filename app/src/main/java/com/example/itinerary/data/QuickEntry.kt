@@ -34,6 +34,8 @@ data class QuickEntrySuggestion(
     val reminderImplied: Boolean = false,
     /** Last day of a multi-day entry ("3–7 Oct", "for 5 days"); null = one day. */
     val endDate: LocalDate? = null,
+    /** "8am and 8pm": the later times of the same entry, each saved as its own event; [time] is the first. */
+    val extraTimes: List<LocalTime> = emptyList(),
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -163,10 +165,31 @@ object QuickEntry {
     private val noReminder = rx("\\b(?:(?:and|with)\\s+)?no\\s+(?:reminders?|alarms?|alerts?)\\b")
     // "EOD", "by close of business": 5pm.
     private val endOfDay = rx("\\b(?:(?:by|at|before|due(?:\\s+by)?)\\s+)?(?:eod|cob|close\\s+of\\s+business|end\\s+of\\s+(?:the\\s+)?(?:business\\s+)?day)\\b")
-    // A time zone right after a time: converted to the phone's time zone.
-    private val timeZones = rx("(?<![\\w])(aest|aedt|acst|acdt|awst|utc|gmt)(?![\\w+-])")
+    // A time zone right after a time: converted to the phone's time zone. "Sydney time", "UK time": that place's zone,
+    // daylight saving included.
     private val zoneOffsets = mapOf("AEST" to ZoneOffset.ofHours(10), "AEDT" to ZoneOffset.ofHours(11), "ACST" to ZoneOffset.ofHoursMinutes(9, 30),
         "ACDT" to ZoneOffset.ofHoursMinutes(10, 30), "AWST" to ZoneOffset.ofHours(8), "UTC" to ZoneOffset.UTC, "GMT" to ZoneOffset.UTC)
+    private val placeZones = mapOf(
+        "Australia/Sydney" to listOf("sydney", "canberra", "nsw"), "Australia/Melbourne" to listOf("melbourne", "vic"),
+        "Australia/Brisbane" to listOf("brisbane", "queensland", "qld"), "Australia/Adelaide" to listOf("adelaide"),
+        "Australia/Perth" to listOf("perth", "wa"), "Australia/Darwin" to listOf("darwin"), "Australia/Hobart" to listOf("hobart", "tasmania", "tas"),
+        "Pacific/Auckland" to listOf("auckland", "wellington", "nz", "new zealand"), "Europe/London" to listOf("london", "uk"),
+        "Europe/Paris" to listOf("paris"), "Europe/Berlin" to listOf("berlin"), "America/New_York" to listOf("new york", "nyc", "ny"),
+        "America/Los_Angeles" to listOf("los angeles", "la", "san francisco"), "Asia/Tokyo" to listOf("tokyo", "japan"),
+        "Asia/Singapore" to listOf("singapore"), "Asia/Hong_Kong" to listOf("hong kong"), "Asia/Makassar" to listOf("bali"),
+        "Asia/Dubai" to listOf("dubai"), "Asia/Kolkata" to listOf("india", "delhi", "mumbai"),
+    ).flatMap { (zone, names) -> names.map { it to ZoneId.of(zone) } }.toMap()
+    private val timeZones = rx("(?<![\\w])(aest|aedt|acst|acdt|awst|utc|gmt|(?:${placeZones.keys.sortedByDescending { it.length }.joinToString("|") { it.replace(" ", "\\s+") }})\\s+time)(?![\\w+-])")
+    // "all afternoon": a block of that part of the day.
+    private val allPeriod = rx("\\ball\\s+(?:the\\s+)?(morning|afternoon|arvo|evening)\\b")
+    private val periodBlocks = mapOf("morning" to (LocalTime.of(9, 0) to 180), "afternoon" to (LocalTime.of(13, 0) to 240),
+        "arvo" to (LocalTime.of(13, 0) to 240), "evening" to (LocalTime.of(18, 0) to 180))
+    // "twice a day at 8am and 8pm": daily, at each of the times given.
+    private val timesPerDay = rx("\\b(twice|two\\s+times|three\\s+times)\\s+(?:(?:a|per|each)\\s+)?(?:day|daily)\\b")
+    // Between the times of one entry: "8am and 8pm", "8am, 2pm and 8pm", "7am & 5pm".
+    private val timeJoin = rx("\\s*(?:,\\s*(?:and\\s+)?|&\\s*|and\\s+)")
+    // A bare hour range such as 9-5, read as hours rather than a date when the entry already has a day or repeat.
+    private val hourRange = Regex("(1[0-2]|[1-9])-(1[0-2]|[1-9])")
     // "todo buy milk", "Task: pay rent": a task, without a reminder.
     private val taskPrefix = rx("^\\s*(?:(?:todo|to-do)\\s*:?|(?:to\\s+do|task)\\s*:)\\s+(?=\\S)")
     // "every morning", "each evening": daily, at a time of that part of the day (asked, or settled by a clock time).
@@ -279,6 +302,13 @@ object QuickEntry {
         var dayPeriod: String? = null
         var periodHour: Int? = null
         var impliedToday = false
+        // "twice a day": daily, and needs that many times (checked once the times are read).
+        val perDayMatches = timesPerDay.findAll(remaining).toList()
+        if (perDayMatches.size > 1) return error("Use one repeat rule. Adjust it in the full editor (More options → Open in full editor).")
+        val perDay = perDayMatches.firstOrNull()?.let { match ->
+            consume(match.range, QuickPhraseKind.REPEAT)
+            match.groupValues[1].lowercase(Locale.ROOT).let { if (it.startsWith("three")) 3 else 2 } to match.value
+        }
         tooManyPerPeriod.find(remaining)?.let { match ->
             phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
             return error(if (rx("\\band\\b").containsMatchIn(match.value))
@@ -301,6 +331,13 @@ object QuickEntry {
                 timePrompt = "What time did you mean by ‘${match.value}’? Tap Choose time."
                 consume(match.range, QuickPhraseKind.REPEAT)
             }
+        }
+        // "all afternoon": that part of the day as a block, read before "arvo" alone asks for a time.
+        val allPeriodMatches = allPeriod.findAll(remaining).toList()
+        if (allPeriodMatches.size > 1) return error("Use one time phrase, or choose a specific time.")
+        val periodBlock = allPeriodMatches.firstOrNull()?.let { match ->
+            consume(match.range, QuickPhraseKind.TIME)
+            match.value.trim() to periodBlocks.getValue(match.groupValues[1].lowercase(Locale.ROOT))
         }
         // "starting next week" is a repeat's start, checked once the repeat is known.
         val wordDateRanges = (wordDateMatches.findAll(remaining) + repeatStart.findAll(remaining)).map { it.range }.toList()
@@ -490,8 +527,9 @@ object QuickEntry {
         }
         val repeatMatches = repeats.findAll(remaining).toList()
         if (repeatMatches.size + monthDayMatches.size + monthlyWeekdayMatches.size + weekdayListMatches.size + ruleOnWeekdayMatches.size +
-            lastDayMatches.size + (if (dailyPeriod) 1 else 0) + (if (rangeRepeat != null) 1 else 0) > 1)
+            lastDayMatches.size + (if (dailyPeriod) 1 else 0) + (if (rangeRepeat != null) 1 else 0) + (if (perDay != null) 1 else 0) > 1)
             return error("Use one repeat rule. Adjust it in the full editor (More options → Open in full editor).")
+        if (perDay != null) repeat = RepeatRule.DAILY
         if (dailyPeriod) { repeat = periodRule!!; periodDay?.let { repeatDay = it } }
         rangeRepeat?.let { repeat = it; rangeRepeatDay?.let { day -> repeatDay = day } }
         repeatMatches.firstOrNull()?.let { match ->
@@ -634,7 +672,10 @@ object QuickEntry {
             bareWeekday.matches(d.value) && rx("\\b(?:good|easter)\\s+$").containsMatchIn(remaining.substring(0, d.range.first))
         }.toList()
         val meridiemRanges = ranges.findAll(remaining).filter { rx("$meridiem$").containsMatchIn(rangeEnds(it).second) }.toList()
-        val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }.toList()
+        // "Work 9-5 weekdays", "Shift Saturday 10-2": with a day or repeat already given, 9-5 is hours, not a date.
+        val whenGiven = repeat != RepeatRule.NONE || ds.isNotEmpty() || rangeStart != null || startFrom != null || impliedToday || holidays.containsMatchIn(remaining)
+        val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
+            .filterNot { whenGiven && hourRange.matches(it.value) }.toList()
         // A weekday beside a calendar date is a cross-check, not a second date: Friday 2 October, Fri 3/10.
         var weekdayCheck: DayOfWeek? = null
         (ds + numeric).sortedBy { it.range.first }.takeIf { it.size == 2 }?.let { (a, b) ->
@@ -857,12 +898,22 @@ object QuickEntry {
                 fun at(value: String, pm: Boolean) = twelveHour.matchEntire(value)!!.destructured.let { (h, m) ->
                     LocalTime.of(h.toInt() % 12 + if (pm) 12 else 0, m.ifEmpty { "0" }.toInt()) }
                 val starts = listOf(at(endpoints[0], false), at(endpoints[0], true))
+                // "9-5", "10 till 2": an end hour below the start is the working day, morning to afternoon. Not across
+                // noon from 12, and not for night work ("Night shift 10-6"), which still ask.
+                val (startHour, endHour) = endpoints.map { twelveHour.matchEntire(it)!!.groupValues[1].toInt() }
+                if (endHour < startHour && startHour != 12 && !rx("\\bnight").containsMatchIn(text)) {
+                    val length = at(endpoints[1], true).toSecondOfDay() / 60 - starts[0].toSecondOfDay() / 60
+                    if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
+                    time = starts[0]; duration = length
+                    consume(range.range, QuickPhraseKind.TIME)
+                } else {
                 val length = listOf(false, true).map { pm ->
                     Math.floorMod(at(endpoints[1], pm).toSecondOfDay() / 60 - starts[0].toSecondOfDay() / 60, 1440)
                 }.filter { it in 1..719 }.minOrNull() ?: return error("The start and end times are the same. Use a duration if you mean 24 hours.")
                 if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
                 ambiguous = true; timeChoices = starts; duration = length
                 consume(range.range, QuickPhraseKind.TIME)
+                }
             } else {
             // A trailing suffix can cover an increasing range within the same half-day: 3–4pm.
             // Never infer across noon/midnight or reinterpret an explicit 24-hour start.
@@ -901,15 +952,41 @@ object QuickEntry {
                     remaining.substring(m.range.last + 1).let { after -> after.isBlank() ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
-        val ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
+        var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
+        fun clockText(value: String) = spokenToClock(value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
+            .replace(Regex("^(?:(?:at|by|before|around|about|approx(?:imately)?|roughly|circa)\\s+|[@~]\\s*)+"), "")
+            .replace(Regex("\\s*-?ish$|\\s+sharp$"), "").trim()).let { r -> if (Regex("\\d{1,2}\\.\\d{2}").matches(r)) r.replace('.', ':') else r }
+        // "8am and 8pm", "8am, 2pm and 8pm": one event at each time. Each time must be clear on its own.
+        var extraTimes = emptyList<LocalTime>()
+        if (ts.size in 2..3 && rs.isEmpty() && bareHour == null && timePrompt == null &&
+            ts.zipWithNext().all { (a, b) -> timeJoin.matches(remaining.substring(a.range.last + 1, b.range.first)) }) {
+            val read = ts.map { m -> clockText(m.value).takeUnless { Regex("([1-9]|1[0-2])(?::[0-5]\\d)?").matches(it) }?.let(::readTime) }
+            if (read.any { it == null }) {
+                phrases += ts.map { QuickEntryPhrase(it.range.first, it.range.last + 1, QuickPhraseKind.TIME) }
+                return error("Add am or pm to each time, for example 8am and 8pm.")
+            }
+            val sorted = read.filterNotNull().distinct().sorted()
+            if (sorted.size != ts.size) return error("Use different times, for example 8am and 8pm.")
+            time = sorted.first(); extraTimes = sorted.drop(1)
+            consume(ts.first().range.first..ts.last().range.last, QuickPhraseKind.TIME)
+            ts = emptyList()
+        }
+        if (perDay != null && extraTimes.size + 1 != perDay.first) {
+            return error("Give ${if (perDay.first == 2) "both" else "all three"} times for ‘${perDay.second}’, for example ${perDay.second} at ${if (perDay.first == 2) "8am and 8pm" else "8am, 1pm and 6pm"}.")
+        }
         if (ts.size > 1 || ts.isNotEmpty() && rs.isNotEmpty()) {
             phrases += ts.map { QuickEntryPhrase(it.range.first, it.range.last + 1, QuickPhraseKind.TIME) }
             return error("Use one start time or one time range.")
         }
+        // "all afternoon": its block of time, unless another time is given too.
+        periodBlock?.let { (said, block) ->
+            if (time != null || ambiguous || ts.isNotEmpty() || rs.isNotEmpty() || endOfDaySaid || relative || allDayMatches.isNotEmpty())
+                return error("Use one time: ‘$said’ or a clock time.")
+            if (duration != null) return error("Use ‘$said’ or a duration, not both.")
+            time = block.first; duration = block.second
+        }
         ts.firstOrNull()?.let {
-            val raw = spokenToClock(it.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
-                .replace(Regex("^(?:(?:at|by|before|around|about|approx(?:imately)?|roughly|circa)\\s+|[@~]\\s*)+"), "")
-                .replace(Regex("\\s*-?ish$|\\s+sharp$"), "").trim()).let { r -> if (Regex("\\d{1,2}\\.\\d{2}").matches(r)) r.replace('.', ':') else r }
+            val raw = clockText(it.value)
             // 7:30 could be morning or evening; 07:30 and 19:30 are unambiguous.
             val twelveHour = Regex("([1-9]|1[0-2]):([0-5]\\d)").matchEntire(raw)
             time = if (twelveHour != null) null else readTime(raw)
@@ -943,7 +1020,7 @@ object QuickEntry {
                 ?: return error("${fitting.joinToString(" or ")} isn't in the $period. Correct the time, or remove ‘$period’.")
             timeChoices = emptyList(); ambiguous = false; timePrompt = null
         }
-        if (relative && (timePrompt != null || ts.isNotEmpty() || rs.isNotEmpty()))
+        if (relative && (timePrompt != null || ts.isNotEmpty() || rs.isNotEmpty() || extraTimes.isNotEmpty()))
             return error("Use one time: ‘in …’ or a clock time.")
         if (relative) time = relativeAt?.toLocalTime() ?: return error(STALE_RELATIVE)
         if (allDayMatches.isNotEmpty() && (time != null || ambiguous || duration != null))
@@ -953,16 +1030,23 @@ object QuickEntry {
         timeZones.find(remaining)?.let { zm ->
             val lastTime = phrases.filter { it.kind == QuickPhraseKind.TIME && it.end <= zm.range.first }.maxOfOrNull { it.end }
             if (lastTime == null || text.substring(lastTime, zm.range.first).isNotBlank()) return@let
-            val name = zm.value.uppercase(Locale.ROOT)
+            val said = zm.value.replace(Regex("\\s+"), " ")
+            val name = zoneOffsets.keys.firstOrNull { it.equals(said, ignoreCase = true) } ?: said
+            val from: ZoneId = zoneOffsets[name] ?: placeZones.getValue(said.lowercase(Locale.ROOT).removeSuffix(" time"))
             val at = time ?: return error("Add am or pm to the time to use $name, for example 3pm $name.")
-            val local = LocalDateTime.of(date, at).atOffset(zoneOffsets.getValue(name)).atZoneSameInstant(zone).toLocalDateTime()
+            fun converted(t: LocalTime) = LocalDateTime.of(date, t).atZone(from).withZoneSameInstant(zone).toLocalDateTime()
+            val local = converted(at)
             if (local.toLocalDate() != date && (repeat != RepeatRule.NONE || dateChoices.isNotEmpty() || rangeEnd != null || (spanLength ?: 0) > 1))
                 return error("In your time zone that is ${longDate(local.toLocalDate())}. Type the date and time in your own time zone.")
+            val others = extraTimes.map(::converted)
+            if (others.any { it.toLocalDate() != local.toLocalDate() })
+                return error("In your time zone these times fall on different days. Type them in your own time zone.")
             zoneMovedDate = local.toLocalDate() != date
-            date = local.toLocalDate(); time = local.toLocalTime()
+            date = local.toLocalDate(); time = local.toLocalTime(); extraTimes = others.map { it.toLocalTime() }
             consume(zm.range, QuickPhraseKind.TIME)
         }
         reminderAt?.let { at ->
+            if (extraTimes.isNotEmpty()) return error("With more than one time, use remind me … before, for example remind me 10 min before.")
             val start = time ?: return error("Add the event's time to be reminded at ${at}, or use remind me … before.")
             var before = (start.toSecondOfDay() - at.toSecondOfDay()) / 60
             // A reminder time later in the day than the event means the day before.
@@ -1005,7 +1089,7 @@ object QuickEntry {
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
-            taskHint, reminderImplied, endDate)
+            taskHint, reminderImplied, endDate, extraTimes)
     }
 
     private fun spanMinutes(value: String): Double = when {

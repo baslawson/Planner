@@ -17,6 +17,8 @@ import com.example.itinerary.data.PlannerTask
 import com.example.itinerary.data.QuickEntrySuggestion
 import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.RepeatRule
+import com.example.itinerary.data.eachTime
+import com.example.itinerary.data.quickToken
 import com.example.itinerary.data.quickReminders
 import com.example.itinerary.data.quickTask
 import java.time.LocalDate
@@ -287,10 +289,16 @@ fun BoxScope.AddMenuHost(
     if (quickEntry) QuickEntryDialog(today, onDismiss = { quickEntry = false },
         onAdd = { suggestion, task, token ->
             if (task) repository.saveTask(suggestion.quickTask().copy(id = token))
+            // One event per time. The first keeps the draft's token and is saved last, so that token is only there
+            // once every event is; a retried save skips the ones already in.
             else {
-                val event = quickEvent(suggestion)
-                saveEvent(event, emptyList(), emptyList(), suggestion.quickReminders(), emptyList(), EventSaveOptions(repeat = suggestion.repeat, count = if (suggestion.repeat == RepeatRule.NONE) 1 else suggestion.repeatCount, draftToken = token))
-                onEventSaved(event)
+                val parts: List<QuickEntrySuggestion> = suggestion.eachTime()
+                for (i in parts.indices.reversed()) {
+                    val part = parts[i]
+                    val event = quickEvent(part)
+                    saveEvent(event, emptyList(), emptyList(), part.quickReminders(), emptyList(), EventSaveOptions(repeat = part.repeat, count = if (part.repeat == RepeatRule.NONE) 1 else part.repeatCount, draftToken = quickToken(token, i)))
+                    onEventSaved(event)
+                }
             }
         },
         onReview = { suggestion, task ->

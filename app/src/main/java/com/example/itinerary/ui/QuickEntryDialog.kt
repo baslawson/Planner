@@ -72,9 +72,9 @@ fun QuickEntryDialog(
         try { store.write(next); draft = next; error = null }
         catch (_: Exception) { error = "Couldn't keep this draft. Free some storage and try again." }
     }
-    suspend fun confirm(candidate: QuickCandidate): Boolean {
+    suspend fun confirm(candidates: List<QuickCandidate>): Boolean {
         val snapshot = repository.snapshot()
-        val found = withContext(Dispatchers.Default) { quickConflicts(listOf(candidate), snapshot.items, snapshot.tasks) }
+        val found = withContext(Dispatchers.Default) { quickConflicts(candidates, snapshot.items, snapshot.tasks) }
         if (found.isEmpty()) return true
         warnings = found
         val answer = CompletableDeferred<Boolean>()
@@ -87,7 +87,7 @@ fun QuickEntryDialog(
     } else key(generation) {
         QuickEntryEditor(draft.single.baseDate, onDismiss = onDismiss,
             onAdd = { suggestion, task, token ->
-                if (!confirm(QuickCandidate(token, suggestion, task))) throw QuickSaveCancelled()
+                if (!confirm(suggestion.eachTime().mapIndexed { i, s -> QuickCandidate(quickToken(token, i), s, task) })) throw QuickSaveCancelled()
                 // Checked again: a reminder can pass while "Check before adding" waits.
                 suggestion.quickProblem(task, ZonedDateTime.now())?.let { throw QuickSaveProblem(it) }
                 onAdd(suggestion, task, token)
@@ -281,7 +281,8 @@ fun QuickEntryEditor(
     PlannerDialog(
         title = "Quick entry",
         onDismissRequest = { if (!busy) onDismiss() },
-        primary = DialogAction(if (busy) "Saving…" else if (task) "Add task" else if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount} events" else "Add event",
+        primary = DialogAction(if (busy) "Saving…" else if (task) "Add task" else (suggestion.extraTimes.size + 1).let { times ->
+                if (suggestion.repeat != RepeatRule.NONE) "Add ${suggestion.repeatCount * times} events" else if (times > 1) "Add $times events" else "Add event" },
             enabled = canAdd) { add() },
         dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss),
         extra = if (onContinue != null) listOf(DialogAction("Add another", enabled = canAdd) { add(true) }) else emptyList(),
@@ -368,7 +369,7 @@ fun QuickEntryEditor(
                                 if (showDetails && task && suggestion.dateSpecified) MatrixQuietButton(enabled = !busy, onClick = { dateOverride = "" }) { Text("Clear date") }
                                 if (!task) {
                                     SummaryButton({ Icon(painterResource(com.example.itinerary.R.drawable.action_clock), contentDescription = null, Modifier.size(18.dp)) }, kind = "Time", enabled = !busy, onClick = { keyboard?.hide(); pickingTime = true },
-                                        label = suggestion.time?.label(LocalTimeFormat.current, context) ?: if (suggestion.ambiguousTime || suggestion.durationMinutes != null) "Choose time" else "All day · set time")
+                                        label = suggestion.time?.let { first -> val format = LocalTimeFormat.current; (listOf(first) + suggestion.extraTimes).joinToString(" and ") { it.label(format, context) } } ?: if (suggestion.ambiguousTime || suggestion.durationMinutes != null) "Choose time" else "All day · set time")
                                     if (showDetails && suggestion.time != null && suggestion.durationMinutes == null) MatrixQuietButton(enabled = !busy, onClick = { timeOverride = "" }) { Text("All day") }
                                 }
                                 if (!task && (suggestion.durationMinutes != null || showDetails && suggestion.time != null)) SummaryButton(null, kind = "Duration", enabled = !busy, onClick = { pickingDuration = true; keyboard?.hide() },
@@ -432,7 +433,9 @@ fun QuickEntryEditor(
                     }
                     if (showFeedback && problem != null && problem != "Which date did you mean?") Text(problem, color = MaterialTheme.colorScheme.error)
                     if (!showFeedback && problem != null) Text("Keep typing, or choose a suggestion.", style = MaterialTheme.typography.bodySmall)
-                    if (showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("Open in full editor") }
+                    // The full editor holds one event, so an entry with several times is added from here.
+                    if (showDetails && !task && suggestion.extraTimes.isNotEmpty()) Text("Adds an event at each time. The full editor holds one event: choose one time to open it there.", style = MaterialTheme.typography.bodySmall)
+                    else if (showDetails) TextButton(enabled = valid, onClick = { keyboard?.hide(); onReview(suggestion, task) }) { Text("Open in full editor") }
                     if (showDetails && onDiscard != null) TextButton(enabled = !busy, onClick = onDiscard) { Text("Discard draft") }
                 }
                 if (saveError != null) Text(saveError!!, color = MaterialTheme.colorScheme.error)
