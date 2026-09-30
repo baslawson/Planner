@@ -235,6 +235,9 @@ class Repository(
         entries.filter { it.deletedAt > System.currentTimeMillis() - TRASH_RETENTION_MS }
     }
 
+    // A task as saved, for an editor that goes on editing it after Save.
+    suspend fun task(id: String): PlannerTask? = taskDao.byId(id)
+
     suspend fun eventDetails(id: Long): Triple<ItineraryItem, List<Attachment>, List<Reminder>>? = db.withTransaction {
         itemDao.byId(id)?.let { Triple(it, attachmentDao.forItem(id), reminderDao.forItem(id)) }
     }
@@ -346,7 +349,18 @@ class Repository(
         addedReminders: List<Reminder> = emptyList(),
         removedReminders: List<Reminder> = emptyList(),
         options: EventSaveOptions = EventSaveOptions(),
-    ) = changes.withLock {
+    ) { saveItemId(item, added, removed, addedReminders, removedReminders, options) }
+
+    // saveItem, returning the id of the event the editor was showing, so it can go on editing the saved event: its own
+    // id, or for a new event (or new series) the first one added. A retried save (its token already in) finds the same.
+    suspend fun saveItemId(
+        item: ItineraryItem,
+        added: List<Attachment> = emptyList(),
+        removed: List<Attachment> = emptyList(),
+        addedReminders: List<Reminder> = emptyList(),
+        removedReminders: List<Reminder> = emptyList(),
+        options: EventSaveOptions = EventSaveOptions(),
+    ): Long = changes.withLock {
         requirePlannerEvent(item.id)
         require(item.tripId != OutsideCalendars.TRIP_ID) { OutsideCalendars.READ_ONLY }
         ChecklistCodec.validate(item.checklist)
@@ -361,8 +375,9 @@ class Repository(
         val removedFiles = mutableListOf<String>()
         val scheduled = mutableListOf<Pair<ItineraryItem, List<Reminder>>>()
         val payments = mutableListOf<PendingPayment>()
-        db.withTransaction {
-            if (options.draftToken != null && itemDao.hasDraftToken(options.draftToken)) return@withTransaction
+        val editedId = db.withTransaction {
+            if (options.draftToken != null && itemDao.hasDraftToken(options.draftToken))
+                return@withTransaction item.id.takeIf { it != 0L } ?: itemDao.firstIdForDraftToken(options.draftToken) ?: 0L
             if (item.id == 0L && item.linkedTaskId != null) {
                 require(taskDao.byId(item.linkedTaskId) != null) { "The task this time block belongs to was deleted." }
                 require(item.startTime != null && item.durationMinutes != null) { "A time block needs a start time and a duration." }
@@ -459,9 +474,11 @@ class Repository(
                     payments += PendingPayment(before = original, paid = saved.paid, remindersBefore = originalReminders, remindersAfter = savedReminders, paymentsAfter = saved.payments)
                 scheduled.add(saved to savedReminders)
             }
+            if (item.id != 0L) item.id else scheduled.first().first.id
         }
         payments.forEach(::recordPayment)
         afterCommit(removedFiles, cancelled.map { it.id } + scheduled.flatMap { it.second }.map { it.id }, cancelFirst = resetReminders)
+        editedId
     }
 
     // Import calendar file: many new, plain events (no reminders, attachments or bills) in one transaction, with one

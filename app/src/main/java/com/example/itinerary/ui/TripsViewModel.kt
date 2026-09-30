@@ -232,9 +232,7 @@ class TripsViewModel(
         addedReminders: List<Reminder>,
         removedReminders: List<Reminder>,
         options: com.example.itinerary.data.EventSaveOptions = com.example.itinerary.data.EventSaveOptions(),
-    ) {
-        repo.saveItem(item, added, removed, addedReminders, removedReminders, options)
-    }
+    ): Long = repo.saveItemId(item, added, removed, addedReminders, removedReminders, options)
 
     val themeMode: StateFlow<ThemeMode> = settings.themeMode
 

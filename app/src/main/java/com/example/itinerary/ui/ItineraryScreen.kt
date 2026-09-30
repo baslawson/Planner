@@ -243,9 +243,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             onShowCategory = vm::showCategory,
             onDismiss = { editing = null; planningTools.eventEditorDismissed() },
             onSave = { item, added, removed, addedReminders, removedReminders, options ->
-                vm.saveItem(item, added, removed, addedReminders, removedReminders, options)
+                val id = vm.saveItem(item, added, removed, addedReminders, removedReminders, options)
                 planningTools.eventSaved()
                 follow(item)
+                id
             },
             onDelete = vm::deleteItem,
         )

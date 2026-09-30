@@ -240,7 +240,7 @@ fun BoxScope.AddMenuHost(
     onRemoveCategories: (Set<String>) -> Unit,
     onShowCategory: (String) -> Unit,
     planningTools: PlanningToolsState,
-    saveEvent: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Unit,
+    saveEvent: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Long,
     onEventSaved: (ItineraryItem) -> Unit = {},
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
@@ -324,12 +324,13 @@ fun BoxScope.AddMenuHost(
             onShowCategory = onShowCategory,
             onDismiss = { state.adding = null; state.quickDefaults = null; planningTools.eventEditorDismissed() },
             onSave = { item, added, removed, addedReminders, removedReminders, options ->
-                saveEvent(item, added, removed, addedReminders, removedReminders, options)
+                val id = saveEvent(item, added, removed, addedReminders, removedReminders, options)
                 planningTools.eventSaved()
                 onEventSaved(item)
+                id
             },
-            // A new event has nothing to delete.
-            onDelete = { _, _ -> },
+            // Once saved, the new event stays open and can be deleted.
+            onDelete = { item, series -> repository.deleteWithUndo(item, series) },
         )
     }
     if (choosingTaskType) TaskTypeDialog(

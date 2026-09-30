@@ -100,7 +100,28 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
     var decision by rememberSaveable(draftKey) { mutableStateOf(if (recovered == null) "fresh" else "ask") }
     val scope = rememberCoroutineScope()
     val repo = (context.applicationContext as ItineraryApp).repository
-    if (decision == "ask") {
+    // After a Save the editor goes on with the task as stored (a new one becomes one to edit). Which task and which save
+    // survive recreation, so a saved new task isn't offered as new again; each save starts the form afresh.
+    var savedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedRound by rememberSaveable { mutableIntStateOf(0) }
+    var savedTask by remember { mutableStateOf<PlannerTask?>(null) }
+    val onSaved: suspend (String) -> Unit = { id ->
+        val task = repo.task(id)
+        if (task == null) onDismiss() else { savedTask = task; savedId = id; savedRound++ }
+    }
+    val savedKey = savedId
+    if (savedKey != null) {
+        if (savedTask == null) LaunchedEffect(savedKey) { repo.task(savedKey)?.let { savedTask = it } ?: onDismiss() }
+        savedTask?.let { task ->
+            key(savedRound) {
+                // Only unsaved edits made after that save (kept across recreation) are in its draft.
+                val draft = remember { runCatching { store.read(task.id) }.getOrNull() }
+                CompositionLocalProvider(LocalEditingTaskId provides task.id) {
+                    TaskEditorContent(task, false, draft, task.id, store, onDismiss, onSaved)
+                }
+            }
+        }
+    } else if (decision == "ask") {
         PlannerDialog("Unfinished task", onDismissRequest = onDismiss,
             primary = DialogAction("Resume draft") { decision = "resume" },
             dismiss = DialogAction("Discard draft", danger = true) {
@@ -121,7 +142,7 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
             if (creating && draft != null) initial.copy(id = draft.getString("id")) else initial
         }
         CompositionLocalProvider(LocalEditingTaskId provides source.id) {
-            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss)
+            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved)
         }
     }
 }
@@ -129,7 +150,7 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, onDismiss: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JSONObject?, draftKey: String,
-                              draftStore: TaskDraftStore, onDismiss: () -> Unit) {
+                              draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -159,9 +180,11 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     var duplicate by remember { mutableStateOf<PlannerTask?>(null) }
     var schedule by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var askingToSave by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    fun action(block: suspend () -> Unit) {
+    // [keepOpen]: a plain Save goes on editing the task as stored instead of leaving.
+    fun action(keepOpen: Boolean = false, block: suspend () -> Unit) {
         if (busy) return
         busy = true; error = null
         scope.launch {
@@ -169,8 +192,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                     block(); finished = true; draftStore.clear(draftKey)
                     repo.releaseTaskFiles(attachments.map { it.fileName } + listOfNotNull(pendingPhoto))
+                    if (keepOpen) { onSaved(initial.id); android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show() }
                 }
-                onDismiss()
+                if (!keepOpen) onDismiss()
             }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "Couldn't save the change. Please try again." }
@@ -200,6 +224,27 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     fun discard() {
         action { /* Explicit discard clears the draft and releases only unowned files. */ }
     }
+    // Unsaved changes: anything Save would store that differs from what this form opened with (the task as last saved,
+    // or a new one as offered); a resumed draft always counts. Save greys out without them (a new task can still be
+    // saved as it is) and Close only asks "Save changes?" with them.
+    fun currentTask() = initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority),
+        reminderAt = reminderAt, repeat = repeat, repeatDays = repeatDays.toIntOrNull() ?: -1, checklist = checklist,
+        attachments = attachments, prerequisiteIds = prerequisiteIds)
+    val openedWith = remember { currentTask() }
+    val unsaved = EditorRules.taskUnsaved(openedWith, currentTask(), recovered = draft != null)
+    val canSave = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
+        (repeat != TaskRepeat.AFTER_COMPLETION.name || repeatDays.toIntOrNull() in 1..3650)
+    fun save(close: Boolean = false) {
+        // A new task (also one handed over from Quick entry) never saves a reminder that has passed.
+        if (reminderAt != null && (creating || reminderAt != initial.reminderAt) && reminderAt!! <= System.currentTimeMillis()) {
+            error = "Choose a future reminder date and time."
+        } else action(keepOpen = !close) { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt,
+            repeat = repeat, repeatDays = repeatDays.toIntOrNull()?.coerceIn(1, 3650) ?: 7,
+            repeatAnchorDay = if (date != initial.dueDate?.toString() || repeat != initial.repeat) 0 else initial.repeatAnchorDay,
+            checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating) }
+    }
+    // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first.
+    fun close() { if (unsaved) askingToSave = true else discard() }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             busy = true
@@ -220,7 +265,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         }
         pendingPhoto = null
     }
-    BackHandler { if (!busy) onDismiss() }
+    BackHandler { if (!busy) close() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxWidth()) { Column(
@@ -237,7 +282,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             repeatDays = repeatDays.toIntOrNull() ?: initial.repeatDays).duplicateForEditing()
                     }) { Text("Duplicate task") }
                     TextButton(enabled = !busy, onClick = {
-                        if (runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
+                        if (EditorDraftStore.openEditors.value > 0 || runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
                             error = "Close your current event editor before scheduling another block."
                         else schedule = true
                     }) { Text("Schedule time") }
@@ -329,18 +374,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (!creating) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
-                    OutlinedButton(enabled = !busy, onClick = ::discard) { Text("Discard") }
+                    OutlinedButton(enabled = !busy, onClick = ::close) { Text("Close") }
                     Spacer(Modifier.width(12.dp))
-                    Button(enabled = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
-                        (repeat != TaskRepeat.AFTER_COMPLETION.name || repeatDays.toIntOrNull() in 1..3650), onClick = {
-                        // A new task (also one handed over from Quick entry) never saves a reminder that has passed.
-                        if (reminderAt != null && (creating || reminderAt != initial.reminderAt) && reminderAt!! <= System.currentTimeMillis()) {
-                            error = "Choose a future reminder date and time."
-                        } else action { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt,
-                            repeat = repeat, repeatDays = repeatDays.toIntOrNull()?.coerceIn(1, 3650) ?: 7,
-                            repeatAnchorDay = if (date != initial.dueDate?.toString() || repeat != initial.repeat) 0 else initial.repeatAnchorDay,
-                            checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating) }
-                    }) { Text("Save") }
+                    Button(enabled = canSave && (unsaved || creating), onClick = { save() }) { Text("Save") }
                 }
             }
         }
@@ -363,6 +399,13 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         })
     duplicate?.let { TaskEditor(it, true) { duplicate = null } }
     if (schedule) ScheduleTaskDialog(initial) { schedule = false }
+    if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
+        primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(close = true) },
+        dismiss = DialogAction("Keep editing") { askingToSave = false },
+        extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
+        Text(if (canSave || busy) "This task has changes that aren't saved yet."
+            else "This task has changes that can't be saved as they are. Keep editing to fix them, or discard them.")
+    }
     if (confirmingDelete) PlannerDialog("Delete task?", onDismissRequest = { confirmingDelete = false },
         primary = DialogAction("Delete", enabled = !busy, danger = true) { confirmingDelete = false; action { repo.deleteTask(initial.id) } },
         dismiss = DialogAction("Keep task") { confirmingDelete = false }) {

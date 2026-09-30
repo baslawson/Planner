@@ -350,7 +350,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                     ImportRow(entry, dates, entry.id in ticked, entry.id in duplicates, entry.id in pastIds, enabled = !busy,
                         format = format, onToggle = { on -> ticked = if (on) ticked + entry.id else ticked - entry.id },
                         onEdit = if (entry.repeating || busy) null else ({
-                            if (runCatching { EditorDraftStore(context).read() == null }.getOrDefault(false))
+                            if (EditorDraftStore.openEditors.value == 0 && runCatching { EditorDraftStore(context).read() == null }.getOrDefault(false))
                                 editing = entry.item.startingOn(dates.firstOrNull() ?: entry.dates.first())
                             else error = "Finish or discard your current event draft before reviewing another event."
                         }))
@@ -406,8 +406,8 @@ fun NewPlanningEventEditor(item: ItineraryItem, onDismiss: () -> Unit) {
     val hidden by categories.hidden.collectAsStateWithLifecycle()
     PlanningOverlay(onDismiss) {
     ItemEditorSheet(item, emptyList(), emptyList(), counts, hidden, categories::remove, categories::show, onDismiss,
-        onSave = { event, added, removed, reminders, removedReminders, options -> app.repository.saveItem(event, added, removed, reminders, removedReminders, options) },
-        onDelete = { _, _ -> })
+        onSave = { event, added, removed, reminders, removedReminders, options -> app.repository.saveItemId(event, added, removed, reminders, removedReminders, options) },
+        onDelete = { event, series -> app.repository.deleteWithUndo(event, series) })
     }
 }
 
@@ -456,7 +456,7 @@ fun TaskTimeBlocks(taskId: String) {
     blocks.forEach { block ->
         val context = LocalContext.current
         TextButton(onClick = {
-            if (runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
+            if (EditorDraftStore.openEditors.value > 0 || runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
                 android.widget.Toast.makeText(context, "Close your current event editor before opening another time block.", android.widget.Toast.LENGTH_LONG).show()
             else editing = block
         }) {
@@ -474,7 +474,7 @@ fun TaskTimeBlocks(taskId: String) {
         if (attachments != null && reminders != null) PlanningOverlay({ editing = null }) { ItemEditorSheet(item, attachments.orEmpty().filter { it.itemId == item.id }, reminders.orEmpty().filter { it.itemId == item.id },
             counts, hidden, categories::remove, categories::show, { editing = null },
             onSave = { event, added, removed, addedReminders, removedReminders, options ->
-                repo.saveItem(event, added, removed, addedReminders, removedReminders, options)
+                repo.saveItemId(event, added, removed, addedReminders, removedReminders, options)
             }, onDelete = { event, series -> repo.deleteWithUndo(event, series) }) }
     }
 }

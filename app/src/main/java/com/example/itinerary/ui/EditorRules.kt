@@ -49,4 +49,30 @@ object EditorRules {
     // Saved attachments likewise, by id: the editor shouldn't depend on the record staying the same while it is open.
     fun keptAttachments(existing: List<Attachment>, removed: List<Attachment>): List<Attachment> =
         existing.filter { kept -> removed.none { it.id == kept.id } }
+
+    // What an event editor would store on Save, to tell whether anything is unsaved. Attachments are the ones this edit
+    // [added] and [removed] (not the saved ones shown: a host may pass those live, and text recognised in the background
+    // isn't an edit); [reminders] are the ones shown (kept + added). [count] is the occurrence count while a new series
+    // is being made, else ""; [texts] are the raw number fields (duration, buffers, bill amount), so a half-typed value
+    // counts too.
+    data class EventEdit(val item: ItineraryItem, val added: List<Attachment>, val removed: List<Attachment>, val reminders: List<Reminder>,
+        val repeat: String, val count: String, val duplicating: Boolean, val texts: List<String> = emptyList())
+
+    // Unsaved = something Save would store differs from the last saved state (or what a new editor opened with); a
+    // recovered draft always is. Added records compare by what they hold, not their ids, and a reminder's ring switched
+    // on and off again is no change, nor is a snooze; removed ones by id. The series choice alone (This event / Entire
+    // series) isn't passed in: it changes nothing until something else does.
+    fun eventUnsaved(saved: EventEdit, now: EventEdit, recovered: Boolean = false): Boolean {
+        fun EventEdit.stored() = copy(added = added.map { it.copy(id = 0, itemId = 0) }, removed = removed.sortedBy { it.id }.map { Attachment(it.id, 0, "", "", "") },
+            reminders = reminders.map { Reminder(itemId = 0, amount = it.amount, unit = it.unit, ringUntilDismissed = it.ringUntilDismissed) }
+                .sortedWith(compareBy({ it.offsetMinutes }, { it.unit }, { it.ringUntilDismissed })))
+        return recovered || saved.stored() != now.stored()
+    }
+
+    // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
+    fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
+        fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),
+            checklist = checklist.map { it.copy(text = it.text.trim()) })
+        return recovered || saved.stored() != now.stored()
+    }
 }

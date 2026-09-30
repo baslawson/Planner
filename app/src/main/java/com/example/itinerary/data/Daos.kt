@@ -77,6 +77,10 @@ interface ItemDao {
     @Query("SELECT EXISTS(SELECT 1 FROM items WHERE draftToken = :token)")
     suspend fun hasDraftToken(token: String): Boolean
 
+    // The first event a save added (a new series shares its token); the editor was showing that one.
+    @Query("SELECT id FROM items WHERE draftToken = :token ORDER BY id LIMIT 1")
+    suspend fun firstIdForDraftToken(token: String): Long?
+
     @Query("SELECT * FROM items WHERE id IN (:ids) ORDER BY id")
     suspend fun byIds(ids: List<Long>): List<ItineraryItem>
 

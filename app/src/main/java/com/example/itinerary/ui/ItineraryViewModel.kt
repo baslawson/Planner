@@ -102,9 +102,7 @@ class ItineraryViewModel(
         addedReminders: List<Reminder> = emptyList(),
         removedReminders: List<Reminder>,
         options: com.example.itinerary.data.EventSaveOptions = com.example.itinerary.data.EventSaveOptions(),
-    ) {
-        repo.saveItem(item, added, removed, addedReminders, removedReminders, options)
-    }
+    ): Long = repo.saveItemId(item, added, removed, addedReminders, removedReminders, options)
 
     suspend fun moveToTomorrow(id: Long) = repo.moveToTomorrow(id)
 

@@ -295,7 +295,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         LaunchedEffect(entryAction, draftChecked) {
             if (entryAction != null && draftChecked) {
                 val existingDraft = runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }
-                if (existingDraft.isFailure || existingDraft.getOrNull() != null || recovered != null || shortcutItem != null) {
+                if (existingDraft.isFailure || existingDraft.getOrNull() != null || recovered != null || shortcutItem != null ||
+                    com.example.itinerary.data.EditorDraftStore.openEditors.value > 0) {
                     Toast.makeText(app, "Finish or discard your current draft before using a shortcut.", Toast.LENGTH_LONG).show()
                 } else if (com.example.itinerary.EntryShortcuts.accepts(entryAction)) {
                     shortcutScan = entryAction == com.example.itinerary.EntryShortcuts.SCAN
@@ -313,7 +314,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 categoryCounts = counts, hiddenCategories = hidden, onRemoveCategories = vm::removeCategories,
                 onShowCategory = vm::showCategory, onDismiss = { shortcutItem = null }, startWithScan = shortcutScan,
                 onSave = { event, added, removed, ar, rr, options -> vm.saveEvent(event, added, removed, ar, rr, options) },
-                onDelete = { _, _ -> })
+                onDelete = { event, series -> app.repository.deleteWithUndo(event, series) })
         }
         if (draftChecked) recovered?.let { draft ->
             val vm: TripsViewModel = viewModel(key = "draft-recovery", factory = tripsFactory)
@@ -334,11 +335,11 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 
 }
 
-internal const val WIDGET_WAITS_FOR_EDITOR = "Save or discard this event first. Then the widget's day opens."
+internal const val WIDGET_WAITS_FOR_EDITOR = "Close this event first. Then the widget's day opens."
 
 internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
 
-// What a widget tap does now: nothing to open, wait for the open editor(s) to be saved or discarded, or open the day.
+// What a widget tap does now: nothing to open, wait for the open editor(s) to be closed, or open the day.
 internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDateStep = when {
     widgetDate == null -> WidgetDateStep.NOTHING
     openEditors > 0 -> WidgetDateStep.WAIT

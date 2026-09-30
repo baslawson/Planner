@@ -12,7 +12,8 @@ import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** One private, durable editor session. Explicit Save or Discard is the only thing that clears it. */
+/** One private, durable editor session: the unsaved edits of the open event editor (a new event's too). Save, Discard
+ *  or undoing the edits clears it. */
 class EditorDraftStore(context: Context) {
     private val file = AtomicFile(File(context.filesDir, "editor-draft.json"))
     @Synchronized fun read(): JSONObject? = if (!file.baseFile.exists()) null else
@@ -25,7 +26,7 @@ class EditorDraftStore(context: Context) {
     @Synchronized fun clear() { file.delete() }
 
     companion object {
-        // How many event editors are on screen now (D10). A widget tap waits while one is open, because moving to
+        // How many event editors are on screen now (D10), saved or not. A widget tap waits while one is open, because moving to
         // another screen would drop the editor without saving or discarding it.
         private val open = MutableStateFlow(0)
         val openEditors: StateFlow<Int> = open.asStateFlow()

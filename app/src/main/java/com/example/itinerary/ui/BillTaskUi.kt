@@ -88,7 +88,7 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
             categoryCounts = emptyMap(), hiddenCategories = emptySet(), onRemoveCategories = {}, onShowCategory = {},
             onDismiss = onDismiss,
             onSave = { item, added, removed, addedReminders, removedReminders, options ->
-                repo.saveItem(item, added, removed, addedReminders, removedReminders, options)
+                repo.saveItemId(item, added, removed, addedReminders, removedReminders, options)
             }, onDelete = { item, entireSeries -> repo.deleteWithUndo(item, entireSeries) }) }
     } ?: run {
         BackHandler(onBack = onDismiss)

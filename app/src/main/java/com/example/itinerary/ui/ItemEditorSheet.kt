@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,8 +113,9 @@ private fun ModeButton(selected: Boolean, text: String, onClick: () -> Unit) {
     }
 }
 
-// The New event / Edit event form.
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+// The New event / Edit event form. Save stores the event and the form stays open on it as saved (a new event becomes
+// one to edit, with Delete); Close leaves, first asking "Save changes?" when something is unsaved. [onSave] returns the
+// id of the event it saved (Repository.saveItemId), which is read back here with its files and reminders as stored.
 @Composable
 fun ItemEditorSheet(
     initial: ItineraryItem,
@@ -124,7 +126,50 @@ fun ItemEditorSheet(
     onRemoveCategories: (Set<String>) -> Unit,
     onShowCategory: (String) -> Unit,
     onDismiss: () -> Unit,
-    onSave: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Unit,
+    onSave: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Long,
+    onDelete: suspend (ItineraryItem, Boolean) -> Unit,
+    startWithScan: Boolean = false,
+    startWithBillScan: Boolean = false,
+    initialAddedReminders: List<Reminder> = emptyList(),
+    initialRepeatCount: Int = 12,
+) {
+    val repository = (LocalContext.current.applicationContext as ItineraryApp).repository
+    // One open editor for the widget's wait (D10) for the whole visit, saves included.
+    DisposableEffect(Unit) {
+        EditorDraftStore.editorOpened()
+        onDispose { EditorDraftStore.editorClosed() }
+    }
+    // After a Save: the event as stored (read in one transaction, like BillTaskEditor) and which save it was, so each
+    // save starts the form afresh from it.
+    var saved by remember { mutableStateOf<Pair<Int, Triple<ItineraryItem, List<Attachment>, List<Reminder>>>?>(null) }
+    val onSaved: suspend (Long) -> Unit = { id ->
+        val details = repository.eventDetails(id)
+        if (details == null) onDismiss() else saved = (saved?.first ?: 0) + 1 to details
+    }
+    val current = saved
+    if (current == null) ItemEditorForm(initial, existingAttachments, existingReminders, categoryCounts, hiddenCategories,
+        onRemoveCategories, onShowCategory, onDismiss, onSave, onSaved, onDelete, startWithScan, startWithBillScan,
+        initialAddedReminders, initialRepeatCount)
+    else key(current.first) {
+        val (item, attachments, reminders) = current.second
+        ItemEditorForm(item, attachments, reminders, categoryCounts, hiddenCategories, onRemoveCategories, onShowCategory,
+            onDismiss, onSave, onSaved, onDelete, initialRepeatCount = initialRepeatCount)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun ItemEditorForm(
+    initial: ItineraryItem,
+    existingAttachments: List<Attachment>,
+    existingReminders: List<Reminder>,
+    categoryCounts: Map<String, Int>,
+    hiddenCategories: Set<String>,
+    onRemoveCategories: (Set<String>) -> Unit,
+    onShowCategory: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: suspend (ItineraryItem, List<Attachment>, List<Attachment>, List<Reminder>, List<Reminder>, EventSaveOptions) -> Long,
+    onSaved: suspend (Long) -> Unit,
     onDelete: suspend (ItineraryItem, Boolean) -> Unit,
     startWithScan: Boolean = false,
     startWithBillScan: Boolean = false,
@@ -145,6 +190,9 @@ fun ItemEditorSheet(
     var duplicating by remember { mutableStateOf(draft?.optBoolean("duplicating") ?: false) }
     val isNew = initial.id == 0L || duplicating
     var busy by remember { mutableStateOf(false) }
+    var askingToSave by remember { mutableStateOf(false) }
+    // Set by "Save changes?" → Save: leave once saved (also after a duplicate-bill warning) instead of editing on.
+    var closeAfterSave by remember { mutableStateOf(false) }
     var duplicateBills by remember { mutableStateOf<List<ItineraryItem>>(emptyList()) }
     var viewingDuplicate by remember { mutableStateOf<Long?>(null) }
     var readingText by remember { mutableStateOf(false) }
@@ -199,10 +247,7 @@ fun ItemEditorSheet(
         }
     }
 
-    DisposableEffect(Unit) {
-        EditorDraftStore.editorOpened()
-        onDispose { disposed = true; EditorDraftStore.editorClosed() }
-    }
+    DisposableEffect(Unit) { onDispose { disposed = true } }
 
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
         val file = pendingPhoto
@@ -343,7 +388,7 @@ fun ItemEditorSheet(
         if (committed) null else JSONObject().put("token", draftToken).put("initial", DraftCodec.item(initial))
                     .put("existingAttachments", DraftCodec.attachments(existingAttachments))
                     .put("existingReminders", DraftCodec.reminders(existingReminders))
-                    .put("item", DraftCodec.item(values.copy(title = title, date = date, endDate = spanEnd, startTime = time,
+                    .put("item", DraftCodec.item(values.copy(title = title, date = date, endDate = EditorRules.spanEnd(date, endDate, time, category), startTime = time,
                         location = location, notes = notes, category = category, colorIndex = colorIndex,
                         paymentLink = paymentLink, paymentReference = paymentReference, bpayBillerCode = bpayBillerCode, bpayReference = bpayReference,
                         customColor = customColor, checklist = checklist, paid = paid, payments = payments, billAmountMinor = Bills.parse(billAmountText), billCurrency = billCurrency)))
@@ -355,18 +400,6 @@ fun ItemEditorSheet(
                         .put("beforeText", beforeText).put("afterText", afterText)
                         .put("lastTimedTime", lastTimedTime.toString()).put("pendingPhoto", pendingPhoto?.name).put("scanningPdf", scanningPdf).put("billReviewFiles", org.json.JSONArray(billReviewFiles)).put("billReviewRequested", billReviewRequested))
     } }
-    // This holder is deliberately not Compose state: recording a successful write must not redraw the editor.
-    val writtenDraft = remember { arrayOfNulls<JSONObject>(1) }
-    // Observe the derived state during composition, not only inside SideEffect. Otherwise an edit
-    // handled by a nested text-field scope would not schedule the parent's persistence effect.
-    val snapshotToWrite = draftSnapshot
-    SideEffect {
-        val snapshot = snapshotToWrite
-        if (snapshot != null && !committed && writtenDraft[0] !== snapshot) {
-            try { draftStore.write(snapshot); writtenDraft[0] = snapshot }
-            catch (_: Exception) { error = "Couldn't protect this draft. Keep the app open and save your event." }
-        }
-    }
     val count = repeatCount.toIntOrNull()
     val creatingSeries = isNew || initial.seriesId == null
     val changeRepeat = !isNew && entireSeries && repeat.name != initial.repeatRule
@@ -409,6 +442,30 @@ fun ItemEditorSheet(
             location = location.trim(), notes = notes.trim(), category = category,
             colorIndex = colorIndex, customColor = customColor,
         )
+    // Unsaved changes: anything Save would store that differs from what this form opened with (the event as last saved,
+    // or a new one as offered). Save greys out without them (a new event can still be saved as it is), and Close only
+    // asks "Save changes?" with them.
+    fun edit() = EditorRules.EventEdit(currentItem(), added.toList(), removed.toList(), shownReminders, repeat.name,
+        if (creatingSeries && repeat != RepeatRule.NONE) repeatCount else "", duplicating, listOf(durationText, beforeText, afterText, billAmountText))
+    val openedWith = remember { edit() }
+    val unsaved = EditorRules.eventUnsaved(openedWith, edit(), recovered = recovered != null)
+    // The draft on disk holds only what is unsaved (a new event's too, as before), so a saved event leaves nothing to
+    // recover; edits undone again clear it.
+    val keepDraft = unsaved || isNew
+    val canSave = title.isNotBlank() && validRepeat && validDuration && (billTask || validBuffers) && validBillAmount && !readingText &&
+        checklist.all { it.text.isNotBlank() } && !busy
+    // This holder is deliberately not Compose state: recording a successful write must not redraw the editor.
+    val writtenDraft = remember { arrayOfNulls<JSONObject>(1) }
+    // Observe the derived state during composition, not only inside SideEffect. Otherwise an edit
+    // handled by a nested text-field scope would not schedule the parent's persistence effect.
+    val snapshotToWrite = draftSnapshot
+    SideEffect {
+        val snapshot = snapshotToWrite
+        if (snapshot != null && !committed) try {
+            if (!keepDraft) { if (writtenDraft[0] != null) { draftStore.clear(); writtenDraft[0] = null } }
+            else if (writtenDraft[0] !== snapshot) { draftStore.write(snapshot); writtenDraft[0] = snapshot }
+        } catch (_: Exception) { error = "Couldn't protect this draft. Keep the app open and save your event." }
+    }
     fun applyTemplate(content: TemplateContent) {
         val item = content.forDate(date)
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
@@ -450,12 +507,17 @@ fun ItemEditorSheet(
                     // Only commit after the duplicate warning has been accepted, if needed.
                     committed = true
                     duplicateBills = emptyList()
-                    onSave(item, attachmentsToAdd, attachmentsToRemove, remindersToAdd, remindersToRemove, options)
+                    val savedId = onSave(item, attachmentsToAdd, attachmentsToRemove, remindersToAdd, remindersToRemove, options)
                     draftStore.clear()
                     File(context.filesDir, "draft-scan").deleteRecursively()
-                    if (!disposed) onDismiss()
+                    // Save changes? → Save leaves; a plain Save goes on editing the event as stored. That form is new,
+                    // with a new draft token, so its next save isn't taken for a retry of this one.
+                    if (disposed) Unit
+                    else if (closeAfterSave) onDismiss()
+                    else { onSaved(savedId); Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show() }
                 } catch (e: Exception) {
                     committed = false
+                    closeAfterSave = false
                     error = EditorRules.saveError(e, billTask)
                 } finally { busy = false }
             }
@@ -478,7 +540,10 @@ fun ItemEditorSheet(
             finally { busy = false }
         }
     }
-    BackHandler { if (!busy && !readingText) discard() }
+    // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first.
+    // Not once saved: this form is on its way out, and its added files now belong to the saved event.
+    fun close() { if (committed) return; if (unsaved) askingToSave = true else discard() }
+    BackHandler { if (!busy && !readingText) close() }
     val editorScroll = rememberScrollState()
 
     if (scanningPdf == null) Surface(
@@ -845,11 +910,11 @@ fun ItemEditorSheet(
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(
                     enabled = !busy && !readingText,
-                    onClick = ::discard,
+                    onClick = ::close,
                 ) {
-                    Text("Discard")
+                    Text("Close")
                 }
-                Button(enabled = title.isNotBlank() && validRepeat && validDuration && (billTask || validBuffers) && validBillAmount && !readingText && checklist.all { it.text.isNotBlank() } && !busy, onClick = { save() }) {
+                Button(enabled = canSave && (unsaved || isNew), onClick = { save() }) {
                     Text(if (busy) "Saving…" else "Save")
                 }
             }
@@ -857,15 +922,25 @@ fun ItemEditorSheet(
     }
 
     if (duplicateBills.isNotEmpty()) PlannerDialog("Possible duplicate bill",
-        onDismissRequest = { if (!busy) duplicateBills = emptyList() },
+        onDismissRequest = { if (!busy) { duplicateBills = emptyList(); closeAfterSave = false } },
         primary = DialogAction("Save anyway", enabled = !busy) { save(allowDuplicate = true) },
-        dismiss = DialogAction("Go back", enabled = !busy) { duplicateBills = emptyList() },
+        dismiss = DialogAction("Go back", enabled = !busy) { duplicateBills = emptyList(); closeAfterSave = false },
     ) {
         Text("A bill with the same title, amount and due date already exists:")
         duplicateBills.forEach { bill ->
             Text("${bill.title} · ${Bills.format(bill.billAmountMinor!!, bill.billCurrency)} · ${bill.date.fullLabel()}")
             TextButton(enabled = !busy, onClick = { viewingDuplicate = bill.id }) { Text("Open existing bill") }
         }
+    }
+
+    if (askingToSave) PlannerDialog("Save changes?",
+        onDismissRequest = { askingToSave = false },
+        primary = DialogAction("Save", enabled = canSave) { askingToSave = false; closeAfterSave = true; save() },
+        dismiss = DialogAction("Keep editing") { askingToSave = false },
+        extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() }),
+    ) {
+        Text(if (canSave || busy) "This ${if (billTask) "bill" else "event"} has changes that aren't saved yet."
+            else "This ${if (billTask) "bill" else "event"} has changes that can't be saved as they are. Keep editing to fix them, or discard them.")
     }
 
     viewingDuplicate?.let { ExistingBillDialog(it) { viewingDuplicate = null } }
