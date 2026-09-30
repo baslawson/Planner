@@ -20,7 +20,7 @@ object Categories {
 
     // "Bills" is not a category you can type: a bill has its own form (amount, payments, no chips), so typing it
     // would turn the event into a bill with no way back (D9). Shown instead of adding it.
-    const val BILLS_BY_NAME_MESSAGE = "Use the Bill button to make a bill"
+    const val BILLS_BY_NAME_MESSAGE = "To make a bill, use + → Add task → Bill payment"
 
     // Your own category's name to store, or null when there is nothing to add, including "Bills" in any case.
     fun ownCategory(input: String, inUse: Collection<String> = emptyList()): String? =
