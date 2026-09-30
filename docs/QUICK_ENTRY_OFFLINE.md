@@ -103,6 +103,15 @@ More everyday wording:
   `Fri 3/10` picks whichever reading is a Friday.
 - `weds` and `thur` are recognised.
 
+Past dates, for logging something that has happened:
+
+- `Car service yesterday`, `service td929 yesterday from 1700 to 0600`, `Oil change the day before yesterday`
+- `Plumber 2 days ago`, `Haircut a week ago` (days, weeks, fortnights, months, years)
+- `Meeting last Friday 2pm` — the most recent Friday before today. `last Friday of the month` is still a monthly repeat.
+- `Gym yesterday morning` asks for the time; `Party last night 9pm` is yesterday at 9pm (1am is this morning).
+- The preview says "Adds to a past date." instead of the past-date warning. A repeat can't start in the past.
+  `yesterday's` stays in the title (`Read yesterday's paper`).
+
 Several times, parts of the day, working hours and other time zones:
 
 - `Meds every day at 8am and 8pm`, `Tablets 8am, 2pm and 8pm daily`, `Pills tomorrow 9am and 9pm` — an event at

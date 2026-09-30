@@ -427,7 +427,10 @@ fun QuickEntryEditor(
                         Text("Notifications are off, so reminders won't show.", color = MaterialTheme.colorScheme.error)
                         TextButton(enabled = !busy, onClick = notifications.enable) { Text("Enable notifications") }
                     }
-                    if (showFeedback && suggestion.dateChoices.isEmpty() && suggestion.isPast(now, task)) {
+                    // Typed on purpose ("yesterday"): a plain note rather than a warning to move it.
+                    if (showFeedback && suggestion.dateChoices.isEmpty() && suggestion.pastDate && suggestion.isPast(now, task))
+                        Text("Adds to a past date.", style = MaterialTheme.typography.bodySmall)
+                    else if (showFeedback && suggestion.dateChoices.isEmpty() && suggestion.isPast(now, task)) {
                         Text("This date or time is in the past.", color = MaterialTheme.colorScheme.error)
                         TextButton(enabled = !busy, onClick = { dateOverride = (if (suggestion.repeat != RepeatRule.NONE) suggestion.nextRepeatDate(task, now) else if (task) now.toLocalDate() else now.toLocalDate().plusDays(1)).toString() }) { Text(if (suggestion.repeat != RepeatRule.NONE) "Move to next occurrence" else if (task) "Move to today" else "Move to tomorrow") }
                     }

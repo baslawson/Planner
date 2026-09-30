@@ -185,6 +185,16 @@ class QuickEntryUiTest {
         }
         assertEquals(before+8,data().items.size)
     }
+    // Parser round 8: a past date typed on purpose saves there, with a plain note instead of the past-date warning.
+    @Test fun yesterdayLogsAPastEvent()=runBlocking {
+        start();setText("","QA r8 service yesterday from 1700 to 0600")
+        await { find("Adds to a past date.")!=null };screenshot("r8-yesterday")
+        assertNull(find("This date or time is in the past."));assertNull(find("Move to tomorrow"))
+        click("Add event");await { data().items.any { it.title=="QA r8 service" } }
+        data().items.single { it.title=="QA r8 service" }.let {
+            assertEquals(LocalDate.now().minusDays(1),it.date);assertEquals(java.time.LocalTime.of(17,0),it.startTime);assertEquals(780,it.durationMinutes)
+        }
+    }
     @Test fun ambiguousTimeUsesExistingClockAndDateCorrectionPersists()=runBlocking {
         start();setText("","QA quick clock tomorrow at 3")
         await { find("Morning or afternoon? Choose a time below, or type am or pm.")!=null }
