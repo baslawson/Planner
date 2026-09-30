@@ -97,8 +97,9 @@ class PlanningFiveDataTest {
             raw.execSQL("ALTER TABLE items DROP COLUMN bufferAfterMinutes")
             raw.execSQL("ALTER TABLE tasks DROP COLUMN prerequisiteIds")
             raw.execSQL("ALTER TABLE items DROP COLUMN endDate") // added in version 24
-            // Calendar sync tables added in versions 25–27; the upgrade creates them again.
-            listOf("sent_events", "outside_events", "calendar_sources").forEach { raw.execSQL("DROP TABLE $it") }
+            raw.execSQL("ALTER TABLE tasks DROP COLUMN snoozedUntil") // added in version 29
+            // Calendar sync tables added in versions 25–27 and reminder deliveries in 29; the upgrade creates them again.
+            listOf("sent_events", "outside_events", "calendar_sources", "reminder_deliveries").forEach { raw.execSQL("DROP TABLE $it") }
             raw.execSQL("DELETE FROM room_master_table")
             raw.version = 21; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()

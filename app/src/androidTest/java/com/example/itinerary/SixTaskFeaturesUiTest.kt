@@ -272,7 +272,7 @@ class SixTaskFeaturesUiTest {
         assertEquals(listOf("Done","Snooze"),notification.actions.map { it.title.toString() })
         notification.actions.single { it.title.toString()=="Snooze" }.actionIntent.send()
         await { find("Snooze reminder")!=null };screenshot("task-snooze-choices");click("1 hour")
-        await { data().tasks.single { it.id==task.id }.reminderAt!! > System.currentTimeMillis()+3500000 }
+        await { data().tasks.single { it.id==task.id }.activeReminderAt!! > System.currentTimeMillis()+3500000 }
         assertTrue(manager.activeNotifications.none { it.tag=="task:${task.id}" })
         val stale=notification.actions.single { it.title.toString()=="Done" }.actionIntent
         stale.send();Thread.sleep(400);assertFalse(data().tasks.single { it.id==task.id }.done)

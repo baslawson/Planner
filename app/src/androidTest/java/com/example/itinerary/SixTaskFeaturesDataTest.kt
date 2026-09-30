@@ -60,11 +60,17 @@ class SixTaskFeaturesDataTest {
         assertFalse(repo.actOnTaskReminder(task.id, old - 1))
         val future = System.currentTimeMillis() + 600000
         assertTrue(repo.actOnTaskReminder(task.id, old, future))
-        assertEquals(future, repo.snapshot().tasks.single().reminderAt)
+        // A snooze moves only this reminder; the series keeps its reminder time.
+        repo.snapshot().tasks.single().let { assertEquals(future, it.snoozedUntil); assertEquals(old, it.reminderAt); assertEquals(future, it.activeReminderAt) }
         assertFalse(repo.actOnTaskReminder(task.id, old))
         assertFalse(repo.actOnTaskReminder(task.id, future)) // early action
+        // Saved again unchanged, the snooze stays; a new reminder time replaces it.
         repo.saveTask(task, create = false)
-        assertTrue(repo.actOnTaskReminder(task.id, old)); assertFalse(repo.actOnTaskReminder(task.id, old))
+        assertEquals(future, repo.snapshot().tasks.single().snoozedUntil)
+        val elapsed = old - 500
+        repo.saveTask(task.copy(reminderAt = elapsed), create = false)
+        assertNull(repo.snapshot().tasks.single().snoozedUntil)
+        assertTrue(repo.actOnTaskReminder(task.id, elapsed)); assertFalse(repo.actOnTaskReminder(task.id, elapsed))
         assertEquals(2, repo.snapshot().tasks.size)
     }
     @Test fun sharedAttachmentsSurviveRepeatsTrashAndDraftsThenAreCleaned() = fixture { repo, _, _, store, context ->
