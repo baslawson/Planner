@@ -250,8 +250,9 @@ class CalendarSync(
         val checked = planner == null || target.fetchedFor != null
         // Past events before the pull window are only noted then; one edited since may have a file there already.
         if (checked && planner != null) { val start = linkWindow().first
-            rows += linkEdited(account, target, rows, items.filter { item -> rows[item.id]?.let { it.uid == null && it.problem == null &&
-                sendable(item) && item.lastDay < start && !inSync(it.fingerprint, item) } == true })
+            val (edited, unedited) = items.filter { item -> rows[item.id]?.let { it.uid == null && it.problem == null && sendable(item) &&
+                item.lastDay < start } == true }.partition { !inSync(rows.getValue(it.id).fingerprint, it) }
+            rows += linkEdited(account, target, rows, edited, unedited)
         }
         for (item in items) {
             var row = rows[item.id]
@@ -328,19 +329,25 @@ class CalendarSync(
     }
 
     // The files of [edited] events (noted past ones, edited since) looked for around their dates only, and linked (see
-    // relink, linkedForSend): their rows now. The pull doesn't read the whole history for them. A lookup that fails (a
-    // reply too large, a server error) is skipped: those events are sent as new files, as before there was a lookup.
-    private suspend fun linkEdited(account: NextcloudAccount, target: CalendarSource, rows: Map<Long, SentEvent>, edited: List<ItineraryItem>): Map<Long, SentEvent> {
+    // editedFiles, linkedForSend): their rows now. The pull doesn't read the whole history for them. The [noted] past
+    // events (unedited) whose days lie in the ranges read take part, so an edited one never gets a neighbour's file (a
+    // series); their own rows stay as they are. A lookup that fails (a reply too large, a server error) is skipped, and
+    // an event whose file isn't found exactly is sent as a new file, as before there was a lookup.
+    private suspend fun linkEdited(account: NextcloudAccount, target: CalendarSource, rows: Map<Long, SentEvent>, edited: List<ItineraryItem>,
+                                   noted: List<ItineraryItem>): Map<Long, SentEvent> {
         if (edited.isEmpty()) return emptyMap()
         val known = rows.values.filter { it.uid != null }.mapTo(HashSet()) { hrefOf(target, it) }
-        val found = lookupRanges(edited).flatMap { (start, end) ->
+        val ranges = lookupRanges(edited)
+        val neighbours = noted.filter { item -> ranges.any { (start, end) -> item.date < end && item.lastDay >= start } }
+        val found = ranges.flatMap { (start, end) ->
             try { client.calendarFiles(account, target.href, start.atStartOfDay(zone()).toInstant(), end.atStartOfDay(zone()).toInstant()) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { android.util.Log.w("CalendarSync", "Skipped looking for past events' files ($start to $end)", e); emptyList() }
         }.filter { it.href !in known }.associateBy { it.href }
         val parsed = found.mapValues { ServerEvents.parse(it.value.data, zone()) }
         val byId = edited.associateBy { it.id }
-        return relink(parsed.mapNotNull { (href, p) -> p.item?.let { Triple(href, p.uid, it) } }, edited).entries.associate { (href, id) ->
+        return editedFiles(parsed.mapNotNull { (href, p) -> p.item?.let { Triple(href, p.uid, it) } }, edited, neighbours,
+            (edited + neighbours).associate { it.id to rows.getValue(it.id).fingerprint }, zone()).entries.associate { (href, id) ->
             val p = parsed.getValue(href)
             id to linkedForSend(rows.getValue(id), href, p.uid ?: href.substringAfterLast('/').removeSuffix(".ics"), found.getValue(href),
                 p.item!!, byId.getValue(id), zone()).also { db.sentDao().put(it) }
@@ -882,8 +889,7 @@ class CalendarSync(
         // event with that title, or else the one at that date and time (edited on one side while disconnected; the
         // difference becomes a conflict to choose). Each event is used once; anything unsure is left alone.
         internal fun relink(files: List<Triple<String, String?, ItineraryItem>>, candidates: List<ItineraryItem>): Map<String, Long> {
-            fun key(it: ItineraryItem) = listOf(it.title.trim().take(500).ifEmpty { "(No title)" }, it.date, it.lastDay, it.startTime,
-                it.durationMinutes?.takeIf { d -> it.startTime != null && d > 0 })
+            fun key(it: ItineraryItem) = relinkKey(it)
             val free = candidates.sortedBy { it.id }.toMutableList()
             val result = LinkedHashMap<String, Long>()
             for ((href, _, server) in files) free.firstOrNull { key(it) == key(server) }?.let { result[href] = it.id; free.remove(it) }
@@ -894,6 +900,28 @@ class CalendarSync(
                 result[href] = match.id; free.remove(match)
             }
             return result
+        }
+
+        // What makes a file exactly an event for linking: the same title, dates, time and length.
+        private fun relinkKey(it: ItineraryItem) = listOf(it.title.trim().take(500).ifEmpty { "(No title)" }, it.date, it.lastDay, it.startTime,
+            it.durationMinutes?.takeIf { d -> it.startTime != null && d > 0 })
+
+        // Which files ([href], uid, the event as Planner would hold it) are the [edited] events' (noted past ones, edited
+        // since), looked up together with their [neighbours] (noted past ones near them, unedited): first the file exactly
+        // as an event was noted ([noted]: each one's fingerprint then), so an edited one finds its own file whatever the
+        // edit; then a file exactly like an event now (see relink). Nothing looser: a series' occurrences differ only by
+        // date, and a guess by title or time would give an edited one a neighbour's file (a false conflict). Neighbours
+        // only claim their own files so no edited event takes them; only the edited events' files are returned.
+        internal fun editedFiles(files: List<Triple<String, String?, ItineraryItem>>, edited: List<ItineraryItem>, neighbours: List<ItineraryItem>,
+                                 noted: Map<Long, String>, zone: ZoneId): Map<String, Long> {
+            val free = (edited + neighbours).sortedBy { it.id }.toMutableList()
+            val claimed = LinkedHashMap<String, Long>()
+            for ((href, _, server) in files) free.firstOrNull { event -> noted[event.id]?.let { inSync(it, ServerEvents.apply(event, server), zone) } == true }
+                ?.let { claimed[href] = it.id; free.remove(it) }
+            for ((href, _, server) in files) if (href !in claimed) free.firstOrNull { relinkKey(it) == relinkKey(server) }
+                ?.let { claimed[href] = it.id; free.remove(it) }
+            val ids = edited.mapTo(HashSet()) { it.id }
+            return claimed.filterValues { it in ids }
         }
 
         // Which login a calendar belongs to: the server address and username, never the password.

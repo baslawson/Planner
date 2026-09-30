@@ -341,6 +341,38 @@ class CalendarTwoWayTest {
         assertOtherCalendarUntouched()
     }
 
+    @Test fun anEditedPastDayOfASeriesUpdatesItsOwnFileNotANeighbours() = runBlocking {
+        // A daily gym from 3 to 7 March (before the pull window), each day already on Nextcloud as Planner wrote it.
+        val uids = (3..7).associateWith { "planner-0000000$it-aaaa-bbbb-cccc-dddddddddddd@planner" }
+        for ((d, uid) in uids) {
+            repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, d), startTime = LocalTime.of(7, 0), durationMinutes = 60, title = "QA Gym"))
+            dav.put("${synced}$uid.ics", ics(uid, "QA Gym", "2026030${d}T070000Z"))
+        }
+        start()
+        fun gym(d: Int) = items().single { it.title == "QA Gym" && it.date == LocalDate.of(2026, 3, d) }
+        val neighbours = uids.filterKeys { it != 5 }.values.associateWith { dav.files["${synced}$it.ics"]!! }
+        val before = writes().size
+        // 5 March moved to 8:00. Its neighbours' files are read with it (a day either side) but are not its own.
+        repo.saveItem(gym(5).copy(startTime = LocalTime.of(8, 0)))
+        sync.send()
+        assertTrue(conflicts().isEmpty())
+        assertNull(sync.sendState.value.message)
+        assertEquals(before + 1, writes().size)
+        assertEquals(uids[5], rows().single { it.itemId == gym(5).id }.uid)
+        assertTrue(dav.files["${synced}${uids[5]}.ics"]!!.second.contains("DTSTART:20260305T080000Z"))
+        neighbours.forEach { (uid, file) -> assertEquals(file, dav.files["${synced}$uid.ics"]) }
+        assertEquals(5, plannerFiles().size)
+        // 6 March's own file deleted on Nextcloud, then moved in Planner: none found, so a new file (no neighbour's).
+        dav.files.remove("${synced}${uids[6]}.ics")
+        repo.saveItem(gym(6).copy(startTime = LocalTime.of(8, 0)))
+        sync.send()
+        assertTrue(conflicts().isEmpty())
+        assertEquals(5, plannerFiles().size)
+        assertTrue(plannerFiles().none { it == "${synced}${uids[6]}.ics" })
+        uids.filterKeys { it != 5 && it != 6 }.values.forEach { assertEquals(neighbours[it], dav.files["${synced}$it.ics"]) }
+        assertOtherCalendarUntouched()
+    }
+
     @Test fun anEditedPastEventWhoseLookupFailsIsSentAsANewFile() = runBlocking {
         repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, 5), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "QA Long ago"))
         start()

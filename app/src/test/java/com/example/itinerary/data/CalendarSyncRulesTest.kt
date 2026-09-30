@@ -128,4 +128,41 @@ class CalendarSyncRulesTest {
         assertEquals(mapOf("/x.ics" to 1L), CalendarSync.relink(listOf(Triple("/y.ics", planner(3), event(0, "Dentist", time = 15)),
             Triple("/x.ics", "web-1", event(0, "Dentist"))), listOf(dentist)))
     }
+
+    // D1: an edited past occurrence of a series is looked up with its neighbours' files in range (a day either side, near
+    // ranges merged). It finds its own file or none, never a neighbour's (that was a false "changed in both places").
+    private val gym = (1..5L).map { event(it, "Gym", time = 7, date = day.plusDays(it)) }
+    private val gymFiles = gym.map { Triple("/c/${planner(it.id.toInt())}.ics", planner(it.id.toInt()), it.copy(id = 0)) }
+    private val gymNoted = gym.associate { it.id to CalendarSync.fingerprint(it) }
+    private fun edited(files: List<Triple<String, String?, ItineraryItem>>, edited: ItineraryItem, noted: Map<Long, String> = gymNoted) =
+        CalendarSync.editedFiles(files, listOf(edited), gym.filter { it.id != edited.id }, noted, ZoneOffset.UTC)
+
+    @Test fun anEditedOccurrenceOfASeriesFindsItsOwnFileNotANeighbours() {
+        val own = gymFiles[2].first
+        // Moved to 8:00: its file is the one exactly as it was noted.
+        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(startTime = LocalTime.of(8, 0))))
+        // Renamed, or moved onto the next day's slot: still its own file; the neighbours keep theirs.
+        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(title = "Gym with Sam")))
+        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(date = day.plusDays(4))))
+        // Its own file gone from Nextcloud: none (sent as a new file), whatever else is there.
+        assertTrue(edited(gymFiles - gymFiles[2], gym[2].copy(startTime = LocalTime.of(8, 0))).isEmpty())
+        assertTrue(edited(gymFiles - gymFiles[2], gym[2].copy(date = day.plusDays(4))).isEmpty())
+    }
+
+    @Test fun anEditedPastEventIsOnlyLinkedToAnExactMatch() {
+        val moved = gym[2].copy(startTime = LocalTime.of(8, 0))
+        // Changed the same way on Nextcloud: exactly the event as it is now, so linked (nothing to send).
+        val same = gymFiles.toMutableList().also { it[2] = it[2].copy(third = moved.copy(id = 0)) }
+        assertEquals(mapOf(gymFiles[2].first to 3L), edited(same, moved))
+        // Changed differently on Nextcloud: neither as noted nor as now, so no link (no guessing by title or time).
+        val other = gymFiles.toMutableList().also { it[2] = it[2].copy(third = gym[2].copy(id = 0, startTime = LocalTime.of(9, 0))) }
+        assertTrue(edited(other, moved).isEmpty())
+        // A lone event: the looser matches of the pull's relink are not used here either.
+        assertTrue(CalendarSync.editedFiles(listOf(Triple("/a.ics", planner(1), event(0, "Dentist", time = 15))), listOf(event(1, "Dentist", time = 11)),
+            emptyList(), mapOf(1L to CalendarSync.fingerprint(event(1, "Dentist"))), ZoneOffset.UTC).isEmpty())
+        // A row noted before fingerprints had their prefix (worked out in the phone's zone) still finds its file.
+        val perth = ZoneId.of("Australia/Perth")
+        assertEquals(mapOf(gymFiles[2].first to 3L), CalendarSync.editedFiles(gymFiles, listOf(moved), gym - gym[2],
+            gymNoted + (3L to CalendarSync.zonedFingerprint(gym[2], perth)), perth))
+    }
 }
