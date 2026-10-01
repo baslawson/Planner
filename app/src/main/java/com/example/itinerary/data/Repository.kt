@@ -464,6 +464,7 @@ class Repository(
         require(item.bufferBeforeMinutes in 0..1440 && item.bufferAfterMinutes in 0..1440)
         require(item.durationMinutes == null || item.startTime != null && item.durationMinutes in 1..1440)
         MultiDay.validate(item)
+        EventText.validate(item, if (item.id == 0L) null else itemDao.byId(item.id))
         val cancelled = mutableListOf<Reminder>()
         val resetReminders = mutableSetOf<Long>()
         val removedFiles = mutableListOf<String>()

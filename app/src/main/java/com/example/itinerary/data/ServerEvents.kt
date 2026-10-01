@@ -106,8 +106,8 @@ object ServerEvents {
         return out.joinToString("\r\n", postfix = "\r\n")
     }
 
-    // The most text Planner takes from a calendar event (as file import and phone calendars do).
-    const val MAX_TITLE = 500
-    const val MAX_LOCATION = 2000
-    const val MAX_NOTES = 20_000
+    // The most text Planner takes from a calendar event (as file import and phone calendars do, and as an event holds).
+    const val MAX_TITLE = EventText.MAX_TITLE
+    const val MAX_LOCATION = EventText.MAX_LOCATION
+    const val MAX_NOTES = EventText.MAX_NOTES
 }
