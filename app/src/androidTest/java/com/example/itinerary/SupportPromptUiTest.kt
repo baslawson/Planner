@@ -130,6 +130,13 @@ class SupportPromptUiTest {
         assertEquals(installed,prefs.getLong(SupportPrompt.KEY_SHOWN_FOR,0))
         // The same version again: no pop-up.
         assertFalse(relaunchAndWait())
+        // The next update's "Remind me later" doesn't add a second task while the first is still to do.
+        prefs.edit { putLong(SupportPrompt.KEY_SHOWN_FOR, installed - 1) }
+        launch();await { find(title)!=null }
+        click("Remind me later")
+        await { find(title)==null && prefs.getLong(SupportPrompt.KEY_SHOWN_FOR,0)==installed }
+        Thread.sleep(1500)
+        assertEquals(1,data().tasks.count { it.title==SupportPrompt.TASK_TITLE })
     }
 
     @Test fun shownAgainAfterAnUpdateAndNoThanksCloses() {

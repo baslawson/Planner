@@ -15,6 +15,7 @@ import androidx.core.content.edit
 import androidx.core.content.pm.PackageInfoCompat
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.PlannerTask
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 // "Planner is free and open source": once after installing and once after each update. The version it was last shown
@@ -28,6 +29,10 @@ object SupportPrompt {
     @Volatile var showInTestApp = false
 
     fun due(shownFor: Long, installed: Long) = shownFor < installed
+
+    // "Remind me later" adds the task only when there isn't one still to do, so updates don't stack copies; once ticked
+    // off or deleted, the next "Remind me later" adds a fresh one.
+    fun needsTask(tasks: List<PlannerTask>) = tasks.none { it.title == TASK_TITLE && !it.done }
 
     fun installedVersion(context: Context): Long =
         runCatching { PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0)) }.getOrDefault(0L)
@@ -60,7 +65,9 @@ fun SupportPromptHost(blocked: Boolean) {
         extra = listOf(DialogAction("Remind me later") {
             seen()
             // A task in the normal list, ticked off or deleted like any other.
-            app.appScope.launch { runCatching { app.repository.saveTask(PlannerTask(title = SupportPrompt.TASK_TITLE, notes = KOFI_URL)) } }
+            app.appScope.launch { runCatching {
+                if (SupportPrompt.needsTask(app.repository.tasks.first())) app.repository.saveTask(PlannerTask(title = SupportPrompt.TASK_TITLE, notes = KOFI_URL))
+            } }
         }),
     ) {
         Text("No ads, no tracking, no account. Planner is made in spare time and shared for free. If it's useful to you, " +
