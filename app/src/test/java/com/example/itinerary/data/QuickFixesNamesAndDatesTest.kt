@@ -91,6 +91,20 @@ class QuickFixesNamesAndDatesTest {
         ok("Pay 50 EUR tomorrow at 9.30").let { assertEquals("Pay 50 EUR", it.title); assertEquals(listOf(at(9, 30), at(21, 30)), it.timeChoices) }
     }
 
+    // Q-N4: "due" and "by" introduce a day number as "on" does.
+    @Test fun dueOrByBeforeADayNumberIsADate() {
+        for ((text, title, date) in listOf(
+            Triple("Rent due 15th", "Rent", day(10, 15)),
+            Triple("Rent due by 15th", "Rent", day(10, 15)),
+            Triple("Rent due on 15th", "Rent", day(10, 15)),
+            Triple("Submit report by 5th", "Submit report", day(10, 5)),
+            Triple("Submit report by 5th at 2pm", "Submit report", day(10, 5)),
+        )) ok(text).let { assertEquals(text, title, it.title); assertEquals(text, date, it.date); assertTrue(text, it.dateSpecified) }
+        ok("Submit report by 5th at 2pm").let { assertEquals(at(14), it.time) }
+        // Before an ordinary word it is still title text.
+        ok("Meeting 3rd floor Friday").let { assertEquals("Meeting 3rd floor", it.title); assertEquals(day(10, 2), it.date) }
+        ok("Awards due 3rd place Friday").let { assertEquals("Awards due 3rd place", it.title); assertEquals(day(10, 2), it.date) }
+    }
 
 
 

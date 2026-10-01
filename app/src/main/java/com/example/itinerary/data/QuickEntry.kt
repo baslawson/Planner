@@ -102,8 +102,9 @@ object QuickEntry {
     // Right after a day number, am or pm makes it a time: "Call Jan 3 pm" is 3pm, with Jan (a name) left in the title.
     private const val notClockHour = "(?!\\d{1,2}\\s*(?:am|pm|a\\.m|p\\.m)(?![a-z]))"
     // "Dentist 3rd 2pm": a day number (1–31) with st/nd/rd/th and no "the" is a date right before a time, not before a
-    // date ("Sam's 21st 17 Oct"), and only when the entry has no other date (see parse); with "on", also at the end or
-    // before at/from/for ("Dentist on 3rd at 2pm"). Before other words it stays in the title: "3rd floor".
+    // date ("Sam's 21st 17 Oct"), and only when the entry has no other date (see parse); with "on", "by" or "due", also at
+    // the end or before at/from/for ("Dentist on 3rd at 2pm", "Rent due 15th"). Before other words it stays in the title:
+    // "3rd floor".
     private const val bareOrdinalValue = "(?:3[01]|[12]\\d|0?[1-9])(?:st|nd|rd|th)"
     private const val bareOrdinal = "$bareOrdinalValue(?=\\s*,?\\s*(?:at\\s+|@\\s*)?\\d)" +
         "(?!\\s*,?\\s*\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:$months)\\b|\\s*,?\\s*(?:\\d{1,2}/|\\d{1,2}\\.\\d{1,2}\\.|\\d{4}[-/.])\\d)"
@@ -119,7 +120,7 @@ object QuickEntry {
     private const val numberLabels = "bus|route|ferry|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|seat|line|no\\.?|number"
     private val labelledNumbers = rx("(?:(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)|(?<=\\b(?:train|row)\\s{1,3})(?!(?:[1-9]|1[0-2])\\b))\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
-    private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
+    private const val onOrdinal = "(?:on|by|due(?:\\s+(?:on|by))?)\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
     private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
     // "before Friday" is a deadline: the date is Friday, "before" leaves the title.
