@@ -52,7 +52,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     fun checkConnection(account: NextcloudAccount) {
         val root = account.filesRoot
         val entries = properties(account, root, "0")
-        if (entries.none { it.url.encodedPath.trimEnd('/') == root.encodedPath.trimEnd('/') && it.collection }) {
+        if (entries.none { samePath(it.url, root) && it.collection }) {
             throw BackupException("The server didn't return a Nextcloud files folder. Check the address and username.")
         }
     }
@@ -60,9 +60,9 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     fun list(account: NextcloudAccount): List<NextcloudBackup> {
         val entries = properties(account, account.folder, "1", missingIsEmpty = true)
         return entries.mapNotNull { entry ->
-            if (entry.collection || entry.url.encodedPath.trimEnd('/') == account.folder.encodedPath.trimEnd('/')) return@mapNotNull null
+            if (entry.collection || samePath(entry.url, account.folder)) return@mapNotNull null
             val name = entry.url.pathSegments.last()
-            if (!validName(name) || entry.url != fileUrl(account, name)) return@mapNotNull null
+            if (!validName(name) || !samePath(entry.url, fileUrl(account, name))) return@mapNotNull null
             NextcloudBackup(name, entry.size, entry.modified, entry.etag)
         }.distinctBy { it.name }.sortedByDescending { it.name }
     }
@@ -77,7 +77,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             }
             // A 405 may mean a file occupies this name. Never overwrite it or continue through it.
             if (properties(account, directory, "0").none { it.collection &&
-                    it.url.encodedPath.trimEnd('/') == directory.encodedPath.trimEnd('/') }) {
+                    samePath(it.url, directory) }) {
                 throw BackupException("Part of the backup path exists but isn't a folder. Choose another path.")
             }
         }
@@ -143,7 +143,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             invalid = "The server returned an invalid calendar list. Check that this is your Nextcloud address.",
             empty = "The server returned an empty calendar list.").mapNotNull { (resolved, prop) ->
             val path = resolved.encodedPath
-            if (!path.startsWith(home.encodedPath) || path.trimEnd('/') == home.encodedPath.trimEnd('/')) return@mapNotNull null
+            if (!inside(resolved, home)) return@mapNotNull null
             if (prop("resourcetype")?.children("calendar", CALDAV)?.isNotEmpty() != true) return@mapNotNull null
             val components = prop("supported-calendar-component-set", CALDAV)?.children("comp", CALDAV).orEmpty()
             if (components.isNotEmpty() && components.none { it.attributes["name"].equals("VEVENT", ignoreCase = true) }) return@mapNotNull null
@@ -163,7 +163,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     fun calendarEvents(account: NextcloudAccount, calendar: String, from: Instant, until: Instant): List<String> {
         val home = account.calendarsRoot
         val url = account.server.newBuilder().encodedPath(calendar).build()
-        require(url.encodedPath.startsWith(home.encodedPath) && url.encodedPath != home.encodedPath &&
+        require(inside(url, home) &&
             url.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
         val stamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
         val range = "start=\"${stamp.format(from)}\" end=\"${stamp.format(until)}\""
@@ -268,7 +268,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     private fun calendarUrl(account: NextcloudAccount, calendar: String): HttpUrl {
         val home = account.calendarsRoot
         val folder = account.server.newBuilder().encodedPath(calendar).build()
-        require(folder.encodedPath.startsWith(home.encodedPath) && folder.encodedPath != home.encodedPath &&
+        require(inside(folder, home) &&
             folder.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
         return folder
     }
@@ -432,6 +432,15 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/><d:current-user-privilege-set/></d:prop></d:propfind>"""
         private val EMPTY = ByteArray(0).toRequestBody(null)
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
+        // Paths compared by their decoded segments: Nextcloud writes some characters percent-encoded that OkHttp leaves
+        // as they are (an apostrophe in a username is %27 there, ' here), and both name the same folder.
+        private fun segments(url: HttpUrl) = url.pathSegments.dropLastWhile { it.isEmpty() }
+        internal fun samePath(url: HttpUrl, other: HttpUrl) = segments(url) == segments(other)
+        // [url] is somewhere inside the folder [folder] (not the folder itself).
+        internal fun inside(url: HttpUrl, folder: HttpUrl): Boolean {
+            val base = segments(folder); val path = segments(url)
+            return path.size > base.size && path.subList(0, base.size) == base
+        }
         private fun validName(name: String) = name.startsWith("Planner-backup-") && name.endsWith(".zip") &&
             name.length <= 240 && name.none { it == '/' || it == '\\' || it.isISOControl() }
     }

@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -114,7 +115,12 @@ object CalendarFileImport {
         val start = requireNotNull(one("DTSTART"))
         val end = one("DTEND"); val duration = one("DURATION")
         val allDay = Ics.isDate(start)
-        val ownZone = if (allDay || start.value.endsWith("Z")) zone else start.params["TZID"]?.let { ZoneId.of(it) } ?: zone
+        // A start in UTC repeats on UTC dates (RFC 5545); each date is then moved onto the phone's clock below.
+        val ownZone = when {
+            allDay -> zone
+            start.value.endsWith("Z") -> ZoneOffset.UTC
+            else -> start.params["TZID"]?.let(Ics::zone) ?: zone
+        }
         val first: ZonedDateTime = if (allDay) Ics.date(start).atStartOfDay(zone) else strictTime(start, zone)
         val firstLocal = first.withZoneSameInstant(ownZone).toLocalDateTime()
         // An all-day event longer than Planner holds is cut to MultiDay.MAX_DAYS (a one-time copy, or a read-only one in a
@@ -166,19 +172,21 @@ object CalendarFileImport {
                 val item = ItineraryItem(tripId = 0, date = t.date, startTime = t.startTime, durationMinutes = t.durationMinutes,
                     endDate = t.endDate, title = e.title, location = e.location,
                     notes = listOfNotNull(longNote, e.notes.takeIf { it.isNotEmpty() }).joinToString("\n\n").take(20_000))
-                val plannerRule = if (group.size > 1) e.repeat?.plannerRule(e.repeatStart) ?: RepeatRule.NONE else RepeatRule.NONE
+                // Only a rule that gives these dates: on the phone's clock they may fall a day off the event's own
+                // (a weekly Monday in UTC is Tuesday in Sydney).
+                val plannerRule = (if (group.size > 1) e.repeat?.plannerRule(e.repeatStart) else null)
+                    ?.takeIf { rule -> rule.valid && rule.dates(group.first().date, 365).let { given -> group.take(8).all { it.date in given } } } ?: RepeatRule.NONE
                 Row(item, group.map { it.date }, plannerRule, e.note)
             }
 
     // The dates in an EXDATE, RDATE or RECURRENCE-ID (a list of dates or date-times) on the event's own clock.
     private fun values(p: Ics.Property, zone: ZoneId): List<LocalDate> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
         val part = Ics.Property(p.name, p.params, value.trim())
-        if (Ics.isDate(part)) Ics.date(part) else strictTime(part, zone).withZoneSameInstant(
-            if (value.trim().endsWith("Z")) zone else p.params["TZID"]?.let { ZoneId.of(it) } ?: zone).toLocalDate()
+        if (Ics.isDate(part)) Ics.date(part) else strictTime(part, zone).withZoneSameInstant(zone).toLocalDate()
     }
 
     // A date-time in its own zone (unknown zones refuse the event rather than guessing its time).
-    private fun strictTime(p: Ics.Property, zone: ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false) { ZoneId.of(it) }
+    private fun strictTime(p: Ics.Property, zone: ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false, Ics::zone)
 
     // The Planner events to save for the ticked rows: a repeating row becomes one series (shared seriesId).
     fun events(entries: List<Entry>, today: LocalDate, includePast: Boolean): List<ItineraryItem> {

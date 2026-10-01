@@ -69,8 +69,7 @@ class CalendarSync(
     val sources: Flow<List<CalendarSource>> = dao.observeSources()
 
     // Planner's events on Nextcloud (two-way), by event id, for the cards to mark.
-    val syncMarks: Flow<Map<Long, SyncMark>> = db.sentDao().observeMarks()
-        .map { rows -> rows.mapNotNull { row -> SyncMark.of(row.uid, row.problem)?.let { row.itemId to it } }.toMap() }
+    val syncMarks: Flow<Map<Long, SyncMark>> = combine(db.sentDao().observeMarks(), dao.observeSources()) { rows, sources -> SyncMark.forCards(rows, sources) }
         .distinctUntilChanged()
 
     // Ticked calendars' events with their calendar's name and colour, keyed by the id they are shown under.
@@ -344,10 +343,12 @@ class CalendarSync(
                 }
             }
         }
-        // Deleted in Planner (and past its Undo): the copy goes too, unless it was changed on Nextcloud meanwhile.
+        // Deleted in Planner (and past its Undo): the copy goes too, unless it was changed on Nextcloud meanwhile; then the
+        // row stays for the next pull to make it a conflict, rather than the file coming back as a new event (one-way, with
+        // no pull, it goes as before).
         for (row in rows.values) if (row.itemId !in present && row.itemId !in waiting && row.problem != SentEvent.CONFLICT) {
-            removeCopy(account, target, row)
-            sentDao.delete(row.id)
+            val kept = afterDelete(row, removeCopy(account, target, row)).takeIf { planner != null }
+            if (kept == null) sentDao.delete(row.id) else if (kept != row) sentDao.put(kept)
         }
         return summary(target)
     }
@@ -366,11 +367,11 @@ class CalendarSync(
     }
 
     // Deletes Planner's copy of [row], only if Nextcloud still has the version Planner synced. A copy changed on Nextcloud
-    // meanwhile stays there (the server refuses the delete); either way Planner then forgets the row.
-    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentEvent) {
-        if (row.uid == null || row.problem != null && row.problem != SentEvent.PENDING) return
+    // meanwhile stays there (the server refuses the delete: Changed). Null when nothing was tried (see deletable).
+    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentEvent): WriteResult? {
+        if (!deletable(row)) return null
         // A pending file, if it arrived at all, is Planner's own with a version Planner never heard of.
-        client.deleteFile(account, target.href, hrefOf(target, row), row.etag)
+        return client.deleteFile(account, target.href, hrefOf(target, row), row.etag)
     }
 
     // The files of [edited] events (noted past ones, edited since) looked for around their dates only, and linked (see
@@ -481,11 +482,12 @@ class CalendarSync(
                     readOnly += runCatching { shown(file) }.getOrDefault(emptyList()) }
                 // Deleted in Planner meanwhile.
                 item == null || row.itemId in waiting -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
-                // Unchanged in Planner since the last sync: take Nextcloud's version (Planner-only details stay).
+                // Unchanged in Planner since the last sync: take Nextcloud's version (Planner-only details stay). Made to the
+                // event as it is when saved: one edited or deleted in Planner while this pull ran is compared as below.
                 inSync(row.fingerprint, item) -> {
-                    store.update(ServerEvents.apply(item, server))
-                    val saved = db.itemDao().byId(item.id) ?: continue
-                    sentDao.put(row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
+                    val saved = store.update(item.id) { pulled(row, it, server, zone()) }
+                    sentDao.put(if (saved != null) row.copy(etag = file.etag, ics = file.data, fingerprint = fingerprint(saved), problem = null, conflict = null)
+                        else db.itemDao().byId(item.id)?.let { alreadyThere(row, file, it, zone()) } ?: row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
                 }
                 // Changed in Planner too, but Nextcloud already has it as Planner has it now (Planner's own write, not
                 // recorded): nothing to choose.
@@ -498,7 +500,9 @@ class CalendarSync(
             val item = items[row.itemId]
             when {
                 item == null -> sentDao.delete(row.id)
-                inSync(row.fingerprint, item) -> { store.archive(setOf(item.id)); sentDao.delete(row.id) }
+                // Only if still unchanged when it's moved: one edited while this pull ran is a conflict too.
+                inSync(row.fingerprint, item) && store.archive(item.id) { inSync(row.fingerprint, it) } -> sentDao.delete(row.id)
+                db.itemDao().byId(item.id) == null -> sentDao.delete(row.id)
                 else -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = ""))
             }
         }
@@ -944,6 +948,23 @@ class CalendarSync(
             val clash = fingerprint(theirs) != fingerprint(item) && !inSync(row.fingerprint, theirs, zone)
             return row.copy(uid = uid, href = href, etag = file.etag, ics = file.data, fingerprint = fingerprint(theirs),
                 problem = if (clash) SentEvent.CONFLICT else null, conflict = if (clash) file.data else null)
+        }
+
+        // The pull's change to a Planner event whose file changed on Nextcloud, made to [now] (the event as it is when
+        // saved): Nextcloud's version with Planner-only details kept; null when it changed in Planner since [row] was synced.
+        internal fun pulled(row: SentEvent, now: ItineraryItem, server: ItineraryItem, zone: ZoneId): ItineraryItem? =
+            if (inSync(row.fingerprint, now, zone)) ServerEvents.apply(now, server) else null
+
+        // Whether the copy of [row] may be deleted on Nextcloud: sent, and with nothing to settle first.
+        internal fun deletable(row: SentEvent) = row.uid != null && (row.problem == null || row.problem == SentEvent.PENDING)
+
+        // The row of an event deleted in Planner once its copy's delete was tried ([result]; null = not tried): forgotten
+        // (null), or kept as CHANGED when the copy changed on Nextcloud first, so the next pull makes it a conflict
+        // ("deleted in Planner, changed on Nextcloud") instead of bringing the file in as a new event.
+        internal fun afterDelete(row: SentEvent, result: WriteResult?): SentEvent? = when {
+            result == WriteResult.Changed -> row.copy(problem = SentEvent.CHANGED)
+            result == null && row.uid != null && row.problem == SentEvent.CHANGED -> row
+            else -> null
         }
 
         // Planner's own file names for events it created (see sendLocked).

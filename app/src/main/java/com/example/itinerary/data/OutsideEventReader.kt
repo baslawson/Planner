@@ -47,6 +47,6 @@ object OutsideEventReader {
 
     // To the phone's clock, to the minute. An unknown time zone is read as the phone's own rather than dropping the event.
     private fun time(p: Ics.Property, zone: ZoneId): ZonedDateTime =
-        Ics.time(p, zone, strictGap = false) { runCatching { ZoneId.of(it) }.getOrDefault(zone) }
+        Ics.time(p, zone, strictGap = false) { runCatching { Ics.zone(it) }.getOrDefault(zone) }
             .withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
 }

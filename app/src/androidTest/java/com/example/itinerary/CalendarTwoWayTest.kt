@@ -209,6 +209,48 @@ class CalendarTwoWayTest {
         assertTrue(conflicts().isEmpty())
     }
 
+    // Edited in Planner while a pull is running (after it read Planner's events): the pull doesn't save Nextcloud's version
+    // over the edit or move the event to Recently deleted; each is a conflict to choose.
+    @Test fun anEditMadeWhileThePullRunsIsNeverOverwritten() = runBlocking {
+        save("QA Moved there"); save("QA Deleted there", 10)
+        start()
+        dav.edit(plannerFile("QA Moved there").key) { it.replace("SUMMARY:QA Moved there", "SUMMARY:QA Moved there web") }
+        dav.files.remove(plannerFile("QA Deleted there").key); dav.bump()
+        // An event after the window, not sent yet: the pull then reads the files there too, after it read Planner's events.
+        repo.saveItem(ItineraryItem(tripId = 0, date = day.plusMonths(20), startTime = null, title = "QA Far ahead"))
+        val after = "20271101" // the day after the window ends (clock 1 October 2026)
+        dav.onQuery = { start -> if (start >= after) runBlocking {
+            dav.onQuery = null
+            listOf("QA Moved there", "QA Deleted there").forEach { repo.saveItem(item(it).copy(location = "Typed meanwhile")) }
+        } }
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        assertTrue(dav.queries.any { it >= after }) // the edits really came in during the pull
+        assertEquals(listOf("Typed meanwhile", "Typed meanwhile"),
+            listOf("QA Moved there", "QA Deleted there").map { item(it).location })
+        assertEquals(2, conflicts().size)
+        assertTrue(repo.snapshot().deleted.isEmpty())
+    }
+
+    // Deleted in Planner and sent before the next pull, while Nextcloud changed it: the refused delete keeps the row, so
+    // the pull makes it a conflict instead of bringing the file back as a new Planner event.
+    @Test fun aDeleteRefusedByNextcloudBecomesAConflictNotANewEvent() = runBlocking {
+        save("QA Deleted here edited there")
+        start()
+        val path = plannerFile("QA Deleted here edited there").key
+        dav.edit(path) { it.replace("SUMMARY:QA Deleted here edited there", "SUMMARY:QA Edited there") }
+        repo.deleteWithUndo(item("QA Deleted here edited there")); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+        sync.send()
+        assertTrue(dav.files.containsKey(path)) // the server refused the delete
+        assertEquals(SentEvent.CHANGED, rows().single().problem)
+        syncAgain()
+        assertTrue(items().isEmpty()) // not brought back as a new event
+        assertTrue(conflicts().single().conflict!!.contains("SUMMARY:QA Edited there"))
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.NEXTCLOUD)
+        assertEquals(listOf("QA Edited there"), items().map { it.title })
+        assertTrue(conflicts().isEmpty())
+    }
+
     private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
 
     @Test fun reconnectingLinksTheFilesAlreadyThereInsteadOfCopyingThem() = runBlocking {

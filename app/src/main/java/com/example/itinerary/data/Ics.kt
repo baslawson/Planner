@@ -64,7 +64,48 @@ internal object Ics {
         return local.atZone(zone)
     }
 
-    fun isDate(p: Property): Boolean = p.params["VALUE"] == "DATE" || p.value.matches(Regex("[0-9]{8}"))
+    // A TZID as a zone: an IANA name as it is; one with a unique-id prefix such as "/mozilla.org/20050126_1/Europe/Berlin"
+    // (older Thunderbird, libical) without it; a Windows name such as "W. Europe Standard Time" (Outlook, Exchange) as its
+    // usual IANA zone. Throws for anything else, which callers treat as an unknown zone.
+    fun zone(tzid: String): ZoneId {
+        val id = tzid.trim()
+        runCatching { return ZoneId.of(id) }
+        if (id.startsWith("/")) {
+            val parts = id.split('/').filter { it.isNotEmpty() }
+            for (i in 1 until parts.size) runCatching { return ZoneId.of(parts.drop(i).joinToString("/")) }
+        }
+        // Android knows every Windows name; plain JVM tests don't have it, so the common ones are listed too.
+        val windows = runCatching { android.icu.util.TimeZone.getIDForWindowsID(id, null) }.getOrNull() ?: WINDOWS_ZONES[id]
+        return ZoneId.of(requireNotNull(windows) { "Unknown time zone." })
+    }
+
+    private val WINDOWS_ZONES = mapOf(
+        "Dateline Standard Time" to "Etc/GMT+12", "Hawaiian Standard Time" to "Pacific/Honolulu", "Alaskan Standard Time" to "America/Anchorage",
+        "Pacific Standard Time" to "America/Los_Angeles", "US Mountain Standard Time" to "America/Phoenix",
+        "Mountain Standard Time" to "America/Denver", "Central Standard Time" to "America/Chicago",
+        "Central Standard Time (Mexico)" to "America/Mexico_City", "Canada Central Standard Time" to "America/Regina",
+        "Eastern Standard Time" to "America/New_York", "SA Pacific Standard Time" to "America/Bogota",
+        "Atlantic Standard Time" to "America/Halifax", "Newfoundland Standard Time" to "America/St_Johns",
+        "Pacific SA Standard Time" to "America/Santiago", "E. South America Standard Time" to "America/Sao_Paulo",
+        "Argentina Standard Time" to "America/Argentina/Buenos_Aires", "GMT Standard Time" to "Europe/London",
+        "Greenwich Standard Time" to "Atlantic/Reykjavik", "Morocco Standard Time" to "Africa/Casablanca",
+        "W. Europe Standard Time" to "Europe/Berlin", "Central Europe Standard Time" to "Europe/Budapest",
+        "Romance Standard Time" to "Europe/Paris", "Central European Standard Time" to "Europe/Warsaw",
+        "W. Central Africa Standard Time" to "Africa/Lagos", "GTB Standard Time" to "Europe/Bucharest",
+        "E. Europe Standard Time" to "Europe/Chisinau", "FLE Standard Time" to "Europe/Kiev", "Egypt Standard Time" to "Africa/Cairo",
+        "South Africa Standard Time" to "Africa/Johannesburg", "Israel Standard Time" to "Asia/Jerusalem",
+        "Turkey Standard Time" to "Europe/Istanbul", "Russian Standard Time" to "Europe/Moscow", "Arab Standard Time" to "Asia/Riyadh",
+        "E. Africa Standard Time" to "Africa/Nairobi", "Iran Standard Time" to "Asia/Tehran", "Arabian Standard Time" to "Asia/Dubai",
+        "Pakistan Standard Time" to "Asia/Karachi", "India Standard Time" to "Asia/Kolkata", "Nepal Standard Time" to "Asia/Kathmandu",
+        "Bangladesh Standard Time" to "Asia/Dhaka", "Myanmar Standard Time" to "Asia/Yangon", "SE Asia Standard Time" to "Asia/Bangkok",
+        "China Standard Time" to "Asia/Shanghai", "Singapore Standard Time" to "Asia/Singapore", "Taipei Standard Time" to "Asia/Taipei",
+        "W. Australia Standard Time" to "Australia/Perth", "Tokyo Standard Time" to "Asia/Tokyo", "Korea Standard Time" to "Asia/Seoul",
+        "Cen. Australia Standard Time" to "Australia/Adelaide", "AUS Central Standard Time" to "Australia/Darwin",
+        "E. Australia Standard Time" to "Australia/Brisbane", "AUS Eastern Standard Time" to "Australia/Sydney",
+        "Tasmania Standard Time" to "Australia/Hobart", "New Zealand Standard Time" to "Pacific/Auckland",
+    )
+
+    fun isDate(p: Property): Boolean =p.params["VALUE"] == "DATE" || p.value.matches(Regex("[0-9]{8}"))
 
     // The properties of each VEVENT, in file order; those of components inside an event (such as an alarm) are left out.
     fun events(lines: List<String>, max: Int, tooMany: String, unfinished: String = "Incomplete calendar component."): List<List<Property>> {
