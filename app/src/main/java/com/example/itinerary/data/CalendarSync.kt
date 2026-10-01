@@ -208,15 +208,25 @@ class CalendarSync(
     // Upcoming events are sent; past ones are noted and sent once edited; the calendar's own events come into Planner.
     // Choosing another calendar leaves the old one as it is.
     suspend fun setSendTarget(id: Long?) {
-        db.withTransaction {
-            val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-            sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
-            takeUp(sources.firstOrNull { it.id == id && it.writable && it.events } ?: return@withTransaction)
+        // Not while a send, pull or choice is under way (see paused); released before the sync that follows.
+        sendLock.withLock {
+            db.withTransaction {
+                val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
+                sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
+                takeUp(sources.firstOrNull { it.id == id && it.writable && it.events } ?: return@withTransaction)
+            }
+            _sendState.value = State()
         }
-        _sendState.value = State()
         onChanged()
         if (id != null) { sync(); send() }
     }
+
+    // Runs [block] with no send, pull or conflict choice under way, and none starting until it's done. Those work from
+    // the events and the record of what was sent as they read them at the start, and write rows back by event: one
+    // running across a change of either (a restore, a new synced calendar) would put rows naming the old events back
+    // over the new record (wrong files overwritten, duplicates, false conflicts). Inside, use the *Locked functions only
+    // (the lock isn't reentrant).
+    suspend fun <T> paused(block: suspend () -> T): T = sendLock.withLock { block() }
 
     // In a transaction: [target] becomes the synced calendar and is read before anything new is sent there; past events
     // without a record are only noted.
@@ -235,7 +245,10 @@ class CalendarSync(
     // After restoring a backup that doesn't say what was sent (made before backups kept that): the old record named
     // other events, so none is kept, and the synced calendar is taken up again as when choosing it. The next pull links
     // its files to the restored events by content; nothing is overwritten or deleted on the strength of an old record.
-    suspend fun forgetSent() {
+    suspend fun forgetSent() = paused { forgetSentLocked() }
+
+    // forgetSent, inside paused.
+    suspend fun forgetSentLocked() {
         db.withTransaction {
             db.sentDao().deleteAll()
             dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }?.let { takeUp(it) }
@@ -588,7 +601,10 @@ class CalendarSync(
             db.sentDao().all().filter { it.account == target.account && it.calendar == target.href }
     }
 
-    suspend fun restoreSend(target: CalendarChoice?, rows: List<SentEvent>) {
+    suspend fun restoreSend(target: CalendarChoice?, rows: List<SentEvent>) = paused { restoreSendLocked(target, rows) }
+
+    // restoreSend, inside paused.
+    suspend fun restoreSendLocked(target: CalendarChoice?, rows: List<SentEvent>) {
         db.withTransaction {
             db.sentDao().deleteAll()
             dao.sources().filter { it.sendHere }.forEach { dao.updateSource(it.copy(sendHere = false)) }

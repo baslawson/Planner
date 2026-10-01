@@ -158,23 +158,30 @@ class BackupManager(
             created.forEach { it.delete() }
             throw BackupException("Couldn't copy the attachments out of the backup. Nothing was changed.")
         }
-        try {
-            repo.replaceAll(staged.data)
-        } catch (e: Exception) {
-            created.forEach { it.delete() }
-            throw BackupException("Couldn't restore the backup. Nothing was changed.")
-        }
-        // The data is in: each remaining step runs even if one before it failed (the first failure is reported after).
-        // What was sent to Nextcloud always gets replaced: by the backup's record, or by none (an older backup), since
-        // the current record names events that are gone or are other events now.
         var failure: Exception? = null
-        suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
-        withContext(NonCancellable) {
-            step { settings.applySnapshot(staged.settings) }
-            step { staged.calendars?.let { calendars?.restoreChoices(it) } }
-            step { val send = staged.send; if (send != null) calendars?.restoreSend(send.first, send.second) else calendars?.forgetSent() }
-            // After the calendars, whose restore rebuilds the list rows.
-            step { val send = staged.taskSend; if (send != null) tasks?.restore(send.first, send.second) else tasks?.forget() }
+        // No calendar send or pull runs from before the events are replaced until the record of what was sent is (see
+        // CalendarSync.paused): one would put rows for the old events back over the restored record, or bring the
+        // calendar's files in as new events beside the restored ones. (The task list's sync has its own lock; the same
+        // would apply to it around tasks?.restore.)
+        suspend fun paused(block: suspend () -> Unit) { val sync = calendars; if (sync != null) sync.paused(block) else block() }
+        paused {
+            try {
+                repo.replaceAll(staged.data)
+            } catch (e: Exception) {
+                created.forEach { it.delete() }
+                throw BackupException("Couldn't restore the backup. Nothing was changed.")
+            }
+            // The data is in: each remaining step runs even if one before it failed (the first failure is reported after).
+            // What was sent to Nextcloud always gets replaced: by the backup's record, or by none (an older backup), since
+            // the current record names events that are gone or are other events now.
+            suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
+            withContext(NonCancellable) {
+                step { settings.applySnapshot(staged.settings) }
+                step { staged.calendars?.let { calendars?.restoreChoices(it) } }
+                step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
+                // After the calendars, whose restore rebuilds the list rows.
+                step { val send = staged.taskSend; if (send != null) tasks?.restore(send.first, send.second) else tasks?.forget() }
+            }
         }
         failure?.let { throw it }
         staged.file.delete()

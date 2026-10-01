@@ -7,6 +7,10 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import com.example.itinerary.reminders.ReminderScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -610,5 +614,61 @@ class CalendarTwoWayTest {
         assertEquals("QA Unrecorded (moved)", items().single().title)
         assertEquals(1, plannerFiles().size)
         assertOtherCalendarUntouched()
+    }
+
+    // Starts [action] on another thread from inside the pull's calendar query (the pull is under way), gives it time to
+    // finish, and says whether it did.
+    private fun duringThePull(action: suspend () -> Unit): Pair<() -> Boolean, () -> Deferred<Unit>> {
+        var started: Deferred<Unit>? = null
+        var doneDuringPull = false
+        dav.onQuery = {
+            dav.onQuery = null
+            started = CoroutineScope(Dispatchers.IO).async { action() }
+            Thread.sleep(1500)
+            doneDuringPull = started!!.isCompleted
+        }
+        return { doneDuringPull } to { started!! }
+    }
+
+    // E1: restoring what was sent waits for a pull under way. Before, it went in at once and the pull then wrote back the
+    // row it had read before it (same event id replaces), so the restored record was lost.
+    @Test fun restoringTheSendRecordWaitsForAPullUnderWay() = runBlocking {
+        save("QA Alpha")
+        start()
+        val before = rows().single()
+        dav.edit(plannerFile("QA Alpha").key) { it.replace("SUMMARY:QA Alpha", "SUMMARY:QA Alpha web") }
+        val (doneDuringPull, job) = duringThePull {
+            sync.restoreSend(CalendarChoice(before.account, before.calendar, "Planner", null), listOf(before.copy(fingerprint = "from-backup")))
+        }
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        job().await()
+        assertFalse(doneDuringPull())
+        assertEquals("from-backup", rows().single().fingerprint)
+        assertNull(database.outsideDao().sources().single { it.sendHere }.fetchedFor) // the restore's: read again next time
+    }
+
+    // E1: a backup restore keeps the sync off from replacing the events until the record of what was sent is back.
+    @Test fun aBackupRestoreWaitsForAPullUnderWay() = runBlocking {
+        save("QA Alpha")
+        start()
+        val before = rows().single()
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-paused-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        val staged = backup.stage(android.net.Uri.fromFile(zip))
+        dav.edit(plannerFile("QA Alpha").key) { it.replace("SUMMARY:QA Alpha", "SUMMARY:QA Alpha web") }
+        val (doneDuringPull, job) = duringThePull { backup.restore(staged) }
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        job().await()
+        assertFalse(doneDuringPull())
+        // The backup's events and record, as they were; the edit on Nextcloud comes in with the next pull.
+        assertEquals(before.etag, rows().single().etag)
+        assertEquals(listOf("QA Alpha"), items().map { it.title })
+        syncAgain()
+        assertEquals(listOf("QA Alpha web"), items().map { it.title })
+        assertTrue(conflicts().isEmpty())
+        assertEquals(1, plannerFiles().size)
     }
 }
