@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -166,8 +167,11 @@ fun AppLockSettingsSection() {
         Text("Lock Planner", Modifier.weight(1f))
         Switch(checked = enabled, onCheckedChange = null)
     }
+    // Android 13 and later get a blank card in recent apps (MainActivity); earlier versions have no way to hide it short
+    // of blocking screenshots.
     Text("Ask for your fingerprint, face, or the phone's PIN, pattern or password to open Planner. Reminders and the " +
-        "home screen widget still show.", style = MaterialTheme.typography.bodySmall)
+        "home screen widget still show." + if (Build.VERSION.SDK_INT < 33) " On this Android version, recent apps may " +
+        "still show Planner's last screen." else "", style = MaterialTheme.typography.bodySmall)
     if (enabled) {
         Spacer(Modifier.height(8.dp))
         SettingsDropdown(label = "Lock again", current = lockAfter.label, options = LockAfter.entries,
