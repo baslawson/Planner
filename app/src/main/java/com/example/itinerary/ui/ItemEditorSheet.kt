@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
 import com.example.itinerary.data.DraftCodec
 import com.example.itinerary.data.EditorDraftStore
+import com.example.itinerary.data.EventText
 import org.json.JSONObject
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -648,7 +649,7 @@ private fun ItemEditorForm(
             )
             OutlinedTextField(
                 value = title,
-                onValueChange = { title = it.replace('\n', ' ') },
+                onValueChange = { title = EventText.typed(title, it.replace('\n', ' '), EventText.MAX_TITLE) },
                 readOnly = busy,
                 label = { Text(if (billTask) "Bill title" else "What are you doing?") },
                 // Grows as the text wraps; Done closes the keyboard instead of adding a line break.
@@ -845,14 +846,14 @@ private fun ItemEditorForm(
             OutlinedTextField(
                 value = location,
                 readOnly = busy,
-                onValueChange = { location = it.replace('\n', ' ') },
+                onValueChange = { location = EventText.typed(location, it.replace('\n', ' '), EventText.MAX_LOCATION) },
                 label = { Text(if (billTask) "Payee / location (optional)" else "Location") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = notes,
-                onValueChange = { notes = it },
+                onValueChange = { notes = EventText.typed(notes, it, EventText.MAX_NOTES) },
                 readOnly = busy,
                 label = { Text("Notes") },
                 minLines = 2,

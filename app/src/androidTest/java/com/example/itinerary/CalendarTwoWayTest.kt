@@ -7,6 +7,10 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import com.example.itinerary.reminders.ReminderScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -249,6 +253,66 @@ class CalendarTwoWayTest {
         sync.resolve(conflicts().single().id, CalendarSync.Resolution.NEXTCLOUD)
         assertEquals(listOf("QA Edited there"), items().map { it.title })
         assertTrue(conflicts().isEmpty())
+    }
+
+    // E2: made a bill in Planner while edited on Nextcloud: the refused delete keeps the row, as for a deleted event, so the
+    // pull makes it a conflict instead of bringing the file in as a second event. Keeping Nextcloud's makes it an event of
+    // its own; the bill stays.
+    @Test fun aCopyRefusedOnTheWayOutBecomesAConflictNotADuplicate() = runBlocking {
+        save("QA Turned bill")
+        start()
+        val path = plannerFile("QA Turned bill").key
+        dav.edit(path) { it.replace("SUMMARY:QA Turned bill", "SUMMARY:QA Edited there") }
+        repo.saveItem(item("QA Turned bill").copy(category = "Bills", billAmountMinor = 1000, startTime = null, durationMinutes = null))
+        sync.send()
+        assertTrue(dav.files.containsKey(path)) // the server refused the delete
+        assertEquals(SentEvent.CHANGED, rows().single().problem)
+        syncAgain()
+        assertEquals(listOf("QA Turned bill"), items().map { it.title }) // not brought in as a new event
+        assertTrue(conflicts().single().conflict!!.contains("SUMMARY:QA Edited there"))
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.NEXTCLOUD)
+        assertEquals(setOf("QA Turned bill", "QA Edited there"), items().map { it.title }.toSet())
+        assertEquals("Bills", item("QA Turned bill").category)
+        assertTrue(conflicts().isEmpty())
+        syncAgain()
+        assertEquals(listOf(path), plannerFiles()) // Nextcloud's file stays, now the new event's
+        assertEquals(2, items().size)
+        // Keeping Planner's instead: the file goes and the bill stays.
+        val other = plannerFile("QA Edited there").key
+        dav.edit(other) { it.replace("SUMMARY:QA Edited there", "SUMMARY:QA Edited there again") }
+        repo.saveItem(item("QA Edited there").copy(category = "Bills", billAmountMinor = 500, startTime = null, durationMinutes = null))
+        sync.send(); syncAgain()
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.PLANNER)
+        assertTrue(plannerFiles().isEmpty())
+        assertEquals(2, items().count { it.category == "Bills" })
+        assertTrue(rows().isEmpty())
+        assertOtherCalendarUntouched()
+    }
+
+    // E4: a backup keeps conflicts but not Nextcloud's side of them; after a restore the next pull reads that again, so
+    // the choice shows what Nextcloud has (and Keep both) instead of "changed".
+    @Test fun aRestoredConflictGetsNextcloudsSideBack() = runBlocking {
+        dav.put("${synced}from-web.ics", ics("web-1", "QA From web", "20261007T090000Z"))
+        save("QA Gone there", 10)
+        start()
+        dav.edit("${synced}from-web.ics") { it.replace("SUMMARY:QA From web", "SUMMARY:QA From web edited") }
+        repo.saveItem(item("QA From web").copy(title = "QA From web mine"))
+        dav.files.remove(plannerFile("QA Gone there").key); dav.bump()
+        repo.saveItem(item("QA Gone there").copy(location = "Still on"))
+        syncAgain()
+        assertEquals(2, conflicts().size)
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-conflict-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        backup.restore(backup.stage(android.net.Uri.fromFile(zip)))
+        assertEquals(listOf(null, null), conflicts().map { it.conflict }) // kept, without Nextcloud's side
+        syncAgain()
+        val mine = item("QA From web mine")
+        assertTrue(conflicts().single { it.itemId == mine.id }.conflict!!.contains("SUMMARY:QA From web edited"))
+        assertEquals("", conflicts().single { it.itemId == item("QA Gone there").id }.conflict)
+        assertEquals(2, items().size) // nothing brought in twice
+        sync.resolve(conflicts().single { it.itemId == mine.id }.id, CalendarSync.Resolution.BOTH)
+        assertEquals(setOf("QA From web mine", "QA From web edited", "QA Gone there"), items().map { it.title }.toSet())
     }
 
     private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
@@ -610,5 +674,61 @@ class CalendarTwoWayTest {
         assertEquals("QA Unrecorded (moved)", items().single().title)
         assertEquals(1, plannerFiles().size)
         assertOtherCalendarUntouched()
+    }
+
+    // Starts [action] on another thread from inside the pull's calendar query (the pull is under way), gives it time to
+    // finish, and says whether it did.
+    private fun duringThePull(action: suspend () -> Unit): Pair<() -> Boolean, () -> Deferred<Unit>> {
+        var started: Deferred<Unit>? = null
+        var doneDuringPull = false
+        dav.onQuery = {
+            dav.onQuery = null
+            started = CoroutineScope(Dispatchers.IO).async { action() }
+            Thread.sleep(1500)
+            doneDuringPull = started!!.isCompleted
+        }
+        return { doneDuringPull } to { started!! }
+    }
+
+    // E1: restoring what was sent waits for a pull under way. Before, it went in at once and the pull then wrote back the
+    // row it had read before it (same event id replaces), so the restored record was lost.
+    @Test fun restoringTheSendRecordWaitsForAPullUnderWay() = runBlocking {
+        save("QA Alpha")
+        start()
+        val before = rows().single()
+        dav.edit(plannerFile("QA Alpha").key) { it.replace("SUMMARY:QA Alpha", "SUMMARY:QA Alpha web") }
+        val (doneDuringPull, job) = duringThePull {
+            sync.restoreSend(CalendarChoice(before.account, before.calendar, "Planner", null), listOf(before.copy(fingerprint = "from-backup")))
+        }
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        job().await()
+        assertFalse(doneDuringPull())
+        assertEquals("from-backup", rows().single().fingerprint)
+        assertNull(database.outsideDao().sources().single { it.sendHere }.fetchedFor) // the restore's: read again next time
+    }
+
+    // E1: a backup restore keeps the sync off from replacing the events until the record of what was sent is back.
+    @Test fun aBackupRestoreWaitsForAPullUnderWay() = runBlocking {
+        save("QA Alpha")
+        start()
+        val before = rows().single()
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-paused-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        val staged = backup.stage(android.net.Uri.fromFile(zip))
+        dav.edit(plannerFile("QA Alpha").key) { it.replace("SUMMARY:QA Alpha", "SUMMARY:QA Alpha web") }
+        val (doneDuringPull, job) = duringThePull { backup.restore(staged) }
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        job().await()
+        assertFalse(doneDuringPull())
+        // The backup's events and record, as they were; the edit on Nextcloud comes in with the next pull.
+        assertEquals(before.etag, rows().single().etag)
+        assertEquals(listOf("QA Alpha"), items().map { it.title })
+        syncAgain()
+        assertEquals(listOf("QA Alpha web"), items().map { it.title })
+        assertTrue(conflicts().isEmpty())
+        assertEquals(1, plannerFiles().size)
     }
 }
