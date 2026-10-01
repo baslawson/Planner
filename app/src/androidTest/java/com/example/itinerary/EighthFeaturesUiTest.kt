@@ -145,6 +145,26 @@ class EighthFeaturesUiTest {
         closeAndDiscard();assertEquals(count,data().items.size)
     }
 
+    // U-N3: the launcher starts a static shortcut with NEW_TASK | CLEAR_TASK. It lands on EntryShortcutActivity, in a
+    // task of its own, so the running Planner and the editor open in it stay; the shortcut waits for that editor.
+    @Test fun launcherShortcutKeepsTheRunningPlannerAndItsEditor()=runBlocking {
+        EditorDraftStore(context).clear()
+        val shortcut=context.getSystemService(android.content.pm.ShortcutManager::class.java).manifestShortcuts.first { it.id=="add_bill" }
+        assertEquals(EntryShortcutActivity::class.java.name,shortcut.intent!!.component!!.className)
+        app.settings.lastViewCalendar=false
+        val activity=ins.startActivitySync(Intent(context,MainActivity::class.java).setAction(EntryShortcuts.ADD_EVENT)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        await { find("Close")!=null }
+        setText("","QA kept editor")
+        await { EditorDraftStore(context).read()?.getJSONObject("item")?.getString("title")=="QA kept editor" }
+        context.startActivity(Intent(shortcut.intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_TASK_ON_HOME))
+        Thread.sleep(2500)
+        assertFalse("the shortcut must not close the running Planner",activity.isDestroyed)
+        await { pickEditable(nodes(),"QA kept editor")!=null };screenshot("shortcut-keeps-editor")
+        assertEquals("Other",EditorDraftStore(context).read()!!.getJSONObject("item").getString("category"))
+        closeAndDiscard()
+    }
+
     @Test fun ocrBillSuggestionsAreReviewedAppliedAndSaved()=runBlocking {
         EditorDraftStore(context).clear()
         // Render a real invoice and run the bundled OCR engine, then review the output in the editor.

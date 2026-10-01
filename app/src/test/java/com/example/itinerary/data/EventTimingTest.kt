@@ -41,4 +41,16 @@ class EventTimingTest {
         assertEquals(listOf(allDay, event), eventsOnDay(listOf(midnight, event, allDay), day.plusDays(1)))
         assertTrue(eventsOnDay(listOf(event), day.plusDays(2)).isEmpty())
     }
+
+    // U-N6: the widget hid skipped dates but listed a paid bill as "Bill due" and counted it; the Agenda hides it.
+    @Test fun widgetLeavesOutPaidAndSkippedBillsLikeTheAgenda() {
+        val due = ItineraryItem(id = 1, tripId = 0, date = day, startTime = null, title = "Due", category = "Bills")
+        val paid = due.copy(id = 2, title = "Paid", paid = true)
+        val skipped = due.copy(id = 3, title = "Skipped", skipped = true)
+        val event = ItineraryItem(id = 4, tripId = 0, date = day, startTime = LocalTime.of(9, 0), title = "Event")
+        val skippedEvent = event.copy(id = 5, skipped = true)
+        assertEquals(listOf(due, event), widgetEventsOnDay(listOf(paid, skipped, event, due, skippedEvent), day))
+        assertEquals(BillTasks.visible(listOf(due, paid, skipped).map { it.billTaskSummary() }, AgendaRange.TODAY, "", day, false).map { it.id },
+            widgetEventsOnDay(listOf(due, paid, skipped), day).map { it.id })
+    }
 }

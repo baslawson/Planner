@@ -122,6 +122,62 @@ class CalendarFileImportUiTest {
         }
     }
 
+    // U-N4: a recreation the manifest doesn't handle (and process death) used to close the open review: only the
+    // shared text was kept in the saved state.
+    @Test fun theReviewSurvivesARecreation() = runBlocking {
+        val stamp = DateTimeFormatter.BASIC_ISO_DATE
+        val file = File(context.cacheDir, "qa-calendar-import-recreate.ics")
+        file.writeText("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:recreate\r\nDTSTART:${today.plusDays(1).format(stamp)}T100000\r\n" +
+            "DURATION:PT30M\r\nSUMMARY:QA Import recreate\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+        try {
+            app.settings.lastViewCalendar = false
+            val activity = ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
+                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            await { find("Add 1 event") != null }
+            ins.runOnMainSync { activity.recreate() }
+            Thread.sleep(1500)
+            await { find("Import calendar file") != null && find("Add 1 event") != null }
+            screenshot("recreated")
+            click("Close")
+            await { find("AGENDA") != null }
+        } finally {
+            file.delete()
+        }
+    }
+
+    // U-N7: a row saved through Edit and then deleted in that editor used to stay "Added" with Add leaving it out.
+    @Test fun aRowSavedThenDeletedInItsEditorCanBeAddedAgain() = runBlocking {
+        val stamp = DateTimeFormatter.BASIC_ISO_DATE
+        val file = File(context.cacheDir, "qa-calendar-import-delete.ics")
+        file.writeText("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:gone\r\nDTSTART:${today.plusDays(1).format(stamp)}T100000\r\n" +
+            "DURATION:PT30M\r\nSUMMARY:QA Import gone\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+        try {
+            app.settings.lastViewCalendar = false
+            ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
+                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            await { find("Add 1 event") != null }
+            click("Edit")
+            await { nodes().any { it.isEditable && it.text?.toString() == "QA Import gone" } }
+            click("Save")
+            await { data().items.any { it.title == "QA Import gone" } }
+            await { find("Delete") != null }
+            click("Delete")
+            await { data().items.none { it.title == "QA Import gone" } }
+            await { find("Import calendar file") != null }
+            screenshot("saved-then-deleted")
+            assertNull(find("Added"))
+            // Unticked once saved; it can be ticked and added again.
+            reveal { ticked("QA Import gone") != null }
+            if (ticked("QA Import gone") == false) click("QA Import gone")
+            await { find("Add 1 event") != null }
+            click("Close")
+        } finally {
+            file.delete()
+        }
+    }
+
     // U1: a row reviewed with Edit and saved there under another title is "Added" and Add leaves it out, so the file's
     // original isn't imported as well. Undo import then removes only what Add inserted.
     @Test fun aRowSavedThroughEditIsNotImportedTwice() = runBlocking {

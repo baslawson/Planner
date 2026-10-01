@@ -28,12 +28,15 @@
             Compose, which re-reads the configuration and recomposes, so nothing needs rebuilding from resources.
             Without this, any of these changes destroys the activity and every screen's state with it: an open event
             editor loses the title, attachments and reminders typed into it, and a document scan in progress is thrown
-            away (found and fixed 20 Sep 2026). Unfinished editors and scans also have a private durable draft for process-death recovery.
+            away (found and fixed 20 Sep 2026). That covers a hardware keyboard or navigation device coming or going,
+            Bold text (fontWeightAdjustment), wide-colour mode and the grammatical gender setting too (U-N4). What Planner
+            was asked to open survives a recreation that still happens (MainActivity.onSaveInstanceState), and unfinished
+            editors and scans also have a private durable draft for process-death recovery.
         -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|fontScale|uiMode|density|locale|layoutDirection">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|fontScale|fontWeightAdjustment|uiMode|colorMode|density|locale|layoutDirection|grammaticalGender">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -54,9 +57,18 @@
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
+        <!--
+            Launcher shortcuts (res/xml/shortcuts.xml) land here, in a task of its own, and are passed on to Planner's
+            task (EntryShortcuts.kt). Android starts a static shortcut with NEW_TASK | CLEAR_TASK; aimed at MainActivity
+            that closed the running Planner and any editor open in it. Exported like MainActivity, which takes the same
+            three actions.
+        -->
+        <activity android:name=".EntryShortcutActivity" android:exported="true" android:taskAffinity=""
+            android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.NoDisplay" />
+
         <!-- App lock (ui/AppLock.kt): covers Planner until the user unlocks; dialogs and editors stay open underneath. -->
         <activity android:name=".LockActivity" android:exported="false" android:launchMode="singleTop"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|fontScale|uiMode|density|locale|layoutDirection" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|fontScale|fontWeightAdjustment|uiMode|colorMode|density|locale|layoutDirection|grammaticalGender" />
 
         <activity android:name=".reminders.SnoozeActivity" android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" />

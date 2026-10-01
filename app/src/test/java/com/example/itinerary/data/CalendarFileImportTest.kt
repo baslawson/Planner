@@ -168,4 +168,15 @@ class CalendarFileImportTest {
         assertEquals(file.entries, CalendarFileImport.chosen(file.entries, all, reviewed = emptySet()))
         assertEquals(setOf(kept.id), CalendarFileImport.selectAll(file.entries, today, includePast = false, duplicates = setOf(edited.id)))
     }
+
+    // U-N7: a row saved through Edit and then deleted again (in that editor) is no longer "Added", so it can be added;
+    // Undo of that deletion brings the event, and "Added", back.
+    @Test fun aSavedRowIsReviewedOnlyWhileItsEventExists() {
+        val event = ItineraryItem(id = 41, tripId = 0, date = LocalDate.of(2026, 10, 2), startTime = null, title = "Saved")
+        val other = event.copy(id = 7, title = "Other")
+        val saved = mapOf(3 to 41L)
+        assertEquals(setOf(3), CalendarFileImport.stillSaved(saved, listOf(other, event)))
+        assertEquals(emptySet<Int>(), CalendarFileImport.stillSaved(saved, listOf(other)))
+        assertEquals(emptySet<Int>(), CalendarFileImport.stillSaved(emptyMap(), listOf(event)))
+    }
 }

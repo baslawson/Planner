@@ -50,7 +50,7 @@ class Repository(
     }
 
     suspend fun widgetEvents(day: java.time.LocalDate): List<ItineraryItem> =
-        eventsOnDay(itemDao.dayCandidates(day, day.minusDays(1)), day)
+        widgetEventsOnDay(itemDao.dayCandidates(day, day.minusDays(1)), day)
 
     suspend fun widgetTasks(day: java.time.LocalDate): List<PlannerTask> =
         taskDao.all().filter { !it.done && it.dueDate != null && it.dueDate <= day }

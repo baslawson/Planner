@@ -111,6 +111,11 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("sharedText", sharedText)
         outState.putString("sharedSubject", sharedSubject)
+        // U-N4: a recreation (or process death) keeps an open calendar-file review, widget task or unhandled tap too.
+        outState.putString("widgetTaskId", widgetTaskId)
+        outState.putParcelable("calendarUri", calendarUri)
+        outState.putString("entryAction", entryAction)
+        outState.putString("widgetDate", widgetDate?.toString())
         super.onSaveInstanceState(outState)
     }
     override fun onNewIntent(intent: Intent) {
@@ -183,6 +188,10 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState != null) {
             sharedText = savedInstanceState.getString("sharedText")
             sharedSubject = savedInstanceState.getString("sharedSubject")
+            widgetTaskId = savedInstanceState.getString("widgetTaskId")
+            calendarUri = androidx.core.os.BundleCompat.getParcelable(savedInstanceState, "calendarUri", android.net.Uri::class.java)
+            entryAction = savedInstanceState.getString("entryAction")?.takeIf(EntryShortcuts::accepts)
+            widgetDate = savedInstanceState.getString("widgetDate")?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
         }
         val settings = (application as ItineraryApp).settings
         // With App lock on, the recent-apps list shows a blank card instead of the last screen (Android 13 and later).
