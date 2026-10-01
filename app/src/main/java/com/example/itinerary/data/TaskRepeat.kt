@@ -33,7 +33,8 @@ enum class TaskRepeat(val label: String) {
 }
 
 /** Calendar repeats advance from their due date; late completions skip missed occurrences. */
-fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): PlannerTask? {
+fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault(),
+                               now: Long = System.currentTimeMillis()): PlannerTask? {
     val rule = TaskRepeat.of(repeat)
     if (rule == TaskRepeat.NONE) return null
     val base = dueDate ?: today
@@ -70,22 +71,54 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
             date
         }
     }
-    // From the base reminder, never a snooze, so snoozing one occurrence doesn't shift the rest.
+    // From the base reminder, never a snooze, so snoozing one occurrence doesn't shift the rest. If it has already passed
+    // [now] (a "day before" reminder of a task done after that time), it goes to the next day its clock time is still
+    // ahead, the new due date at the latest, so it still rings.
     val nextReminder = reminderAt?.let { timestamp ->
         val localReminder = Instant.ofEpochMilli(timestamp).atZone(zone)
         // An undated task has no due-date offset: keep its reminder clock time on the new due date.
         val reminderBase = dueDate ?: localReminder.toLocalDate()
-        localReminder.plusDays(ChronoUnit.DAYS.between(reminderBase, next)).toInstant().toEpochMilli()
+        val moved = localReminder.plusDays(ChronoUnit.DAYS.between(reminderBase, next))
+        val movedAt = moved.toInstant().toEpochMilli()
+        if (movedAt > now) movedAt
+        else generateSequence(moved.toLocalDate().plusDays(1)) { it.plusDays(1) }.takeWhile { it <= next }
+            .map { it.atTime(moved.toLocalTime()).atZone(zone).toInstant().toEpochMilli() }.firstOrNull { it > now } ?: movedAt
     }
     return copy(id = UUID.randomUUID().toString(), dueDate = next, done = false, reminderAt = nextReminder, snoozedUntil = null,
         repeatAnchorDay = anchor, nextTaskId = null, checklist = checklist.map { it.copy(done = false) })
 }
 
-/** "Due tomorrow" from a task's ⋮ menu: due tomorrow, its reminder moved by the same number of days (as a repeat moves
- *  it); an undated task keeps its reminder. A moved reminder ends a snooze. */
-fun PlannerTask.dueTomorrow(today: LocalDate, zone: ZoneId = ZoneId.systemDefault()): PlannerTask {
+/**
+ * "Due tomorrow" from a task's ⋮ menu, like changing the date in the editor: due tomorrow, and a monthly repeat's day
+ * starts again from the new date. The reminder moves by the same number of days (as a repeat moves it) when that is
+ * still ahead of [now] and not after the new due date; otherwise it stays where it was if that is, and else goes on the
+ * new due date at its own clock time. So a dated task's reminder is never left in the past, where it would never ring.
+ * An undated task keeps its reminder. A moved reminder ends a snooze.
+ */
+fun PlannerTask.dueTomorrow(today: LocalDate, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): PlannerTask {
     val target = today.plusDays(1)
-    val days = dueDate?.let { ChronoUnit.DAYS.between(it, target) } ?: 0L
-    val reminder = reminderAt?.let { Instant.ofEpochMilli(it).atZone(zone).plusDays(days).toInstant().toEpochMilli() }
-    return copy(dueDate = target, reminderAt = reminder, snoozedUntil = if (reminder == reminderAt) snoozedUntil else null)
+    if (dueDate == target) return this
+    val reminder = reminderAt?.let { at ->
+        val due = dueDate ?: return@let at
+        val old = Instant.ofEpochMilli(at).atZone(zone)
+        listOf(old.plusDays(ChronoUnit.DAYS.between(due, target)), old)
+            .firstOrNull { it.toInstant().toEpochMilli() > now && it.toLocalDate() <= target }?.toInstant()?.toEpochMilli()
+            ?: target.atTime(old.toLocalTime()).atZone(zone).toInstant().toEpochMilli()
+    }
+    return copy(dueDate = target, reminderAt = reminder, repeatAnchorDay = 0,
+        snoozedUntil = if (reminder == reminderAt) snoozedUntil else null)
+}
+
+/**
+ * Task reminders follow the phone's clock, as event reminders do: after the time zone changes [from] one [to] another,
+ * a reminder keeps its local date and time. A snooze is a fixed time and stays. The alarm as it was set still decides
+ * whether it rings: one not yet gone off whose clock time has already passed in the new zone still rings at its old
+ * time, and one already gone off is not brought back. Both are held as a snooze, so a repeat follows the new clock time.
+ */
+fun PlannerTask.inTimeZone(from: ZoneId, to: ZoneId, now: Long): PlannerTask {
+    val at = reminderAt ?: return this
+    val moved = Instant.ofEpochMilli(at).atZone(from).toLocalDateTime().atZone(to).toInstant().toEpochMilli()
+    if (moved == at) return this
+    val keep = snoozedUntil != null || (moved > now) != (at > now)
+    return copy(reminderAt = moved, snoozedUntil = if (keep) snoozedUntil ?: at else null)
 }

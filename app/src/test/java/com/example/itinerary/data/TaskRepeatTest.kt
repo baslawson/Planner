@@ -55,16 +55,93 @@ class TaskRepeatTest {
         fun at(day: LocalDate, hour: Int) = day.atTime(hour, 0).atZone(sydney).toInstant().toEpochMilli()
         val late = PlannerTask(title = "Late", dueDate = LocalDate.of(2026, 10, 1), reminderAt = at(LocalDate.of(2026, 9, 30), 9),
             snoozedUntil = at(today, 12))
-        val moved = late.dueTomorrow(today, sydney)
+        // Moved at 8 am, so today's 9 am is still ahead.
+        val moved = late.dueTomorrow(today, at(today, 8), sydney)
         assertEquals(LocalDate.of(2026, 10, 6), moved.dueDate)
         // Five days on, across the 4 October clock change: still 9 am, the day before it's due.
         assertEquals(at(LocalDate.of(2026, 10, 5), 9), moved.reminderAt)
         assertNull(moved.snoozedUntil)
         val undated = PlannerTask(title = "Some day", reminderAt = at(today, 15), snoozedUntil = at(today, 16))
-        val dated = undated.dueTomorrow(today, sydney)
+        val dated = undated.dueTomorrow(today, at(today, 8), sydney)
         assertEquals(LocalDate.of(2026, 10, 6), dated.dueDate)
         assertEquals(undated.reminderAt, dated.reminderAt); assertEquals(undated.snoozedUntil, dated.snoozedUntil)
         assertEquals(late.copy(dueDate = moved.dueDate, reminderAt = moved.reminderAt, snoozedUntil = null), moved)
+    }
+    // Review T1: "Due tomorrow" never leaves a reminder in the past (it would never ring) or after the new due date.
+    @Test fun dueTomorrowNeverLeavesAPastOrLateReminder() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        val today = LocalDate.of(2026, 10, 5)
+        fun at(day: LocalDate, hour: Int) = day.atTime(hour, 0).atZone(sydney).toInstant().toEpochMilli()
+        val now = at(today, 10)
+        // Due on the 10th, reminder the day before at 9: brought forward 4 days it would be today 9 am, already past.
+        val early = PlannerTask(title = "Early", dueDate = LocalDate.of(2026, 10, 10), reminderAt = at(LocalDate.of(2026, 10, 9), 9))
+        assertEquals(at(today.plusDays(1), 9), early.dueTomorrow(today, now, sydney).reminderAt)
+        // The same for a late task whose moved reminder (today 9 am) has just passed.
+        val late = PlannerTask(title = "Late", dueDate = LocalDate.of(2026, 10, 1), reminderAt = at(LocalDate.of(2026, 9, 30), 9))
+        assertEquals(at(today.plusDays(1), 9), late.dueTomorrow(today, now, sydney).reminderAt)
+        // An overdue task reminded this afternoon: moved 5 days it would come after the new due date, so it stays,
+        // snooze and all.
+        val overdue = PlannerTask(title = "Overdue", dueDate = LocalDate.of(2026, 10, 1), reminderAt = at(today, 15),
+            snoozedUntil = at(today, 16))
+        val kept = overdue.dueTomorrow(today, now, sydney)
+        assertEquals(overdue.reminderAt, kept.reminderAt); assertEquals(overdue.snoozedUntil, kept.snoozedUntil)
+        for (task in listOf(early, late, overdue)) {
+            val reminder = task.dueTomorrow(today, now, sydney).reminderAt!!
+            assertTrue(task.title, reminder > now && reminder < at(today.plusDays(2), 0))
+        }
+    }
+    // Review T4: like changing the date in the editor, "Due tomorrow" resets the day a monthly repeat keeps to.
+    @Test fun dueTomorrowResetsTheMonthlyAnchorDay() {
+        val successor = PlannerTask(title = "Rent", dueDate = LocalDate.of(2027, 4, 30), repeat = "MONTHLY", repeatAnchorDay = 31)
+        val moved = successor.dueTomorrow(LocalDate.of(2027, 4, 14), 0L)
+        assertEquals(0, moved.repeatAnchorDay)
+        assertEquals(LocalDate.of(2027, 5, 15), moved.nextOccurrence(LocalDate.of(2027, 4, 15))!!.dueDate)
+        // Already due tomorrow: nothing changes.
+        val tomorrow = successor.copy(dueDate = LocalDate.of(2027, 4, 15))
+        assertEquals(tomorrow, tomorrow.dueTomorrow(LocalDate.of(2027, 4, 14), 0L))
+    }
+    // Review R3: a repeat's next reminder at the same offset may already have passed (a "day before" reminder done after
+    // that time): it goes to the next time its clock time comes round, no later than the new due date.
+    @Test fun nextReminderIsNeverAlreadyPast() {
+        val zone = ZoneId.of("Australia/Perth")
+        val today = LocalDate.of(2026, 10, 5)
+        fun at(day: LocalDate, hour: Int) = day.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+        val daily = PlannerTask(title = "Pills", dueDate = today, repeat = "DAILY", reminderAt = at(today.minusDays(1), 9))
+        // Done at 10: tomorrow's "day before" reminder would be today 9 am.
+        assertEquals(at(today.plusDays(1), 9), daily.nextOccurrence(today, zone, at(today, 10))!!.reminderAt)
+        // Done at 8: today 9 am is still ahead.
+        assertEquals(at(today, 9), daily.nextOccurrence(today, zone, at(today, 8))!!.reminderAt)
+        // A weekly one keeps its day-before reminder when that is still ahead.
+        assertEquals(at(today.plusDays(6), 9), daily.copy(repeat = "WEEKLY").nextOccurrence(today, zone, at(today, 10))!!.reminderAt)
+    }
+    // Review R5: task reminders follow the phone's clock, as event reminders do. After a time-zone change a reminder
+    // still ahead keeps its local date and time; one already gone off is not brought back, and one not yet gone off is
+    // not lost when its clock time has already passed in the new zone.
+    @Test fun taskRemindersKeepTheirClockTimeInANewTimeZone() {
+        val perth = ZoneId.of("Australia/Perth"); val sydney = ZoneId.of("Australia/Sydney")
+        val day = LocalDate.of(2026, 10, 7)
+        fun at(hour: Int, zone: ZoneId) = day.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+        val task = PlannerTask(title = "Call", dueDate = day, reminderAt = at(9, perth))
+        // East, at 6 am Perth time (9 am Sydney): 9 am in Sydney has just passed, so the old alarm stays and still rings.
+        val east = task.inTimeZone(perth, sydney, at(6, perth) + 60_000)
+        assertEquals(at(9, sydney), east.reminderAt); assertEquals(at(9, perth), east.activeReminderAt)
+        // East the evening before: 9 am Sydney time.
+        val early = task.inTimeZone(perth, sydney, at(9, perth) - 86_400_000)
+        assertEquals(at(9, sydney), early.reminderAt); assertEquals(at(9, sydney), early.activeReminderAt)
+        // The way back: 9 am in Perth again, unless it has already gone off.
+        assertEquals(at(9, perth), early.inTimeZone(sydney, perth, at(9, perth) - 86_400_000).activeReminderAt)
+        val rung = PlannerTask(title = "Call", dueDate = day, reminderAt = at(9, sydney))
+        val west = rung.inTimeZone(sydney, perth, at(9, sydney) + 60_000)
+        assertEquals(at(9, perth), west.reminderAt)
+        assertTrue(west.activeReminderAt!! <= at(9, sydney) + 60_000)
+        // A snooze is a fixed time, as an event's is; a repeat then follows the new clock time.
+        val snoozed = task.copy(snoozedUntil = at(12, perth)).inTimeZone(perth, sydney, at(9, perth) - 86_400_000)
+        assertEquals(at(12, perth), snoozed.activeReminderAt)
+        assertEquals(day.plusDays(1).atTime(9, 0).atZone(sydney).toInstant().toEpochMilli(),
+            snoozed.copy(repeat = "DAILY").nextOccurrence(day, sydney, at(9, perth) - 86_400_000)!!.reminderAt)
+        // No reminder, or the same zone: unchanged.
+        assertEquals(task.copy(reminderAt = null), task.copy(reminderAt = null).inTimeZone(perth, sydney, 0L))
+        assertEquals(task, task.inTimeZone(perth, perth, 0L))
     }
     @Test fun lateWeeklyCompletionSkipsMissedDatesAndKeepsWeekday() {
         val task = PlannerTask(title = "Weekly", dueDate = LocalDate.of(2026, 9, 1), repeat = "WEEKLY")

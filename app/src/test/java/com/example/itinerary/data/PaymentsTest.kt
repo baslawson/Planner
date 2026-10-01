@@ -11,11 +11,27 @@ class PaymentsTest {
         val settled=Payments.setPaid(bill(),true)
         assertEquals(listOf(3000L,7000L),settled.payments.map { it.amount })
         assertEquals(0L,Payments.remaining(settled.billAmountMinor,settled.paid,settled.payments))
+        // Unticking "paid" reverses only the "Marked paid" entry: the part-payment still counts.
         val reversed=Payments.setPaid(settled,false)
-        assertEquals(2,reversed.payments.size)
-        assertTrue(reversed.payments.all { it.reversed })
-        assertEquals(10000L,Payments.remaining(reversed.billAmountMinor,false,reversed.payments))
+        assertEquals(listOf(false,true),reversed.payments.map { it.reversed })
+        assertEquals(7000L,Payments.remaining(reversed.billAmountMinor,false,reversed.payments))
         assertEquals(7000L,Payments.remaining(10000,false,bill().payments))
+    }
+    // Review R6: $100 bill, $40 part-payment, ticked paid (adds $60 "Marked paid"), unticked: $60 owing again.
+    @Test fun untickingPaidKeepsRealPartPayments() {
+        val bill=bill().copy(payments=listOf(BillPayment(amount=4000,note="Cash")))
+        val paid=Payments.setPaid(bill,true)
+        assertEquals(listOf(4000L,6000L),paid.payments.map { it.amount }); assertEquals("Marked paid",paid.payments.last().note)
+        val unpaid=Payments.setPaid(paid,false)
+        assertFalse(unpaid.paid)
+        assertEquals(listOf(false,true),unpaid.payments.map { it.reversed })
+        assertEquals(6000L,Payments.remaining(unpaid.billAmountMinor,false,unpaid.payments))
+        // Ticked and unticked again: a new "Marked paid" entry, reversed in its turn; the history stays.
+        val again=Payments.setPaid(Payments.setPaid(unpaid,true),false)
+        assertEquals(listOf(false,true,true),again.payments.map { it.reversed }); assertEquals(4000L,Payments.total(again.payments))
+        // Paid in full by real payments: unticking can't leave them covering the bill, so they are reversed as before.
+        val full=bill().copy(paid=true,payments=listOf(BillPayment(amount=4000),BillPayment(amount=6000)))
+        assertTrue(Payments.setPaid(full,false).payments.all { it.reversed })
     }
     @Test fun invalidPaymentBalanceAndRepeatedIdsAreRejected() {
         assertTrue(runCatching { Payments.validate(bill().copy(billAmountMinor=2000)) }.isFailure)

@@ -50,14 +50,21 @@ object Payments {
         require(total == 0L || item.billAmountMinor != null && total <= item.billAmountMinor)
     }
 
+    /** Ticking "paid" records what is left as a "Marked paid" entry; unticking reverses only that entry, so real
+     *  part-payments still count. Payments that would still cover the bill are reversed too: it can't be unpaid with them. */
     fun setPaid(item: ItineraryItem, paid: Boolean): ItineraryItem {
         if (paid == item.paid) return item
         val amount = remaining(item.billAmountMinor, false, item.payments)
         val entries = if (paid && amount != null && amount > 0)
-            item.payments + BillPayment(amount = amount, note = "Marked paid")
-        else if (!paid) item.payments.map { it.copy(reversed = true) } else item.payments
+            item.payments + BillPayment(amount = amount, note = MARKED_PAID)
+        else if (!paid) {
+            val unmarked = item.payments.map { if (it.note == MARKED_PAID) it.copy(reversed = true) else it }
+            val bill = item.billAmountMinor
+            if (bill != null && anyLive(unmarked) && total(unmarked) >= bill) item.payments.map { it.copy(reversed = true) } else unmarked
+        } else item.payments
         return item.copy(paid = paid, payments = entries).also(::validate)
     }
+    private const val MARKED_PAID = "Marked paid"
     fun encode(payments: List<BillPayment>): String = JSONArray().apply {
         validate(payments)
         payments.forEach { put(JSONObject().put("id", it.id).put("amount", it.amount)

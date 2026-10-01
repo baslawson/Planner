@@ -49,7 +49,9 @@ class FourAdditionsDataTest {
         assertEquals(partial,repo.snapshot().items.single());assertEquals(1,scheduled.size)
         repo.setPaid(partial.id,true);repo.setPaid(partial.id,false)
         assertEquals(2,repo.snapshot().items.single().payments.size)
-        assertTrue(repo.snapshot().items.single().payments.all { it.reversed });assertEquals(1,scheduled.size)
+        // Unticking reverses only the "Marked paid" entry: the deposit still counts.
+        assertEquals(listOf(false,true),repo.snapshot().items.single().payments.map { it.reversed });assertEquals(1,scheduled.size)
+        assertEquals(3000L,Payments.total(repo.snapshot().items.single().payments))
     }
     @Test fun recurrenceKeepsEachOccurrencesPaymentsAndCategoryChangeKeepsHistory()=fixture { repo,_,_,_,_,_,_ ->
         repo.saveItem(bill(),options=EventSaveOptions(RepeatRule.MONTHLY,3))

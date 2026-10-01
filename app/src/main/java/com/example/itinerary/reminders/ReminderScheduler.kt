@@ -17,11 +17,19 @@ interface ReminderAlarms {
     fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {}
     fun cancelTask(id: String) {}
     fun cancel(reminderId: Long)
+    // The time zone task reminders were last set in, so that after a change they keep their clock time (Repository).
+    fun reminderZone(): String? = null
+    fun setReminderZone(zone: String) {}
 }
 
 class ReminderScheduler(private val context: Context) : ReminderAlarms {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
     val ledger = AlarmLedger(context)
+    // Backed up with the database on purpose: tasks restored on another phone were set in this zone.
+    private val zonePrefs = context.getSharedPreferences("reminder_zone", Context.MODE_PRIVATE)
+
+    override fun reminderZone(): String? = zonePrefs.getString("zone", null)
+    override fun setReminderZone(zone: String) { if (reminderZone() != zone) zonePrefs.edit().putString("zone", zone).commit() }
 
     override fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {
         val triggerAt = task.activeReminderAt

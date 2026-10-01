@@ -159,8 +159,9 @@ class BillTaskWorkflowUiTest {
         screenshot("completed-bill-task")
         click("Actions for $title"); click("Mark unpaid")
         await { !data().items.single { it.id == saved.id }.paid }
-        assertEquals(0L, Payments.total(data().items.single { it.id == saved.id }.payments))
-        assertTrue(data().items.single { it.id == saved.id }.payments.all { it.reversed })
+        // Only the "Marked paid" entry is reversed: the part-payment still counts.
+        assertEquals(2550L, Payments.total(data().items.single { it.id == saved.id }.payments))
+        assertEquals(listOf(false, true), data().items.single { it.id == saved.id }.payments.map { it.reversed })
     }
 
     @Test fun overdueBillOpensDirectlyFromAgendaSearchAndCalendarAndKeepsItsData() = runBlocking {

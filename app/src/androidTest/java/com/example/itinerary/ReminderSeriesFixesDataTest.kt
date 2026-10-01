@@ -11,6 +11,7 @@ import org.junit.Test
 import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 
 // Move to tomorrow, reminder snoozes, time-zone deliveries, task snoozes and entire-series saves (repository level).
 class ReminderSeriesFixesDataTest {
@@ -19,6 +20,9 @@ class ReminderSeriesFixesDataTest {
         override fun cancel(reminderId: Long) {}
         override fun schedule(item: ItineraryItem, reminder: Reminder) { scheduled += reminder.id }
         override fun reconcile(item: ItineraryItem, reminder: Reminder) { scheduled += reminder.id }
+        var zone: String? = null
+        override fun reminderZone() = zone
+        override fun setReminderZone(zone: String) { this.zone = zone }
     }
     private fun fixture(test: suspend (Repository, Alarms, AttachmentStore) -> Unit) = runBlocking {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
@@ -45,16 +49,25 @@ class ReminderSeriesFixesDataTest {
         assertNull(repo.snapshot().reminders.single().snoozedUntil)
     }
 
-    @Test fun reminderReaddedFromEditorDropsItsSnooze() = fixture { repo, _, _ ->
+    // Review R4: toggling "Ring until I stop it" changes the reminder in place, so its snooze still rings. A reminder
+    // added anew (no id) starts unsnoozed.
+    @Test fun ringToggleKeepsTheReminderAndItsSnooze() = fixture { repo, alarms, _ ->
         repo.saveItem(event(), addedReminders = listOf(reminder()))
         val item = repo.snapshot().items.single()
         val alarm = repo.snapshot().reminders.single()
-        repo.snoozeReminder(alarm.id, System.currentTimeMillis() + 600_000)
+        val until = System.currentTimeMillis() + 600_000
+        repo.snoozeReminder(alarm.id, until)
         val snoozed = repo.snapshot().reminders.single()
-        // What the editor does when "ring until dismissed" is toggled.
-        repo.saveItem(item, addedReminders = listOf(snoozed.copy(id = 0, itemId = 0, ringUntilDismissed = true)), removedReminders = listOf(snoozed))
+        // What the editor does when "ring until dismissed" is toggled: the saved one removed, its changed copy added.
+        alarms.scheduled.clear()
+        repo.saveItem(item, addedReminders = listOf(snoozed.copy(ringUntilDismissed = true)), removedReminders = listOf(snoozed))
         val saved = repo.snapshot().reminders.single()
-        assertTrue(saved.ringUntilDismissed); assertNull(saved.snoozedUntil)
+        assertEquals(snoozed.copy(ringUntilDismissed = true), saved); assertEquals(until, saved.snoozedUntil)
+        // Its alarm is set again, now to ring.
+        assertEquals(listOf(alarm.id), alarms.scheduled)
+        repo.saveItem(item, addedReminders = listOf(saved.copy(id = 0, itemId = 0)), removedReminders = listOf(saved))
+        val readded = repo.snapshot().reminders.single()
+        assertNotEquals(saved.id, readded.id); assertTrue(readded.ringUntilDismissed); assertNull(readded.snoozedUntil)
     }
 
     @Test fun deliveredReminderIsNotScheduledAgain() = fixture { repo, alarms, _ ->
@@ -91,6 +104,21 @@ class ReminderSeriesFixesDataTest {
         repo.setTaskDone("t", true)
         val next = repo.snapshot().tasks.single { it.id != "t" }
         assertEquals(base + 86_400_000, next.reminderAt); assertNull(next.snoozedUntil)
+    }
+
+    // Review R5: a task's 9 am reminder is still 9 am after the phone moves from Perth to Sydney.
+    @Test fun taskRemindersKeepTheirClockTimeAfterATimeZoneChange() = fixture { repo, alarms, _ ->
+        val perth = ZoneId.of("Australia/Perth"); val sydney = ZoneId.of("Australia/Sydney")
+        val day = LocalDate.now().plusDays(3)
+        fun nine(zone: ZoneId) = day.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        repo.saveTask(PlannerTask(id = "t", title = "Call", dueDate = day, reminderAt = nine(perth)))
+        // The first time, the zone is only remembered.
+        repo.rescheduleAllReminders(perth)
+        assertEquals(perth.id, alarms.zone); assertEquals(nine(perth), repo.snapshot().tasks.single().reminderAt)
+        repo.rescheduleAllReminders(sydney)
+        assertEquals(sydney.id, alarms.zone)
+        assertEquals(nine(sydney), repo.snapshot().tasks.single().activeReminderAt)
+        assertTrue(repo.maintenanceIssues.value.isEmpty())
     }
 
     @Test fun entireSeriesSaveLeavesOtherOccurrencesOwnChildren() = fixture { repo, _, store ->
