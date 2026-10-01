@@ -1,0 +1,37 @@
+package com.example.itinerary.data
+
+import org.junit.Assert.*
+import org.junit.Test
+import java.time.*
+
+// Calendar sync and calendar files: review fixes of 1 October 2026.
+class CalendarFixesOct1Test {
+    private val utc = ZoneOffset.UTC
+    private val sydney = ZoneId.of("Australia/Sydney")
+    private fun ics(vararg events: String) = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n" +
+        events.joinToString("") { "BEGIN:VEVENT\r\n$it\r\nEND:VEVENT\r\n" } + "END:VCALENDAR\r\n"
+
+    // S2: Outlook/Exchange write Windows zone names, older Thunderbird a "/mozilla.org/…" prefix. Both are known zones.
+    @Test fun windowsAndPrefixedZoneNamesAreRead() {
+        val berlin = "UID:w\r\nDTSTART;TZID=W. Europe Standard Time:20261005T090000\r\nDTEND;TZID=W. Europe Standard Time:20261005T100000\r\nSUMMARY:Meeting"
+        val synced = ServerEvents.parse(ics(berlin), utc).item
+        assertNotNull("A Windows zone name keeps the event editable", synced)
+        assertEquals(LocalTime.of(7, 0), synced!!.startTime) // 09:00 in Berlin (summer time) is 07:00 UTC
+        assertEquals(60, synced.durationMinutes)
+        val aus = "UID:a\r\nDTSTART;TZID=\"AUS Eastern Standard Time\":20261005T090000\r\nDURATION:PT30M\r\nSUMMARY:Call"
+        assertEquals(LocalTime.of(9, 0), ServerEvents.parse(ics(aus), sydney).item!!.startTime)
+        val mozilla = "UID:m\r\nDTSTART;TZID=/mozilla.org/20050126_1/America/New_York:20261005T090000\r\nDURATION:PT1H\r\nSUMMARY:Lunch"
+        assertEquals(LocalTime.of(13, 0), ServerEvents.parse(ics(mozilla), utc).item!!.startTime)
+        // A subscribed calendar (link) and a file import read them too, instead of skipping every timed event.
+        val window = CalendarFileImport.window(ics(berlin, aus, mozilla), utc, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31))
+        assertEquals(0, window.skipped)
+        assertEquals(listOf(LocalTime.of(7, 0), LocalTime.of(13, 0), LocalTime.of(22, 0)), window.events.map { it.startTime }.sortedBy { it })
+        val imported = CalendarFileImport.read(ics(berlin, mozilla), utc, LocalDate.of(2026, 10, 1))
+        assertEquals(0, imported.skipped)
+        assertEquals(2, imported.entries.size)
+        // Still unknown: read-only, and skipped by an import, as before.
+        assertNull(ServerEvents.parse(ics("UID:z\r\nDTSTART;TZID=Customized Time Zone:20261005T090000\r\nSUMMARY:Where"), utc).item)
+        assertEquals(1, CalendarFileImport.read(ics(berlin, "UID:z\r\nDTSTART;TZID=Imaginary/Zone:20261005T090000\r\nSUMMARY:Where"), utc,
+            LocalDate.of(2026, 10, 1)).skipped)
+    }
+}

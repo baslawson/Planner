@@ -114,7 +114,7 @@ object CalendarFileImport {
         val start = requireNotNull(one("DTSTART"))
         val end = one("DTEND"); val duration = one("DURATION")
         val allDay = Ics.isDate(start)
-        val ownZone = if (allDay || start.value.endsWith("Z")) zone else start.params["TZID"]?.let { ZoneId.of(it) } ?: zone
+        val ownZone = if (allDay || start.value.endsWith("Z")) zone else start.params["TZID"]?.let(Ics::zone) ?: zone
         val first: ZonedDateTime = if (allDay) Ics.date(start).atStartOfDay(zone) else strictTime(start, zone)
         val firstLocal = first.withZoneSameInstant(ownZone).toLocalDateTime()
         // An all-day event longer than Planner holds is cut to MultiDay.MAX_DAYS (a one-time copy, or a read-only one in a
@@ -174,11 +174,11 @@ object CalendarFileImport {
     private fun values(p: Ics.Property, zone: ZoneId): List<LocalDate> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
         val part = Ics.Property(p.name, p.params, value.trim())
         if (Ics.isDate(part)) Ics.date(part) else strictTime(part, zone).withZoneSameInstant(
-            if (value.trim().endsWith("Z")) zone else p.params["TZID"]?.let { ZoneId.of(it) } ?: zone).toLocalDate()
+            if (value.trim().endsWith("Z")) zone else p.params["TZID"]?.let(Ics::zone) ?: zone).toLocalDate()
     }
 
     // A date-time in its own zone (unknown zones refuse the event rather than guessing its time).
-    private fun strictTime(p: Ics.Property, zone: ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false) { ZoneId.of(it) }
+    private fun strictTime(p: Ics.Property, zone: ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false, Ics::zone)
 
     // The Planner events to save for the ticked rows: a repeating row becomes one series (shared seriesId).
     fun events(entries: List<Entry>, today: LocalDate, includePast: Boolean): List<ItineraryItem> {

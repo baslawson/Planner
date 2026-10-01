@@ -31,9 +31,9 @@ object ServerEvents {
             Ics.allDay(first, days)
         } else {
             // An unknown time zone makes the event read-only rather than guessing its time.
-            val begin = Ics.time(start, zone, strictGap = false) { ZoneId.of(it) }.withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
+            val begin = Ics.time(start, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
             val finish = when {
-                end != null -> Ics.time(end, zone, strictGap = false) { ZoneId.of(it) }.withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
+                end != null -> Ics.time(end, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
                 duration != null -> begin.plus(Ics.duration(duration.value))
                 else -> null
             }
