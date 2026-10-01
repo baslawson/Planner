@@ -15,6 +15,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
@@ -27,7 +30,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-/** The sync icon's cloud: plain when all is well, raining while a sync runs, struck through when it isn't synced. */
+/** The sync icon's cloud: with a tick cut out when all is well, raining while a sync runs, struck through when it isn't synced. */
 enum class CloudLook { SYNCED, RAINING, STRUCK }
 
 // Material's "cloud" shape, on a 24 x 24 grid (x 0..24, y 4..20).
@@ -45,13 +48,16 @@ fun SyncCloud(look: CloudLook, color: Color, contentDescription: String, modifie
             infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "fall")
         t
     } else 0f
-    // Offscreen, so the strike's gap clears the cloud, not the top bar behind it.
+    // Offscreen, so the tick and the strike's gap clear the cloud, not the top bar behind it.
     Canvas(modifier.size(24.dp)
         .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
         .semantics { this.contentDescription = contentDescription; role = Role.Image }) {
         scale(size.minDimension / 24f, pivot = Offset.Zero) {
             when (look) {
-                CloudLook.SYNCED -> drawPath(cloud, color)
+                CloudLook.SYNCED -> {
+                    drawPath(cloud, color)
+                    tick()
+                }
                 CloudLook.STRUCK -> {
                     drawPath(cloud, color)
                     strike(color)
@@ -69,6 +75,13 @@ fun SyncCloud(look: CloudLook, color: Color, contentDescription: String, modifie
             }
         }
     }
+}
+
+// Cut out of the cloud's fuller lower middle, so the top bar shows through it.
+private val tickPath = Path().apply { moveTo(7.5f, 13.2f); lineTo(10.6f, 16.2f); lineTo(16.6f, 10.2f) }
+
+private fun DrawScope.tick() {
+    drawPath(tickPath, Color.Black, style = Stroke(width = 2.2f, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = BlendMode.Clear)
 }
 
 // Corner to corner, with a clear gap either side so it reads on a filled cloud.
