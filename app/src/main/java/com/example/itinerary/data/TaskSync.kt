@@ -296,6 +296,11 @@ class TaskSync(
                 else -> rowsDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = ""))
             }
         }
+        // A conflict whose file has gone since: Nextcloud's side is now "deleted" (not the version it had); deleted on both
+        // sides, nothing is left to choose.
+        for ((href, row) in synced) if (href !in listing && row.problem == SentEvent.CONFLICT && row.conflict != "") {
+            if (tasks[row.taskId] == null && row.taskId !in waiting) rowsDao.delete(row.id) else rowsDao.put(row.copy(conflict = ""))
+        }
         db.withTransaction { dao.source(target.id)?.let { dao.updateSource(it.copy(taskCtag = ctag ?: "", taskError = null)) } }
         _hidden.value = hidden
         onChanged()
@@ -351,6 +356,9 @@ class TaskSync(
                         // Nextcloud's file now belongs to a new Planner task; Planner's own task is sent as a new file.
                         val saved = db.taskDao().byId(store.add(ServerTasks.apply(PlannerTask(), server))) ?: return@withContext
                         rowsDao.put(row.copy(taskId = saved.id, etag = current.etag, ics = current.data, fingerprint = ServerTasks.fingerprint(saved), problem = null, conflict = null))
+                        // Planner's task was synced, so it is sent even when done (a done task without a row never is).
+                        rowsDao.put(SentTask(taskId = task.id, account = target.account, list = target.href,
+                            uid = "planner-task-${java.util.UUID.randomUUID()}@planner", fingerprint = ServerTasks.fingerprint(task), problem = SentEvent.PENDING))
                     }
                 }
             }

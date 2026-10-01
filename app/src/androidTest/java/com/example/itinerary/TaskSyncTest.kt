@@ -334,6 +334,43 @@ class TaskSyncTest {
         assertTrue(writes().none { it.first == "DELETE" })
     }
 
+    // Keep both with a done Planner task: that one is sent as its own file too.
+    @Test fun keepBothSendsADonePlannerTask() = runBlocking {
+        add("QA Both done")
+        start()
+        dav.edit(fileOf("QA Both done").key) { it.replace("SUMMARY:QA Both done", "SUMMARY:QA Both done (web)") }
+        repo.setTaskDone(task("QA Both done").id, true)
+        syncAgain()
+        tasks.resolve(tasks.conflicts.first().single().id, TaskSync.Resolution.BOTH)
+        val done = listFiles().values.single { it.second.contains("SUMMARY:QA Both done\r\n") }.second
+        assertTrue(done, done.contains("STATUS:COMPLETED"))
+        assertNotNull(fileOf("QA Both done (web)"))
+        assertTrue(rows().all { it.problem == null })
+    }
+
+    // A conflict whose file is then deleted on Nextcloud shows it as deleted there, not the version it had.
+    @Test fun aConflictsFileDeletedLaterShowsAsDeleted() = runBlocking {
+        add("QA Conflict then gone")
+        start()
+        val path = fileOf("QA Conflict then gone").key
+        dav.edit(path) { it.replace("SUMMARY:QA Conflict then gone", "SUMMARY:QA Conflict then gone (web)") }
+        repo.saveTask(task("QA Conflict then gone").copy(notes = "Planner note"), create = false)
+        syncAgain()
+        assertTrue(tasks.conflicts.first().single().conflict!!.contains("(web)"))
+        dav.files.remove(path); dav.bump()
+        syncAgain()
+        assertEquals("", tasks.conflicts.first().single().conflict)
+    }
+
+    // Sync now says when only the task list couldn't be downloaded.
+    @Test fun aFailedTaskListIsntUpToDate() = runBlocking {
+        start()
+        dav.failTaskQueries = true; dav.bump()
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        assertEquals("Synced, but the task list couldn't be downloaded.", sync.state.value.message)
+    }
+
     @Test fun aBackupKeepsTheListAndWhatWasSynced() = runBlocking {
         add("QA Backed up")
         start()

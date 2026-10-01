@@ -30,6 +30,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var refuse: ((String) -> Int?)? = null
     // Files a REPORT lists without their calendar-data (a server leaving one out of a query reply).
     @Volatile var withoutData: Set<String> = emptySet()
+    // Task queries (VTODO calendar-queries) fail with a 500.
+    @Volatile var failTaskQueries = false
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -61,6 +63,7 @@ class FakeCalDav(private val home: String, private val user: String, private val
                 val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
                 if (start != null) { queries += start; onQuery?.invoke(start); if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
                 val todo = body.contains("name=\"VTODO\"")
+                if (todo && failTaskQueries) return MockResponse().setResponseCode(500)
                 ms(files.filterKeys { it.startsWith(path) }.filter { (p, v) ->
                     if (body.contains("calendar-multiget")) p in wanted
                     // A calendar-query returns only the kind it asks for.
