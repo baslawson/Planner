@@ -883,6 +883,10 @@ class Repository(
                 // are linked to events by content, not sent twice (a backup's own record is put back by the restore).
                 db.sentDao().deleteAll()
                 db.outsideDao().sources().filter { it.sendHere }.forEach { db.outsideDao().updateSource(it.copy(ctag = null, fetchedFor = null)) }
+                // The same for tasks (T5): a send before TaskSync.restore/forget would otherwise delete the files of tasks
+                // the backup doesn't have; the list is read again before anything new is sent to it.
+                db.sentTaskDao().deleteAll()
+                db.outsideDao().sources().filter { it.tasksHere }.forEach { db.outsideDao().updateSource(it.copy(taskCtag = null)) }
             }
         } catch (e: Throwable) {
             dropUncommitted(deleted)

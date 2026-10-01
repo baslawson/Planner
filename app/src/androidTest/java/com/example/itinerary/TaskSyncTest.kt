@@ -323,6 +323,17 @@ class TaskSyncTest {
         assertTrue(all().none { it.title == "QA Still there" })
     }
 
+    // T5: the data is replaced first and the task record only after; a send in between deletes nothing on Nextcloud.
+    @Test fun aSendBetweenRestoreStepsDeletesNothing() = runBlocking {
+        add("QA Not in the backup")
+        start()
+        repo.replaceAll(repo.snapshot().copy(tasks = emptyList()))
+        assertTrue(rows().isEmpty())
+        tasks.send()
+        assertNotNull(fileOf("QA Not in the backup"))
+        assertTrue(writes().none { it.first == "DELETE" })
+    }
+
     @Test fun aBackupKeepsTheListAndWhatWasSynced() = runBlocking {
         add("QA Backed up")
         start()
