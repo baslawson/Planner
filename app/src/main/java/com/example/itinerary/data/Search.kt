@@ -30,7 +30,8 @@ class SearchOutcome(
 
 // On-device search over every trip. Words must all match somewhere (title, location, notes,
 // attachment names or category), tolerating capitals, accents, part-words and small typos.
-// Date words like "tomorrow", "next friday", "june" or "12 june" narrow by date instead of matching text.
+// Date words like "tomorrow", "next friday", "june" or "12 june" narrow by date instead of matching text. A month word
+// that is the only date word ("march", "may") finds events in that month or with the word: "Climate March".
 object Search {
     private val MARKS = Regex("\\p{M}+")
     private val ISO_DATE = Regex("\\d{4}-\\d{2}-\\d{2}")
@@ -116,15 +117,21 @@ object Search {
             if (parsed.invalidDates.isNotEmpty()) {
                 return SearchOutcome(emptyList(), parsed.words, emptyList(), parsed.invalidDates)
             }
-            if (parsed.words.isEmpty() && parsed.dates.isEmpty() && categories.isEmpty()) return SearchOutcome.EMPTY
+            val monthOrWord = parsed.monthOrWord
+            if (parsed.words.isEmpty() && parsed.dates.isEmpty() && monthOrWord == null && categories.isEmpty()) return SearchOutcome.EMPTY
             val hits = documents.mapNotNull { document ->
                 checkCancelled()
                 val item = document.item
                 if (categories.isNotEmpty() && item.category !in categories && !("Tasks" in categories && item.category == "Bills")) return@mapNotNull null
                 // A multi-day event matches a date on any day it covers.
-                if (parsed.dates.isNotEmpty() && parsed.dates.none { filter ->
-                        generateSequence(item.date) { it.plusDays(1) }.takeWhile { it <= item.lastDay }.any { day -> filter.test(day) } }) return@mapNotNull null
-                val score = score(parsed.words, document) ?: return@mapNotNull null
+                fun covers(filter: DateFilter) = generateSequence(item.date) { it.plusDays(1) }.takeWhile { it <= item.lastDay }.any { day -> filter.test(day) }
+                if (parsed.dates.isNotEmpty() && parsed.dates.none(::covers)) return@mapNotNull null
+                var score = score(parsed.words, document) ?: return@mapNotNull null
+                if (monthOrWord != null) {
+                    val wordScore = score(listOf(monthOrWord.word), document)
+                    if (wordScore == null && !covers(monthOrWord.month)) return@mapNotNull null
+                    score += wordScore ?: 0.0
+                }
                 val matchingDocument = document.attachments.firstOrNull { attachment ->
                     parsed.words.any { token -> attachment.words.any { word -> matchesWord(word, token) } }
                 }
@@ -137,9 +144,11 @@ object Search {
             val taskHits = if (categories.isNotEmpty() && "Tasks" !in categories) emptyList() else taskDocuments.mapNotNull { (task, words) ->
                 checkCancelled()
                 if (parsed.dates.isNotEmpty() && (task.dueDate == null || parsed.dates.none { it.test(task.dueDate) })) return@mapNotNull null
+                if (monthOrWord != null && words.none { matchesWord(it, monthOrWord.word) } && (task.dueDate == null || !monthOrWord.month.test(task.dueDate))) return@mapNotNull null
                 task.takeIf { parsed.words.all { token -> words.any { matchesWord(it, token) } } }
             }.sortedWith(compareBy<PlannerTask> { it.dueDate == null }.thenBy { it.dueDate }.then(Tasks.order))
-            return SearchOutcome(hits, parsed.words, parsed.dates.map { it.label }, taskHits = taskHits)
+            return SearchOutcome(hits, parsed.words + listOfNotNull(monthOrWord?.word),
+                parsed.dates.map { it.label } + listOfNotNull(monthOrWord?.let { "${it.month.label} (or the word ‘${it.word}’)" }), taskHits = taskHits)
         }
 
         companion object {
@@ -212,7 +221,9 @@ object Search {
 
     private class DateFilter(val label: String, val test: (LocalDate) -> Boolean)
 
-    private class Parsed(val words: List<String>, val dates: List<DateFilter>, val invalidDates: List<String>)
+    private class MonthOrWord(val word: String, val month: DateFilter)
+
+    private class Parsed(val words: List<String>, val dates: List<DateFilter>, val invalidDates: List<String>, val monthOrWord: MonthOrWord? = null)
 
     private fun parse(query: String, today: LocalDate): Parsed {
         var text = normalize(query)
@@ -226,6 +237,7 @@ object Search {
 
         val tokens = text.split(SPLIT).filter { it.isNotEmpty() }
         val words = mutableListOf<String>()
+        val loneMonths = mutableListOf<MonthOrWord>()
         var i = 0
         while (i < tokens.size) {
             val token = tokens[i]
@@ -234,26 +246,27 @@ object Search {
                 token == "today" -> { dates += exact(today); i++ }
                 token == "tomorrow" -> { dates += exact(today.plusDays(1)); i++ }
                 token == "yesterday" -> { dates += exact(today.minusDays(1)); i++ }
+                // As quick entry reads them: next Friday is next week's, this Friday this week's.
                 token in MODIFIERS && next in WEEKDAYS -> {
-                    dates += exact(weekdayDate(WEEKDAYS.getValue(next!!), token, today))
+                    dates += exact(QuickEntry.weekdayDate(WEEKDAYS.getValue(next!!), token, today))
                     i += 2
                 }
-                token in WEEKDAYS -> { dates += exact(weekdayDate(WEEKDAYS.getValue(token), "this", today)); i++ }
-                isDayNumber(token) && next != null && monthOf(next) != null -> {
+                token in WEEKDAYS -> { dates += exact(QuickEntry.weekdayDate(WEEKDAYS.getValue(token), "", today)); i++ }
+                dayNumber(token) != null && next != null && monthOf(next) != null -> {
                     val year = yearAt(tokens, i + 2)
                     val size = if (year != null) 3 else 2
-                    named(token.toInt(), monthOf(next)!!, year, tokens.subList(i, i + size), dates, invalidDates)
+                    named(dayNumber(token)!!, monthOf(next)!!, year, tokens.subList(i, i + size), dates, invalidDates)
                     i += size
                 }
-                monthOf(token) != null && next != null && isDayNumber(next) -> {
+                monthOf(token) != null && next != null && dayNumber(next) != null -> {
                     val year = yearAt(tokens, i + 2)
                     val size = if (year != null) 3 else 2
-                    named(next.toInt(), monthOf(token)!!, year, tokens.subList(i, i + size), dates, invalidDates)
+                    named(dayNumber(next)!!, monthOf(token)!!, year, tokens.subList(i, i + size), dates, invalidDates)
                     i += size
                 }
                 token in MONTHS -> {
                     val year = yearAt(tokens, i + 1)
-                    dates += month(MONTHS.getValue(token), year)
+                    if (year != null) dates += month(MONTHS.getValue(token), year) else loneMonths += MonthOrWord(token, month(MONTHS.getValue(token), null))
                     i += if (year != null) 2 else 1
                 }
                 else -> {
@@ -262,6 +275,9 @@ object Search {
                 }
             }
         }
+        // A month word alone may be a title word too: matched as either, unless another date word narrows the search.
+        if (loneMonths.size == 1 && dates.isEmpty() && invalidDates.isEmpty()) return Parsed(words, dates, emptyList(), loneMonths.single())
+        dates += loneMonths.map { it.month }
         return Parsed(words, dates, invalidDates.distinct())
     }
 
@@ -272,19 +288,15 @@ object Search {
         if (valid) dates += dayMonth(day, month, year) else invalidDates += words.joinToString(" ")
     }
 
-    private fun isDayNumber(token: String): Boolean = token.length <= 2 && token.toIntOrNull() in 1..31
+    private val DAY_NUMBER = Regex("(\\d{1,2})(?:st|nd|rd|th)?")
+
+    // 1 to 31, also written 1st, 22nd.
+    private fun dayNumber(token: String): Int? = DAY_NUMBER.matchEntire(token)?.groupValues?.get(1)?.toInt()?.takeIf { it in 1..31 }
 
     private fun monthOf(token: String): Month? = MONTHS[token] ?: MONTH_ABBREVIATIONS[token]
 
     private fun yearAt(tokens: List<String>, index: Int): Int? =
         tokens.getOrNull(index)?.takeIf { it.length == 4 }?.toIntOrNull()?.takeIf { it in 1900..2100 }
-
-    // "friday" and "this friday" include today; "next friday" is the first one after today.
-    private fun weekdayDate(day: DayOfWeek, modifier: String, today: LocalDate): LocalDate = when (modifier) {
-        "last" -> today.minusDays(((today.dayOfWeek.value - day.value + 7) % 7).let { if (it == 0) 7 else it }.toLong())
-        "next" -> today.plusDays(((day.value - today.dayOfWeek.value + 7) % 7).let { if (it == 0) 7 else it }.toLong())
-        else -> today.plusDays(((day.value - today.dayOfWeek.value + 7) % 7).toLong())
-    }
 
     // Formatters are immutable, so one per language is enough; `get()` built a new one for every date
     // word in every query. The locale is part of the key, so changing the phone's language cannot

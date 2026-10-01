@@ -1297,6 +1297,16 @@ object QuickEntry {
         return minute.plusMinutes(((5 - minute.minute % 5) % 5).toLong())
     }
 
+    /** A weekday with next, this, last or nothing, as quick entry and search read it: next Friday is next week's (weeks run
+     *  Monday to Sunday), this Friday this week's (it may have passed), last Friday the latest before today, Friday the
+     *  coming one (today included). */
+    fun weekdayDate(day: DayOfWeek, modifier: String, today: LocalDate): LocalDate = when (modifier) {
+        "next" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(1).with(day)
+        "this" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).with(day)
+        "last" -> today.with(TemporalAdjusters.previous(day))
+        else -> today.with(TemporalAdjusters.nextOrSame(day))
+    }
+
     private fun monthOf(word: String): Month = Month.entries.first { it.name.lowercase(Locale.ROOT).startsWith(word.take(3)) }
 
     private fun weekdayIn(phrase: String): DayOfWeek =
@@ -1475,9 +1485,9 @@ object QuickEntry {
                 when {
                     // "this coming Monday": the next one after today.
                     d.startsWith("this coming ") || d.startsWith("coming ") -> today.with(TemporalAdjusters.next(day))
-                    d.startsWith("next ") || d.startsWith("nxt ") -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(1).with(day)
-                    d.startsWith("this ") -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).with(day)
-                    else -> today.with(TemporalAdjusters.nextOrSame(day))
+                    d.startsWith("next ") || d.startsWith("nxt ") -> weekdayDate(day, "next", today)
+                    d.startsWith("this ") -> weekdayDate(day, "this", today)
+                    else -> weekdayDate(day, "", today)
                 }
             }
         }
