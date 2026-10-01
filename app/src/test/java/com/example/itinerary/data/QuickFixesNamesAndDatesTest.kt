@@ -58,6 +58,27 @@ class QuickFixesNamesAndDatesTest {
         ok("Bins weekly on Tuesday").let { assertEquals(day(10, 6), it.date) }
     }
 
+    // Q-N2: the words between "remind me" and "to" are the when only if they read as a date or time.
+    @Test fun remindMeKeepsATitleThatHasToInIt() {
+        for ((text, title, date) in listOf(
+            Triple("Remind me about the trip to Paris tomorrow", "About the trip to Paris", day(10, 2)),
+            Triple("Remind me how to cook rice tomorrow", "How to cook rice", day(10, 2)),
+            Triple("Remind me Sam's flight to Perth Friday", "Sam's flight to Perth", day(10, 2)),
+        )) ok(text).let {
+            assertEquals(text, title, it.title); assertEquals(text, date, it.date); assertTrue(text, it.taskHint); assertEquals(text, 0, it.reminderMinutes)
+        }
+    }
+
+    @Test fun remindMeWithTheWhenBeforeToStillWorks() {
+        ok("Remind me tomorrow to call mum").let { assertEquals("Call mum", it.title); assertEquals(day(10, 2), it.date); assertTrue(it.taskHint) }
+        ok("Remind me in 2 hours to call mum").let { assertEquals("Call mum", it.title); assertEquals(at(12), it.time) }
+        ok("Remind me on Friday at 3pm to pay rent").let { assertEquals("Pay rent", it.title); assertEquals(day(10, 2), it.date); assertEquals(at(15), it.time) }
+        ok("Remind me to call mum").let { assertEquals("Call mum", it.title); assertTrue(it.taskHint) }
+        ok("Remind me 12 Oct to renew rego").let { assertEquals("Renew rego", it.title); assertEquals(day(10, 12), it.date) }
+        // An unsupported when is still pointed out rather than kept as the title.
+        assertEquals("‘next week’ needs a specific date, time or supported repeat. Edit it, or open More options → Adjust recognised text to keep it in the title.",
+            parse("Remind me next week to book").error)
+    }
 
 
 

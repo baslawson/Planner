@@ -355,7 +355,8 @@ object QuickEntry {
         var taskHint = false
         // Where "remind me" starts, after any masked title in front.
         fun remindStart(match: MatchResult) = match.range.first + match.value.indexOfFirst { !it.isWhitespace() && it != '\uE000' }
-        remindTo.find(remaining)?.let { match ->
+        // Words before "to" that aren't a when are the start of the title: "Remind me about the trip to Paris tomorrow".
+        remindTo.find(remaining)?.takeIf { match -> match.groups[1]?.let { readsAsWhen(it.value) } != false }?.let { match ->
             taskHint = true
             // The when between "remind me" and "to" is left for the date and time parsers.
             val between = match.groups[1]
@@ -1243,6 +1244,13 @@ object QuickEntry {
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
             taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes)
     }
+
+    /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */
+    private fun readsAsWhen(words: String): Boolean =
+        sequenceOf(dates, numericDate, ranges, times, relativeTimes, unsupported, wordDateMatches, holidays, endOfDay, nowWords, allDay,
+            everyPeriod, monthlyWeekdays, monthDayRepeat, weekdayLists, repeats)
+            .fold(words) { left, phrase -> phrase.replace(left, " ") }
+            .let { rx("[\\s,]*(?:\\b(?:at|on|in|by|from|and|then|the)\\b[\\s,]*)*").matches(it) }
 
     private fun spanMinutes(value: String): Double = when {
         rx("^(?:for|in) (?:a )?half\\b").containsMatchIn(value) -> 30.0
