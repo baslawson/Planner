@@ -139,7 +139,10 @@ class EighthFeaturesUiTest {
         await { find("Take page")!=null };click("Cancel");click("Close")
         open(EntryShortcuts.ADD_EVENT);setText("","QA protected draft")
         await { EditorDraftStore(context).read()?.getJSONObject("item")?.getString("title")=="QA protected draft" }
-        open(EntryShortcuts.ADD_BILL)
+        // A second shortcut arrives as the launcher sends it now: through EntryShortcutActivity into the running Planner
+        // (U-N3). Clearing Planner's own task, as this test once did, is exactly what the trampoline avoids.
+        context.startActivity(Intent(context,EntryShortcutActivity::class.java).setAction(EntryShortcuts.ADD_BILL)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await { find("QA protected draft")!=null };screenshot("shortcut-protected-draft")
         assertEquals("Other",EditorDraftStore(context).read()!!.getJSONObject("item").getString("category"))
         closeAndDiscard();assertEquals(count,data().items.size)
