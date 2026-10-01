@@ -32,10 +32,13 @@
             Bold text (fontWeightAdjustment), wide-colour mode and the grammatical gender setting too (U-N4). What Planner
             was asked to open survives a recreation that still happens (MainActivity.onSaveInstanceState), and unfinished
             editors and scans also have a private durable draft for process-death recovery.
+            adjustResize: the screens lift themselves above the keyboard (imePadding). Left unset, Android also panned
+            the window up when a low field (a checklist item) was focused: the pinned buttons ended up far above it.
         -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|fontScale|fontWeightAdjustment|uiMode|colorMode|density|locale|layoutDirection|grammaticalGender">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
