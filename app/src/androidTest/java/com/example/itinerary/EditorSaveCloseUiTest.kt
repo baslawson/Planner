@@ -188,43 +188,43 @@ class EditorSaveCloseUiTest {
         click("Save")
         await { data().items.single { it.id==id }.title=="QA underneath mine" && !enabled("Save") }
         Thread.sleep(1000)
-        assertNull(find("This event was changed on Nextcloud"))
+        assertNull(find("This event was changed elsewhere"))
         // Changed underneath while nothing is unsaved: the banner, and Reload shows it at once.
         fun pull(title:String,location:String)=runBlocking {
             app.repository.asPlannerStore().update(data().items.single { it.id==id }.copy(title=title,location=location))
         }
         pull("QA underneath web","Web room")
-        await { find("This event was changed on Nextcloud")!=null }
+        await { find("This event was changed elsewhere")!=null }
         screenshot("changed-underneath-banner")
         click("Reload")
-        await { pickEditable(nodes(),"QA underneath web")!=null && find("This event was changed on Nextcloud")==null }
+        await { pickEditable(nodes(),"QA underneath web")!=null && find("This event was changed elsewhere")==null }
         assertFalse(enabled("Save"))
         // Changed again while edited here: Save asks; Reload (after asking) drops the edit for Nextcloud's version.
         setText("QA underneath web","QA underneath edit 1")
         pull("QA underneath web 2","Web room 2")
-        await { find("This event was changed on Nextcloud")!=null }
+        await { find("This event was changed elsewhere")!=null }
         click("Save")
-        await { find("Changed on Nextcloud")!=null }
+        await { find("Changed elsewhere")!=null }
         screenshot("changed-underneath-save-asks")
         assertEquals("QA underneath web 2",data().items.single { it.id==id }.title) // nothing written yet
         click("Reload")
-        await { pickEditable(nodes(),"QA underneath web 2")!=null && find("Changed on Nextcloud")==null }
+        await { pickEditable(nodes(),"QA underneath web 2")!=null && find("Changed elsewhere")==null }
         assertEquals("Web room 2",data().items.single { it.id==id }.location)
         // Banner Reload with unsaved changes asks first.
         setText("QA underneath web 2","QA underneath edit 2")
         pull("QA underneath web 3","Web room 3")
-        await { find("This event was changed on Nextcloud")!=null }
+        await { find("This event was changed elsewhere")!=null }
         click("Reload")
         await { find("Reload?")!=null }
         click("Keep editing")
         await { find("Reload?")==null && pickEditable(nodes(),"QA underneath edit 2")!=null }
-        // Save anyway: this version is written over Nextcloud's.
+        // Save anyway: this version is written over the stored one.
         click("Save")
-        await { find("Changed on Nextcloud")!=null }
+        await { find("Changed elsewhere")!=null }
         click("Save anyway")
         await { data().items.single { it.id==id }.title=="QA underneath edit 2" && !enabled("Save") }
         Thread.sleep(1000)
-        assertNull(find("This event was changed on Nextcloud"))
+        assertNull(find("This event was changed elsewhere"))
         click("Close")
         await { !editorOpen() }
     }
