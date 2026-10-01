@@ -294,7 +294,7 @@ object QuickEntry {
     // adjective form, group 2 the word after it; see parse.
     private val frequencyNames = rx("(?<![\\w-])(?:(daily|weekly|bi-?weekly|fortnightly|monthly|quarterly|yearly|annually)|every\\s+day)(?=\\s+(\\p{L}+))")
     // Also with a word already kept as title text between: "the midnight sun".
-    private val determinerBefore = rx("\\b(?:the|a|an|my|our|your|his|her|their)\\s+(?:+\\s+)*$")
+    private val determinerBefore = rx("\\b(?:the|a|an|my|our|your|his|her|their)\\s+(?:\uE000+\\s+)*$")
     // Capitalised words right after "at": the place's name so far ("at Rising "). Not a possessive: "at Mum's Sun" is Sunday.
     private val placeNameBefore = Regex("(?:\\b[Aa][Tt]\\s+|(?<!\\S)@\\s*)(?:\\p{Lu}[\\p{L}&-]*\\s+)+$")
 
@@ -349,13 +349,13 @@ object QuickEntry {
             // "Watch the sun", "Dinner at the Sun", "Lunch at Rising Sun": after "the", or ending a place's name, a word.
             if (determinerBefore.containsMatchIn(before) ||
                 following == null && match.value.equals("sun", ignoreCase = true) && placeNameBefore.containsMatchIn(before)) {
-                mask(match.range, ''); return@forEach
+                mask(match.range, '\uE000'); return@forEach
             }
             // "Watch Midnight in Paris": a capitalised clock word before in/at/of and a name is a title. Written in lower
             // case it is still the time: "Call midnight in Perth".
             if (clockWord && match.value[0].isUpperCase() &&
                 Regex("^\\s+(?:in|at|of)\\s+(?:the\\s+)?\\p{Lu}").containsMatchIn(remaining.substring(match.range.last + 1))) {
-                mask(match.range, ''); return@forEach
+                mask(match.range, '\uE000'); return@forEach
             }
             if (following == null) return@forEach
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
