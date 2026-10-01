@@ -156,4 +156,16 @@ class CalendarFileImportTest {
             ZoneOffset.UTC, LocalDate.of(2026, 7, 1), LocalDate.of(2027, 10, 31)).events.single()
         assertEquals(LocalDate.of(2026, 10, 1).plusDays(MultiDay.MAX_DAYS - 1L), shown.endDate)
     }
+
+    // U1: a row saved through Edit (perhaps with a new title or time, so no longer a duplicate) is never added again by
+    // Add, even while still ticked, and Select all leaves it out.
+    @Test fun aRowSavedThroughEditIsNotAddedAgain() {
+        val file = read("UID:a\r\nDTSTART:20261001T090000\r\nSUMMARY:Edited", "UID:b\r\nDTSTART:20261002T090000\r\nSUMMARY:Kept")
+        val edited = file.entries.single { it.item.title == "Edited" }
+        val kept = file.entries.single { it.item.title == "Kept" }
+        val all = file.entries.mapTo(HashSet()) { it.id }
+        assertEquals(listOf(kept), CalendarFileImport.chosen(file.entries, all, reviewed = setOf(edited.id)))
+        assertEquals(file.entries, CalendarFileImport.chosen(file.entries, all, reviewed = emptySet()))
+        assertEquals(setOf(kept.id), CalendarFileImport.selectAll(file.entries, today, includePast = false, duplicates = setOf(edited.id)))
+    }
 }

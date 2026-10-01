@@ -131,6 +131,22 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
         if (task == null) onDismiss() else { savedTask = task; savedId = id; savedRound++ }
     }
     val savedKey = savedId
+    // Counted for the widget's day (U5) from first composed to gone, whatever it shows.
+    DisposableEffect(Unit) {
+        TaskDraftStore.editorOpened()
+        onDispose { TaskDraftStore.editorClosed() }
+    }
+    // U4: one editor per task. Another one on a task already open (the widget's over the agenda's, a second window's)
+    // says so instead of opening on the same draft. A new task has nothing to share until it is saved.
+    val claimId = if (creating) savedKey else initial.id
+    val claim = remember(claimId) { claimId?.let(::TaskEditorClaim) }
+    if (claim != null && !claim.owner) {
+        if (closeRequested) LaunchedEffect(Unit) { onDismiss() }
+        PlannerDialog("Task already open", onDismissRequest = onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) {
+            Text("This task is open in another editor. Save or close it there first.")
+        }
+        return
+    }
     if (savedKey != null) {
         if (savedTask == null) LaunchedEffect(savedKey) { repo.task(savedKey)?.let { savedTask = it } ?: onDismiss() }
         savedTask?.let { task ->
@@ -169,6 +185,14 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
             TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved, closeRequested, onCloseCancelled)
         }
     }
+}
+
+// Holds [taskId] for one task editor from when it is first composed until it leaves (or its composition is dropped).
+private class TaskEditorClaim(val taskId: String) : RememberObserver {
+    val owner = TaskDraftStore.claim(taskId, this)
+    override fun onRemembered() {}
+    override fun onForgotten() = TaskDraftStore.release(taskId, this)
+    override fun onAbandoned() = TaskDraftStore.release(taskId, this)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

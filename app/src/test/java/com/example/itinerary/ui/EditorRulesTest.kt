@@ -107,4 +107,12 @@ class EditorRulesTest {
         assertEquals(false, EditorRules.changedElsewhere(opened.copy(id = 0), opened.copy(id = 0, title = "x")))
         assertEquals(false, EditorRules.changedElsewhere(opened, opened.copy(id = 8, title = "x")))
     }
+
+    // U6: a date moved back by Undo in Planner counts as changed too, so the banner doesn't claim it came from Nextcloud.
+    @Test fun changedElsewhereBannerDoesNotNameNextcloud() {
+        val opened = ItineraryItem(id = 7, tripId = 0, date = oct3, startTime = LocalTime.of(9, 0), title = "Dentist")
+        assertEquals(true, EditorRules.changedElsewhere(opened, opened.copy(date = oct3.plusDays(1))))
+        assertEquals("This event was changed elsewhere", EditorRules.changedElsewhereBanner(bill = false))
+        assertEquals("This bill was changed elsewhere", EditorRules.changedElsewhereBanner(bill = true))
+    }
 }

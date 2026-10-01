@@ -201,6 +201,10 @@ object CalendarFileImport {
     fun selectAll(entries: List<Entry>, today: LocalDate, includePast: Boolean, duplicates: Set<Int>): Set<Int> =
         entries.filter { it.id !in duplicates && it.datesFor(today, includePast).isNotEmpty() }.mapTo(HashSet()) { it.id }
 
+    // What Add saves: the ticked rows, never one already saved through Edit ([reviewed]), even after it was changed there.
+    fun chosen(entries: List<Entry>, ticked: Set<Int>, reviewed: Set<Int>): List<Entry> =
+        entries.filter { it.id in ticked && it.id !in reviewed }
+
     fun existingKeys(items: List<ItineraryItem>): Set<Triple<String, LocalDate, LocalTime?>> =
         items.mapTo(HashSet()) { Triple(it.title, it.date, it.startTime) }
 }

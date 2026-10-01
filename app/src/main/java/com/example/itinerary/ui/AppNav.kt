@@ -115,12 +115,23 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             }
         }
     }
-    var recovered by remember { mutableStateOf(runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }.getOrNull()) }
+    var recovered by remember { mutableStateOf(runCatching {
+        draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value) { com.example.itinerary.data.EditorDraftStore(app).read() }
+    }.getOrNull()) }
 
     var shortcutItem by remember { mutableStateOf<com.example.itinerary.data.ItineraryItem?>(null) }
     var shortcutScan by remember { mutableStateOf(false) }
     if (calendarUri != null) CalendarImportDialog(initialUri = calendarUri, onDismiss = onCalendarOpened)
     var draftChecked by remember { mutableStateOf(recovered == null) }
+    // U2: the saved event the recovery editor reopens, claimed while it's up (a new event's draft has no other editor).
+    // Claimed before any restored bill editor looks (BillTaskEditor checks once composed, in its LaunchedEffect).
+    val recoveringId = remember(recovered) {
+        recovered?.let { runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")).id }.getOrNull() }?.takeIf { it != 0L }
+    }
+    if (recoveringId != null) DisposableEffect(recoveringId) {
+        com.example.itinerary.data.EditorDraftStore.recoveryOpened(recoveringId)
+        onDispose { com.example.itinerary.data.EditorDraftStore.recoveryClosed(recoveringId) }
+    }
     LaunchedEffect(Unit) {
         val token = recovered?.optString("token")?.takeIf { it.isNotEmpty() }
         if (token != null && app.repository.snapshot().items.any { it.draftToken == token }) {
@@ -293,14 +304,16 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 }
             }
         }
-        // A widget tap while an event editor is open goes back to that editor; the widget's day opens once it is saved
-        // or discarded (D10). Moving to the day at once would drop the editor with its draft.
+        // A widget tap while an event or task editor is open goes back to that editor; the widget's day opens once it is
+        // saved or discarded (D10, U5). Moving to the day at once would drop the editor with its draft.
         // Not lifecycle-bound: the tap that brings Planner back must see the current count at once.
-        val openEditors by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsState()
+        val openEventEditors by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsState()
+        val openTaskEditors by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsState()
+        val openEditors = openEventEditors + openTaskEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.WAIT)
-                Toast.makeText(app, WIDGET_WAITS_FOR_EDITOR, Toast.LENGTH_LONG).show()
+                Toast.makeText(app, widgetWaitMessage(openEventEditors, openTaskEditors), Toast.LENGTH_LONG).show()
         }
         LaunchedEffect(widgetDate, waitingForEditor) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.OPEN) {
@@ -354,9 +367,18 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 
 }
 
-internal const val WIDGET_WAITS_FOR_EDITOR = "Close this event first. Then the widget's day opens."
+// What the widget's day waits for, named by what is open.
+internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int): String = when {
+    taskEditors == 0 -> "Close this event first. Then the widget's day opens."
+    eventEditors == 0 -> "Close this task first. Then the widget's day opens."
+    else -> "Close the open event and task first. Then the widget's day opens."
+}
 
 internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
+
+// U3: the event draft on disk is recovered only while no event editor is open in this process. One open in another
+// Planner window (a share, an .ics file or a shortcut can open a second one) is still writing that draft.
+internal fun <T> draftToRecover(openEditors: Int, read: () -> T?): T? = if (openEditors > 0) null else read()
 
 // What a widget tap does now: nothing to open, wait for the open editor(s) to be closed, or open the day.
 internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDateStep = when {

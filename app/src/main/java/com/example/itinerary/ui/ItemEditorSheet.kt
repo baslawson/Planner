@@ -396,7 +396,7 @@ private fun ItemEditorForm(
         committed = true
         onDismiss()
     }
-    // E10: the form again from the event as stored now (changed on Nextcloud); what was unsaved here is dropped, like
+    // E10: the form again from the event as stored now (changed elsewhere); what was unsaved here is dropped, like
     // Discard. [onSaved] loads it, as after a Save.
     fun reload() {
         draftStore.clear()
@@ -604,7 +604,7 @@ private fun ItemEditorForm(
             if (changedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                 FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("This ${if (billTask) "bill" else "event"} was changed on Nextcloud",
+                    Text(EditorRules.changedElsewhereBanner(billTask),
                         color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.align(Alignment.CenterVertically))
                     TextButton(enabled = !busy && !readingText, onClick = { if (unsaved) askingReload = true else reload() }) { Text("Reload") }
                 }
@@ -987,13 +987,13 @@ private fun ItemEditorForm(
             else "This ${if (billTask) "bill" else "event"} has changes that can't be saved as they are. Keep editing to fix them, or discard them.")
     }
 
-    // E10: Save while the event changed underneath: keep this version (written over Nextcloud's), or reload theirs.
-    if (askingStale) PlannerDialog("Changed on Nextcloud",
+    // E10: Save while the event changed underneath: keep this version (written over the stored one), or reload that.
+    if (askingStale) PlannerDialog("Changed elsewhere",
         onDismissRequest = { askingStale = false; closeAfterSave = false },
         primary = DialogAction("Save anyway", enabled = !busy) { askingStale = false; save(allowStale = true) },
         dismiss = DialogAction("Reload", enabled = !busy) { askingStale = false; closeAfterSave = false; reload() },
     ) {
-        Text("This ${if (billTask) "bill" else "event"} changed on Nextcloud since you opened it. Save your version anyway?")
+        Text("This ${if (billTask) "bill" else "event"} changed since you opened it, on Nextcloud or elsewhere in Planner. Save your version anyway?")
         Text("Reload shows it as it is now, without your unsaved changes.", style = MaterialTheme.typography.bodySmall)
     }
     if (askingReload) PlannerDialog("Reload?",

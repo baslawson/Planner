@@ -1,6 +1,7 @@
 package com.example.itinerary.ui
 
 import com.example.itinerary.data.EditorDraftStore
+import com.example.itinerary.data.TaskDraftStore
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.LocalDate
@@ -26,5 +27,17 @@ class WidgetDateStepTest {
         EditorDraftStore.editorClosed()
         assertEquals(before, EditorDraftStore.openEditors.value)
         assertEquals(WidgetDateStep.OPEN, widgetDateStep(day, EditorDraftStore.openEditors.value))
+    }
+
+    // U5: an open task editor makes the widget's day wait too, and the message names what is open.
+    @Test fun openTaskEditorsWaitToo() {
+        val before = TaskDraftStore.openEditors.value
+        TaskDraftStore.editorOpened()
+        assertEquals(WidgetDateStep.WAIT, widgetDateStep(day, EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value))
+        TaskDraftStore.editorClosed()
+        assertEquals(before, TaskDraftStore.openEditors.value)
+        assertEquals("Close this event first. Then the widget's day opens.", widgetWaitMessage(1, 0))
+        assertEquals("Close this task first. Then the widget's day opens.", widgetWaitMessage(0, 1))
+        assertEquals("Close the open event and task first. Then the widget's day opens.", widgetWaitMessage(1, 2))
     }
 }

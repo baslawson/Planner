@@ -121,4 +121,50 @@ class CalendarFileImportUiTest {
             file.delete()
         }
     }
+
+    // U1: a row reviewed with Edit and saved there under another title is "Added" and Add leaves it out, so the file's
+    // original isn't imported as well. Undo import then removes only what Add inserted.
+    @Test fun aRowSavedThroughEditIsNotImportedTwice() = runBlocking {
+        val stamp = DateTimeFormatter.BASIC_ISO_DATE
+        fun at(date: LocalDate, time: String) = "${date.format(stamp)}T$time"
+        val file = File(context.cacheDir, "qa-calendar-import-edit.ics")
+        file.writeText("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + listOf(
+            "UID:review\r\nDTSTART:${at(today.plusDays(1), "100000")}\r\nDURATION:PT30M\r\nSUMMARY:QA Import review",
+            "UID:weekly\r\nDTSTART:${at(today.plusDays(2), "180000")}\r\nDURATION:PT1H\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:QA Import weekly",
+        ).joinToString("") { "BEGIN:VEVENT\r\n$it\r\nEND:VEVENT\r\n" } + "END:VCALENDAR\r\n")
+        try {
+            app.settings.lastViewCalendar = false
+            ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
+                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            await { find("Add 2 events") != null }
+            // Only the one-off row offers Edit; a repeating one doesn't.
+            click("Edit")
+            await { nodes().any { it.isEditable && it.text?.toString() == "QA Import review" } }
+            val title = nodes().first { it.isEditable && it.text?.toString() == "QA Import review" }
+            assertTrue(title.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "QA Import reviewed")
+            }))
+            click("Save")
+            await { data().items.any { it.title == "QA Import reviewed" } }
+            click("Close")
+            await { find("Import calendar file") != null && find("Add 1 event") != null }
+            reveal { find("Added") != null && ticked("QA Import review") == false }
+            screenshot("edited-row")
+            // Select all doesn't tick it again.
+            click("Select all")
+            await { find("Add 1 event") != null }
+            click("Add 1 event")
+            await { find("Calendar imported") != null && find("Added 3 events.") != null }
+            val items = data().items
+            assertEquals(1, items.count { it.title == "QA Import reviewed" })
+            assertEquals(0, items.count { it.title == "QA Import review" })
+            assertEquals(3, items.count { it.title == "QA Import weekly" })
+            click("Undo import")
+            await { data().items.none { it.title == "QA Import weekly" } }
+            assertEquals(1, data().items.count { it.title == "QA Import reviewed" })
+        } finally {
+            file.delete()
+        }
+    }
 }

@@ -44,8 +44,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -161,9 +163,14 @@ fun AgendaScreen(
     // Quick entry's "Add": the list scrolls to it once it's there; if this view doesn't show it, the bar says it.
     var following by remember { mutableStateOf<QuickAdded?>(null) }
     val addedBar = rememberAddedBar()
-    LaunchedEffect(following, dates, anytimeTasks, anytimeExpanded) {
-        val added = following ?: return@LaunchedEffect
-        rowOf(added)?.let { listState.animateScrollToItem(it); following = null }
+    val followScope = rememberCoroutineScope()
+    // Read here, so any change rowOf depends on (an entry added to a day already listed too) looks again (T3).
+    val followRow = following?.let(::rowOf)
+    LaunchedEffect(followRow) {
+        val row = followRow ?: return@LaunchedEffect
+        // Found: done following before the scroll starts, so the bar's timer below can't fire and cancel it midway.
+        following = null
+        followScope.launch { listState.animateScrollToItem(row) }
     }
     LaunchedEffect(following) {
         val added = following ?: return@LaunchedEffect

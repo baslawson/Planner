@@ -76,6 +76,10 @@ object EditorRules {
     fun changedElsewhere(baseline: ItineraryItem, stored: ItineraryItem?): Boolean =
         baseline.id != 0L && stored != null && stored.id == baseline.id && com.example.itinerary.data.ServerEvents.apply(baseline, stored) != baseline
 
+    // The banner for [changedElsewhere]. It doesn't name Nextcloud: the same fields also change in Planner itself (Undo
+    // of "Moved … to tomorrow", U6), and the editor can't tell which it was.
+    fun changedElsewhereBanner(bill: Boolean): String = "This ${if (bill) "bill" else "event"} was changed elsewhere"
+
     // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
     fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
         fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),

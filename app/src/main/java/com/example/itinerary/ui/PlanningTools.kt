@@ -231,7 +231,10 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     var result by remember { mutableStateOf<CalendarFileImport.Result?>(null) }
     var ticked by remember { mutableStateOf(emptySet<Int>()) }
     var includePast by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<ItineraryItem?>(null) }
+    // The row being reviewed in the event editor, and the event it opened with.
+    var editing by remember { mutableStateOf<Pair<Int, ItineraryItem>?>(null) }
+    // Rows saved through Edit: already in Planner, perhaps changed, so Add and Select all leave them out (U1).
+    var reviewed by remember { mutableStateOf(emptySet<Int>()) }
     var added by remember { mutableStateOf<List<Long>?>(null) }
     var addedSeries by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -253,6 +256,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                 }
                 result = read
                 includePast = false
+                reviewed = emptySet()
                 ticked = read.entries.filter { !it.past(today) && !CalendarFileImport.duplicate(it, existing, today, false) }.mapTo(HashSet()) { it.id }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "Could not read this calendar file."; result = null }
@@ -266,10 +270,10 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
         entries.filter { CalendarFileImport.duplicate(it, existing, today, includePast) }.mapTo(HashSet()) { it.id }
     }
     // An event saved from the editor (or added some other way) meanwhile is now in Planner: don't add it twice.
-    LaunchedEffect(duplicates) { ticked = ticked - duplicates }
+    LaunchedEffect(duplicates, reviewed) { ticked = ticked - duplicates - reviewed }
     val pastIds = remember(entries, today) { entries.filter { it.past(today) }.mapTo(HashSet()) { it.id } }
 
-    editing?.let { NewPlanningEventEditor(it) { editing = null }; return }
+    editing?.let { (id, item) -> NewPlanningEventEditor(item, onSaved = { reviewed = reviewed + id }) { editing = null }; return }
     added?.let { ids ->
         PlannerDialog("Calendar imported", onDismissRequest = { if (!busy) onDismiss() },
             primary = DialogAction("Done", enabled = !busy, onClick = onDismiss),
@@ -302,7 +306,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
         }
         return
     }
-    val chosen = entries.filter { it.id in ticked }
+    val chosen = CalendarFileImport.chosen(entries, ticked, reviewed)
     val format = LocalTimeFormat.current
     PlannerDialog("Import calendar file", onDismissRequest = { if (!busy) onDismiss() },
         primary = DialogAction(if (busy) "Adding…" else if (chosen.size == 1) "Add 1 event" else "Add ${chosen.size} events",
@@ -327,7 +331,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                 if (repeating > 0) " ($repeating repeating)" else "", style = MaterialTheme.typography.bodyMedium)
             if (pastIds.isNotEmpty()) Row(Modifier.fillMaxWidth().toggleable(value = includePast, enabled = !busy, role = Role.Switch) { on ->
                 includePast = on
-                ticked = if (on) ticked + (pastIds - duplicates) else ticked - pastIds
+                ticked = if (on) ticked + (pastIds - duplicates - reviewed) else ticked - pastIds
             }, verticalAlignment = Alignment.CenterVertically) {
                 // The header sits in the pop-up's title area, so plain text needs its own style there.
                 Text("Include past events (${pastIds.size})", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
@@ -335,7 +339,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(enabled = !busy, onClick = {
-                    ticked = CalendarFileImport.selectAll(entries, today, includePast, duplicates)
+                    ticked = CalendarFileImport.selectAll(entries, today, includePast, duplicates + reviewed)
                 }) { Text("Select all") }
                 TextButton(enabled = !busy, onClick = { ticked = emptySet() }) { Text("Select none") }
             }
@@ -347,11 +351,12 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                 items(entries.size, key = { entries[it].id }) { index ->
                     val entry = entries[index]
                     val dates = entry.datesFor(today, includePast)
-                    ImportRow(entry, dates, entry.id in ticked, entry.id in duplicates, entry.id in pastIds, enabled = !busy,
-                        format = format, onToggle = { on -> ticked = if (on) ticked + entry.id else ticked - entry.id },
-                        onEdit = if (entry.repeating || busy) null else ({
+                    val done = entry.id in reviewed
+                    ImportRow(entry, dates, entry.id in ticked && !done, entry.id in duplicates, entry.id in pastIds, added = done,
+                        enabled = !busy && !done, format = format, onToggle = { on -> ticked = if (on) ticked + entry.id else ticked - entry.id },
+                        onEdit = if (entry.repeating || busy || done) null else ({
                             if (EditorDraftStore.openEditors.value == 0 && runCatching { EditorDraftStore(context).read() == null }.getOrDefault(false))
-                                editing = entry.item.startingOn(dates.firstOrNull() ?: entry.dates.first())
+                                editing = entry.id to entry.item.startingOn(dates.firstOrNull() ?: entry.dates.first())
                             else error = "Finish or discard your current event draft before reviewing another event."
                         }))
                 }
@@ -370,7 +375,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
 // One event in the import list: tick box, title, first date and time, how it repeats, and why it starts unticked.
 @Composable
 private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, checked: Boolean, duplicate: Boolean, past: Boolean,
-                      enabled: Boolean, format: TimeFormat, onToggle: (Boolean) -> Unit, onEdit: (() -> Unit)?) {
+                      added: Boolean, enabled: Boolean, format: TimeFormat, onToggle: (Boolean) -> Unit, onEdit: (() -> Unit)?) {
     val context = LocalContext.current
     val item = entry.item
     val first = dates.firstOrNull() ?: entry.dates.first()
@@ -390,7 +395,8 @@ private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, c
                 "${dates.size} date${if (dates.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall)
             if (item.location.isNotBlank()) Text(item.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             entry.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (duplicate) Text("Already in Planner", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            if (added) Text("Added", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            else if (duplicate) Text("Already in Planner", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             else if (past) Text("Past event", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (onEdit != null) TextButton(onClick = onEdit) { Text("Edit") }
@@ -398,7 +404,7 @@ private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, c
 }
 
 @Composable
-fun NewPlanningEventEditor(item: ItineraryItem, onDismiss: () -> Unit) {
+fun NewPlanningEventEditor(item: ItineraryItem, onSaved: () -> Unit = {}, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val scope = rememberCoroutineScope()
     val categories = remember(app) { CategoryState(app.repository, app.settings, scope) }
@@ -406,7 +412,8 @@ fun NewPlanningEventEditor(item: ItineraryItem, onDismiss: () -> Unit) {
     val hidden by categories.hidden.collectAsStateWithLifecycle()
     PlanningOverlay(onDismiss) {
     ItemEditorSheet(item, emptyList(), emptyList(), counts, hidden, categories::remove, categories::show, onDismiss,
-        onSave = { event, added, removed, reminders, removedReminders, options -> app.repository.saveItemId(event, added, removed, reminders, removedReminders, options) },
+        onSave = { event, added, removed, reminders, removedReminders, options ->
+            app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also { onSaved() } },
         onDelete = { event, series -> app.repository.deleteWithUndo(event, series) })
     }
 }

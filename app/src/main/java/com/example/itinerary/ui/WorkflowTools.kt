@@ -101,6 +101,14 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
     }
 }
 
+// Why shared text can't go to [value] ("event" or "task") now, or null when it can. An event editor open in this or
+// another Planner window (U3) holds the one event draft, so it is named rather than an unfinished draft to resume.
+internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOpen: Boolean): String? = when {
+    value == "event" && eventEditorOpen -> "An event is open in Planner. Close this share, then save or close that event before sharing again."
+    draftExists -> "You have an unfinished $value. Close this share, then resume or discard that draft before sharing again."
+    else -> null
+}
+
 @Composable
 fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
@@ -111,8 +119,8 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
     fun choose(value: String) {
         val check = runCatching { if (value == "event") EditorDraftStore(app).read() != null else TaskDraftStore(app).read("new") != null }
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }
-        if (check.getOrThrow()) error = "You have an unfinished $value. Close this share, then resume or discard that draft before sharing again."
-        else destination = value
+        val blocked = sharedDraftBlock(value, check.getOrThrow(), EditorDraftStore.openEditors.value > 0)
+        if (blocked != null) error = blocked else destination = value
     }
     if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
         primary = DialogAction("Add task", enabled = content.isSuccess) { choose("task") },
@@ -127,6 +135,6 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
             TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss = onDismiss)
         }
         if (destination == "event") NewPlanningEventEditor(ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null,
-                title = shared.title, notes = shared.notes), onDismiss)
+                title = shared.title, notes = shared.notes), onDismiss = onDismiss)
     }
 }

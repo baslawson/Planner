@@ -32,6 +32,14 @@ class EditorDraftStore(context: Context) {
         val openEditors: StateFlow<Int> = open.asStateFlow()
         fun editorOpened() = open.update { it + 1 }
         fun editorClosed() = open.update { (it - 1).coerceAtLeast(0) }
+
+        // U2: the saved event whose draft AppNav's recovery editor has reopened (after process death), while it is up.
+        // A bill editor its screen restored for the same event (Agenda and Search keep which bill was open) closes
+        // again, so only one editor owns the draft and Discard in one can't delete what the other saved.
+        @Volatile private var recovering: Long? = null
+        fun recoveryOpened(itemId: Long) { recovering = itemId }
+        fun recoveryClosed(itemId: Long) { if (recovering == itemId) recovering = null }
+        fun recoveryOwns(itemId: Long): Boolean = recovering == itemId
     }
 }
 
