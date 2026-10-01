@@ -289,6 +289,32 @@ class CalendarTwoWayTest {
         assertOtherCalendarUntouched()
     }
 
+    // E4: a backup keeps conflicts but not Nextcloud's side of them; after a restore the next pull reads that again, so
+    // the choice shows what Nextcloud has (and Keep both) instead of "changed".
+    @Test fun aRestoredConflictGetsNextcloudsSideBack() = runBlocking {
+        dav.put("${synced}from-web.ics", ics("web-1", "QA From web", "20261007T090000Z"))
+        save("QA Gone there", 10)
+        start()
+        dav.edit("${synced}from-web.ics") { it.replace("SUMMARY:QA From web", "SUMMARY:QA From web edited") }
+        repo.saveItem(item("QA From web").copy(title = "QA From web mine"))
+        dav.files.remove(plannerFile("QA Gone there").key); dav.bump()
+        repo.saveItem(item("QA Gone there").copy(location = "Still on"))
+        syncAgain()
+        assertEquals(2, conflicts().size)
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-conflict-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        backup.restore(backup.stage(android.net.Uri.fromFile(zip)))
+        assertEquals(listOf(null, null), conflicts().map { it.conflict }) // kept, without Nextcloud's side
+        syncAgain()
+        val mine = item("QA From web mine")
+        assertTrue(conflicts().single { it.itemId == mine.id }.conflict!!.contains("SUMMARY:QA From web edited"))
+        assertEquals("", conflicts().single { it.itemId == item("QA Gone there").id }.conflict)
+        assertEquals(2, items().size) // nothing brought in twice
+        sync.resolve(conflicts().single { it.itemId == mine.id }.id, CalendarSync.Resolution.BOTH)
+        assertEquals(setOf("QA From web mine", "QA From web edited", "QA Gone there"), items().map { it.title }.toSet())
+    }
+
     private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
 
     @Test fun reconnectingLinksTheFilesAlreadyThereInsteadOfCopyingThem() = runBlocking {

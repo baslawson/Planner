@@ -482,7 +482,8 @@ class CalendarSync(
                     fingerprint = fingerprint(added)))
                 continue
             }
-            if (row.problem == SentEvent.CONFLICT) { if (file.etag != row.etag) sentDao.put(row.copy(conflict = file.data)); continue }
+            // Nextcloud's side of a conflict, kept up to date; read again after a restore (backups keep the conflict, not it).
+            if (row.problem == SentEvent.CONFLICT) { if (file.etag != row.etag || row.conflict == null) sentDao.put(row.copy(conflict = file.data)); continue }
             if (row.problem == SentEvent.PENDING) { adopt(row, file, items[row.itemId]); continue }
             val detached = row.problem == SentEvent.DETACHED
             if (detached && parsed.item == null) {
@@ -514,7 +515,8 @@ class CalendarSync(
             }
         }
         // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile.
-        // A pending one isn't there yet: the next send writes it.
+        // A pending one isn't there yet: the next send writes it. A restored conflict learns again that it's gone there.
+        for ((href, row) in synced) if (href !in listing && row.problem == SentEvent.CONFLICT && row.conflict == null) sentDao.put(row.copy(conflict = ""))
         for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val item = items[row.itemId]
             when {
@@ -602,7 +604,8 @@ class CalendarSync(
     private fun inSync(stored: String, item: ItineraryItem) = inSync(stored, item, zone())
 
     // For backups: which calendar Planner keeps in sync with and what it synced, so a restore doesn't send everything
-    // again. Conflicts aren't kept (they're checked again).
+    // again. Conflicts are kept, without Nextcloud's side (the next pull reads it again): left out, an event from
+    // Nextcloud changed on both sides would match no file by content and come back as a second event.
     suspend fun sendSnapshot(): Pair<CalendarChoice, List<SentEvent>>? {
         val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return null
         return CalendarChoice(target.account, target.href, target.name, target.color, target.enabled) to
