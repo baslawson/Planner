@@ -4,32 +4,19 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
@@ -69,7 +56,8 @@ internal sealed interface SyncIndicatorState {
 }
 
 /**
- * Two-way Nextcloud sync at a glance, for a top bar: spins while syncing, warns on a problem. A tap syncs now while all is
+ * Two-way Nextcloud sync at a glance, for a top bar: a green cloud when up to date, raining while syncing, struck through
+ * (red) on a problem or conflicts. A tap syncs now while all is
  * well (and does nothing while a sync runs); with a problem or conflicts it opens Calendars, where they're shown. A long
  * press always opens Calendars.
  */
@@ -97,17 +85,16 @@ fun SyncIndicator(onOpenCalendars: () -> Unit) {
                 onClickLabel = shown.tapLabel, role = Role.Button),
         contentAlignment = Alignment.Center,
     ) {
-        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.primary) { when (shown) {
+        // The theme's green (Matrix green; a darker, readable green on a light screen); red when it isn't synced.
+        val ok = MaterialTheme.colorScheme.primary
+        val problem = MaterialTheme.colorScheme.error
+        when (shown) {
             is SyncIndicatorState.Conflicts -> BadgedBox(badge = { Badge { Text("${shown.count}") } }) {
-                Icon(Icons.Filled.Warning, contentDescription = shown.label, tint = MaterialTheme.colorScheme.error)
+                SyncCloud(CloudLook.STRUCK, problem, shown.label)
             }
-            SyncIndicatorState.Failed -> Icon(Icons.Filled.Warning, contentDescription = shown.label, tint = MaterialTheme.colorScheme.error)
-            SyncIndicatorState.Syncing -> {
-                val turn by rememberInfiniteTransition(label = "sync").animateFloat(0f, 360f,
-                    infiniteRepeatable(tween(1000, easing = LinearEasing), RepeatMode.Restart), label = "turn")
-                Icon(Icons.Filled.Refresh, contentDescription = shown.label, modifier = Modifier.rotate(turn))
-            }
-            SyncIndicatorState.Synced -> Icon(Icons.Filled.Refresh, contentDescription = shown.label)
-        } }
+            SyncIndicatorState.Failed -> SyncCloud(CloudLook.STRUCK, problem, shown.label)
+            SyncIndicatorState.Syncing -> SyncCloud(CloudLook.RAINING, ok, shown.label)
+            SyncIndicatorState.Synced -> SyncCloud(CloudLook.SYNCED, ok, shown.label)
+        }
     }
 }
