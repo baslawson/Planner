@@ -984,18 +984,20 @@ object QuickEntry {
             val endpoints = rangeEnds(range).toList().map(::normaliseClock)
             val hasMeridiem = endpoints.map { rx("(?:am|pm)$").containsMatchIn(it) }
             val twelveHour = Regex("([1-9]|1[0-2])(?::([0-5]\\d))?")
-            // Only where a bare hour made the range unreadable before; "9:00-10:30" keeps reading as written.
-            if (hasMeridiem.none { it } && endpoints.all { twelveHour.matches(it) } && endpoints.any { ':' !in it }) {
+            // "9-5", "7:30-9:30", "7.30-9.30": either half of the day, as for a single 7:30. A leading zero, an hour of 0
+            // or above 12, four digits or "9h30" read one way only: "08:00-09:30", "9:00-17:30", "1000-1200".
+            if (hasMeridiem.none { it } && rangeEnds(range).toList().all { Regex("([1-9]|1[0-2])(?:[:.][0-5]\\d)?").matches(it.trim()) }) {
                 // "2 till 4", "12 till 1", "4:30-6": morning or afternoon is asked, as for a single time. Both readings last
                 // as long: the end is the first one after the start, within 12 hours.
                 fun at(value: String, pm: Boolean) = twelveHour.matchEntire(value)!!.destructured.let { (h, m) ->
                     LocalTime.of(h.toInt() % 12 + if (pm) 12 else 0, m.ifEmpty { "0" }.toInt()) }
                 val starts = listOf(at(endpoints[0], false), at(endpoints[0], true))
-                // "9-5", "10 till 2": an end hour below the start is the working day, morning to afternoon. Not across
-                // noon from 12, and not for night work ("Night shift 10-6"), which still ask.
+                // "9-5", "10 till 2", "Brunch 11-1": a start from 6 to 11 and an end from 2 to 6 (1 after a start of 10 or
+                // 11) is the working day, morning to afternoon. Others still ask: "Party 8-1" may run past midnight, "Match
+                // 2-1" is a score, "Night shift 10-6" is at night.
                 val (startHour, endHour) = endpoints.map { twelveHour.matchEntire(it)!!.groupValues[1].toInt() }
                 // With a part of the day ("tonight 10-2") that decides am/pm instead.
-                if (endHour < startHour && startHour != 12 && timePrompt == null && !rx("\\bnight").containsMatchIn(text)) {
+                if (startHour in 6..11 && (endHour in 2..6 || endHour == 1 && startHour >= 10) && timePrompt == null && !rx("\\bnight").containsMatchIn(text)) {
                     val length = at(endpoints[1], true).toSecondOfDay() / 60 - starts[0].toSecondOfDay() / 60
                     if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
                     time = starts[0]; duration = length

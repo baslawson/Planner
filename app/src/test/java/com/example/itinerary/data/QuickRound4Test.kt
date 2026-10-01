@@ -58,7 +58,8 @@ class QuickRound4Test {
         // Unchanged: am/pm on one end, and 24-hour ranges.
         ok("Gym Monday 6-7am").let { assertEquals(LocalTime.of(6, 0), it.time); assertEquals(60, it.durationMinutes) }
         ok("Standup 14:00-14:15 tomorrow").let { assertEquals(LocalTime.of(14, 0), it.time); assertEquals(15, it.durationMinutes) }
-        ok("Class 9.00-10.30 Monday").let { assertEquals(LocalTime.of(9, 0), it.time); assertEquals(90, it.durationMinutes); assertFalse(it.ambiguousTime) }
+        // 1 Oct review: minutes without am/pm ask too, as a single 9.00 does.
+        ok("Class 9.00-10.30 Monday").let { assertEquals(listOf(LocalTime.of(9, 0), LocalTime.of(21, 0)), it.timeChoices); assertEquals(90, it.durationMinutes); assertTrue(it.ambiguousTime) }
     }
 
     @Test fun annuallyAndQuarterly() {

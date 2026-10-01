@@ -25,7 +25,8 @@ class QuickRound6Test {
         ok("Picnic Boxing Day 2027").let { assertEquals("Picnic Boxing Day", it.title); assertEquals(LocalDate.of(2027, 12, 26), it.date); assertNull(it.time) }
         ok("Lunch Christmas Day 2026").let { assertEquals(day(12, 25), it.date) }
         // A range without am/pm lasts until the first end after the start.
-        ok("Lunch 12:30-1:30 Thursday").let { assertEquals(LocalTime.of(12, 30), it.time); assertEquals(60, it.durationMinutes) }
+        // 1 Oct review: without am/pm it asks which half of the day, still lasting the hour.
+        ok("Lunch 12:30-1:30 Thursday").let { assertEquals(listOf(LocalTime.of(0, 30), LocalTime.of(12, 30)), it.timeChoices); assertEquals(60, it.durationMinutes) }
         assertEquals(120, ok("Meeting 11:30-1:30 Friday").durationMinutes)
         assertEquals(90, ok("Class 9:00-10:30 Monday").durationMinutes)
         assertEquals(180, ok("Shift 22:00-01:00 Friday").durationMinutes) // 24-hour, overnight
