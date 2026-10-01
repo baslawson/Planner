@@ -11,6 +11,7 @@ import org.junit.Test
 import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 
 // Move to tomorrow, reminder snoozes, time-zone deliveries, task snoozes and entire-series saves (repository level).
 class ReminderSeriesFixesDataTest {
@@ -19,6 +20,9 @@ class ReminderSeriesFixesDataTest {
         override fun cancel(reminderId: Long) {}
         override fun schedule(item: ItineraryItem, reminder: Reminder) { scheduled += reminder.id }
         override fun reconcile(item: ItineraryItem, reminder: Reminder) { scheduled += reminder.id }
+        var zone: String? = null
+        override fun reminderZone() = zone
+        override fun setReminderZone(zone: String) { this.zone = zone }
     }
     private fun fixture(test: suspend (Repository, Alarms, AttachmentStore) -> Unit) = runBlocking {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
@@ -100,6 +104,21 @@ class ReminderSeriesFixesDataTest {
         repo.setTaskDone("t", true)
         val next = repo.snapshot().tasks.single { it.id != "t" }
         assertEquals(base + 86_400_000, next.reminderAt); assertNull(next.snoozedUntil)
+    }
+
+    // Review R5: a task's 9 am reminder is still 9 am after the phone moves from Perth to Sydney.
+    @Test fun taskRemindersKeepTheirClockTimeAfterATimeZoneChange() = fixture { repo, alarms, _ ->
+        val perth = ZoneId.of("Australia/Perth"); val sydney = ZoneId.of("Australia/Sydney")
+        val day = LocalDate.now().plusDays(3)
+        fun nine(zone: ZoneId) = day.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        repo.saveTask(PlannerTask(id = "t", title = "Call", dueDate = day, reminderAt = nine(perth)))
+        // The first time, the zone is only remembered.
+        repo.rescheduleAllReminders(perth)
+        assertEquals(perth.id, alarms.zone); assertEquals(nine(perth), repo.snapshot().tasks.single().reminderAt)
+        repo.rescheduleAllReminders(sydney)
+        assertEquals(sydney.id, alarms.zone)
+        assertEquals(nine(sydney), repo.snapshot().tasks.single().activeReminderAt)
+        assertTrue(repo.maintenanceIssues.value.isEmpty())
     }
 
     @Test fun entireSeriesSaveLeavesOtherOccurrencesOwnChildren() = fixture { repo, _, store ->

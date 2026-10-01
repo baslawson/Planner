@@ -802,10 +802,11 @@ class Repository(
             resetTaskIds = oldTasks.mapTo(hashSetOf()) { it.id })
     }
 
-    // After a reboot or update, and whenever the app opens (the exact-alarm permission may have changed).
-    suspend fun rescheduleAllReminders() = changes.withLock {
+    // After a reboot, update or time change, and whenever the app opens (the exact-alarm permission may have changed).
+    suspend fun rescheduleAllReminders(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()) = changes.withLock {
         // Cleanup is independent maintenance: its failure must not prevent scheduling alarms.
-        performFollowUp(linkedMapOf("cleanup:expired" to { purgeExpiredDeleted() }, "reminders:reload" to {
+        performFollowUp(linkedMapOf("cleanup:expired" to { purgeExpiredDeleted() }, "reminders:zone" to { followTimeZone(zone) },
+            "reminders:reload" to {
             val reminders = reminderDao.all()
             val items = readIds(reminders.map { it.itemId }, itemDao::byIds).associateBy { it.id }
             val delivered = readIds(reminders.map { it.id }, reminderDao::deliveries).associate { it.reminderId to it.key }
@@ -820,6 +821,19 @@ class Repository(
             }
             failure?.let { throw it }
         }))
+    }
+
+    // Task reminders keep their clock time when the phone's time zone changes, as event reminders do (inTimeZone). The
+    // zone they were set in is remembered; the first time there is none, nothing moves.
+    private suspend fun followTimeZone(zone: java.time.ZoneId) = withContext(NonCancellable) {
+        val from = scheduler.reminderZone()?.let { runCatching { java.time.ZoneId.of(it) }.getOrNull() }
+        if (from != null && from != zone) {
+            val now = System.currentTimeMillis()
+            db.withTransaction {
+                taskDao.all().forEach { task -> task.inTimeZone(from, zone, now).let { if (it != task) taskDao.update(it) } }
+            }
+        }
+        scheduler.setReminderZone(zone.id)
     }
 
     /** After a reboot: [post] the [pending] alarms that fell due while the phone was off; missed event reminders then count as delivered. */
