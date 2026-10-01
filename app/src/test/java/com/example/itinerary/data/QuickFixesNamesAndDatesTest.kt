@@ -113,6 +113,12 @@ class QuickFixesNamesAndDatesTest {
         ok("Exam November the first 9am").let { assertEquals("Exam", it.title); assertEquals(day(11, 1), it.date); assertEquals(at(9), it.time) }
     }
 
+    @Test fun monthTheDayNumberLeavesNoMonthInTheTitle() {
+        ok("Exam October the 21st").let { assertEquals("Exam", it.title); assertEquals(day(10, 21), it.date) }
+        ok("Exam October the 21st at 9am").let { assertEquals("Exam", it.title); assertEquals(day(10, 21), it.date); assertEquals(at(9), it.time) }
+        ok("Party Dec the 5th").let { assertEquals("Party", it.title); assertEquals(day(12, 5), it.date) }
+        ok("Exam October 21st").let { assertEquals("Exam", it.title); assertEquals(day(10, 21), it.date) }
+    }
 
 
 
