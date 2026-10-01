@@ -54,9 +54,11 @@ object ServerTasks {
 
     fun fields(task: PlannerTask) = Fields(task.title, task.notes, task.dueDate, task.priority, task.done)
 
-    // The fields sync carries from Nextcloud into a Planner task; everything Planner-only stays as it is.
+    // The fields sync carries from Nextcloud into a Planner task; everything Planner-only stays as it is, except that a
+    // moved due date starts a repeating task's month day afresh (as the editor and "Due tomorrow" do).
     fun apply(task: PlannerTask, server: Fields): PlannerTask =
-        task.copy(title = server.title, notes = server.notes, dueDate = server.dueDate, priority = server.priority, done = server.done)
+        task.copy(title = server.title, notes = server.notes, dueDate = server.dueDate, priority = server.priority, done = server.done,
+            repeatAnchorDay = if (server.dueDate != task.dueDate) 0 else task.repeatAnchorDay)
 
     // What Planner syncs for [task], as a short fingerprint: a change in any synced field changes it.
     fun fingerprint(task: PlannerTask): String = fingerprint(fields(task))

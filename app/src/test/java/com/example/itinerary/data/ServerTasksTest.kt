@@ -55,6 +55,16 @@ class ServerTasksTest {
         assertEquals(LocalDate.of(2026, 10, 5), fields(file("SUMMARY:x", "DUE:20261005T233000"))!!.dueDate)
     }
 
+    // R-M2: a due date moved on Nextcloud starts the monthly anchor afresh; anything else keeps it.
+    @Test fun aMovedDueDateResetsTheRepeatAnchor() {
+        val task = PlannerTask(id = "t", title = "Rent", dueDate = LocalDate.of(2026, 10, 30), repeat = "MONTHLY", repeatAnchorDay = 31)
+        val same = ServerTasks.Fields("Rent paid", "", LocalDate.of(2026, 10, 30), TaskPriority.NORMAL, false)
+        assertEquals(31, ServerTasks.apply(task, same).repeatAnchorDay)
+        val moved = ServerTasks.apply(task, same.copy(dueDate = LocalDate.of(2026, 10, 15)))
+        assertEquals(0, moved.repeatAnchorDay)
+        assertEquals(LocalDate.of(2026, 11, 15), moved.copy(done = true).nextOccurrence(today = LocalDate.of(2026, 10, 1), zone = perth, now = now.toEpochMilli())?.dueDate)
+    }
+
     @Test fun priorityBands() {
         fun p(v: String?) = fields(file(*listOfNotNull("SUMMARY:x", v?.let { "PRIORITY:$it" }).toTypedArray()))!!.priority
         assertEquals(TaskPriority.HIGH, p("1")); assertEquals(TaskPriority.HIGH, p("4"))
