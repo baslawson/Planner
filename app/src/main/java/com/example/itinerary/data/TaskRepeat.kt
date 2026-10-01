@@ -114,11 +114,12 @@ fun PlannerTask.dueTomorrow(today: LocalDate, now: Long = System.currentTimeMill
  * a reminder keeps its local date and time. A snooze is a fixed time and stays. The alarm as it was set still decides
  * whether it rings: one not yet gone off whose clock time has already passed in the new zone still rings at its old
  * time, and one already gone off is not brought back. Both are held as a snooze, so a repeat follows the new clock time.
+ * One gone off keeps its time even when the new one has passed too: its notification's Done and Snooze carry that time.
  */
 fun PlannerTask.inTimeZone(from: ZoneId, to: ZoneId, now: Long): PlannerTask {
     val at = reminderAt ?: return this
     val moved = Instant.ofEpochMilli(at).atZone(from).toLocalDateTime().atZone(to).toInstant().toEpochMilli()
     if (moved == at) return this
-    val keep = snoozedUntil != null || (moved > now) != (at > now)
+    val keep = snoozedUntil != null || at <= now || moved <= now
     return copy(reminderAt = moved, snoozedUntil = if (keep) snoozedUntil ?: at else null)
 }
