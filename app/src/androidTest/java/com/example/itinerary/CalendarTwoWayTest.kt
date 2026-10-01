@@ -209,6 +209,25 @@ class CalendarTwoWayTest {
         assertTrue(conflicts().isEmpty())
     }
 
+    // Deleted in Planner and sent before the next pull, while Nextcloud changed it: the refused delete keeps the row, so
+    // the pull makes it a conflict instead of bringing the file back as a new Planner event.
+    @Test fun aDeleteRefusedByNextcloudBecomesAConflictNotANewEvent() = runBlocking {
+        save("QA Deleted here edited there")
+        start()
+        val path = plannerFile("QA Deleted here edited there").key
+        dav.edit(path) { it.replace("SUMMARY:QA Deleted here edited there", "SUMMARY:QA Edited there") }
+        repo.deleteWithUndo(item("QA Deleted here edited there")); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+        sync.send()
+        assertTrue(dav.files.containsKey(path)) // the server refused the delete
+        assertEquals(SentEvent.CHANGED, rows().single().problem)
+        syncAgain()
+        assertTrue(items().isEmpty()) // not brought back as a new event
+        assertTrue(conflicts().single().conflict!!.contains("SUMMARY:QA Edited there"))
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.NEXTCLOUD)
+        assertEquals(listOf("QA Edited there"), items().map { it.title })
+        assertTrue(conflicts().isEmpty())
+    }
+
     private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
 
     @Test fun reconnectingLinksTheFilesAlreadyThereInsteadOfCopyingThem() = runBlocking {

@@ -58,6 +58,27 @@ class CalendarFixesOct1Test {
         assertEquals(emptyMap<Long, SyncMark>(), SyncMark.forCards(rows, emptyList()))
     }
 
+    // S4: an event deleted in Planner whose copy changed on Nextcloud first keeps its row (CHANGED), so the next pull makes it a
+    // conflict ("deleted in Planner, changed on Nextcloud") instead of bringing the file in as a new event.
+    @Test fun aDeleteRefusedBecauseNextcloudChangedKeepsTheRow() {
+        val row = SentEvent(id = 4, itemId = 9, account = "acc", calendar = "/cal/", uid = "planner-1@planner", etag = "\"e1\"", fingerprint = "u1:x")
+        assertTrue(CalendarSync.deletable(row))
+        assertNull(CalendarSync.afterDelete(row, WriteResult.Ok(null)))
+        assertNull(CalendarSync.afterDelete(row, WriteResult.Missing))
+        assertEquals(row.copy(problem = SentEvent.CHANGED), CalendarSync.afterDelete(row, WriteResult.Changed))
+        // Already known to have changed there: not deleted, and kept.
+        val changed = row.copy(problem = SentEvent.CHANGED)
+        assertFalse(CalendarSync.deletable(changed))
+        assertEquals(changed, CalendarSync.afterDelete(changed, null))
+        // A pending write is deleted as before; refused, it's kept too.
+        assertTrue(CalendarSync.deletable(row.copy(problem = SentEvent.PENDING)))
+        assertEquals(row.copy(problem = SentEvent.CHANGED), CalendarSync.afterDelete(row.copy(problem = SentEvent.PENDING), WriteResult.Changed))
+        // Gone there already, read-only there, or never sent: forgotten, as before.
+        listOf(row.copy(problem = SentEvent.DELETED), row.copy(problem = SentEvent.DETACHED), row.copy(uid = null)).forEach {
+            assertFalse(CalendarSync.deletable(it)); assertNull(CalendarSync.afterDelete(it, null))
+        }
+    }
+
     // S3: a repeating event whose start is in UTC repeats on UTC dates (RFC 5545), each then shown on the phone's clock.
     @Test fun aRepeatingUtcEventRepeatsOnUtcDates() {
         val weekly = "UID:u\r\nDTSTART:20260105T230000Z\r\nDTEND:20260106T000000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4\r\nSUMMARY:Standup"
