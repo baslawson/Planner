@@ -20,11 +20,8 @@ class QuickFixesNamesAndDatesTest {
     // Q-N1: a frequency word that is part of a name stays in the title, and the entry is one event.
     @Test fun aFrequencyWordInANameIsTitleText() {
         for ((text, title, date) in listOf(
-            Triple("Weekly report due Friday", "Weekly report", day(10, 2)),
-            Triple("Monthly meeting Friday 10am", "Monthly meeting", day(10, 2)),
             Triple("Read The Daily Telegraph tomorrow", "Read The Daily Telegraph", day(10, 2)),
             Triple("Daily Mail delivery tomorrow", "Daily Mail delivery", day(10, 2)),
-            Triple("Quarterly review Friday", "Quarterly review", day(10, 2)),
             Triple("Read the weekly newsletter Monday", "Read the weekly newsletter", day(10, 5)),
         )) ok(text).let {
             assertEquals(text, title, it.title); assertEquals(text, date, it.date); assertEquals(text, RepeatRule.NONE, it.repeat)
@@ -36,7 +33,18 @@ class QuickFixesNamesAndDatesTest {
             assertEquals("Lunch", it.title); assertEquals("the Every Day Cafe", it.location); assertEquals(day(10, 2), it.date); assertEquals(RepeatRule.NONE, it.repeat)
         }
         ok("Every Day Cafe lunch Friday").let { assertEquals("Every Day Cafe lunch", it.title); assertEquals(RepeatRule.NONE, it.repeat) }
-        ok("Monthly meeting Friday 10am").let { assertEquals(at(10), it.time) }
+    }
+
+    // User decision: a frequency word first in the entry still repeats, and stays in the title.
+    @Test fun aLeadingFrequencyWordRepeatsAndStaysInTheTitle() {
+        for ((text, title, rule) in listOf(
+            Triple("Weekly report due Friday", "Weekly report", RepeatRule.WEEKLY),
+            Triple("Daily standup 9am", "Daily standup", RepeatRule.DAILY),
+            Triple("Monthly meeting Friday 10am", "Monthly meeting", RepeatRule.MONTHLY),
+            Triple("Quarterly review Friday", "Quarterly review", RepeatRule.everyMonths(3)),
+            Triple("Weekly team meeting Monday", "Weekly team meeting", RepeatRule.WEEKLY),
+        )) ok(text).let { assertEquals(text, title, it.title); assertEquals(text, rule, it.repeat) }
+        ok("Monthly meeting Friday 10am").let { assertEquals(at(10), it.time); assertEquals(day(10, 2), it.date) }
     }
 
     @Test fun aFrequencyWordOnItsOwnStillRepeats() {

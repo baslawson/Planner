@@ -361,14 +361,18 @@ object QuickEntry {
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
         }
-        // A frequency word before an ordinary word is part of a name, not a repeat, where a name would be: first in the entry,
-        // capitalised, or after "the" ("Weekly report due Friday", "Read The Daily Telegraph"). "Every day" only after "the"
-        // or written as a name ("Every Day Cafe"). "Gym weekly", "Standup daily 9am", "Call mum weekly please" still repeat.
+        // A frequency word before an ordinary word is part of a name, not a repeat, where a name would be: capitalised in the
+        // middle, after "the", or first and followed by a capitalised word ("Read The Daily Telegraph", "Daily Mail delivery").
+        // "Every day" only after "the" or written as a name ("Every Day Cafe"). First and followed by an ordinary word, it still
+        // repeats but stays in the title ("Weekly report due Friday", "Daily standup 9am"). "Gym weekly" still repeats.
+        var leadingRepeat: IntRange? = null
         frequencyNames.findAll(remaining).toList().forEach { match ->
             val following = match.groupValues[2]
             if (following.lowercase(Locale.ROOT) in scheduleVocabulary) return@forEach
             val before = remaining.substring(0, match.range.first)
-            val named = determinerBefore.containsMatchIn(before) || if (match.groups[1] != null) before.isBlank() || match.value[0].isUpperCase()
+            val adjective = match.groups[1] != null
+            if (adjective && before.isBlank() && !following[0].isUpperCase()) { leadingRepeat = match.range; return@forEach }
+            val named = determinerBefore.containsMatchIn(before) || if (adjective) before.isBlank() || match.value[0].isUpperCase()
                 else match.value.split(' ').last()[0].isUpperCase() && following[0].isUpperCase()
             if (named) mask(match.range, '\uE000')
         }
@@ -685,7 +689,9 @@ object QuickEntry {
                     if (rule.startsWith("other ")) RepeatRule.FORTNIGHTLY else RepeatRule.WEEKLY
                 }
             }
-            consume(match.range, QuickPhraseKind.REPEAT)
+            // A leading "Weekly report": the repeat is read, the word stays in the title.
+            if (match.range == leadingRepeat) { phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.REPEAT); mask(match.range, '\uE000') }
+            else consume(match.range, QuickPhraseKind.REPEAT)
         }
         val countMatches = repeatCounts.findAll(remaining).toList()
         if (countMatches.size > 1) return error("Use one occurrence count.")
