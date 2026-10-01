@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -118,7 +119,29 @@ fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, o
         DropdownMenuItem(text = { Text("Settings") },
             leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
             onClick = { close(); onSettings() })
+        HorizontalDivider()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        DropdownMenuItem(text = { Text("Support Planner on Ko-fi") },
+            leadingIcon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
+            onClick = {
+                close()
+                try { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(KOFI_URL))) }
+                catch (_: android.content.ActivityNotFoundException) {
+                    android.widget.Toast.makeText(context, "No app found to open this link", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            })
+        // The installed app's own version, so it never needs editing.
+        val version = remember {
+            runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()?.let {
+                "Version ${it.versionName} (build ${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(it)})"
+            }
+        }
+        version?.let { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }) { open ->
         IconButton(onClick = open) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
     }
 }
+
+/** Where "Support Planner on Ko-fi" goes (the same page as the README's badge). */
+const val KOFI_URL = "https://ko-fi.com/baslawson"
