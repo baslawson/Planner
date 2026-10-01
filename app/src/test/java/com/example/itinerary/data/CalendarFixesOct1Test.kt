@@ -58,6 +58,21 @@ class CalendarFixesOct1Test {
         assertEquals(emptyMap<Long, SyncMark>(), SyncMark.forCards(rows, emptyList()))
     }
 
+    // S1: the pull applies Nextcloud's change to the event as it is when saved, not to the copy it read when it began.
+    @Test fun aPullNeverOverwritesAnEditMadeWhileItRan() {
+        val synced = ItineraryItem(id = 5, tripId = 1, date = LocalDate.of(2026, 10, 5), startTime = LocalTime.of(9, 0), durationMinutes = 60,
+            title = "Dentist", checklist = listOf(ChecklistEntry("c", "Bring card", false)))
+        val row = SentEvent(itemId = 5, account = "acc", calendar = "/cal/", uid = "u", fingerprint = CalendarSync.fingerprint(synced))
+        val server = synced.copy(id = 0, tripId = 0, title = "Dentist (moved)", startTime = LocalTime.of(15, 0), checklist = emptyList())
+        // Ticked off in Planner meanwhile (a Planner-only detail): Nextcloud's change is made to that, the tick stays.
+        val ticked = synced.copy(checklist = listOf(ChecklistEntry("c", "Bring card", true)))
+        val saved = CalendarSync.pulled(row, ticked, server, utc)!!
+        assertEquals("Dentist (moved)", saved.title); assertEquals(LocalTime.of(15, 0), saved.startTime)
+        assertTrue(saved.checklist.single().done)
+        // Edited in Planner meanwhile (something synced): nothing is saved, the pull compares instead (a conflict).
+        assertNull(CalendarSync.pulled(row, synced.copy(location = "Room 2"), server, utc))
+    }
+
     // S4: an event deleted in Planner whose copy changed on Nextcloud first keeps its row (CHANGED), so the next pull makes it a
     // conflict ("deleted in Planner, changed on Nextcloud") instead of bringing the file in as a new event.
     @Test fun aDeleteRefusedBecauseNextcloudChangedKeepsTheRow() {

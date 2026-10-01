@@ -108,14 +108,21 @@ enum class SyncMark { SYNCED, PROBLEM;
 // Recently deleted. The app passes its Repository (see asPlannerStore); tests may too.
 interface PlannerStore {
     suspend fun update(item: ItineraryItem)
+    // [change] made to event [id] as it is at that moment, with no other change in between (null leaves it): the event as
+    // saved, or null when nothing was saved (also when it's gone).
+    suspend fun update(id: Long, change: (ItineraryItem) -> ItineraryItem?): ItineraryItem?
     suspend fun add(item: ItineraryItem): Long
     suspend fun archive(ids: Set<Long>)
+    // To Recently deleted only if [still] holds for event [id] as it is at that moment. True when it was moved.
+    suspend fun archive(id: Long, still: (ItineraryItem) -> Boolean): Boolean
 }
 
 fun Repository.asPlannerStore(): PlannerStore = object : PlannerStore {
     override suspend fun update(item: ItineraryItem) = saveItem(item)
+    override suspend fun update(id: Long, change: (ItineraryItem) -> ItineraryItem?) = saveItemIf(id, change)
     override suspend fun add(item: ItineraryItem): Long = importEvents(listOf(item)).single()
-    override suspend fun archive(ids: Set<Long>) = archiveEvents(ids)
+    override suspend fun archive(ids: Set<Long>) { archiveEvents(ids) }
+    override suspend fun archive(id: Long, still: (ItineraryItem) -> Boolean) = id in archiveEvents(setOf(id), still)
 }
 
 @Dao

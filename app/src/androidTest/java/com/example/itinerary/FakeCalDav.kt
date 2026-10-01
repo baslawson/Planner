@@ -11,7 +11,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  *  with ETags, a ctag that changes with them, calendar-query (from the window start on) and multiget REPORTs, GET, and
  *  PUT/DELETE honouring If-Match / If-None-Match. Files in Work get the fixed ETag "w-orig". [code] fails everything;
  *  [loseReplies] saves that many PUTs and then drops the connection instead of answering (a reply lost on the way).
- *  [queries] records each calendar-query's start date (yyyyMMdd); one starting before [refuseBefore] fails with a 500. */
+ *  [queries] records each calendar-query's start date (yyyyMMdd); one starting before [refuseBefore] fails with a 500;
+ *  [onQuery] runs first. */
 class FakeCalDav(private val home: String, private val user: String, private val password: String) : Dispatcher() {
     val synced = "${home}planner/"
     val other = "${home}work/"
@@ -21,6 +22,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var loseReplies = 0
     val queries = CopyOnWriteArrayList<String>()
     @Volatile var refuseBefore: String? = null
+    // Called with each calendar-query's start date before it's answered (something happening while a sync runs).
+    @Volatile var onQuery: ((String) -> Unit)? = null
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -49,7 +52,7 @@ class FakeCalDav(private val home: String, private val user: String, private val
                 val wanted = Regex("<d:href>([^<]+)</d:href>").findAll(body).map { it.groupValues[1] }.toSet()
                 // calendar-query: events from the window start on (or repeating); multiget: the listed files.
                 val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
-                if (start != null) { queries += start; if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
+                if (start != null) { queries += start; onQuery?.invoke(start); if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
                 ms(files.filterKeys { it.startsWith(path) }.filter { (p, v) ->
                     if (body.contains("calendar-multiget")) p in wanted
                     else v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start

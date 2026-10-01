@@ -377,7 +377,25 @@ class Repository(
         addedReminders: List<Reminder> = emptyList(),
         removedReminders: List<Reminder> = emptyList(),
         options: EventSaveOptions = EventSaveOptions(),
-    ): Long = changes.withLock {
+    ): Long = changes.withLock { saveItemIdLocked(item, added, removed, addedReminders, removedReminders, options) }
+
+    // Two-way sync: [change] made to event [id] as it is at that moment and saved, with no other change in between (a
+    // save made meanwhile is never overwritten by an older copy). [change] returns null to leave it. Returns the event
+    // as saved, or null when nothing was saved (also when the event is gone).
+    suspend fun saveItemIf(id: Long, change: (ItineraryItem) -> ItineraryItem?): ItineraryItem? = changes.withLock {
+        val next = itemDao.byId(id)?.let(change) ?: return@withLock null
+        saveItemIdLocked(next)
+        itemDao.byId(id)
+    }
+
+    private suspend fun saveItemIdLocked(
+        item: ItineraryItem,
+        added: List<Attachment> = emptyList(),
+        removed: List<Attachment> = emptyList(),
+        addedReminders: List<Reminder> = emptyList(),
+        removedReminders: List<Reminder> = emptyList(),
+        options: EventSaveOptions = EventSaveOptions(),
+    ): Long = run {
         requirePlannerEvent(item.id)
         require(item.tripId != OutsideCalendars.TRIP_ID) { OutsideCalendars.READ_ONLY }
         ChecklistCodec.validate(item.checklist)
@@ -575,21 +593,23 @@ class Repository(
     }
 
     // Two-way calendar sync: events deleted on Nextcloud go to Recently deleted (restorable there), without the Undo
-    // message a deletion in Planner shows.
-    suspend fun archiveEvents(ids: Set<Long>) = changes.withLock {
+    // message a deletion in Planner shows. Only those for which [only] holds as they are at that moment (one edited in
+    // Planner meanwhile stays); returns the ids moved.
+    suspend fun archiveEvents(ids: Set<Long>, only: (ItineraryItem) -> Boolean = { true }): Set<Long> = changes.withLock {
         withContext(NonCancellable) {
-            val reminders = db.withTransaction {
-                val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
-                if (selected.isEmpty()) return@withTransaction emptyList()
+            val (moved, reminders) = db.withTransaction {
+                val selected = readIds(ids, itemDao::byIds).filter(only).sortedBy { it.id }
+                if (selected.isEmpty()) return@withTransaction emptySet<Long>() to emptyList()
                 val selectedIds = selected.mapTo(hashSetOf()) { it.id }
                 val bundle = PendingDeletion(items = selected,
                     attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
                     reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id })
                 archive(bundle)
                 selected.forEach { itemDao.delete(it) }
-                bundle.reminders
+                selectedIds to bundle.reminders
             }
             afterCommit(reminderIds = reminders.map { it.id })
+            moved
         }
     }
 
