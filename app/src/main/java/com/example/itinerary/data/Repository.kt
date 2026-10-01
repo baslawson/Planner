@@ -844,11 +844,15 @@ class Repository(
         if (item.paid || item.skipped || !ReminderDeliveries.accepts(trigger, expected, reminder.snoozedUntil != null, System.currentTimeMillis())) return@withLock
         deliver(item, reminder)
         ReminderDeliveries.key(item, reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(reminder.id, it)) }
+            ?: scheduler.markDelivered(MissedReminders.eventKey(id), expected)
     }
 
     suspend fun deliverTaskReminder(id: String, trigger: Long, deliver: (PlannerTask) -> Unit) = changes.withLock {
         val task = taskDao.byId(id) ?: return@withLock
-        if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) deliver(task)
+        if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) {
+            deliver(task)
+            scheduler.markDelivered(MissedReminders.taskKey(id), trigger)
+        }
     }
 
     // Everything in the database, read in one go so the pieces agree with each other (for backups). Recently deleted
@@ -960,8 +964,13 @@ class Repository(
         val tasks = due.keys.mapNotNull(MissedReminders::taskId).mapNotNull { taskDao.byId(it) }.associateBy { it.id }
         val missed = MissedReminders.select(due, events, delivered, tasks)
         post(missed)
-        missed.filterIsInstance<MissedReminders.Event>().forEach { m ->
-            ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) } }
+        missed.forEach { m ->
+            when (m) {
+                is MissedReminders.Event -> ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) }
+                    ?: scheduler.markDelivered(MissedReminders.eventKey(m.reminder.id), m.due)
+                is MissedReminders.Task -> scheduler.markDelivered(MissedReminders.taskKey(m.task.id), m.due)
+            }
+        }
     }
 }
 

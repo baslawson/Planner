@@ -40,6 +40,19 @@ class AlarmLedger(private val prefs: SharedPreferences) {
 }
 
 /**
+ * The task reminders and snoozes that have rung here (key as in MissedReminders → time). Those are fixed times, so after
+ * the clock is set back one is ahead again, and rescheduling would ring it twice; an on-time event reminder has its own
+ * record (ReminderDeliveries).
+ */
+class DeliveredAlarms(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences("delivered_alarms", Context.MODE_PRIVATE))
+
+    fun record(key: String, trigger: Long) { if (prefs.getLong(key, 0L) != trigger) prefs.edit().putLong(key, trigger).apply() }
+    fun delivered(key: String, trigger: Long): Boolean = prefs.contains(key) && prefs.getLong(key, 0L) == trigger
+    fun forget(key: String) { if (prefs.contains(key)) prefs.edit().remove(key).apply() }
+}
+
+/**
  * Shows the reminders whose alarms went without ringing, then forgets those alarms: at boot every one no longer ahead,
  * when the app opens every one at least [graceMs] late. A late alarm that is still set is [disarm]ed, so it can't show again.
  */

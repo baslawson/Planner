@@ -23,11 +23,15 @@ interface ReminderAlarms {
     fun armHorizon(): Long? = null
     fun setArmHorizon(horizon: Long?) {}
     fun armedCount(): Int = 0
+    // A task reminder or snooze has rung at [trigger] (DeliveredAlarms): it isn't set again for that time.
+    fun markDelivered(key: String, trigger: Long) {}
 }
 
 class ReminderScheduler(private val context: Context) : ReminderAlarms {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
     val ledger = AlarmLedger(context)
+    private val delivered = DeliveredAlarms(context)
+    override fun markDelivered(key: String, trigger: Long) = delivered.record(key, trigger)
     // Backed up with the database on purpose: tasks restored on another phone were set in this zone.
     private val zonePrefs = context.getSharedPreferences("reminder_zone", Context.MODE_PRIVATE)
 
@@ -49,6 +53,8 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         // Opening the app must leave that alarm and any delivered notification alone. Edits that
         // replace/remove its time, completion and deletion explicitly cancel the old reminder.
         if (triggerAt <= System.currentTimeMillis()) return
+        // Rang already, and the clock was set back since.
+        if (delivered.delivered(MissedReminders.taskKey(task.id), triggerAt)) return
         // Waits until it is among the nearest (AlarmWindow); the notification of an earlier time stays.
         if (!AlarmWindow.arms(triggerAt, armHorizon())) {
             taskPending(task.id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
@@ -66,6 +72,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     override fun cancelTask(id: String) {
         taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
         ledger.remove(MissedReminders.taskKey(id))
+        delivered.forget(MissedReminders.taskKey(id))
         androidx.core.app.NotificationManagerCompat.from(context).cancel("task:$id", 0)
     }
 
@@ -99,6 +106,8 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             }
             return
         }
+        // A snooze that rang already, and the clock was set back since.
+        if (delivered.delivered(MissedReminders.eventKey(reminder.id), triggerAt)) return
         cancelCode(snoozeCode(reminder.id))
         if (!AlarmWindow.arms(triggerAt, armHorizon())) {
             ledger.remove(MissedReminders.eventKey(reminder.id))
@@ -134,6 +143,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
 
     override fun cancel(reminderId: Long) {
         ledger.remove(MissedReminders.eventKey(reminderId))
+        delivered.forget(MissedReminders.eventKey(reminderId))
         cancelCode(reminderId.toInt())
         cancelCode(snoozeCode(reminderId))
         androidx.core.app.NotificationManagerCompat.from(context).cancel(reminderId.toInt())
