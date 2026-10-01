@@ -26,4 +26,11 @@ class TaskReminderPresetsTest {
         // Late in the evening "in an hour" is tomorrow: only tomorrow at 09:00.
         assertEquals(listOf(TaskReminderPreset.TOMORROW to at(sep(29), 9)), taskReminderPresets(null, now(28, 23, 30)))
     }
+    // R-L3: the chips were worked out when the editor opened, so "In 1 hour" tapped 40 minutes later rang 20 minutes on.
+    @Test fun aChipTappedLaterCountsFromTheTap() {
+        assertEquals(at(sep(28), 11, 10), taskReminderPresetAt(TaskReminderPreset.LATER_TODAY, null, now(28, 10, 10)))
+        // A choice whose time has passed since is gone.
+        assertEquals(null, taskReminderPresetAt(TaskReminderPreset.DAY_BEFORE, sep(30), now(29, 12)))
+        assertEquals(at(sep(30), 9), taskReminderPresetAt(TaskReminderPreset.ON_THE_DAY, sep(30), now(29, 12)))
+    }
 }

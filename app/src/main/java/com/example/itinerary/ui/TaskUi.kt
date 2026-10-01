@@ -365,17 +365,22 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     label = { Text("Days after completion (1–3650)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (repeat != TaskRepeat.NONE.name) Text("Completing this task creates the next occurrence. Missed calendar dates are skipped.", style = MaterialTheme.typography.bodySmall)
                 // The same layout as an event's Reminders section; a task has one reminder at a date and time.
-                val presets = remember(date, reminderAt) { taskReminderPresets(date?.let(LocalDate::parse)) }
+                var presetsStale by remember { mutableIntStateOf(0) }
+                val presets = remember(date, reminderAt, presetsStale) { taskReminderPresets(date?.let(LocalDate::parse)) }
                 val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
                 ReminderSectionFrame(notifications.enabled, notifications.enable,
                     hints = listOfNotNull(if (reminderAt != null && !exactAllowed) "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing." else null),
-                    chips = if (reminderAt != null) emptyList() else presets.map { (preset, at) ->
+                    chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
                         when (preset) {
                             TaskReminderPreset.ON_THE_DAY -> "On the day $nine"
                             TaskReminderPreset.DAY_BEFORE -> "1 day before"
                             TaskReminderPreset.LATER_TODAY -> "In 1 hour"
                             TaskReminderPreset.TOMORROW -> "Tomorrow $nine"
-                        } to { reminderAt = at; error = null }
+                        } to {
+                            // Timed from the tap, not from when the editor opened; a choice that has passed since goes.
+                            val at = taskReminderPresetAt(preset, date?.let(LocalDate::parse))
+                            if (at != null) { reminderAt = at; error = null } else presetsStale += 1
+                        }
                     } + ("Custom" to {
                         reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
                         choosingReminderDate = true
