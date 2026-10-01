@@ -130,8 +130,6 @@ fun SettingsScreen(
         ) { inner ->
             ScrollHints(scrollState, Modifier.padding(inner).fillMaxSize()) {
                 Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp)) {
-                    SettingsHeading("Quick entry")
-                    QuickAiSettingsButton()
                     SettingsHeading("Agenda")
                     Row(
                         Modifier.fillMaxWidth().toggleable(value = showBillsSummary, role = Role.Switch,

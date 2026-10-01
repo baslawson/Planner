@@ -186,9 +186,6 @@ fun QuickEntryEditor(
     // Optional title box: its words are always the title. Empty, the when box works as the single entry box.
     var titleField by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initial.title, TextRange(initial.title.length))) }
     val title = titleField.text
-    var aiJson by rememberSaveable { mutableStateOf(initial.ai?.json()?.toString()) }
-    val ai = remember(aiJson) { aiJson?.let { QuickAiEntry.decodeDraft(org.json.JSONObject(it)) } }
-    var aiBusy by remember { mutableStateOf(false) }
     var fieldFocused by remember { mutableStateOf(false) }
     var settled by remember { mutableStateOf(true) }
     var attempted by remember { mutableStateOf(false) }
@@ -207,7 +204,7 @@ fun QuickEntryEditor(
     var timeOverride by rememberSaveable { mutableStateOf(initial.timeOverride) }
     var countText by rememberSaveable { mutableStateOf(initial.countText) }
     var removeReminder by rememberSaveable { mutableStateOf(initial.removeReminder) }
-    val saveToken = rememberSaveable(text, title, task, literalKey, dateOverride, timeOverride, countText, removeReminder, durationText, aiJson) { java.util.UUID.randomUUID().toString() }
+    val saveToken = rememberSaveable(text, title, task, literalKey, dateOverride, timeOverride, countText, removeReminder, durationText) { java.util.UUID.randomUUID().toString() }
     var pickingDate by rememberSaveable { mutableStateOf(false) }
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var showPhrases by rememberSaveable { mutableStateOf(false) }
@@ -217,12 +214,11 @@ fun QuickEntryEditor(
     // A draft keeps the day it was started until the person edits it again.
     var baseDate by rememberSaveable { mutableStateOf(today) }
     val parsed = remember(text, title, literalKey, baseDate) { QuickInput(text, literals = literalRanges, baseDate = baseDate, title = title).parse() }
-    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, baseDate, durationText, ai, title, typeChosen)
+    val currentInput = QuickInput(text, task, literalRanges, dateOverride, timeOverride, countText, removeReminder, baseDate, durationText, title, typeChosen)
     SideEffect { onInput(currentInput) }
     val context = LocalContext.current
     val notifications = rememberNotificationState()
     val app = context.applicationContext as com.example.itinerary.ItineraryApp
-    val aiEnabled by app.settings.aiFeaturesEnabled.collectAsState()
     var now by remember { mutableStateOf(ZonedDateTime.now()) }
     var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
     LaunchedEffect(Unit) { while (true) { now = ZonedDateTime.now(); delay(30_000) } }
@@ -232,7 +228,7 @@ fun QuickEntryEditor(
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
         runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
     val problem = if (currentInput.length > 500) "Use at most 500 characters per entry." else suggestion.quickProblem(task, now)
-    val valid = !currentInput.empty && problem == null && !busy && !aiBusy && !inputBlocked
+    val valid = !currentInput.empty && problem == null && !busy && !inputBlocked
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
@@ -251,7 +247,6 @@ fun QuickEntryEditor(
             val updated = currentInput.rebased(LocalDate.now()).edited(value.text)
             baseDate = updated.baseDate
             if (!typeChosen) updated.parse().takeIf { it.taskHint }?.let { switchType(!it.timed()) }
-            aiJson = null
             literalOffsets = updated.literals.flatMap { listOf(it.first, it.last + 1) }.toIntArray()
             dateOverride = updated.dateOverride; timeOverride = updated.timeOverride
             countText = updated.countText; removeReminder = updated.removeReminder; durationText = updated.durationText
@@ -261,7 +256,7 @@ fun QuickEntryEditor(
     }
     fun edit(value: String) = editField(TextFieldValue(value, TextRange(value.length)))
     fun editTitle(value: TextFieldValue) {
-        if (value.text != title) { aiJson = null; settled = false; attempted = false; baseDate = LocalDate.now() }
+        if (value.text != title) { settled = false; attempted = false; baseDate = LocalDate.now() }
         titleField = value.copy(text = value.text.replace('\n', ' '))
     }
     val completions = if (fieldFocused && field.selection.collapsed && !busy)
@@ -303,12 +298,12 @@ fun QuickEntryEditor(
     val errorColor = MaterialTheme.colorScheme.error
     val highlight = VisualTransformation { original ->
         val result = AnnotatedString.Builder(original)
-        (if (ai == null) parsed.phrases else emptyList()).forEach { phrase -> if (phrase.start >= 0 && phrase.end <= original.length)
+        parsed.phrases.forEach { phrase -> if (phrase.start >= 0 && phrase.end <= original.length)
             result.addStyle(SpanStyle(color = if (staleRelative && phrase.kind == QuickPhraseKind.TIME) errorColor else colors.getValue(phrase.kind),
                 fontWeight = FontWeight.Bold), phrase.start, phrase.end) }
         TransformedText(result.toAnnotatedString(), OffsetMapping.Identity)
     }
-    val canAdd = !currentInput.empty && !busy && !aiBusy && !inputBlocked && (valid || !showFeedback)
+    val canAdd = !currentInput.empty && !busy && !inputBlocked && (valid || !showFeedback)
     PlannerDialog(
         title = "Quick entry",
         onDismissRequest = { if (!busy) onDismiss() },
@@ -345,18 +340,6 @@ fun QuickEntryEditor(
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.onGloballyPositioned { fieldReady = true }, visualTransformation = highlight,
                     keyboardOptions = KeyboardOptions(capitalization = if (title.isNotBlank()) KeyboardCapitalization.None else KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { add() }))
-                // AI gets title and when as one line, the title quoted; a typed title replaces the AI's title.
-                if (ai == null) QuickAiAction(currentInput.copy(text = currentInput.entryText, title = ""), enabled = !busy && !inputBlocked,
-                    onWorking = { aiBusy = it }, onResult = { entries -> keyboard?.hide()
-                        aiJson = entries.single().let { if (currentInput.typedTitle.isEmpty()) it else it.copy(title = currentInput.typedTitle) }.json().toString(); literalOffsets = intArrayOf() })
-                if (ai != null) {
-                    Text(if (aiEnabled) "AI preview · check the details. Editing the original text returns to offline parsing." else "Check the details. Editing the original text creates a new preview.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(ai.title, { if (it.length <= 500) aiJson = ai.copy(title = it.filterNot { c -> c.isISOControl() }).json().toString() }, enabled = !busy,
-                        label = { Text("Entry title") }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
-                    OutlinedTextField(ai.location, { if (it.length <= 500) aiJson = ai.copy(location = it.filterNot { c -> c.isISOControl() }).json().toString() }, enabled = !busy,
-                        label = { Text("Location") }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
-                    if (aiEnabled) TextButton(enabled = !busy, onClick = { aiJson = null }) { Text("Use offline interpretation") }
-                }
                 if (completions.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     completions.forEach { completion -> TextButton(enabled = !busy, onClick = {
                         val (next, cursor) = completion.apply(text)
@@ -388,7 +371,7 @@ fun QuickEntryEditor(
                     Surface(shape = RoundedCornerShape(12.dp), color = Color.Transparent,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            if (ai == null) Text(suggestion.title.ifBlank { "Add a title" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                            Text(suggestion.title.ifBlank { "Add a title" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                                 color = if (suggestion.title.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
                             FlowRow {
                                 SummaryButton({ Icon(Icons.Filled.DateRange, contentDescription = null, Modifier.size(18.dp)) }, kind = if (task) "Due date" else "Date", enabled = !busy, onClick = { keyboard?.hide(); pickingDate = true },
@@ -405,7 +388,7 @@ fun QuickEntryEditor(
                                 }
                                 if (!task && (suggestion.durationMinutes != null || showDetails && suggestion.time != null)) SummaryButton(null, kind = "Duration", enabled = !busy, onClick = { pickingDuration = true; keyboard?.hide() },
                                     label = suggestion.durationMinutes?.let { "for $it min" } ?: "Duration")
-                                if (ai == null && suggestion.location.isNotBlank()) SummaryButton({ Icon(Icons.Filled.Place, contentDescription = null, Modifier.size(18.dp)) }, kind = "Place", enabled = !busy, label = suggestion.location, onClick = {
+                                if (suggestion.location.isNotBlank()) SummaryButton({ Icon(Icons.Filled.Place, contentDescription = null, Modifier.size(18.dp)) }, kind = "Place", enabled = !busy, label = suggestion.location, onClick = {
                                     parsed.phrases.firstOrNull { it.kind == QuickPhraseKind.LOCATION }?.let { val prefix = Regex("^at\\s+", RegexOption.IGNORE_CASE).find(text.substring(it.start, it.end))?.value?.length ?: 0; field = field.copy(selection = TextRange(it.start + prefix, it.end)); focus.requestFocus(); keyboard?.show() }
                                 })
                                 if (suggestion.repeat != RepeatRule.NONE) SummaryButton({ Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp)) }, kind = "Repeat", enabled = !busy, onClick = { showDetails = !showDetails },
@@ -425,7 +408,7 @@ fun QuickEntryEditor(
                             val nextDay = suggestion.time?.let { it.toSecondOfDay() / 60 + suggestion.durationMinutes >= 1440 } == true
                             Text("${suggestion.durationMinutes} minutes" + (end?.let { " · ends ${it.label(LocalTimeFormat.current, context)}${if (nextDay) " next day" else ""}" } ?: ""), style = MaterialTheme.typography.bodySmall)
                         }
-                        if (ai == null && suggestion.location.isNotBlank()) Text("Location: ${suggestion.location}", style = MaterialTheme.typography.bodySmall)
+                        if (suggestion.location.isNotBlank()) Text("Location: ${suggestion.location}", style = MaterialTheme.typography.bodySmall)
                         if (suggestion.repeat != RepeatRule.NONE) {
                             if (task) Text("${suggestion.repeat.label} · the next task is created when you complete this one.", style = MaterialTheme.typography.bodySmall)
                             else {
@@ -441,7 +424,7 @@ fun QuickEntryEditor(
                             TextButton(enabled = !busy, onClick = { removeReminder = true }) { Text("Remove reminder") }
                             if (!exactAllowed) Text("Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing.", style = MaterialTheme.typography.bodySmall)
                         }
-                        if (ai == null && parsed.phrases.isNotEmpty()) {
+                        if (parsed.phrases.isNotEmpty()) {
                             TextButton(enabled = !busy, onClick = { showPhrases = !showPhrases }) { Text(if (showPhrases) "Hide recognised phrases" else "Adjust recognised text") }
                             if (showPhrases) {
                                 Text("Tap a phrase to keep it in the title.", style = MaterialTheme.typography.bodySmall)

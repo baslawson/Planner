@@ -12,7 +12,6 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 - Agenda and calendar views for events, tasks and bills.
 - Offline natural-language Quick entry with editable previews.
-- Optional Gemini or OpenAI assistance using a personal API key, sent directly from the phone only when requested.
 - Reminders, recurring entries, calendar file import (.ics, including repeating events) and free-time search.
 - Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways.
 - Document and bill scanning with cropping and on-device text recognition.
@@ -62,7 +61,6 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. It inst
 ## Quick entry
 
 - [Offline parsing guide](docs/QUICK_ENTRY_OFFLINE.md)
-- [Optional AI setup and data handling](docs/QUICK_ENTRY_AI.md)
 
 The offline parser needs no API key or backend server. Never commit personal API keys, signing keys or device backups.
 

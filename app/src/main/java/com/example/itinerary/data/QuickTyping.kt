@@ -29,7 +29,7 @@ fun QuickInput.edited(value: String): QuickInput {
     fun anchors(old: Boolean) = signature(QuickPhraseKind.REPEAT, old)
         // Any repeat tied to a weekday or a day of the month: every Friday, Mon Wed Fri, first Monday of every month, 1st of every month.
         .filter { Regex("\\b(?:mon|tue|wed|thu|fri|sat|sun)(?!th)|weekday|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE).containsMatchIn(it) }
-    return copy(text = value, literals = moved, ai = null,
+    return copy(text = value, literals = moved,
         dateOverride = dateOverride.takeUnless { changed(QuickPhraseKind.DATE) || anchors(true) != anchors(false) },
         timeOverride = timeOverride.takeUnless { changed(QuickPhraseKind.TIME) },
         countText = countText.takeUnless { changed(QuickPhraseKind.REPEAT) },

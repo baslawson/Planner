@@ -5,7 +5,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 /**
  * The text field to type into, found by its current text. In Quick entry, "" means the lowest empty field below Title
- * (an AI clarification answer when one is asked, otherwise When), or else the When box, whose text is then replaced
+ * (When), or else the When box, whose text is then replaced
  * (an empty field may report null or its placeholder). Typing a whole entry into Title would never be read as a date.
  */
 /**

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Android Auto Backup, Android 8–11 (android:fullBackupContent). Only exclusions, so everything else is backed up as
-    before these rules (no_backup, which holds the Nextcloud and AI logins, and the caches never are).
+    before these rules (no_backup, which holds the Nextcloud login, and the caches never are).
     pending_alarms: the reminders this phone has set (reminders/AlarmLedger). Another phone hasn't set them, and a copy
     restored there would show reminders already seen here as "Missed" after its first reboot.
 -->

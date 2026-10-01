@@ -17,10 +17,6 @@ import com.example.itinerary.reminders.ReminderScheduler
 import com.example.itinerary.reminders.createReminderChannel
 
 class ItineraryApp : Application() {
-    lateinit var quickAiClient: com.example.itinerary.data.QuickAiClient
-        internal set
-    lateinit var quickAiConnectionStore: com.example.itinerary.data.QuickAiConnectionStore
-        internal set
     // Simple manual DI. Swap for Hilt once the app grows.
     private val attachmentStoreDelegate = lazy { AttachmentStore(this) }
     val attachmentStore: AttachmentStore by attachmentStoreDelegate
@@ -78,12 +74,8 @@ class ItineraryApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        quickAiClient = com.example.itinerary.data.QuickAiClient(featuresEnabled = settings.aiFeaturesEnabled)
-        quickAiConnectionStore = com.example.itinerary.data.QuickAiConnectionStore(this)
-        val aiStore = quickAiConnectionStore
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            runCatching { aiStore.retireObsoleteAccess() }
-        }
+        // A Gemini or OpenAI key saved by an earlier version is deleted, not left behind.
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.example.itinerary.data.RemovedAiData.remove(this@ItineraryApp) } }
         createReminderChannel(this)
         // Calendar sync in the background follows the setting (and a restored backup's).
         appScope.launch { settings.calendarBackgroundHours.collect { CalendarBackground.schedule(this@ItineraryApp, it) } }

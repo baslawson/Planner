@@ -192,51 +192,40 @@ class QuickTypingUiTest {
         await { data().items.any { it.title=="QA typing" } }
     }
     @Test fun shorthandTimeRangePreviewsAndSavesOffline() = runBlocking {
-        val old = app.settings.aiFeaturesEnabled.value
-        try {
-            app.settings.setAiFeaturesEnabled(false)
-            start();setText("","QA range dentist tomorrow 3-4pm")
-            await { find("Duration, for 60 min")!=null };screenshot("shorthand-range")
-            assertNull(find("Understand with AI"))
-            click("Add event");if(find("Add anyway")!=null)click("Add anyway")
-            await { data().items.any { it.title=="QA range dentist" } }
-            val saved=data().items.single { it.title=="QA range dentist" }
-            assertEquals(java.time.LocalTime.of(15,0),saved.startTime);assertEquals(60,saved.durationMinutes)
-        } finally { app.settings.setAiFeaturesEnabled(old) }
+        start();setText("","QA range dentist tomorrow 3-4pm")
+        await { find("Duration, for 60 min")!=null };screenshot("shorthand-range")
+        click("Add event");if(find("Add anyway")!=null)click("Add anyway")
+        await { data().items.any { it.title=="QA range dentist" } }
+        val saved=data().items.single { it.title=="QA range dentist" }
+        assertEquals(java.time.LocalTime.of(15,0),saved.startTime);assertEquals(60,saved.durationMinutes)
     }
 
-    @Test fun everydayDateAndReminderSaveWithAiOff() = runBlocking {
-        val old=app.settings.aiFeaturesEnabled.value
-        try {
-            app.settings.setAiFeaturesEnabled(false);start()
-            setText("","QA natural dentist day after tomorrow 3pm notify me half an hour before")
-            await { QuickDraftStore(context).read()?.single?.suggestion()?.reminderMinutes==30 }
-            screenshot("everyday-single");click("Add event")
-            if(find("Add anyway")!=null)click("Add anyway")
-            await { data().items.any { it.title=="QA natural dentist" } }
-            val saved=data().items.single { it.title=="QA natural dentist" }
-            assertEquals(LocalDate.now().plusDays(2),saved.date)
-            assertEquals(java.time.LocalTime.of(15,0),saved.startTime)
-        } finally { app.settings.setAiFeaturesEnabled(old) }
+    @Test fun everydayDateAndReminderSaveOffline() = runBlocking {
+        start()
+        setText("","QA natural dentist day after tomorrow 3pm notify me half an hour before")
+        await { QuickDraftStore(context).read()?.single?.suggestion()?.reminderMinutes==30 }
+        screenshot("everyday-single");click("Add event")
+        if(find("Add anyway")!=null)click("Add anyway")
+        await { data().items.any { it.title=="QA natural dentist" } }
+        val saved=data().items.single { it.title=="QA natural dentist" }
+        assertEquals(LocalDate.now().plusDays(2),saved.date)
+        assertEquals(java.time.LocalTime.of(15,0),saved.startTime)
     }
     @Test fun flexibleClockDurationAndTypoTapSaveOffline() = runBlocking {
-        val old=app.settings.aiFeaturesEnabled.value
-        try {
-            app.settings.setAiFeaturesEnabled(false);start()
-            // "tommorow" is now read as tomorrow outright; "tomorrw" is still only offered as a suggestion.
-            setText("","QA flexible tomorrw")
-            await { find("Tomorrow")!=null };screenshot("typo-suggestion")
-            assertTrue(nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrw" })
-            click("Tomorrow")
-            await { nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrow " } }
-            setText("QA flexible tomorrow ","QA flexible tomorrow 3.30pm—actually 4 p.m. for an hour and a half")
-            await { find("Duration, for 90 min")!=null };screenshot("flexible-preview")
-            assertNull(find("Understand with AI"));click("Add event")
-            if(find("Add anyway")!=null)click("Add anyway")
-            await { data().items.any { it.title=="QA flexible" } }
-            val saved=data().items.single { it.title=="QA flexible" }
-            assertEquals(LocalDate.now().plusDays(1),saved.date)
-            assertEquals(java.time.LocalTime.of(16,0),saved.startTime);assertEquals(90,saved.durationMinutes)
-        } finally { app.settings.setAiFeaturesEnabled(old) }
+        start()
+        // "tommorow" is now read as tomorrow outright; "tomorrw" is still only offered as a suggestion.
+        setText("","QA flexible tomorrw")
+        await { find("Tomorrow")!=null };screenshot("typo-suggestion")
+        assertTrue(nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrw" })
+        click("Tomorrow")
+        await { nodes().any { it.isEditable && it.text?.toString()=="QA flexible tomorrow " } }
+        setText("QA flexible tomorrow ","QA flexible tomorrow 3.30pm—actually 4 p.m. for an hour and a half")
+        await { find("Duration, for 90 min")!=null };screenshot("flexible-preview")
+        click("Add event")
+        if(find("Add anyway")!=null)click("Add anyway")
+        await { data().items.any { it.title=="QA flexible" } }
+        val saved=data().items.single { it.title=="QA flexible" }
+        assertEquals(LocalDate.now().plusDays(1),saved.date)
+        assertEquals(java.time.LocalTime.of(16,0),saved.startTime);assertEquals(90,saved.durationMinutes)
     }
 }

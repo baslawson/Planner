@@ -1,6 +1,6 @@
 # Offline Quick entry
 
-Typing is processed on the phone. AI is optional and never runs automatically.
+Typing is processed on the phone; nothing is sent anywhere.
 Enter one entry at a time; Add another keeps Quick entry open for the next.
 
 Examples of everyday wording:
@@ -45,7 +45,7 @@ still need a specific date, a supported repeat or literal text.
 **Title box (optional).** Words typed in Title are always the title and are never read as a date or time, so
 `Monday club` with When `Friday 6pm` works. The When box is read as usual; words in it that are not scheduling
 (`with Bob`) are added after the title. Leave Title empty to type everything in one box as before. Quotation marks
-are removed from a typed title. For AI, the title is sent in quotes on the same line.
+are removed from a typed title.
 
 Quote title/place words you want left untouched, or use More options → Adjust recognised text → Keep in title.
 Manual corrections survive unrelated title edits; editing the corresponding scheduling phrase reconsiders

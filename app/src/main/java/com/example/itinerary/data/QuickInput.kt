@@ -13,7 +13,6 @@ data class QuickInput(
     val timeOverride: String? = null, val countText: String? = null,
     val removeReminder: Boolean = false, val baseDate: LocalDate = LocalDate.now(),
     val durationText: String? = null,
-    val ai: QuickAiEntry? = null,
     /** Typed in its own box: always kept literally, never read as a date or time. */
     val title: String = "",
     /** Event or Task was picked by hand, so "remind me to …" no longer switches it. */
@@ -23,7 +22,7 @@ data class QuickInput(
     val typedTitle: String get() = title.filterNot { it == '"' || it == '“' || it == '”' }.trim()
     private val offset get() = if (typedTitle.isEmpty()) 0 else typedTitle.length + 1
 
-    /** Title and when as one line; the title is quoted so it stays literal (sent to AI). */
+    /** Title and when as one line; the title is quoted so it stays literal. */
     val entryText: String get() = if (typedTitle.isEmpty()) text else "\"$typedTitle\" $text".trimEnd()
     val length: Int get() = offset + text.length
     val empty: Boolean get() = text.isBlank() && typedTitle.isEmpty()
@@ -39,7 +38,7 @@ data class QuickInput(
     fun suggestion(now: ZonedDateTime = ZonedDateTime.now()): QuickEntrySuggestion {
         // "In 30 minutes" counts from now, so only for entries based on today.
         val clock = now.toLocalDateTime().takeIf { baseDate == now.toLocalDate() }
-        val parsed = ai?.suggestion(baseDate) ?: parse(clock, now.zone)
+        val parsed = parse(clock, now.zone)
         val corrected = parsed.corrected(dateOverride, timeOverride)
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
