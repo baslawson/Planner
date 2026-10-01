@@ -76,6 +76,9 @@ private val DarkColors = darkColorScheme(
     surfaceContainer = Color(0xFF1C2120),
     surfaceContainerHigh = Color(0xFF262B2A),
     surfaceContainerHighest = Color(0xFF313635),
+    // A neon red beside the neon green, not Material's pastel pink: Delete buttons and error text.
+    error = Color(0xFFFF4B4B),
+    onError = Color.Black,
 )
 
 // Neutral surfaces and strong accents keep text and control boundaries distinct.
@@ -126,6 +129,8 @@ internal fun plannerColorScheme(theme: AppTheme, dark: Boolean): androidx.compos
         surfaceContainer = surface, surfaceContainerHigh = surface, surfaceContainerHighest = surface,
         inverseSurface = foreground, inverseOnSurface = background, inversePrimary = if (dark) Color(0xFF003399) else Color(0xFFFFE600),
         surfaceTint = Color.Transparent,
+        // Material's own error colours, as before the Matrix dark theme got its neon red.
+        error = if (dark) Color(0xFFFFB4AB) else base.error, onError = if (dark) Color(0xFF690005) else base.onError,
     )
 }
 

@@ -470,13 +470,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!creating && !deletedElsewhere) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
-                    OutlinedButton(enabled = !busy, onClick = ::close) { Text("Close") }
-                    Spacer(Modifier.width(12.dp))
-                    Button(enabled = canSave && (unsaved || creating), onClick = { save() }) { SaveLabel(busy, saved = justSaved && !unsaved) }
-                }
+                EditorActions(onDelete = if (!creating && !deletedElsewhere) ({ confirmingDelete = true }) else null,
+                    onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
+                    saveEnabled = canSave && (unsaved || creating)) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
         }
     }

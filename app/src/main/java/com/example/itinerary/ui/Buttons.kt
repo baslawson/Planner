@@ -48,6 +48,50 @@ fun DangerButton(
     )
 }
 
+// Delete beside other actions (an editor's bar, the selection bar, a template): shaped like them, in red. The solid
+// DangerButton is kept for a dialog's one main action.
+@Composable
+fun DangerOutlinedButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val red = MaterialTheme.colorScheme.error
+    val muted = MaterialTheme.colorScheme.onSurface
+    androidx.compose.material3.OutlinedButton(onClick, modifier, enabled,
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = red.copy(alpha = 0.08f), contentColor = red,
+            disabledContainerColor = muted.copy(alpha = 0.04f),
+            disabledContentColor = muted.copy(alpha = if (com.example.itinerary.ui.theme.LocalHighContrast.current) 0.6f else 0.38f)),
+        border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), if (enabled) red else muted.copy(alpha = 0.12f)),
+        content = content)
+}
+
+// An editor's pinned actions: Delete on the left (when [onDelete] is given), Close and Save on the right, 8 dp apart.
+// Wraps at large text: every button keeps its full size, and Save moves to its own line on the right rather than being
+// squeezed ("Sa|ve") or pushed off the screen.
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun EditorActions(
+    onDelete: (() -> Unit)?,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    modifier: Modifier = Modifier,
+    deleteEnabled: Boolean = true,
+    closeEnabled: Boolean = true,
+    saveEnabled: Boolean = true,
+    saveLabel: @Composable RowScope.() -> Unit,
+) {
+    androidx.compose.foundation.layout.FlowRow(modifier.fillMaxWidth(),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp, Alignment.End),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete) { Text("Delete") }
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        OutlinedButton(enabled = closeEnabled, onClick = onClose) { Text("Close") }
+        MatrixButton(enabled = saveEnabled, onClick = onSave, content = saveLabel)
+    }
+}
+
 // A full-width outlined button, for a list of actions stacked in a dialog.
 @Composable
 fun StackedButton(text: String, onClick: () -> Unit) {

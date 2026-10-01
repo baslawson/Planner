@@ -943,30 +943,13 @@ private fun ItemEditorForm(
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Wraps at large text: every button keeps its full size, and Save moves to its own line on the right
-            // rather than being squeezed ("Sa|ve") or pushed off the screen.
-            FlowRow(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-                    .padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (!isNew) {
-                    DangerButton(enabled = !busy && !readingText, onClick = { if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }) { Text("Delete") }
-                }
-                Spacer(Modifier.weight(1f))
-                OutlinedButton(
-                    enabled = !busy && !readingText,
-                    onClick = ::close,
-                ) {
-                    Text("Close")
-                }
-                Button(enabled = canSave && (unsaved || isNew), onClick = { save() }) {
-                    SaveLabel(busy, saved = justSaved && !unsaved)
-                }
-            }
+            EditorActions(
+                onDelete = if (isNew) null else ({ if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }),
+                onClose = ::close, onSave = { save() },
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp).padding(bottom = 12.dp),
+                deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
+                saveEnabled = canSave && (unsaved || isNew),
+            ) { SaveLabel(busy, saved = justSaved && !unsaved) }
         }
     }
 

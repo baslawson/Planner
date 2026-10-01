@@ -63,7 +63,7 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                             try { onApply(TemplateContent.decode(template.payload)); choosing = false }
                             catch (_: Exception) { error = "Couldn't read this template." }
                         }) { Text("Apply ${template.name}") }
-                        DangerButton(onClick = { deleting = template }) { Text("Delete") }
+                        DangerOutlinedButton(onClick = { deleting = template }) { Text("Delete") }
                     }
                 }
             }

@@ -77,7 +77,7 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("${selection.size} selected", modifier = Modifier.weight(1f))
             OutlinedButton(onClick = selection::clear, enabled = !selection.busy) { Text("Cancel") }
-            DangerButton(onClick = { confirming = true; error = null }, enabled = !selection.busy && count > 0) {
+            DangerOutlinedButton(onClick = { confirming = true; error = null }, enabled = !selection.busy && count > 0) {
                 Text(if (selection.busy) "Deleting…" else "Delete")
             }
         }
