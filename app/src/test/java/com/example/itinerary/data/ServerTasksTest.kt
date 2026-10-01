@@ -35,6 +35,26 @@ class ServerTasksTest {
         assertNull(fields(file("SUMMARY:x"))!!.dueDate)
     }
 
+    // T2: a due time in a zone counts on its own day there, so a move writes exactly the day chosen and travelling never
+    // makes an unrelated edit rewrite the due date.
+    @Test fun aZonedDueKeepsItsOwnDay() {
+        // 23:00 in New York on the 5th is 11:00 on the 6th in Perth: still due on the 5th.
+        val ny = file("SUMMARY:x", "DUE;TZID=America/New_York:20261005T230000")
+        assertEquals(LocalDate.of(2026, 10, 5), fields(ny)!!.dueDate)
+        // Moved to the 8th: the 8th at 23:00 New York, read back as the 8th (it used to drift to the 9th).
+        val task = ServerTasks.apply(PlannerTask(id = "t"), fields(ny)!!)
+        val moved = ServerTasks.patch(ny, task.copy(dueDate = LocalDate.of(2026, 10, 8)), perth, now)
+        assertTrue(moved, moved.contains("DUE;TZID=America/New_York:20261008T230000"))
+        assertEquals(LocalDate.of(2026, 10, 8), fields(moved)!!.dueDate)
+        // Synced in Perth, the title edited after flying to Honolulu: the due line stays exactly as it was.
+        val honolulu = ZoneId.of("Pacific/Honolulu")
+        val edited = ServerTasks.patch(ny, task.copy(title = "y"), honolulu, now)
+        assertTrue(edited, edited.contains("DUE;TZID=America/New_York:20261005T230000"))
+        assertEquals(LocalDate.of(2026, 10, 5), ServerTasks.parse(edited, honolulu).fields!!.dueDate)
+        // Floating: its own day too.
+        assertEquals(LocalDate.of(2026, 10, 5), fields(file("SUMMARY:x", "DUE:20261005T233000"))!!.dueDate)
+    }
+
     @Test fun priorityBands() {
         fun p(v: String?) = fields(file(*listOfNotNull("SUMMARY:x", v?.let { "PRIORITY:$it" }).toTypedArray()))!!.priority
         assertEquals(TaskPriority.HIGH, p("1")); assertEquals(TaskPriority.HIGH, p("4"))

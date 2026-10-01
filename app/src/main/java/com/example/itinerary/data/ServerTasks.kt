@@ -43,9 +43,14 @@ object ServerTasks {
         Parsed(uid, Fields(title.ifEmpty { "(No title)" }, notes, due, priority, done))
     }.getOrElse { Parsed(null, null) }
 
-    // A due date-time counts on the phone's calendar day.
-    private fun dueDate(p: Ics.Property, zone: ZoneId): LocalDate =
-        if (Ics.isDate(p)) Ics.date(p) else Ics.time(p, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).toLocalDate()
+    // Planner holds a due date, not a moment. A due date-time in a zone (TZID) or floating counts on its own calendar day
+    // there, whatever zone the phone is in, so travelling never moves it and moving it writes exactly the day chosen
+    // (movedDue keeps its clock time). Only a UTC one ("…Z", no day of its own) counts on the phone's day.
+    private fun dueDate(p: Ics.Property, zone: ZoneId): LocalDate = when {
+        Ics.isDate(p) -> Ics.date(p)
+        p.value.endsWith("Z") -> Ics.time(p, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).toLocalDate()
+        else -> Ics.time(p, zone, strictGap = false, Ics::zone).toLocalDate()
+    }
 
     fun fields(task: PlannerTask) = Fields(task.title, task.notes, task.dueDate, task.priority, task.done)
 
@@ -92,7 +97,8 @@ object ServerTasks {
         else -> emptyList()
     }
 
-    // [line] (a DUE with a time) moved to [date] at the same clock time. Null when it holds only a date, or can't be read.
+    // [line] (a DUE with a time) moved to [date] at the same clock time: in its own zone (or floating), where [date] is its
+    // own day (see dueDate); a UTC one at the same clock time on the phone. Null when it holds only a date, or can't be read.
     private fun movedDue(line: String, date: LocalDate, zone: ZoneId): String? = runCatching {
         val p = Ics.property(line)
         if (Ics.isDate(p)) return null
