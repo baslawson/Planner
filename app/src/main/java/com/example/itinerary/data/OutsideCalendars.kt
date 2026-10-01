@@ -83,7 +83,7 @@ data class SentEvent(
     }
 }
 
-class SentMarkRow(val itemId: Long, val uid: String?, val problem: String?)
+class SentMarkRow(val itemId: Long, val uid: String?, val problem: String?, val account: String, val calendar: String)
 
 // What an event card says about two-way sync: on Nextcloud, or on Nextcloud with something to settle in Calendars.
 enum class SyncMark { SYNCED, PROBLEM;
@@ -93,6 +93,13 @@ enum class SyncMark { SYNCED, PROBLEM;
             uid == null || problem == SentEvent.DETACHED -> null
             problem == null || problem == SentEvent.PENDING -> SYNCED
             else -> PROBLEM
+        }
+
+        // The marks by event id: only for the calendar Planner keeps in sync now. Turning two-way sync off keeps the
+        // rows (choosing it again links the same files), but the cards then say nothing about Nextcloud.
+        fun forCards(rows: List<SentMarkRow>, sources: List<CalendarSource>): Map<Long, SyncMark> {
+            val synced = sources.filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }.mapTo(HashSet()) { it.account to it.href }
+            return rows.filter { (it.account to it.calendar) in synced }.mapNotNull { row -> of(row.uid, row.problem)?.let { row.itemId to it } }.toMap()
         }
     }
 }
@@ -120,7 +127,7 @@ interface SentDao {
     fun observe(): Flow<List<SentEvent>>
 
     // Only what the event cards show (not the stored calendar files): see CalendarSync.syncMarks.
-    @Query("SELECT itemId, uid, problem FROM sent_events")
+    @Query("SELECT itemId, uid, problem, account, calendar FROM sent_events")
     fun observeMarks(): Flow<List<SentMarkRow>>
 
     @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)

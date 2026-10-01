@@ -48,6 +48,16 @@ class CalendarFixesOct1Test {
         assertFalse(NextcloudClient.samePath(home.resolve("/remote.php/dav/files/o%27brien/x/")!!, account.filesRoot))
     }
 
+    // T2: with two-way sync off (its rows are kept on purpose), the cards say nothing about Nextcloud.
+    @Test fun cardsAreMarkedOnlyWhileTheirCalendarIsKeptInSync() {
+        val rows = listOf(SentMarkRow(1, "u1", null, "acc", "/cal/planner/"), SentMarkRow(2, "u2", SentEvent.CONFLICT, "acc", "/cal/planner/"),
+            SentMarkRow(3, "u3", null, "other", "/cal/planner/"))
+        val on = CalendarSource(id = 7, account = "acc", href = "/cal/planner/", name = "Planner", enabled = true, sendHere = true)
+        assertEquals(mapOf(1L to SyncMark.SYNCED, 2L to SyncMark.PROBLEM), SyncMark.forCards(rows, listOf(on)))
+        assertEquals(emptyMap<Long, SyncMark>(), SyncMark.forCards(rows, listOf(on.copy(sendHere = false, enabled = false))))
+        assertEquals(emptyMap<Long, SyncMark>(), SyncMark.forCards(rows, emptyList()))
+    }
+
     // S3: a repeating event whose start is in UTC repeats on UTC dates (RFC 5545), each then shown on the phone's clock.
     @Test fun aRepeatingUtcEventRepeatsOnUtcDates() {
         val weekly = "UID:u\r\nDTSTART:20260105T230000Z\r\nDTEND:20260106T000000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4\r\nSUMMARY:Standup"

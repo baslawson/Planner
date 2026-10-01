@@ -157,6 +157,8 @@ class TaskSelectAndSyncMarksUiTest {
         sent.put(SentEvent(itemId=synced,account="https://cloud.test/|qa",calendar="/cal/",uid="qa-1",fingerprint="x"))
         sent.put(SentEvent(itemId=conflict,account="https://cloud.test/|qa",calendar="/cal/",uid="qa-2",fingerprint="x",problem=SentEvent.CONFLICT))
         val dao=app.database.outsideDao()
+        // Marked only while that calendar is the one kept in sync.
+        val planner=dao.insertSource(CalendarSource(account="https://cloud.test/|qa",href="/cal/",name="QA Planner",enabled=true,sendHere=true))
         val work=dao.insertSource(CalendarSource(account="https://cloud.test/|qa",href="/remote.php/dav/calendars/qa/work/",name="QA Work",
             color=0xFF1565C0.toInt(),enabled=true))
         dao.insertEvents(listOf(OutsideEvent(sourceId=work,date=today,startTime=LocalTime.of(13,0),durationMinutes=30,title="QA from work")))
@@ -169,5 +171,8 @@ class TaskSelectAndSyncMarksUiTest {
         Thread.sleep(1200)
         await { find("From QA Work")!=null }
         screenshot("marks-dark")
+        // Two-way sync turned off: the rows stay, the marks go.
+        dao.updateSource(dao.source(planner)!!.copy(sendHere=false,enabled=false))
+        await { find("Nextcloud")==null && find("Nextcloud: check Calendars")==null && find("QA on Nextcloud")!=null }
     }
 }
