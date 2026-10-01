@@ -231,6 +231,9 @@ class TaskSync(
         val rows = rowsDao.all().filter { it.account == target.account && it.list == target.href }
         val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
         if (ctag != null && ctag == target.taskCtag && !unsettled && target.taskError == null) return
+        // T4: what is gone is judged from the full listing (as for events): the task query leaves out any file it returns
+        // without its content.
+        val listing = client().eventEtags(account, target.href)
         val files = client().taskFiles(account, target.href).associateBy { it.href }
         val parsed = files.mapValues { ServerTasks.parse(it.value.data, zone()) }
         val tasks = db.taskDao().all().associateBy { it.id }
@@ -284,7 +287,7 @@ class TaskSync(
         }
         // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile. A pending one isn't there
         // yet: the next send writes it.
-        for ((href, row) in synced) if (href !in files && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
+        for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val task = tasks[row.taskId]
             when {
                 task == null -> rowsDao.delete(row.id)

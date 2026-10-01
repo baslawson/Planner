@@ -308,6 +308,21 @@ class TaskSyncTest {
         assertTrue(rows().all { it.problem == null })
     }
 
+    // T4: a file the task query returns without its content is still there: not "deleted on Nextcloud".
+    @Test fun aFileMissingFromTheQueryIsntTakenForDeleted() = runBlocking {
+        add("QA Still there")
+        start()
+        dav.withoutData = setOf(fileOf("QA Still there").key); dav.bump()
+        syncAgain()
+        assertEquals(1, all().count { it.title == "QA Still there" })
+        assertTrue(repo.recentlyDeleted.first().none { it.label == "QA Still there" })
+        assertNull(rows().single().problem)
+        // Really gone: then it is.
+        dav.withoutData = emptySet(); dav.files.remove(fileOf("QA Still there").key); dav.bump()
+        syncAgain()
+        assertTrue(all().none { it.title == "QA Still there" })
+    }
+
     @Test fun aBackupKeepsTheListAndWhatWasSynced() = runBlocking {
         add("QA Backed up")
         start()

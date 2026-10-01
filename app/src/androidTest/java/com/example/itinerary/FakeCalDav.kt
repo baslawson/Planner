@@ -28,6 +28,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var onQuery: ((String) -> Unit)? = null
     // A PUT whose body this returns a code for is answered with it and not stored (Nextcloud refusing one file).
     @Volatile var refuse: ((String) -> Int?)? = null
+    // Files a REPORT lists without their calendar-data (a server leaving one out of a query reply).
+    @Volatile var withoutData: Set<String> = emptySet()
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -64,7 +66,7 @@ class FakeCalDav(private val home: String, private val user: String, private val
                     // A calendar-query returns only the kind it asks for.
                     else if (todo != v.second.contains("BEGIN:VTODO")) false
                     else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
-                }.entries.joinToString("") { entry(it.key, it.value, true) })
+                }.entries.joinToString("") { entry(it.key, it.value, it.key !in withoutData) })
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)
             "PUT" -> {
