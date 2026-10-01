@@ -2,6 +2,7 @@ package com.example.itinerary.data
 
 import androidx.room.withTransaction
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import com.example.itinerary.reminders.ReminderAlarms
@@ -358,6 +359,16 @@ class Repository(
         stored?.let(payloads::delete)
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
         afterCommit(reminderIds = reminderIds, taskIds = restoredTasks)
+    }
+
+    // Recently deleted's selection: each entry on its own, as one Restore / Delete forever would; one that fails doesn't
+    // stop the rest. Returns how many failed.
+    suspend fun restoreDeleted(ids: Collection<String>): Int = ids.count { id ->
+        try { restoreDeleted(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { true }
+    }
+
+    suspend fun permanentlyDelete(ids: Collection<String>): Int = ids.count { id ->
+        try { permanentlyDelete(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { true }
     }
 
     suspend fun permanentlyDelete(id: String) = changes.withLock {

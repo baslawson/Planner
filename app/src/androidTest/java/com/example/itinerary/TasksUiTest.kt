@@ -191,14 +191,11 @@ class TasksUiTest {
         app.repository.finishDeletion(app.repository.pendingDeletions.value.single { it.tasks.any { t -> t.id==task.id } }.token)
         open();click("Settings");click("Recently deleted")
         reveal { find("QA task trash")!=null };screenshot("task-recently-deleted")
-        // Locate the Restore action belonging to this task, rather than another archived record.
-        fun descendants(n:AccessibilityNodeInfo):List<AccessibilityNodeInfo> = listOf(n)+(0 until n.childCount).flatMap { i -> n.getChild(i)?.let(::descendants).orEmpty() }
-        var group=find("QA task trash")!!.parent
-        while(group!=null && descendants(group).none { it.text?.toString()=="Restore" }) group=group.parent
-        val restore=descendants(checkNotNull(group)).first { it.text?.toString()=="Restore" }
-        var button:AccessibilityNodeInfo?=restore
-        while(button!=null && !button.isClickable)button=button.parent
-        assertTrue(button!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        // Select this task's row (not another archived record), then Restore the selection.
+        var row=find("QA task trash")
+        while(row!=null && !row.isClickable)row=row.parent
+        assertTrue(row!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        click("Restore (1)")
         await { data().tasks.any { it.id==task.id } };assertEquals(task,data().tasks.single { it.id==task.id })
         click("Close")
     }

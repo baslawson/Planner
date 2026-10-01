@@ -127,10 +127,11 @@ class FourAdditionsUiTest {
         open();click("Settings");click("Recently deleted")
         await { find("QA cold recovery bill")!=null }
         screenshot("recently-deleted")
-        click("Delete forever")
-        await { find("Delete forever?")!=null }
+        click("QA cold recovery bill")
+        click("Delete forever (1)")
+        await { find("Delete 1 entry forever?")!=null }
         click("Cancel")
-        click("Restore")
+        click("Restore (1)")
         await { data().items.any { it.title=="QA cold recovery bill" } }
         val restored=data().items.single { it.title=="QA cold recovery bill" }
         assertEquals(3000L,Payments.total(restored.payments))
