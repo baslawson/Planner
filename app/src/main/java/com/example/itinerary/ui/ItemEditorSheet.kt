@@ -576,6 +576,7 @@ private fun ItemEditorForm(
     fun close() { if (committed) return; if (unsaved) askingToSave = true else discard() }
     BackHandler { if (!busy && !readingText) close() }
     val editorScroll = rememberScrollState()
+    val checklistAnchor = remember { ChecklistAnchor() }
 
     if (scanningPdf == null) Surface(
         modifier = Modifier.fillMaxSize(),
@@ -588,7 +589,8 @@ private fun ItemEditorForm(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            ScrollHints(editorScroll, Modifier.weight(1f)) { Column(
+            ScrollHints(editorScroll, Modifier.weight(1f),
+                overlay = { ChecklistJumpButton(checklist, checklistAnchor, editorScroll) }) { Column(
                 Modifier
                     .lockedWhile(busy)
                     .padding(horizontal = 20.dp)
@@ -899,7 +901,7 @@ private fun ItemEditorForm(
                 },
                 onOpen = { openAttachment(context, store, it) },
             )
-            ChecklistSection(checklist, onChange = { checklist = it })
+            ChecklistSection(checklist, onChange = { checklist = it }, anchor = checklistAnchor)
             RemindersSection(
                 billTask = billTask,
                 eventDate = date,

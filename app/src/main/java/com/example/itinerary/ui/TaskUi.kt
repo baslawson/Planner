@@ -321,9 +321,12 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         pendingPhoto = null
     }
     BackHandler { if (!busy) close() }
+    val taskScroll = rememberScrollState()
+    val checklistAnchor = remember { ChecklistAnchor() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxWidth()) { Column(
+            ScrollHints(taskScroll, Modifier.weight(1f).fillMaxWidth(),
+                overlay = { ChecklistJumpButton(checklist, checklistAnchor, taskScroll) }) { Column(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -397,7 +400,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 OutlinedTextField(notes, onValueChange = { if (it.length <= 20_000) notes = it }, label = { Text("Notes (optional)") },
                     enabled = !busy, minLines = 4, modifier = Modifier.fillMaxWidth())
                 TaskPrerequisites(initial.id, prerequisiteIds, enabled = !busy, onChange = { prerequisiteIds = it })
-                ChecklistSection(checklist, onChange = { if (!busy) checklist = it })
+                ChecklistSection(checklist, onChange = { if (!busy) checklist = it }, anchor = checklistAnchor)
                 HorizontalDivider()
                 HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
                 attachments.forEach { attachment ->

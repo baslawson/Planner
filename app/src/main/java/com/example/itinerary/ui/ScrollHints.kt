@@ -2,6 +2,7 @@ package com.example.itinerary.ui
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,12 +23,14 @@ import androidx.compose.ui.unit.dp
 // Nothing is drawn when everything fits.
 
 // A scrolling column with the bar. [fitContent]: only as tall as the content (up to the space available), for a short
-// dialog; otherwise it fills the height it is given, as a full screen does.
+// dialog; otherwise it fills the height it is given, as a full screen does. [overlay] floats over the scrolling area (a
+// button that stays put while the content scrolls, such as ChecklistJumpButton).
 @Composable
 fun ScrollHints(state: ScrollState, modifier: Modifier = Modifier, fitContent: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit) {
+    overlay: @Composable BoxScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     ScrollBarFrame(
         modifier = modifier,
+        overlay = overlay,
         // Where the visible part sits: (top, height) as fractions of the whole, or null when it all fits.
         thumb = { height -> if (state.maxValue <= 0 || height <= 0f) null else
             (state.value.toFloat() / (height + state.maxValue)) to (height / (height + state.maxValue)) },
@@ -63,6 +66,7 @@ fun LazyScrollHints(modifier: Modifier = Modifier, content: @Composable (LazyLis
 private fun ScrollBarFrame(
     modifier: Modifier,
     thumb: (viewportHeight: Float) -> Pair<Float, Float>?,
+    overlay: @Composable BoxScope.() -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     val thumbColor = scrollBarColor()
@@ -80,5 +84,5 @@ private fun ScrollBarFrame(
                 drawRoundRect(thumbColor, Offset(x, top), Size(width, thumbHeight), CornerRadius(width / 2))
             }
         },
-    ) { content() }
+    ) { content(); overlay() }
 }
