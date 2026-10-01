@@ -121,6 +121,15 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     var shortcutScan by remember { mutableStateOf(false) }
     if (calendarUri != null) CalendarImportDialog(initialUri = calendarUri, onDismiss = onCalendarOpened)
     var draftChecked by remember { mutableStateOf(recovered == null) }
+    // U2: the saved event the recovery editor reopens, claimed while it's up (a new event's draft has no other editor).
+    // Claimed before any restored bill editor looks (BillTaskEditor checks once composed, in its LaunchedEffect).
+    val recoveringId = remember(recovered) {
+        recovered?.let { runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")).id }.getOrNull() }?.takeIf { it != 0L }
+    }
+    if (recoveringId != null) DisposableEffect(recoveringId) {
+        com.example.itinerary.data.EditorDraftStore.recoveryOpened(recoveringId)
+        onDispose { com.example.itinerary.data.EditorDraftStore.recoveryClosed(recoveringId) }
+    }
     LaunchedEffect(Unit) {
         val token = recovered?.optString("token")?.takeIf { it.isNotEmpty() }
         if (token != null && app.repository.snapshot().items.any { it.draftToken == token }) {

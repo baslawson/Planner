@@ -75,6 +75,8 @@ fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
     var details by remember(id) { mutableStateOf<Triple<ItineraryItem, List<Attachment>, List<Reminder>>?>(null) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id) {
+        // U2: AppNav's recovery editor has this bill's unsaved edits open already; this one leaves them to it.
+        if (com.example.itinerary.data.EditorDraftStore.recoveryOwns(id)) { onDismiss(); return@LaunchedEffect }
         try {
             details = repo.eventDetails(id)
             if (details?.first?.category != "Bills") failure = "This bill is no longer available."
