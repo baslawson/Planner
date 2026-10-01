@@ -304,14 +304,16 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 }
             }
         }
-        // A widget tap while an event editor is open goes back to that editor; the widget's day opens once it is saved
-        // or discarded (D10). Moving to the day at once would drop the editor with its draft.
+        // A widget tap while an event or task editor is open goes back to that editor; the widget's day opens once it is
+        // saved or discarded (D10, U5). Moving to the day at once would drop the editor with its draft.
         // Not lifecycle-bound: the tap that brings Planner back must see the current count at once.
-        val openEditors by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsState()
+        val openEventEditors by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsState()
+        val openTaskEditors by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsState()
+        val openEditors = openEventEditors + openTaskEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.WAIT)
-                Toast.makeText(app, WIDGET_WAITS_FOR_EDITOR, Toast.LENGTH_LONG).show()
+                Toast.makeText(app, widgetWaitMessage(openEventEditors, openTaskEditors), Toast.LENGTH_LONG).show()
         }
         LaunchedEffect(widgetDate, waitingForEditor) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.OPEN) {
@@ -365,7 +367,12 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 
 }
 
-internal const val WIDGET_WAITS_FOR_EDITOR = "Close this event first. Then the widget's day opens."
+// What the widget's day waits for, named by what is open.
+internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int): String = when {
+    taskEditors == 0 -> "Close this event first. Then the widget's day opens."
+    eventEditors == 0 -> "Close this task first. Then the widget's day opens."
+    else -> "Close the open event and task first. Then the widget's day opens."
+}
 
 internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
 

@@ -18,6 +18,7 @@ import java.time.LocalDate
  * U3: a second Planner window (here a share) doesn't recover the draft of an editor still open in the first, and
  * sharing to an event says an event is open.
  * U4: the widget's task editor doesn't open on a task already open in the agenda's (they shared one draft).
+ * U5: the widget's day waits for an open task editor, as for an event editor (D10), instead of dropping it.
  * Run only with an external backup/restore harness for the shared emulator (it adds events and tasks).
  */
 @Suppress("DEPRECATION")
@@ -121,6 +122,30 @@ class EditorOwnershipUiTest {
         click("Discard")
         await { find("Edit task") == null }
         assertEquals("QA owned task", data().tasks.single { it.id == task.id }.title)
+    }
+
+    @Test fun theWidgetsDayWaitsForAnOpenTaskEditor() = runBlocking {
+        app.settings.setAgendaRange(AgendaRange.ALL)
+        val task = PlannerTask(title = "QA waiting task", dueDate = LocalDate.now().plusDays(2)).also { app.repository.saveTask(it) }
+        launch()
+        click("QA waiting task")
+        await { find("Edit task") != null }
+        setText("QA waiting task", "QA waiting task edited")
+        context.startActivity(Intent(context, MainActivity::class.java).apply {
+            action = "com.example.itinerary.widget.OPEN_DATE"
+            putExtra("widget_date", LocalDate.now().toString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        })
+        Thread.sleep(1500)
+        // Still on the task, with its edit; the day waits.
+        assertNotNull(pickEditable(nodes(), "QA waiting task edited"))
+        assertNull(find("CALENDAR"))
+        screenshot("widget-day-waits-for-task")
+        click("Close")
+        await { find("Save changes?") != null }
+        click("Discard")
+        await { find("CALENDAR") != null && find("Edit task") == null }
+        assertEquals("QA waiting task", data().tasks.single { it.id == task.id }.title)
     }
 
     @Test fun aBillEditorLeavesARecoveredBillToTheRecoveryEditor() = runBlocking {
