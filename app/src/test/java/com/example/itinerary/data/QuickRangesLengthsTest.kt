@@ -93,4 +93,37 @@ class QuickRangesLengthsTest {
         // Not a length at all: title text, as before.
         ok("Hike for a few hours Saturday").let { assertEquals("Hike for a few hours", it.title) }
     }
+
+    @Test fun aBareHourAfterARepeatAsksMorningOrAfternoon() {
+        parse("Gym every Monday 6").let {
+            assertEquals(morningOrAfternoon, it.error); assertEquals("Gym", it.title); assertEquals(RepeatRule.WEEKLY, it.repeat)
+            assertEquals(day(10, 5), it.date); assertEquals(listOf(at(6), at(18)), it.timeChoices)
+        }
+        // After "daily" a number may be a count: title text, as before.
+        ok("Pills daily 2").let { assertEquals("Pills 2", it.title); assertTrue(it.timeChoices.isEmpty()) }
+    }
+
+    @Test fun aTwentyFourHourHourAfterAtNeedsNoQuestion() {
+        ok("Call tomorrow at 13").let { assertEquals(at(13), it.time); assertNull(it.error); assertFalse(it.ambiguousTime) }
+        ok("Call tomorrow at 0").let { assertEquals(at(0), it.time); assertNull(it.error); assertFalse(it.ambiguousTime) }
+        asks("Call tomorrow at 7", at(7), null)
+    }
+
+    @Test fun aTimeAfterMidnightIsTheNextDay() {
+        ok("Meds 8pm and 2am tomorrow").let {
+            assertEquals(day(10, 2), it.date); assertEquals(at(20), it.time); assertEquals(listOf(at(2)), it.extraTimes)
+            assertEquals(listOf(day(10, 2) to at(20), day(10, 3) to at(2)), it.eachTime().map { e -> e.date to e.time })
+        }
+        // Converted from another time zone, each keeps its own day.
+        ok("Meds tomorrow 8pm and 2am AWST").let {
+            assertEquals(listOf(day(10, 2) to at(22), day(10, 3) to at(4)), it.eachTime().map { e -> e.date to e.time })
+        }
+        // In order within the day: unchanged.
+        ok("Meds 8am and 8pm tomorrow").let {
+            assertEquals(listOf(day(10, 2) to at(8), day(10, 2) to at(20)), it.eachTime().map { e -> e.date to e.time })
+        }
+        ok("Meds 8pm and 8am tomorrow").let {
+            assertEquals(listOf(day(10, 2) to at(8), day(10, 2) to at(20)), it.eachTime().map { e -> e.date to e.time })
+        }
+    }
 }

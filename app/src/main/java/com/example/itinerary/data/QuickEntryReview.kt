@@ -37,12 +37,14 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         time = if (timeOverride != null) timeOverride.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) else time,
         dateChoices = dates, ambiguousTime = ambiguous, error = problem,
         // A time chosen by hand is the one time: "8am and 8pm" then adds a single event.
-        extraTimes = if (timeOverride != null) emptyList() else extraTimes)
+        extraTimes = if (timeOverride != null) emptyList() else extraTimes, nextDayTimes = if (timeOverride != null) 0 else nextDayTimes)
 }
 
-/** One suggestion per time: "8am and 8pm" adds an event at each. */
+/** One suggestion per time: "8am and 8pm" adds an event at each; "8pm and 2am" puts 2am on the next day. */
 fun QuickEntrySuggestion.eachTime(): List<QuickEntrySuggestion> =
-    if (extraTimes.isEmpty()) listOf(this) else (listOf(time) + extraTimes).map { copy(time = it, extraTimes = emptyList()) }
+    if (extraTimes.isEmpty()) listOf(this) else (listOf(time) + extraTimes).mapIndexed { i, at ->
+        copy(date = if (i > extraTimes.size - nextDayTimes) date.plusDays(1) else date, time = at, extraTimes = emptyList(), nextDayTimes = 0)
+    }
 
 /** The save token of an entry's [index]th event: the first keeps the draft's own token. */
 fun quickToken(token: String, index: Int) = if (index == 0) token else "$token-$index"
