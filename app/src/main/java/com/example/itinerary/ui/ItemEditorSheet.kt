@@ -140,9 +140,10 @@ fun ItemEditorSheet(
 ) {
     val repository = (LocalContext.current.applicationContext as ItineraryApp).repository
     // One open editor for the widget's wait (D10) for the whole visit, saves included.
+    val windowEditors = LocalWindowEditors.current
     DisposableEffect(Unit) {
-        EditorDraftStore.editorOpened()
-        onDispose { EditorDraftStore.editorClosed() }
+        EditorDraftStore.editorOpened(); windowEditors?.let { it.events++ }
+        onDispose { EditorDraftStore.editorClosed(); windowEditors?.let { it.events-- } }
     }
     // After a Save: the event as stored (read in one transaction, like BillTaskEditor) and which save it was, so each
     // save starts the form afresh from it.

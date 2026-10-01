@@ -132,9 +132,10 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
     }
     val savedKey = savedId
     // Counted for the widget's day (U5) from first composed to gone, whatever it shows.
+    val windowEditors = LocalWindowEditors.current
     DisposableEffect(Unit) {
-        TaskDraftStore.editorOpened()
-        onDispose { TaskDraftStore.editorClosed() }
+        TaskDraftStore.editorOpened(); windowEditors?.let { it.tasks++ }
+        onDispose { TaskDraftStore.editorClosed(); windowEditors?.let { it.tasks-- } }
     }
     // U4: one editor per task. Another one on a task already open (the widget's over the agenda's, a second window's)
     // says so instead of opening on the same draft. A new task has nothing to share until it is saved.

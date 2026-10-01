@@ -40,4 +40,18 @@ class WidgetDateStepTest {
         assertEquals("Close this task first. Then the widget's day opens.", widgetWaitMessage(0, 1))
         assertEquals("Close the open event and task first. Then the widget's day opens.", widgetWaitMessage(1, 2))
     }
+
+    // U-N5: an editor open in another Planner window (a share opened in the browser's task) doesn't hold up this
+    // window's widget day; a shortcut, which waits for the one event draft wherever it is, says where that editor is.
+    @Test fun eachWindowWaitsOnlyForItsOwnEditors() {
+        val main = WindowEditors(); val share = WindowEditors()
+        share.events++; share.tasks++
+        assertEquals(WidgetDateStep.OPEN, widgetDateStep(day, main.events + main.tasks))
+        assertEquals(WidgetDateStep.WAIT, widgetDateStep(day, share.events + share.tasks))
+        main.tasks++
+        assertEquals(WidgetDateStep.WAIT, widgetDateStep(day, main.events + main.tasks))
+        assertEquals("Finish or discard the event open in another Planner window before using a shortcut.", shortcutBlockedMessage(0, 1))
+        assertEquals("Finish or discard your current draft before using a shortcut.", shortcutBlockedMessage(1, 2))
+        assertEquals("Finish or discard your current draft before using a shortcut.", shortcutBlockedMessage(0, 0))
+    }
 }

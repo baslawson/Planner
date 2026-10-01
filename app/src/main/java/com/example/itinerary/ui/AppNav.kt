@@ -68,6 +68,8 @@ private fun NavController.openCalendar(entry: NavBackStackEntry, date: LocalDate
 
 @Composable
 fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}) {
+    val windowEditors = remember { WindowEditors() }
+    CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
     if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) }
@@ -306,9 +308,10 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }
         // A widget tap while an event or task editor is open goes back to that editor; the widget's day opens once it is
         // saved or discarded (D10, U5). Moving to the day at once would drop the editor with its draft.
-        // Not lifecycle-bound: the tap that brings Planner back must see the current count at once.
-        val openEventEditors by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsState()
-        val openTaskEditors by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsState()
+        // Only the editors in this window (U-N5): one in another Planner window (a share opened in the browser's task)
+        // stays where it is. Snapshot state: the tap that brings Planner back sees the current count at once.
+        val openEventEditors = windowEditors.events
+        val openTaskEditors = windowEditors.tasks
         val openEditors = openEventEditors + openTaskEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
@@ -329,7 +332,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 val existingDraft = runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }
                 if (existingDraft.isFailure || existingDraft.getOrNull() != null || recovered != null || shortcutItem != null ||
                     com.example.itinerary.data.EditorDraftStore.openEditors.value > 0) {
-                    Toast.makeText(app, "Finish or discard your current draft before using a shortcut.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(app, shortcutBlockedMessage(windowEditors.events, com.example.itinerary.data.EditorDraftStore.openEditors.value), Toast.LENGTH_LONG).show()
                 } else if (com.example.itinerary.EntryShortcuts.accepts(entryAction)) {
                     shortcutScan = entryAction == com.example.itinerary.EntryShortcuts.SCAN
                     shortcutItem = com.example.itinerary.data.ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null,
@@ -367,7 +370,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     val openTasks by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsStateWithLifecycle()
     SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || recovered != null)
     }
-
+    }
 }
 
 // What the widget's day waits for, named by what is open.
@@ -376,6 +379,19 @@ internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int): String = wh
     eventEditors == 0 -> "Close this task first. Then the widget's day opens."
     else -> "Close the open event and task first. Then the widget's day opens."
 }
+
+// A shortcut waits for the one event draft Planner keeps, wherever its editor is open (U-N5: in another Planner
+// window, such as a share opened in the browser's task, the user wouldn't see it from here).
+internal fun shortcutBlockedMessage(windowEventEditors: Int, allEventEditors: Int): String =
+    if (windowEventEditors == 0 && allEventEditors > 0) "Finish or discard the event open in another Planner window before using a shortcut."
+    else "Finish or discard your current draft before using a shortcut."
+
+/** The editors open in one Planner window (one AppNav), for what waits for them there (U-N5). */
+internal class WindowEditors {
+    var events by mutableIntStateOf(0)
+    var tasks by mutableIntStateOf(0)
+}
+internal val LocalWindowEditors = compositionLocalOf<WindowEditors?> { null }
 
 internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
 
