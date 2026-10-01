@@ -9,7 +9,6 @@ import android.os.Bundle
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.activeReminderAt
-import com.example.itinerary.data.reminderTrigger
 
 interface ReminderAlarms {
     fun schedule(item: ItineraryItem, reminder: Reminder)
@@ -20,6 +19,10 @@ interface ReminderAlarms {
     // The time zone task reminders were last set in, so that after a change they keep their clock time (Repository).
     fun reminderZone(): String? = null
     fun setReminderZone(zone: String) {}
+    // At most AlarmWindow.LIMIT reminders are armed at once: the ones after [armHorizon] wait (null: all are armed).
+    fun armHorizon(): Long? = null
+    fun setArmHorizon(horizon: Long?) {}
+    fun armedCount(): Int = 0
 }
 
 class ReminderScheduler(private val context: Context) : ReminderAlarms {
@@ -31,6 +34,14 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     override fun reminderZone(): String? = zonePrefs.getString("zone", null)
     override fun setReminderZone(zone: String) { if (reminderZone() != zone) zonePrefs.edit().putString("zone", zone).commit() }
 
+    private val windowPrefs = context.getSharedPreferences("alarm_window", Context.MODE_PRIVATE)
+    override fun armHorizon(): Long? = if (windowPrefs.contains("horizon")) windowPrefs.getLong("horizon", 0L) else null
+    override fun setArmHorizon(horizon: Long?) {
+        if (horizon != armHorizon()) windowPrefs.edit().apply { if (horizon == null) remove("horizon") else putLong("horizon", horizon) }.commit()
+    }
+    // Every alarm set and not yet seen go off is in the ledger.
+    override fun armedCount(): Int = ledger.all().size
+
     override fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {
         val triggerAt = task.activeReminderAt
         if (task.done || triggerAt == null) { cancelTask(task.id); return }
@@ -38,6 +49,12 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         // Opening the app must leave that alarm and any delivered notification alone. Edits that
         // replace/remove its time, completion and deletion explicitly cancel the old reminder.
         if (triggerAt <= System.currentTimeMillis()) return
+        // Waits until it is among the nearest (AlarmWindow); the notification of an earlier time stays.
+        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+            taskPending(task.id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
+            ledger.remove(MissedReminders.taskKey(task.id))
+            return
+        }
         // Distinct receiver and URI keep task alarms independent of event ids and hash collisions.
         val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt)
         val updated = PendingIntent.getBroadcast(context, 0, intent,
@@ -63,7 +80,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     override fun reconcile(item: ItineraryItem, reminder: Reminder) = scheduleEvent(item, reminder, preservePending = true)
 
     private fun scheduleEvent(item: ItineraryItem, reminder: Reminder, preservePending: Boolean) {
-        val triggerAt = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder.offsetMinutes).toInstant().toEpochMilli()
+        val triggerAt = eventReminderAt(item, reminder)
         if (item.paid || item.skipped) { cancel(reminder.id); return }
         if (triggerAt <= System.currentTimeMillis()) {
             // Reloading the app must not dismiss a delivered reminder or an active ringing alarm.
@@ -77,6 +94,11 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             return
         }
         cancelCode(snoozeCode(reminder.id))
+        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+            ledger.remove(MissedReminders.eventKey(reminder.id))
+            cancelCode(reminder.id.toInt())
+            return
+        }
 
         // Everything the notification shows travels in the intent; each save reschedules with fresh values.
         val intent = reminderIntent(context, item, reminder).putExtra(EXTRA_TRIGGER, triggerAt)
@@ -121,8 +143,15 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             }
         } catch (e: SecurityException) {
             // Permission was revoked between the check and the call.
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        }
+            try { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending) }
+            catch (e: IllegalStateException) { tooManyAlarms(e) }
+        } catch (e: IllegalStateException) { tooManyAlarms(e) }
+    }
+
+    // Over Android's 500 alarms (AlarmWindow keeps Planner well under it). It stays in the ledger, so the next
+    // rescheduling sets it, or the app shows it as missed if that comes too late.
+    private fun tooManyAlarms(e: IllegalStateException) {
+        android.util.Log.w("ReminderScheduler", "Android refused another alarm", e)
     }
 
     private fun cancelCode(requestCode: Int) {

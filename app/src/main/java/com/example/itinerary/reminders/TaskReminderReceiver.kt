@@ -42,6 +42,8 @@ class TaskReminderReceiver : BroadcastReceiver() {
                         }
                     }
                 }
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow).
+                withContext(Dispatchers.IO) { (context.applicationContext as ItineraryApp).repository.refillReminders() }
             } catch (e: Exception) {
                 android.util.Log.w("TaskReminderReceiver", "Couldn't deliver task reminder", e)
             } finally { pending.finish() }
