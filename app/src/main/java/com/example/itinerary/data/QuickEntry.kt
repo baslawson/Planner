@@ -113,8 +113,9 @@ object QuickEntry {
     private val phoneNumbers = Regex("(?<![\\w.:/+(-])(?:\\+\\d{1,3}(?:[ -]\\d{1,5}){2,}|\\(0\\d\\)\\s?\\d{3,4}[ -]?\\d{3,4}|\\d{2,5}(?: \\d{2,5}){2,}|0\\d{2,4}(?:-\\d{3,4}){2})(?![\\w.:/-])")
     // "Bus 2 - 3pm", "Ferry 12 till 10am": a number naming a bus, room or gate stays in the title rather than starting a range.
     // Written tight against the dash ("Court 1-2pm") it is still a range.
-    private const val numberLabels = "bus|route|ferry|train|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|row|seat|line|no\\.?|number"
-    private val labelledNumbers = rx("(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
+    // Train and row are also things to do ("Train 6 - 7pm"): after them only a number that can't be an hour is a label.
+    private const val numberLabels = "bus|route|ferry|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|seat|line|no\\.?|number"
+    private val labelledNumbers = rx("(?:(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)|(?<=\\b(?:train|row)\\s{1,3})(?!(?:[1-9]|1[0-2])\\b))\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
     private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.

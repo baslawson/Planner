@@ -126,4 +126,16 @@ class QuickRangesLengthsTest {
             assertEquals(listOf(day(10, 2) to at(8), day(10, 2) to at(20)), it.eachTime().map { e -> e.date to e.time })
         }
     }
+
+    @Test fun aTrainOrRowWithASmallNumberCanStartARange() {
+        ok("Train 6 - 7pm").let { assertEquals("Train", it.title); assertEquals(at(18), it.time); assertEquals(60, it.durationMinutes) }
+        ok("Row 6 - 7pm Friday").let { assertEquals("Row", it.title); assertEquals(at(18), it.time); assertEquals(60, it.durationMinutes) }
+        // Still labels: a number that can't be an hour, and the other label words.
+        ok("Train 96 till 5pm").let { assertEquals(at(17), it.time); assertNull(it.durationMinutes) }
+        ok("Bus 2 - 3pm").let { assertEquals("Bus 2", it.title); assertEquals(at(15), it.time); assertNull(it.durationMinutes) }
+        ok("Ferry 12 - 10am Sunday").let { assertEquals("Ferry 12", it.title); assertEquals(at(10), it.time) }
+        ok("Gate 5 till 6pm").let { assertEquals(at(18), it.time); assertNull(it.durationMinutes) }
+        ok("Train 06 - 7pm").let { assertEquals("Train 06", it.title); assertEquals(at(19), it.time) }
+        ok("Train no. 7 - 8am Monday").let { assertEquals("Train no. 7", it.title); assertEquals(at(8), it.time) }
+    }
 }
