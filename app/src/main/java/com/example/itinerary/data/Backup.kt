@@ -113,7 +113,8 @@ class BackupManager(
         try {
             ZipFile(file).use { zip ->
                 val entry = zip.getEntry(DATA_ENTRY) ?: throw notABackup()
-                val json = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+                // Read only up to a size no real backup's data comes near: a crafted file can't run the app out of memory.
+                val json = zip.getInputStream(entry).use { readLimited(it, MAX_DATA_BYTES) ?: throw notABackup() }.toString(Charsets.UTF_8)
                 val parsed = parse(json)
                 val present = parsed.data.attachments.filter {
                     it.url != null || zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null
@@ -142,6 +143,9 @@ class BackupManager(
         // Files go in first, so the database never points at a file that isn't there. File names are
         // random, so a name that already exists is the same file and is left alone.
         val created = mutableListOf<File>()
+        // A file may unpack to far more than it holds: each attachment is copied up to a size no real one comes near, and
+        // all of them only while space is left on the phone.
+        var room = context.filesDir.usableSpace - MIN_FREE_BYTES
         try {
             ZipFile(staged.file).use { zip ->
                 staged.data.storedAttachments.forEach { attachment ->
@@ -151,12 +155,13 @@ class BackupManager(
                     if (target.exists()) return@forEach
                     created += target
                     val entry = zip.getEntry("$ATTACHMENTS_DIR/${attachment.fileName}") ?: error("Missing entry")
-                    zip.getInputStream(entry).use { source -> target.outputStream().use { source.copyTo(it) } }
+                    zip.getInputStream(entry).use { source -> target.outputStream().use { room -= copyLimited(source, it, minOf(MAX_ATTACHMENT_BYTES, room)) } }
                 }
             }
         } catch (e: Exception) {
             created.forEach { it.delete() }
-            throw BackupException("Couldn't copy the attachments out of the backup. Nothing was changed.")
+            throw BackupException(if (e is TooLargeException && e.space) "There isn't enough free space on this phone to restore this backup. Nothing was changed."
+                else "Couldn't copy the attachments out of the backup. Nothing was changed.")
         }
         var failure: Exception? = null
         // No calendar send or pull runs from before the events are replaced until the record of what was sent is (see
@@ -527,5 +532,41 @@ class BackupManager(
 
         // Attachment file names become paths inside the app's storage, so nothing but plain names is allowed.
         private val SAFE_FILE_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+        // The most a backup's data.json may unpack to (a large real one is a few MB), one attachment, and the space a
+        // restore leaves free on the phone.
+        internal const val MAX_DATA_BYTES = 64L * 1024 * 1024
+        internal const val MAX_ATTACHMENT_BYTES = 2L * 1024 * 1024 * 1024
+        private const val MIN_FREE_BYTES = 100L * 1024 * 1024
+
+        // All of [input], or null when it holds more than [limit] bytes (read no further than that).
+        internal fun readLimited(input: java.io.InputStream, limit: Long): ByteArray? {
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) return out.toByteArray()
+                total += count
+                if (total > limit) return null
+                out.write(buffer, 0, count)
+            }
+        }
+
+        // Copies [input] to [output] and returns how much; throws TooLargeException once it passes [limit] (the rest unread).
+        internal fun copyLimited(input: java.io.InputStream, output: java.io.OutputStream, limit: Long): Long {
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) return total
+                total += count
+                if (total > limit) throw TooLargeException(space = limit < MAX_ATTACHMENT_BYTES)
+                output.write(buffer, 0, count)
+            }
+        }
     }
+
+    // An attachment in a backup larger than one can be ([space] = larger than the space left on the phone).
+    internal class TooLargeException(val space: Boolean) : java.io.IOException("Too large")
 }
