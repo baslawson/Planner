@@ -625,10 +625,13 @@ class Repository(
 
     suspend fun deleteItem(item: ItineraryItem) = deleteWithUndo(item)
 
-    suspend fun deleteWithUndo(item: ItineraryItem, entireSeries: Boolean = false) = changes.withLock {
-        requirePlannerEvent(item.id)
+    suspend fun deleteWithUndo(item: ItineraryItem, entireSeries: Boolean = false) = deleteWithUndo(item.id, entireSeries)
+
+    // By id, as it is now: the card's ⋮ only has the id and whether it repeats.
+    suspend fun deleteWithUndo(id: Long, entireSeries: Boolean = false) = changes.withLock {
+        requirePlannerEvent(id)
         val deleted = archiving { archived ->
-            val current = itemDao.byId(item.id) ?: return@archiving null
+            val current = itemDao.byId(id) ?: return@archiving null
             val selected = if (entireSeries && current.seriesId != null) {
                 itemDao.forSeries(current.seriesId).sortedBy { it.id }
             } else listOf(current)

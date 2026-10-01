@@ -64,7 +64,7 @@ fun BillTaskCard(bill: PlanEvent, today: LocalDate, selection: EventSelection,
         if (selection.active) Checkbox(checked = bill.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(bill.id, bill.title, bill.date, today, onMove = { repo.moveToTomorrow(bill.id) },
             onShare = { shareEvent(context, bill.title, bill.date, bill.startTime, null, bill.location, format) },
-            billId = bill.id, paid = bill.paid, repeatId = bill.id.takeIf { bill.seriesId != null || bill.skipped }, skipped = bill.skipped)
+            billId = bill.id, paid = bill.paid, repeatId = bill.id.takeIf { bill.seriesId != null || bill.skipped }, skipped = bill.skipped, repeating = bill.seriesId != null)
     }
 }
 

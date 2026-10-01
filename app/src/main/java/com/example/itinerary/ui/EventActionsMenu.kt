@@ -13,12 +13,23 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
-fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: LocalDate, onMove: suspend () -> Unit, onShare: () -> Unit, billId: Long? = null, paid: Boolean = false, repeatId: Long? = null, skipped: Boolean = false) {
+fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: LocalDate, onMove: suspend () -> Unit, onShare: () -> Unit, billId: Long? = null, paid: Boolean = false, repeatId: Long? = null, skipped: Boolean = false, repeating: Boolean = false) {
     val exportCalendar = rememberCalendarExporter(eventId)
     var history by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    fun delete(entireSeries: Boolean) {
+        busy = true
+        scope.launch {
+            withContext(NonCancellable) {
+                try { (context.applicationContext as com.example.itinerary.ItineraryApp).repository.deleteWithUndo(eventId, entireSeries) }
+                catch (_: Exception) { Toast.makeText(context, "Couldn't delete the ${if (billId != null) "bill" else "event"}. Please try again.", Toast.LENGTH_LONG).show() }
+                finally { busy = false }
+            }
+        }
+    }
     OverlayMenuAnchor(title = "Actions for $title", button = { open ->
         IconButton(enabled = !busy, onClick = open) {
             Icon(Icons.Default.MoreVert, contentDescription = "Actions for $title")
@@ -61,6 +72,11 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
                     }
                 }
             })
+        // Last and red, as on a task's ⋮. Through the same Undo bar and dialog as the event editor's Delete.
+        DropdownMenuItem(text = { Text(if (billId != null) "Delete bill" else "Delete event", color = MaterialTheme.colorScheme.error) },
+            enabled = !busy, onClick = { close(); if (deleteAsks(billId != null, repeating)) deleting = true else delete(false) })
     })
     if (history && billId != null) BillHistoryDialog(billId) { history = false }
+    if (deleting) DeleteEventDialog(bill = billId != null, repeating = repeating, onDismiss = { deleting = false },
+        onDelete = { deleting = false; delete(it) })
 }

@@ -349,7 +349,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
             val repo = (context.applicationContext as com.example.itinerary.ItineraryApp).repository
             EventActionsMenu(item.id, item.title, item.date, today, onMove = { repo.moveToTomorrow(item.id) },
                 billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
-                repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped,
+                repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped, repeating = item.seriesId != null,
                 onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) })
         }
     }

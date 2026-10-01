@@ -954,7 +954,7 @@ private fun ItemEditorForm(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (!isNew) {
-                    DangerButton(enabled = !busy && !readingText, onClick = { if (initial.seriesId != null || billTask) deleting = true else delete(false) }) { Text("Delete") }
+                    DangerButton(enabled = !busy && !readingText, onClick = { if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }) { Text("Delete") }
                 }
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(
@@ -1017,17 +1017,7 @@ private fun ItemEditorForm(
             androidx.compose.foundation.text.selection.SelectionContainer { Text(attachment.recognizedText) }
         }
     }
-    if (deleting) {
-        PlannerDialog(if (billTask) { if (initial.seriesId == null) "Delete bill?" else "Delete repeating bill?" } else "Delete repeating event?",
-            onDismissRequest = { deleting = false },
-            primary = DialogAction(if (initial.seriesId == null) "Delete bill" else if (billTask) "This bill" else "This event", danger = true) { delete(false) },
-            dismiss = DialogAction("Cancel") { deleting = false },
-            // The whole series is the bigger step, so it is the quieter (red text) button beside Cancel.
-            extra = if (initial.seriesId != null) listOf(DialogAction("Entire series", danger = true) { delete(true) }) else emptyList(),
-        ) {
-            Text(if (initial.seriesId == null) "This bill, its payment history and attachments will be kept in Recently deleted for 30 days." else "Delete just this occurrence or every remaining entry in this series? An Undo action will be available afterwards.")
-        }
-    }
+    if (deleting) DeleteEventDialog(bill = billTask, repeating = initial.seriesId != null, onDismiss = { deleting = false }, onDelete = ::delete)
 
     if (scannedBillSuggestion != null && !billReviewRequested && billSuggestion == null) {
         PlannerDialog("Read details from this scan?",

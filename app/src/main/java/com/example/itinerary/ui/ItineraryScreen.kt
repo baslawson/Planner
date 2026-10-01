@@ -339,7 +339,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         else if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(item.id, item.title, item.date, today, onMove,
             billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
-            repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped,
+            repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped, repeating = item.seriesId != null,
             onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) })
     }
 }

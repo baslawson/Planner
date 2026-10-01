@@ -16,8 +16,8 @@ import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** Every card has a ⋮: tasks (Due tomorrow + Undo, Share, Delete + Undo), Search's event results, and events from other
- *  calendars (Copy to Planner, Share). Real application UI; run only with an external backup/restore harness. */
+/** Every card has a ⋮: tasks (Due tomorrow + Undo, Share, Delete + Undo), events and bills (Delete + Undo, asking first
+ *  for a bill or a series), Search's event results, and events from other calendars (Copy to Planner, Share). Real application UI; run only with an external backup/restore harness. */
 @Suppress("DEPRECATION")
 class CardMenusUiTest {
     private val ins get()=InstrumentationRegistry.getInstrumentation()
@@ -149,11 +149,66 @@ class CardMenusUiTest {
         assertEquals(listOf("QA edited since",today.plusDays(1)),repo.task(task.id)!!.let { listOf(it.title,it.dueDate) })
     }
 
+    private fun items(title:String)=data().items.filter { it.title==title }
+
+    @Test fun eventMenuDeletesAtOnceWithUndo()=runBlocking {
+        val id=app.repository.saveItemId(ItineraryItem(tripId=0,date=today,startTime=LocalTime.of(9,0),title="QA menu delete"))
+        start();await { find("Actions for QA menu delete")!=null }
+        click("Actions for QA menu delete");await { find("Delete event")!=null }
+        screenshot("event-menu")
+        click("Delete event")
+        // No question for a plain event: it goes at once, with the Undo bar.
+        await { items("QA menu delete").isEmpty() && find("Event deleted")!=null }
+        assertNull(find("Delete repeating event?"))
+        click("Undo")
+        await { items("QA menu delete").singleOrNull()?.id==id }
+    }
+
+    @Test fun eventMenuAsksForASeries()=runBlocking {
+        // As the editor saves "Daily, 3 times": the repository gives the series its id.
+        app.repository.saveItemId(ItineraryItem(tripId=0,date=today,startTime=LocalTime.of(8,0),title="QA menu series"),
+            removedReminders=emptyList(),options=EventSaveOptions(repeat=RepeatRule.DAILY,count=3))
+        val series=items("QA menu series").map { it.seriesId }.distinct().single()!!
+        assertEquals(3,items("QA menu series").size)
+        start();await { find("Actions for QA menu series")!=null }
+        // Cancel keeps everything.
+        click("Actions for QA menu series");click("Delete event")
+        await { find("Delete repeating event?")!=null && find("This event")!=null && find("Entire series")!=null }
+        screenshot("series-dialog")
+        click("Cancel")
+        await { find("Delete repeating event?")==null }
+        assertEquals(3,items("QA menu series").size)
+        click("Actions for QA menu series");click("Delete event")
+        await { find("This event")!=null };click("This event")
+        await { items("QA menu series").size==2 && find("Event deleted")!=null }
+        click("Undo")
+        await { items("QA menu series").size==3 }
+        click("Actions for QA menu series");click("Delete event")
+        await { find("Entire series")!=null };click("Entire series")
+        await { items("QA menu series").isEmpty() && find("3 events deleted")!=null }
+        click("Undo")
+        await { items("QA menu series").size==3 && items("QA menu series").all { it.seriesId==series } }
+    }
+
+    @Test fun billMenuAsksBeforeDeleting()=runBlocking {
+        app.repository.saveItemId(ItineraryItem(tripId=0,date=today,startTime=null,title="QA menu bill",category="Bills"))
+        start();await { find("Actions for QA menu bill")!=null }
+        click("Actions for QA menu bill");await { find("Delete bill")!=null && find("Delete event")==null }
+        click("Delete bill")
+        await { find("Delete bill?")!=null }
+        screenshot("bill-dialog")
+        assertNull(find("Entire series"))
+        click("Delete bill")
+        await { items("QA menu bill").isEmpty() && find("Event deleted")!=null }
+        click("Undo")
+        await { items("QA menu bill").size==1 }
+    }
+
     @Test fun searchResultsHaveTheEventMenu()=runBlocking {
         app.repository.saveItemId(ItineraryItem(tripId=0,date=today,startTime=LocalTime.of(10,0),title="QA search menu"))
         start();click("Search");await { find("Search events and tasks")!=null };setText("","QA search menu")
         await { find("Actions for QA search menu")!=null }
-        click("Actions for QA search menu");await { find("Move to tomorrow")!=null && find("Share event")!=null }
+        click("Actions for QA search menu");await { find("Move to tomorrow")!=null && find("Share event")!=null && find("Delete event")!=null }
         screenshot("search-menu")
     }
 
@@ -164,7 +219,7 @@ class CardMenusUiTest {
         dao.insertEvents(listOf(OutsideEvent(sourceId=work,date=today,startTime=LocalTime.of(14,0),durationMinutes=45,title="QA outside menu")))
         start();await { find("Actions for QA outside menu")!=null }
         click("Actions for QA outside menu");await { find("Copy to Planner")!=null && find("Share event")!=null }
-        assertNull(find("Move to tomorrow"))
+        assertNull(find("Move to tomorrow"));assertNull(find("Delete event"))
         screenshot("outside-menu")
         click("Copy to Planner")
         await { find("New event")!=null && pickEditable(nodes(),"QA outside menu")!=null }
