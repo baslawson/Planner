@@ -6,6 +6,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import com.example.itinerary.reminders.ReminderAlarms
 import com.example.itinerary.reminders.MissedReminders
+import com.example.itinerary.reminders.AlarmWindow
+import com.example.itinerary.reminders.eventReminderAt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -115,6 +117,10 @@ class Repository(
                 if (task == null || id in resetTaskIds) scheduler.cancelTask(id)
                 if (task != null) scheduler.scheduleTask(task)
             }
+        }
+        // A long series can leave too many alarms armed, a deletion too few while later ones wait (AlarmWindow).
+        if (reminderIds.isNotEmpty() || taskIds.isNotEmpty()) work["reminders:window"] = {
+            if (AlarmWindow.needsRefill(scheduler.armedCount(), scheduler.armHorizon())) armReminders()
         }
         if (notify) work["widget"] = { onChanged() }
         performFollowUp(work)
@@ -842,11 +848,15 @@ class Repository(
         if (item.paid || item.skipped || !ReminderDeliveries.accepts(trigger, expected, reminder.snoozedUntil != null, System.currentTimeMillis())) return@withLock
         deliver(item, reminder)
         ReminderDeliveries.key(item, reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(reminder.id, it)) }
+            ?: scheduler.markDelivered(MissedReminders.eventKey(id), expected)
     }
 
     suspend fun deliverTaskReminder(id: String, trigger: Long, deliver: (PlannerTask) -> Unit) = changes.withLock {
         val task = taskDao.byId(id) ?: return@withLock
-        if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) deliver(task)
+        if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) {
+            deliver(task)
+            scheduler.markDelivered(MissedReminders.taskKey(id), trigger)
+        }
     }
 
     // Everything in the database, read in one go so the pieces agree with each other (for backups). Recently deleted
@@ -910,21 +920,31 @@ class Repository(
     suspend fun rescheduleAllReminders(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()) = changes.withLock {
         // Cleanup is independent maintenance: its failure must not prevent scheduling alarms.
         performFollowUp(linkedMapOf("cleanup:expired" to { purgeExpiredDeleted() }, "reminders:zone" to { followTimeZone(zone) },
-            "reminders:reload" to {
-            val reminders = reminderDao.all()
-            val items = readIds(reminders.map { it.itemId }, itemDao::byIds).associateBy { it.id }
-            val delivered = readIds(reminders.map { it.id }, reminderDao::deliveries).associate { it.reminderId to it.key }
-            var failure: Exception? = null
-            reminders.forEach { reminder ->
-                try { items[reminder.itemId]?.let { if (it.paid || it.skipped) scheduler.cancel(reminder.id)
-                    else if (!ReminderDeliveries.delivered(delivered[reminder.id], it, reminder)) scheduler.reconcile(it, reminder) } }
-                catch (e: Exception) { failure = e }
-            }
-            taskDao.all().forEach { task ->
-                try { scheduler.scheduleTask(task) } catch (e: Exception) { failure = e }
-            }
-            failure?.let { throw it }
-        }))
+            "reminders:reload" to { armReminders() }))
+    }
+
+    // A reminder has rung and others wait for a free alarm (AlarmWindow): the window moves on.
+    suspend fun refillReminders() = changes.withLock {
+        if (scheduler.armHorizon() != null) performFollowUp(linkedMapOf("reminders:reload" to { armReminders() }))
+    }
+
+    // Every reminder's alarm, the nearest AlarmWindow.LIMIT armed and the rest waiting.
+    private suspend fun armReminders() {
+        val reminders = reminderDao.all()
+        val items = readIds(reminders.map { it.itemId }, itemDao::byIds).associateBy { it.id }
+        val delivered = readIds(reminders.map { it.id }, reminderDao::deliveries).associate { it.reminderId to it.key }
+        val tasks = taskDao.all()
+        val triggers = reminders.mapNotNull { r -> items[r.itemId]?.takeIf { !it.paid && !it.skipped && !ReminderDeliveries.delivered(delivered[r.id], it, r) }
+            ?.let { eventReminderAt(it, r) } } + tasks.mapNotNull { t -> t.activeReminderAt?.takeIf { !t.done } }
+        scheduler.setArmHorizon(AlarmWindow.horizon(triggers, System.currentTimeMillis()))
+        // The latest first, so the alarms of the ones that now wait are freed before nearer ones are set.
+        val jobs: List<Pair<Long, () -> Unit>> = reminders.mapNotNull { reminder -> items[reminder.itemId]?.let { item -> eventReminderAt(item, reminder) to {
+            if (item.paid || item.skipped) scheduler.cancel(reminder.id)
+            else if (!ReminderDeliveries.delivered(delivered[reminder.id], item, reminder)) scheduler.reconcile(item, reminder)
+        } } } + tasks.map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } }
+        var failure: Exception? = null
+        jobs.sortedByDescending { it.first }.forEach { (_, job) -> try { job() } catch (e: Exception) { failure = e } }
+        failure?.let { throw it }
     }
 
     // Task reminders keep their clock time when the phone's time zone changes, as event reminders do (inTimeZone). The
@@ -940,17 +960,25 @@ class Repository(
         scheduler.setReminderZone(zone.id)
     }
 
-    /** After a reboot: [post] the [pending] alarms that fell due while the phone was off; missed event reminders then count as delivered. */
-    suspend fun deliverMissedReminders(pending: Map<String, Long>, now: Long, post: (List<MissedReminders.Missed>) -> Unit) = changes.withLock {
-        val due = MissedReminders.due(pending, now)
+    /**
+     * After a reboot, or when the app finds alarms [graceMs] late: [post] the [pending] alarms that fell due without
+     * ringing; missed event reminders then count as delivered.
+     */
+    suspend fun deliverMissedReminders(pending: Map<String, Long>, now: Long, graceMs: Long = 0L, post: (List<MissedReminders.Missed>) -> Unit) = changes.withLock {
+        val due = MissedReminders.due(pending, now, graceMs)
         val events = due.keys.mapNotNull(MissedReminders::eventId).mapNotNull { id ->
             reminderDao.byId(id)?.let { r -> itemDao.byId(r.itemId)?.let { id to (it to r) } } }.toMap()
         val delivered = readIds(events.keys, reminderDao::deliveries).associate { it.reminderId to it.key }
         val tasks = due.keys.mapNotNull(MissedReminders::taskId).mapNotNull { taskDao.byId(it) }.associateBy { it.id }
         val missed = MissedReminders.select(due, events, delivered, tasks)
         post(missed)
-        missed.filterIsInstance<MissedReminders.Event>().forEach { m ->
-            ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) } }
+        missed.forEach { m ->
+            when (m) {
+                is MissedReminders.Event -> ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) }
+                    ?: scheduler.markDelivered(MissedReminders.eventKey(m.reminder.id), m.due)
+                is MissedReminders.Task -> scheduler.markDelivered(MissedReminders.taskKey(m.task.id), m.due)
+            }
+        }
     }
 }
 

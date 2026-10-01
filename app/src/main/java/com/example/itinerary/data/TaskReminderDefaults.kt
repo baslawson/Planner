@@ -39,3 +39,7 @@ fun taskReminderPresets(dueDate: LocalDate?, now: ZonedDateTime = ZonedDateTime.
         TaskReminderPreset.TOMORROW to at(now.toLocalDate().plusDays(1)),
     )
 }
+
+/** When [preset] rings if it is chosen [now] (an editor may have been open a while); null once it is no longer offered. */
+fun taskReminderPresetAt(preset: TaskReminderPreset, dueDate: LocalDate?, now: ZonedDateTime = ZonedDateTime.now()): Long? =
+    taskReminderPresets(dueDate, now).firstOrNull { it.first == preset }?.second

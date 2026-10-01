@@ -51,4 +51,35 @@ class MissedRemindersDataTest {
             assertTrue(shown.isEmpty())
         } finally { db.close(); dir.deleteRecursively(); prefs.edit().clear().commit() }
     }
+
+    // R-M1: a force stop clears the alarms without a reboot; opening the app shows the ones well overdue, once.
+    @Test fun appOpenShowsRemindersWhoseAlarmsWereDropped() = runBlocking {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(base.cacheDir, "missed-reminders-open").apply { mkdirs() }
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        val prefs = base.getSharedPreferences("missed_reminders_open_test", Context.MODE_PRIVATE).apply { edit().clear().commit() }
+        try {
+            val repo = Repository(db, AttachmentStore(object : ContextWrapper(base) { override fun getFilesDir() = dir }), object : ReminderAlarms {
+                override fun schedule(item: ItineraryItem, reminder: Reminder) {}
+                override fun cancel(reminderId: Long) {}
+            })
+            val now = System.currentTimeMillis()
+            val lost = PlannerTask(title = "Lost alarm", reminderAt = now - 3_600_000)
+            val late = PlannerTask(title = "Late alarm", reminderAt = now - 60_000)
+            repo.saveTask(lost); repo.saveTask(late)
+            val ledger = AlarmLedger(prefs)
+            ledger.set(MissedReminders.taskKey(lost.id), lost.reminderAt!!)
+            ledger.set(MissedReminders.taskKey(late.id), late.reminderAt!!)
+            val shown = mutableListOf<MissedReminders.Missed>()
+            val disarmed = mutableListOf<String>()
+            handleMissedReminders(repo, ledger, now, MissedReminders.GRACE_MS, { disarmed += it }) { shown += it }
+            assertEquals(listOf("Lost alarm"), shown.map { (it as MissedReminders.Task).task.title })
+            assertEquals(listOf(MissedReminders.taskKey(lost.id)), disarmed)
+            assertEquals(setOf(MissedReminders.taskKey(late.id)), ledger.all().keys)
+            // Opening again shows nothing new.
+            shown.clear()
+            handleMissedReminders(repo, ledger, now + 1_000, MissedReminders.GRACE_MS) { shown += it }
+            assertTrue(shown.isEmpty())
+        } finally { db.close(); dir.deleteRecursively(); prefs.edit().clear().commit() }
+    }
 }

@@ -143,6 +143,24 @@ class TaskRepeatTest {
         assertEquals(task.copy(reminderAt = null), task.copy(reminderAt = null).inTimeZone(perth, sydney, 0L))
         assertEquals(task, task.inTimeZone(perth, perth, 0L))
     }
+    // R-L1: a reminder that has rung and whose new clock time has passed too keeps the time it rang at, so Done (or
+    // Snooze) on its notification, which carries that time, still acts on the task (Repository.actOnTaskReminder).
+    @Test fun aRungReminderKeepsItsTimeForItsNotificationAfterATimeZoneChange() {
+        val perth = ZoneId.of("Australia/Perth"); val sydney = ZoneId.of("Australia/Sydney")
+        val day = LocalDate.of(2026, 10, 7)
+        fun at(hour: Int, zone: ZoneId) = day.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+        val task = PlannerTask(title = "Call", dueDate = day, reminderAt = at(9, perth), repeat = "DAILY")
+        // Rang at 9 am in Perth; at 3 pm the phone moves to Sydney, where 9 am has passed as well.
+        val east = task.inTimeZone(perth, sydney, at(15, perth))
+        assertEquals(at(9, perth), east.activeReminderAt)
+        assertNull(east.snoozedAt(at(15, perth)))
+        // The next occurrence follows the new clock time.
+        assertEquals(day.plusDays(1).atTime(9, 0).atZone(sydney).toInstant().toEpochMilli(),
+            east.nextOccurrence(day, sydney, at(15, perth))!!.reminderAt)
+        // The same going west.
+        val rung = task.copy(reminderAt = at(9, sydney))
+        assertEquals(at(9, sydney), rung.inTimeZone(sydney, perth, at(20, sydney)).activeReminderAt)
+    }
     @Test fun lateWeeklyCompletionSkipsMissedDatesAndKeepsWeekday() {
         val task = PlannerTask(title = "Weekly", dueDate = LocalDate.of(2026, 9, 1), repeat = "WEEKLY")
         assertEquals(LocalDate.of(2026, 9, 29), task.nextOccurrence(LocalDate.of(2026, 9, 26))!!.dueDate)
