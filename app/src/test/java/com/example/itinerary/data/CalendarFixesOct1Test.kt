@@ -35,6 +35,19 @@ class CalendarFixesOct1Test {
             LocalDate.of(2026, 10, 1)).skipped)
     }
 
+    // S5: Nextcloud (sabre/dav) writes an apostrophe in a path as %27, OkHttp builds it as '. The same folder either way.
+    @Test fun anApostropheInTheUsernameIsTheSameFolder() {
+        val account = NextcloudAccount.create("https://cloud.example.com/", "o'brien", "app-password")
+        val home = account.calendarsRoot
+        val listed = home.resolve("/remote.php/dav/calendars/o%27brien/personal/")!!
+        assertTrue(NextcloudClient.inside(listed, home))
+        assertFalse(NextcloudClient.inside(home.resolve("/remote.php/dav/calendars/o%27brien/")!!, home)) // the home itself
+        assertFalse(NextcloudClient.inside(home.resolve("/remote.php/dav/calendars/someone/personal/")!!, home))
+        assertFalse(NextcloudClient.inside(home.resolve("/remote.php/dav/calendars/o%27brien2/personal/")!!, home))
+        assertTrue(NextcloudClient.samePath(home.resolve("/remote.php/dav/files/o%27brien/")!!, account.filesRoot))
+        assertFalse(NextcloudClient.samePath(home.resolve("/remote.php/dav/files/o%27brien/x/")!!, account.filesRoot))
+    }
+
     // S3: a repeating event whose start is in UTC repeats on UTC dates (RFC 5545), each then shown on the phone's clock.
     @Test fun aRepeatingUtcEventRepeatsOnUtcDates() {
         val weekly = "UID:u\r\nDTSTART:20260105T230000Z\r\nDTEND:20260106T000000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4\r\nSUMMARY:Standup"
