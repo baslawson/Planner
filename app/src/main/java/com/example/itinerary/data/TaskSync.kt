@@ -140,12 +140,15 @@ class TaskSync(
         val waiting = pendingDeleted()
         // New files wait until the list has been read since it was chosen (see setTarget).
         val checked = target.taskCtag != null
+        // T1: a file Nextcloud refuses (not the login or the connection) holds up only its own task: the row stays as it
+        // was, so the next pass tries again, and the others go on.
+        val refused = mutableListOf<RefusedException>()
         for (task in tasks) {
             val row = rows[task.id]
             val pending = row?.problem == SentEvent.PENDING
             if (row?.problem != null && !pending) continue // settled by the next pull or by the user
             val print = ServerTasks.fingerprint(task)
-            when {
+            try { when {
                 pending || row == null -> {
                     if (!pending && (!checked || task.done)) continue
                     val uid = row?.uid?.takeIf { pending } ?: "planner-task-${java.util.UUID.randomUUID()}@planner"
@@ -177,16 +180,20 @@ class TaskSync(
                         WriteResult.Missing -> rowsDao.put(row.copy(problem = SentEvent.DELETED))
                     }
                 }
-            }
+            } } catch (e: RefusedException) { refused += e }
         }
         // Deleted in Planner (and past its Undo): the copy goes too, unless it was changed on Nextcloud meanwhile; then the
         // row stays for the next pull to make it a conflict.
         for (row in rows.values) if (row.taskId !in present && row.taskId !in waiting && row.problem != SentEvent.CONFLICT) {
-            val result = if (CalendarSync.deletable(row.uid, row.problem)) client().deleteFile(account, target.href, hrefOf(target, row), row.etag) else null
+            val result = try { if (CalendarSync.deletable(row.uid, row.problem)) client().deleteFile(account, target.href, hrefOf(target, row), row.etag) else null }
+                catch (e: RefusedException) { refused += e; continue }
             val kept = afterDelete(row, result)
             if (kept == null) rowsDao.delete(row.id) else if (kept != row) rowsDao.put(kept)
         }
-        return summary(target)
+        return summary(target).let { state ->
+            if (refused.isEmpty()) state
+            else CalendarSync.State(message = listOfNotNull(refusedMessage(refused.size, refused.first().code), state.message).joinToString(" "), error = true)
+        }
     }
 
     private suspend fun summary(target: CalendarSource): CalendarSync.State {
@@ -224,6 +231,9 @@ class TaskSync(
         val rows = rowsDao.all().filter { it.account == target.account && it.list == target.href }
         val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
         if (ctag != null && ctag == target.taskCtag && !unsettled && target.taskError == null) return
+        // T4: what is gone is judged from the full listing (as for events): the task query leaves out any file it returns
+        // without its content.
+        val listing = client().eventEtags(account, target.href)
         val files = client().taskFiles(account, target.href).associateBy { it.href }
         val parsed = files.mapValues { ServerTasks.parse(it.value.data, zone()) }
         val tasks = db.taskDao().all().associateBy { it.id }
@@ -277,7 +287,7 @@ class TaskSync(
         }
         // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile. A pending one isn't there
         // yet: the next send writes it.
-        for ((href, row) in synced) if (href !in files && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
+        for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val task = tasks[row.taskId]
             when {
                 task == null -> rowsDao.delete(row.id)
@@ -285,6 +295,11 @@ class TaskSync(
                 db.taskDao().byId(task.id) == null -> rowsDao.delete(row.id)
                 else -> rowsDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = ""))
             }
+        }
+        // A conflict whose file has gone since: Nextcloud's side is now "deleted" (not the version it had); deleted on both
+        // sides, nothing is left to choose.
+        for ((href, row) in synced) if (href !in listing && row.problem == SentEvent.CONFLICT && row.conflict != "") {
+            if (tasks[row.taskId] == null && row.taskId !in waiting) rowsDao.delete(row.id) else rowsDao.put(row.copy(conflict = ""))
         }
         db.withTransaction { dao.source(target.id)?.let { dao.updateSource(it.copy(taskCtag = ctag ?: "", taskError = null)) } }
         _hidden.value = hidden
@@ -341,6 +356,9 @@ class TaskSync(
                         // Nextcloud's file now belongs to a new Planner task; Planner's own task is sent as a new file.
                         val saved = db.taskDao().byId(store.add(ServerTasks.apply(PlannerTask(), server))) ?: return@withContext
                         rowsDao.put(row.copy(taskId = saved.id, etag = current.etag, ics = current.data, fingerprint = ServerTasks.fingerprint(saved), problem = null, conflict = null))
+                        // Planner's task was synced, so it is sent even when done (a done task without a row never is).
+                        rowsDao.put(SentTask(taskId = task.id, account = target.account, list = target.href,
+                            uid = "planner-task-${java.util.UUID.randomUUID()}@planner", fingerprint = ServerTasks.fingerprint(task), problem = SentEvent.PENDING))
                     }
                 }
             }
@@ -373,6 +391,10 @@ class TaskSync(
     }
 
     companion object {
+        // What the user is told when Nextcloud refused [count] tasks (the first with HTTP [code]).
+        internal fun refusedMessage(count: Int, code: Int) = "Nextcloud refused ${if (count == 1) "1 task" else "$count tasks"} (HTTP $code). " +
+            "The others were sent; Planner tries again at the next sync."
+
         internal fun isPlannerUid(uid: String?) = uid != null && uid.startsWith("planner-task-") && uid.endsWith("@planner")
 
         // [file] is the one a pending [row] wrote (its reply was lost): the row takes it (see CalendarSync.adopted).
@@ -411,9 +433,11 @@ class TaskSync(
 
         // Which files ([href], uid, the task as Planner would hold it) are [candidates] already (Planner's open tasks without
         // a file): first exactly (title and due date); then, for files Planner itself created, the one task with that title.
-        // Each task is used once; anything unsure is left alone.
-        internal fun relink(files: List<Triple<String, String?, ServerTasks.Fields>>, candidates: List<PlannerTask>): Map<String, String> {
+        // Each task is used once; anything unsure is left alone. Files already done on Nextcloud stay there only (T3: an
+        // old completed one is never a new open task's file).
+        internal fun relink(all: List<Triple<String, String?, ServerTasks.Fields>>, candidates: List<PlannerTask>): Map<String, String> {
             fun key(title: String, due: java.time.LocalDate?) = title.trim().take(ServerTasks.MAX_TITLE).ifEmpty { "(No title)" } to due
+            val files = all.filter { !it.third.done }
             val free = candidates.sortedBy { it.id }.toMutableList()
             val result = LinkedHashMap<String, String>()
             for ((href, _, server) in files) free.firstOrNull { key(it.title, it.dueDate) == key(server.title, server.dueDate) }

@@ -283,6 +283,94 @@ class TaskSyncTest {
         assertEquals(2, all().size); assertEquals(1, repo.snapshot().items.size)
     }
 
+    // T1: a file Nextcloud refuses (415, as sabre/vobject answers an invalid one) holds up only its own task.
+    @Test fun aRefusedTaskDoesntHoldUpTheOthers() = runBlocking {
+        add("QA Refused new"); add("QA Fine new")
+        dav.put("${list}web.ics", todo("web-1", "QA Refused edit"))
+        dav.refuse = { body -> if (body.contains("QA Refused")) 415 else null }
+        start()
+        assertNotNull(fileOf("QA Fine new"))
+        assertTrue(listFiles().values.none { it.second.contains("QA Refused new") })
+        assertTrue(tasks.state.value.error)
+        assertTrue(tasks.state.value.message.orEmpty(), tasks.state.value.message.orEmpty().contains("HTTP 415"))
+        // An edit refused, one to another task still goes.
+        repo.saveTask(task("QA Refused edit").copy(notes = "Refused note"), create = false)
+        repo.saveTask(task("QA Fine new").copy(notes = "Fine note"), create = false)
+        tasks.send()
+        assertTrue(fileOf("QA Fine new").value.second.contains("DESCRIPTION:Fine note"))
+        assertFalse(dav.files["${list}web.ics"]!!.second.contains("Refused note"))
+        // Accepted again: both are sent at the next pass.
+        dav.refuse = null
+        syncAgain()
+        assertNotNull(fileOf("QA Refused new"))
+        assertTrue(dav.files["${list}web.ics"]!!.second.contains("DESCRIPTION:Refused note"))
+        assertFalse(tasks.state.value.error)
+        assertTrue(rows().all { it.problem == null })
+    }
+
+    // T4: a file the task query returns without its content is still there: not "deleted on Nextcloud".
+    @Test fun aFileMissingFromTheQueryIsntTakenForDeleted() = runBlocking {
+        add("QA Still there")
+        start()
+        dav.withoutData = setOf(fileOf("QA Still there").key); dav.bump()
+        syncAgain()
+        assertEquals(1, all().count { it.title == "QA Still there" })
+        assertTrue(repo.recentlyDeleted.first().none { it.label == "QA Still there" })
+        assertNull(rows().single().problem)
+        // Really gone: then it is.
+        dav.withoutData = emptySet(); dav.files.remove(fileOf("QA Still there").key); dav.bump()
+        syncAgain()
+        assertTrue(all().none { it.title == "QA Still there" })
+    }
+
+    // T5: the data is replaced first and the task record only after; a send in between deletes nothing on Nextcloud.
+    @Test fun aSendBetweenRestoreStepsDeletesNothing() = runBlocking {
+        add("QA Not in the backup")
+        start()
+        repo.replaceAll(repo.snapshot().copy(tasks = emptyList()))
+        assertTrue(rows().isEmpty())
+        tasks.send()
+        assertNotNull(fileOf("QA Not in the backup"))
+        assertTrue(writes().none { it.first == "DELETE" })
+    }
+
+    // Keep both with a done Planner task: that one is sent as its own file too.
+    @Test fun keepBothSendsADonePlannerTask() = runBlocking {
+        add("QA Both done")
+        start()
+        dav.edit(fileOf("QA Both done").key) { it.replace("SUMMARY:QA Both done", "SUMMARY:QA Both done (web)") }
+        repo.setTaskDone(task("QA Both done").id, true)
+        syncAgain()
+        tasks.resolve(tasks.conflicts.first().single().id, TaskSync.Resolution.BOTH)
+        val done = listFiles().values.single { it.second.contains("SUMMARY:QA Both done\r\n") }.second
+        assertTrue(done, done.contains("STATUS:COMPLETED"))
+        assertNotNull(fileOf("QA Both done (web)"))
+        assertTrue(rows().all { it.problem == null })
+    }
+
+    // A conflict whose file is then deleted on Nextcloud shows it as deleted there, not the version it had.
+    @Test fun aConflictsFileDeletedLaterShowsAsDeleted() = runBlocking {
+        add("QA Conflict then gone")
+        start()
+        val path = fileOf("QA Conflict then gone").key
+        dav.edit(path) { it.replace("SUMMARY:QA Conflict then gone", "SUMMARY:QA Conflict then gone (web)") }
+        repo.saveTask(task("QA Conflict then gone").copy(notes = "Planner note"), create = false)
+        syncAgain()
+        assertTrue(tasks.conflicts.first().single().conflict!!.contains("(web)"))
+        dav.files.remove(path); dav.bump()
+        syncAgain()
+        assertEquals("", tasks.conflicts.first().single().conflict)
+    }
+
+    // Sync now says when only the task list couldn't be downloaded.
+    @Test fun aFailedTaskListIsntUpToDate() = runBlocking {
+        start()
+        dav.failTaskQueries = true; dav.bump()
+        clock += CalendarSync.MIN_INTERVAL_MS
+        sync.sync()
+        assertEquals("Synced, but the task list couldn't be downloaded.", sync.state.value.message)
+    }
+
     @Test fun aBackupKeepsTheListAndWhatWasSynced() = runBlocking {
         add("QA Backed up")
         start()

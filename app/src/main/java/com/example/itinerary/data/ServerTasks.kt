@@ -43,15 +43,22 @@ object ServerTasks {
         Parsed(uid, Fields(title.ifEmpty { "(No title)" }, notes, due, priority, done))
     }.getOrElse { Parsed(null, null) }
 
-    // A due date-time counts on the phone's calendar day.
-    private fun dueDate(p: Ics.Property, zone: ZoneId): LocalDate =
-        if (Ics.isDate(p)) Ics.date(p) else Ics.time(p, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).toLocalDate()
+    // Planner holds a due date, not a moment. A due date-time in a zone (TZID) or floating counts on its own calendar day
+    // there, whatever zone the phone is in, so travelling never moves it and moving it writes exactly the day chosen
+    // (movedDue keeps its clock time). Only a UTC one ("…Z", no day of its own) counts on the phone's day.
+    private fun dueDate(p: Ics.Property, zone: ZoneId): LocalDate = when {
+        Ics.isDate(p) -> Ics.date(p)
+        p.value.endsWith("Z") -> Ics.time(p, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).toLocalDate()
+        else -> Ics.time(p, zone, strictGap = false, Ics::zone).toLocalDate()
+    }
 
     fun fields(task: PlannerTask) = Fields(task.title, task.notes, task.dueDate, task.priority, task.done)
 
-    // The fields sync carries from Nextcloud into a Planner task; everything Planner-only stays as it is.
+    // The fields sync carries from Nextcloud into a Planner task; everything Planner-only stays as it is, except that a
+    // moved due date starts a repeating task's month day afresh (as the editor and "Due tomorrow" do).
     fun apply(task: PlannerTask, server: Fields): PlannerTask =
-        task.copy(title = server.title, notes = server.notes, dueDate = server.dueDate, priority = server.priority, done = server.done)
+        task.copy(title = server.title, notes = server.notes, dueDate = server.dueDate, priority = server.priority, done = server.done,
+            repeatAnchorDay = if (server.dueDate != task.dueDate) 0 else task.repeatAnchorDay)
 
     // What Planner syncs for [task], as a short fingerprint: a change in any synced field changes it.
     fun fingerprint(task: PlannerTask): String = fingerprint(fields(task))
@@ -92,7 +99,8 @@ object ServerTasks {
         else -> emptyList()
     }
 
-    // [line] (a DUE with a time) moved to [date] at the same clock time. Null when it holds only a date, or can't be read.
+    // [line] (a DUE with a time) moved to [date] at the same clock time: in its own zone (or floating), where [date] is its
+    // own day (see dueDate); a UTC one at the same clock time on the phone. Null when it holds only a date, or can't be read.
     private fun movedDue(line: String, date: LocalDate, zone: ZoneId): String? = runCatching {
         val p = Ics.property(line)
         if (Ics.isDate(p)) return null
@@ -106,8 +114,8 @@ object ServerTasks {
 
     // [original] with only the managed properties [task] changed replaced by [task]'s, plus a fresh DTSTAMP/LAST-MODIFIED
     // and a higher SEQUENCE. Everything else (start date, categories, alarms, subtask links, unknown properties) is kept
-    // exactly as it was, lines and folding included. A start date after a new due date is dropped (a task can't start
-    // after it's due).
+    // exactly as it was, lines and folding included. A start that doesn't go with a new due date is dropped (a task can't
+    // start after it's due, and both must be dates or both date-times: Nextcloud refuses the file otherwise).
     fun patch(original: String, task: PlannerTask, zone: ZoneId, now: Instant): String {
         val before = read(original, zone, limited = false).fields
         fun same(theirs: String, mine: String, max: Int) = theirs == mine || theirs.length > max && theirs.take(max) == mine
@@ -140,9 +148,10 @@ object ServerTasks {
                 stack.lastOrNull() == "VTODO" && n == "DTSTART" && start == null -> start = unfolded(block)
             }
         }
-        val dropStart = "DUE" in replaced && task.dueDate != null && start?.let { line ->
-            runCatching { dueDate(Ics.property(line), zone) > task.dueDate }.getOrDefault(false)
-        } == true
+        // A new due date and a start that wouldn't go with it (after it, or a date where the other has a time; a server may
+        // refuse the file): the start is dropped.
+        val newDue = if ("DUE" in replaced) managed("DUE", task, now, oldDue, zone).singleOrNull() else null
+        val dropStart = newDue != null && start?.let { !startFits(it, newDue, zone) } == true
         val out = mutableListOf<String>()
         stack.clear()
         var done = false
@@ -169,6 +178,17 @@ object ServerTasks {
         require(done) { "No task in this file" }
         return out.joinToString("\r\n", postfix = "\r\n")
     }
+
+    // Whether start line [start] may stay with due line [due] (RFC 5545: the same kind of value, and not after it; compared
+    // as moments when they have a time). Unreadable counts as not.
+    private fun startFits(start: String, due: String, zone: ZoneId): Boolean = runCatching {
+        val s = Ics.property(start); val d = Ics.property(due)
+        when {
+            Ics.isDate(s) != Ics.isDate(d) -> false
+            Ics.isDate(s) -> Ics.date(s) <= Ics.date(d)
+            else -> !Ics.time(s, zone, strictGap = false, Ics::zone).toInstant().isAfter(Ics.time(d, zone, strictGap = false, Ics::zone).toInstant())
+        }
+    }.getOrDefault(false)
 
     // The most text Planner takes in a task (see Tasks.validate).
     const val MAX_TITLE = 500

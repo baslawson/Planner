@@ -18,7 +18,11 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 // A message that is safe to show the user as it is.
-class BackupException(message: String) : Exception(message)
+open class BackupException(message: String) : Exception(message)
+
+// Nextcloud refused one file as it was sent (HTTP [code], such as 415 for content it won't store), not the login or the
+// connection: sync leaves that file and goes on with the others (see NextcloudClient.refused).
+class RefusedException(val code: Int, message: String) : BackupException(message)
 
 // All rows of the database.
 data class DataSnapshot(

@@ -807,14 +807,16 @@ class CalendarSync(
             }
         }
         // The task list kept in sync (its own state says how it went).
-        tasks?.pull(account, remote)
+        val tasksFailed = tasks?.pull(account, remote) == false
         onChanged()
         val ticked = dao.sources().count { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
         return buildString {
             append(when {
                 remote.isEmpty() -> "No calendars found on Nextcloud."
                 ticked == 0 && dao.sources().none { it.tasksHere } -> "Tick the calendars to show in Planner."
-                failed > 0 -> "Synced, but $failed calendar${if (failed == 1) "" else "s"} couldn't be downloaded."
+                failed > 0 -> "Synced, but $failed calendar${if (failed == 1) "" else "s"} couldn't be downloaded." +
+                    if (tasksFailed) " The task list couldn't be downloaded either." else ""
+                tasksFailed -> "Synced, but the task list couldn't be downloaded."
                 else -> "Calendars are up to date."
             })
             if (skipped > 0) append(" $skipped event${if (skipped == 1) "" else "s"} couldn't be read and ${if (skipped == 1) "was" else "were"} left out.")

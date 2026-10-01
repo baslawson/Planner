@@ -35,6 +35,36 @@ class ServerTasksTest {
         assertNull(fields(file("SUMMARY:x"))!!.dueDate)
     }
 
+    // T2: a due time in a zone counts on its own day there, so a move writes exactly the day chosen and travelling never
+    // makes an unrelated edit rewrite the due date.
+    @Test fun aZonedDueKeepsItsOwnDay() {
+        // 23:00 in New York on the 5th is 11:00 on the 6th in Perth: still due on the 5th.
+        val ny = file("SUMMARY:x", "DUE;TZID=America/New_York:20261005T230000")
+        assertEquals(LocalDate.of(2026, 10, 5), fields(ny)!!.dueDate)
+        // Moved to the 8th: the 8th at 23:00 New York, read back as the 8th (it used to drift to the 9th).
+        val task = ServerTasks.apply(PlannerTask(id = "t"), fields(ny)!!)
+        val moved = ServerTasks.patch(ny, task.copy(dueDate = LocalDate.of(2026, 10, 8)), perth, now)
+        assertTrue(moved, moved.contains("DUE;TZID=America/New_York:20261008T230000"))
+        assertEquals(LocalDate.of(2026, 10, 8), fields(moved)!!.dueDate)
+        // Synced in Perth, the title edited after flying to Honolulu: the due line stays exactly as it was.
+        val honolulu = ZoneId.of("Pacific/Honolulu")
+        val edited = ServerTasks.patch(ny, task.copy(title = "y"), honolulu, now)
+        assertTrue(edited, edited.contains("DUE;TZID=America/New_York:20261005T230000"))
+        assertEquals(LocalDate.of(2026, 10, 5), ServerTasks.parse(edited, honolulu).fields!!.dueDate)
+        // Floating: its own day too.
+        assertEquals(LocalDate.of(2026, 10, 5), fields(file("SUMMARY:x", "DUE:20261005T233000"))!!.dueDate)
+    }
+
+    // R-M2: a due date moved on Nextcloud starts the monthly anchor afresh; anything else keeps it.
+    @Test fun aMovedDueDateResetsTheRepeatAnchor() {
+        val task = PlannerTask(id = "t", title = "Rent", dueDate = LocalDate.of(2026, 10, 30), repeat = "MONTHLY", repeatAnchorDay = 31)
+        val same = ServerTasks.Fields("Rent paid", "", LocalDate.of(2026, 10, 30), TaskPriority.NORMAL, false)
+        assertEquals(31, ServerTasks.apply(task, same).repeatAnchorDay)
+        val moved = ServerTasks.apply(task, same.copy(dueDate = LocalDate.of(2026, 10, 15)))
+        assertEquals(0, moved.repeatAnchorDay)
+        assertEquals(LocalDate.of(2026, 11, 15), moved.copy(done = true).nextOccurrence(today = LocalDate.of(2026, 10, 1), zone = perth, now = now.toEpochMilli())?.dueDate)
+    }
+
     @Test fun priorityBands() {
         fun p(v: String?) = fields(file(*listOfNotNull("SUMMARY:x", v?.let { "PRIORITY:$it" }).toTypedArray()))!!.priority
         assertEquals(TaskPriority.HIGH, p("1")); assertEquals(TaskPriority.HIGH, p("4"))
@@ -137,6 +167,40 @@ class ServerTasksTest {
         assertFalse(ServerTasks.patch(original, task.copy(dueDate = LocalDate.of(2026, 10, 1)), perth, now).contains("DTSTART"))
     }
 
+    // T1: the start and the new due date must make a pair Nextcloud accepts: the same kind of value, the start not after
+    // the due moment (same-day times count).
+    @Test fun aStartThatDoesntGoWithTheNewDueIsDropped() {
+        // A timed start and no due: the new due is a date, so the timed start goes.
+        val timed = file("SUMMARY:x", "DTSTART:20261005T100000Z")
+        val t1 = ServerTasks.apply(PlannerTask(id = "t"), fields(timed)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        val p1 = ServerTasks.patch(timed, t1, perth, now)
+        assertTrue(p1, p1.contains("DUE;VALUE=DATE:20261009")); assertFalse(p1, p1.contains("DTSTART"))
+        // Due moved to the start's own day, but earlier in it.
+        val sameDay = file("SUMMARY:x", "DTSTART;TZID=Australia/Perth:20261009T180000", "DUE;TZID=Australia/Perth:20261010T090000")
+        val t2 = ServerTasks.apply(PlannerTask(id = "t"), fields(sameDay)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        val p2 = ServerTasks.patch(sameDay, t2, perth, now)
+        assertTrue(p2, p2.contains("DUE;TZID=Australia/Perth:20261009T090000")); assertFalse(p2, p2.contains("DTSTART"))
+        // A timed start before the timed due stays, and so does one at the very same moment.
+        val fine = file("SUMMARY:x", "DTSTART;TZID=Australia/Perth:20261001T080000", "DUE;TZID=Australia/Perth:20261005T090000")
+        val t3 = ServerTasks.apply(PlannerTask(id = "t"), fields(fine)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        assertTrue(ServerTasks.patch(fine, t3, perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+        assertTrue(ServerTasks.patch(fine, t3.copy(dueDate = LocalDate.of(2026, 10, 1)), perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+        // A date start with a timed due: not the same kind, dropped.
+        val mixed = file("SUMMARY:x", "DTSTART;VALUE=DATE:20261001", "DUE:20261005T013000Z")
+        val t4 = ServerTasks.apply(PlannerTask(id = "t"), fields(mixed)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        assertFalse(ServerTasks.patch(mixed, t4, perth, now).contains("DTSTART"))
+        // Due date removed: the start stays (a task may have a start alone).
+        assertTrue(ServerTasks.patch(fine, t3.copy(dueDate = null), perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+    }
+
+    // T1: which write replies refuse that one file (sync goes on with the others) and which stop the pass.
+    @Test fun aRefusedFileIsTellableFromAFailedSync() {
+        listOf(400, 409, 413, 415, 422).forEach { assertTrue("$it", NextcloudClient.refused(it)) }
+        listOf(200, 401, 403, 404, 405, 407, 408, 412, 423, 429, 500, 503, 302).forEach { assertFalse("$it", NextcloudClient.refused(it)) }
+        assertEquals("Nextcloud refused 2 tasks (HTTP 415). The others were sent; Planner tries again at the next sync.", TaskSync.refusedMessage(2, 415))
+        assertTrue(TaskSync.refusedMessage(1, 400).startsWith("Nextcloud refused 1 task (HTTP 400)."))
+    }
+
     @Test fun foldedLinesSurviveUntouched() {
         val long = "DESCRIPTION:" + "word ".repeat(30).trim()
         val folded = long.chunked(70).let { parts -> parts.first() + parts.drop(1).joinToString("") { "\r\n $it" } }
@@ -169,5 +233,18 @@ class ServerTasksTest {
         assertEquals(mapOf("/l/1.ics" to "a"), result)
         val single = TaskSync.relink(listOf(Triple("/l/2.ics", "planner-task-x@planner", f("Bread", LocalDate.of(2026, 1, 1)))), listOf(b))
         assertEquals(mapOf("/l/2.ics" to "b"), single)
+    }
+
+    // T3: a file already done on Nextcloud is never taken for a new open Planner task, by either pass.
+    @Test fun relinkLeavesDoneFilesAlone() {
+        val a = PlannerTask(id = "a", title = "Milk", dueDate = LocalDate.of(2026, 10, 5))
+        val b = PlannerTask(id = "b", title = "Bread")
+        val done = ServerTasks.Fields("Milk", "", LocalDate.of(2026, 10, 5), TaskPriority.NORMAL, true)
+        val doneOwn = ServerTasks.Fields("Bread", "", LocalDate.of(2025, 1, 1), TaskPriority.NORMAL, true)
+        assertEquals(emptyMap<String, String>(), TaskSync.relink(listOf(Triple("/l/1.ics", "other", done),
+            Triple("/l/2.ics", "planner-task-x@planner", doneOwn)), listOf(a, b)))
+        // An open one with the same title is still found.
+        assertEquals(mapOf("/l/3.ics" to "a"), TaskSync.relink(listOf(Triple("/l/1.ics", "other", done),
+            Triple("/l/3.ics", "other", done.copy(done = false))), listOf(a)))
     }
 }

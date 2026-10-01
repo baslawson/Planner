@@ -87,7 +87,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             if (widgetTaskWanted == null || widgetTaskWanted == openId) onWidgetTaskOpened()
         }
         val widgetTasks by app.repository.tasks.collectAsStateWithLifecycle(initialValue = null)
-        val task = widgetTasks?.find { it.id == openId }
+        val task = rememberEditedTask(openId, widgetTasks?.find { it.id == openId })
         key(openId) {
             if (task != null) PlanningOverlay(closeWidgetTask) {
                 TaskEditor(task, false, closeRequested = switching, onCloseCancelled = { if (widgetTaskWanted != null && widgetTaskWanted != openId) onWidgetTaskOpened() }, onDismiss = closeWidgetTask)

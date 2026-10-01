@@ -26,6 +26,12 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var refuseBefore: String? = null
     // Called with each calendar-query's start date before it's answered (something happening while a sync runs).
     @Volatile var onQuery: ((String) -> Unit)? = null
+    // A PUT whose body this returns a code for is answered with it and not stored (Nextcloud refusing one file).
+    @Volatile var refuse: ((String) -> Int?)? = null
+    // Files a REPORT lists without their calendar-data (a server leaving one out of a query reply).
+    @Volatile var withoutData: Set<String> = emptySet()
+    // Task queries (VTODO calendar-queries) fail with a 500.
+    @Volatile var failTaskQueries = false
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -57,15 +63,17 @@ class FakeCalDav(private val home: String, private val user: String, private val
                 val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
                 if (start != null) { queries += start; onQuery?.invoke(start); if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
                 val todo = body.contains("name=\"VTODO\"")
+                if (todo && failTaskQueries) return MockResponse().setResponseCode(500)
                 ms(files.filterKeys { it.startsWith(path) }.filter { (p, v) ->
                     if (body.contains("calendar-multiget")) p in wanted
                     // A calendar-query returns only the kind it asks for.
                     else if (todo != v.second.contains("BEGIN:VTODO")) false
                     else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
-                }.entries.joinToString("") { entry(it.key, it.value, true) })
+                }.entries.joinToString("") { entry(it.key, it.value, it.key !in withoutData) })
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)
             "PUT" -> {
+                refuse?.invoke(body)?.let { return MockResponse().setResponseCode(it) }
                 val ifMatch = request.getHeader("If-Match"); val ifNone = request.getHeader("If-None-Match")
                 when {
                     ifNone == "*" && current != null -> MockResponse().setResponseCode(412)

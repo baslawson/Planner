@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -188,6 +189,16 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
     }
 }
 
+// U-N2: the task an editor host passes for [id]: the stored one ([live]), or once that is gone (deleted by sync while its
+// editor is open) the last one seen, so the editor stays open with what was typed and says so, instead of vanishing and
+// leaving its host's "editing" id set (which reopened it when the task was restored).
+@Composable
+fun rememberEditedTask(id: String, live: PlannerTask?): PlannerTask? {
+    val last = remember(id) { arrayOfNulls<PlannerTask>(1) }
+    if (live != null) last[0] = live
+    return live ?: last[0]
+}
+
 // Holds [taskId] for one task editor from when it is first composed until it leaves (or its composition is dropped).
 private class TaskEditorClaim(val taskId: String) : RememberObserver {
     val owner = TaskDraftStore.claim(taskId, this)
@@ -284,9 +295,24 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         attachments = attachments, prerequisiteIds = prerequisiteIds)
     val openedWith = remember { currentTask() }
     val unsaved = EditorRules.taskUnsaved(openedWith, currentTask(), recovered = draft != null)
-    val canSave = !busy && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
+    // U-N1/U-N2: the task as stored, watched while this form is open (each form after a Save or Reload watches afresh from
+    // its own [initial], so its own save isn't taken for a change from elsewhere). Changed underneath (a sync pull): a
+    // banner offers Reload and Save asks first, as the event editor does. Gone (deleted by sync): the form stays with what
+    // was typed (kept as a draft), Save is off, and Duplicate task can keep it as a new one.
+    val stored by remember { if (creating) kotlinx.coroutines.flow.flowOf(initial) else repo.observeTask(initial.id) }
+        .collectAsStateWithLifecycle(initialValue = initial)
+    val settled = !creating && !finished && !busy
+    val changedElsewhere = settled && EditorRules.taskChangedElsewhere(initial, stored)
+    val deletedElsewhere = settled && stored == null
+    var askingStale by remember { mutableStateOf(false) }
+    var closeAfterStale by remember { mutableStateOf(false) }
+    var askingReload by remember { mutableStateOf(false) }
+    val canSave = !busy && !deletedElsewhere && title.isNotBlank() && checklist.none { it.text.isBlank() } && TaskRepeat.valid(repeat) &&
         (repeat != TaskRepeat.AFTER_COMPLETION.name || repeatDays.toIntOrNull() in 1..3650)
-    fun save(close: Boolean = false) {
+    // The form again from the task as stored now; what was unsaved here is dropped, like Discard.
+    fun reload() = action(keepOpen = true) { }
+    fun save(close: Boolean = false, allowStale: Boolean = false) {
+        if (changedElsewhere && !allowStale) { closeAfterStale = close; askingStale = true; return }
         // A new task (also one handed over from Quick entry) never saves a reminder that has passed.
         if (reminderAt != null && (creating || reminderAt != initial.reminderAt) && reminderAt!! <= System.currentTimeMillis()) {
             error = "Choose a future reminder date and time."
@@ -295,8 +321,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
             repeatAnchorDay = if (date != initial.dueDate?.toString() || repeat != initial.repeat) 0 else initial.repeatAnchorDay,
             checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating) }
     }
-    // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first.
-    fun close() { if (unsaved) askingToSave = true else discard() }
+    // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first. A task deleted elsewhere can't be
+    // saved: Close leaves, keeping anything unsaved as its draft for when it is restored.
+    fun close() { if (deletedElsewhere) { if (unsaved) onDismiss() else discard() } else if (unsaved) askingToSave = true else discard() }
     // Asked from outside: the same as Close, once any save under way has finished.
     LaunchedEffect(closeRequested) {
         if (closeRequested) { snapshotFlow { busy }.first { !it }; if (!askingToSave) close() }
@@ -332,6 +359,14 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 HeadingText(if (creating) "Add task" else "Edit task", style = MaterialTheme.typography.headlineSmall)
+                if (changedElsewhere || deletedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
+                    FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(if (deletedElsewhere) EditorRules.taskDeletedElsewhereBanner() else EditorRules.taskChangedElsewhereBanner(),
+                            color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.align(Alignment.CenterVertically).padding(vertical = 8.dp))
+                        if (changedElsewhere) TextButton(enabled = !busy, onClick = { if (unsaved) askingReload = true else reload() }) { Text("Reload") }
+                    }
+                }
                 OutlinedTextField(title, onValueChange = { if (it.length <= 500) title = it.replace('\n', ' ') },
                     label = { Text("Task title") }, enabled = !busy, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth())
                 if (!creating) {
@@ -432,7 +467,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!creating) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
+                    if (!creating && !deletedElsewhere) DangerButton(enabled = !busy, onClick = { confirmingDelete = true }) { Text("Delete") }
                     OutlinedButton(enabled = !busy, onClick = ::close) { Text("Close") }
                     Spacer(Modifier.width(12.dp))
                     Button(enabled = canSave && (unsaved || creating), onClick = { save() }) { SaveLabel(busy, saved = justSaved && !unsaved) }
@@ -464,6 +499,22 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
         Text(if (canSave || busy) "This task has changes that aren't saved yet."
             else "This task has changes that can't be saved as they are. Keep editing to fix them, or discard them.")
+    }
+    // Save while the task changed underneath: keep this version (written over the stored one), or reload that.
+    if (askingStale) PlannerDialog("Changed elsewhere",
+        onDismissRequest = { askingStale = false; closeAfterStale = false },
+        primary = DialogAction("Save anyway", enabled = !busy) { askingStale = false; save(close = closeAfterStale, allowStale = true) },
+        dismiss = DialogAction("Reload", enabled = !busy) { askingStale = false; closeAfterStale = false; reload() },
+    ) {
+        Text("This task changed since you opened it, on Nextcloud or elsewhere in Planner. Save your version anyway?")
+        Text("Reload shows it as it is now, without your unsaved changes.", style = MaterialTheme.typography.bodySmall)
+    }
+    if (askingReload) PlannerDialog("Reload?",
+        onDismissRequest = { askingReload = false },
+        primary = DialogAction("Reload", danger = true, enabled = !busy) { askingReload = false; reload() },
+        dismiss = DialogAction("Keep editing") { askingReload = false },
+    ) {
+        Text("Your unsaved changes to this task will be lost.")
     }
     if (confirmingDelete) PlannerDialog("Delete task?", onDismissRequest = { confirmingDelete = false },
         primary = DialogAction("Delete", enabled = !busy, danger = true) { confirmingDelete = false; action { repo.deleteTask(initial.id) } },
