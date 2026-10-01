@@ -19,7 +19,7 @@ import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.dayCount
 import com.example.itinerary.data.dayNumber
 import com.example.itinerary.data.TimeFormat
-import com.example.itinerary.data.eventsOnDay
+import com.example.itinerary.data.widgetEventsOnDay
 import com.example.itinerary.ui.durationLabel
 import com.example.itinerary.ui.label
 import com.example.itinerary.ui.shortLabel
@@ -103,7 +103,7 @@ class TodayWidget : AppWidgetProvider() {
 
         // Bounded native RemoteViews stay small even with hundreds of events. The footer always opens the complete day.
         fun render(context: Context, events: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList()): RemoteViews {
-            return renderDay(context, eventsOnDay(events.filterNot { it.skipped }, today), today, format, heightDp, tasks.filter { !it.done && it.dueDate != null && it.dueDate <= today }.sortedBy { it.dueDate })
+            return renderDay(context, widgetEventsOnDay(events, today), today, format, heightDp, tasks.filter { !it.done && it.dueDate != null && it.dueDate <= today }.sortedBy { it.dueDate })
         }
 
         private fun renderDay(context: Context, shown: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList()): RemoteViews {
@@ -158,7 +158,7 @@ class TodayWidget : AppWidgetProvider() {
             val app = context.applicationContext as ItineraryApp
             val today = LocalDate.now()
             // Planner's own events and those of ticked Nextcloud calendars, in one day order.
-            val events = eventsOnDay(app.repository.widgetEvents(today) + app.calendarSync.widgetItems(today), today)
+            val events = widgetEventsOnDay(app.repository.widgetEvents(today) + app.calendarSync.widgetItems(today), today)
             val tasks = app.repository.widgetTasks(today)
             ids.forEach { id ->
                 val options = manager.getAppWidgetOptions(id)

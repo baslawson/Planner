@@ -34,5 +34,10 @@ fun eventsOnDay(events: List<ItineraryItem>, day: LocalDate): List<ItineraryItem
         it.date.atTime(it.startTime).plusMinutes(it.durationMinutes.toLong()) > day.atStartOfDay()
 }.sortedWith(compareBy<ItineraryItem> { it.startTime != null }.thenBy { it.date }.thenBy { it.startTime }.thenBy { it.id })
 
+// The home-screen widget's day (U-N6): like the Agenda (BillTasks.visible), a paid or skipped bill is done, so it is
+// neither listed as "Bill due" nor counted; a skipped date isn't either.
+fun widgetEventsOnDay(events: List<ItineraryItem>, day: LocalDate): List<ItineraryItem> =
+    eventsOnDay(events.filterNot { it.skipped || it.category == "Bills" && it.paid }, day)
+
 private fun bufferedDuration(minutes: Int?, before: Int, after: Int): Int? =
     if (minutes == null && before == 0 && after == 0) null else (minutes ?: 0) + before + after
