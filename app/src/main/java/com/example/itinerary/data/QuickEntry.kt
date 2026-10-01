@@ -158,15 +158,17 @@ object QuickEntry {
     private const val shortClock = "\\d{1,2}(?::\\d{2})?[ap]|\\d{1,2}\\.[0-5]\\d"
     private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:.h])(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
     private val shortClocks = rx("(?<![\\w.:/])($shortClock)(?![\\w.])")
-    private const val amount = "(?:-?\\d+(?:\\.\\d+)?|$countWords)"
+    private const val amount = "(?:-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
     private const val minutes = "(?:minutes?|mins?|m)"
-    private const val fraction = "(?:half\\s+(?:an?\\s+)?hour|(?:a\\s+)?quarter\\s+of\\s+an?\\s+hour)"
-    private const val span = "(?:$fraction|$amount\\s*$hours(?:\\s+and\\s+a\\s+half|\\s*(?:and\\s+)?$amount\\s*$minutes)?|$amount\\s*$minutes)"
-    private val durations = rx("\\bfor\\s+$span\\b")
+    private const val fraction = "(?:(?:a\\s+)?half\\s+(?:an?\\s+)?hour|(?:a\\s+)?quarter\\s+of\\s+an?\\s+hour)"
+    private const val span = "(?:$fraction|$amount\\s+and\\s+a\\s+half\\s+$hours|$amount\\s*$hours(?:\\s+and\\s+a\\s+half|\\s*(?:and\\s+)?$amount\\s*$minutes)?|$amount\\s*$minutes)"
+    // After for or in, minutes may follow the hours without a unit: "for 1 hour 30", "in 1h30". Not before a month: "2 hours 20 Oct".
+    private const val wordSpan = "(?:$amount\\s*$hours\\s*(?:and\\s+)?[0-5]\\d(?![\\w:.])(?!\\s*$minutes\\b)(?!\\s+(?:of\\s+)?(?:$months)\\b)|$span)"
+    private val durations = rx("\\bfor\\s+$wordSpan\\b")
     // A length right after a time, without "for": "1pm 1.5 hours", "3pm 45 mins" (see where it's read).
     private val bareDurations = rx("(?<![\\w.])$span(?![\\w])")
-    private val relativeTimes = rx("\\bin\\s+$span\\b")
+    private val relativeTimes = rx("\\bin\\s+$wordSpan\\b")
     private val durationParts = rx("($amount)\\s*($hours|$minutes)(?![a-z])")
     private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)")
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
@@ -939,6 +941,8 @@ object QuickEntry {
                 (it.end <= match.range.first && text.substring(it.end, match.range.first).matches(Regex("[\\s,]*")) ||
                     it.start > match.range.last && text.substring(match.range.last + 1, it.start).matches(Regex("[\\s,]*"))) }
             val money = rx("[£€¥$]\\s*$").containsMatchIn(before)
+            // "for 1.25 hours": a length, read as one below.
+            if (!money && rx("^\\s*(?:$hours|$minutes)(?![a-z])").containsMatchIn(after)) return@forEach
             val timeLike = !money && besideDate || !money && rx("(?:\\b(?:at|from|until|till?|to|by|actually)\\s+|@\\s*|$approx|[-–—]\\s*)$").containsMatchIn(before) ||
                 rx("^\\s*(?:-?ish\\b|[-–—]|to\\b|until\\b|till?\\b)").containsMatchIn(after)
             if (!timeLike) mask(match.range, '\uE000')
@@ -1179,7 +1183,7 @@ object QuickEntry {
         // Scheduling-shaped fragments must not silently turn into part of a saved title.
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))
             return error("Finish the duration, for example for 1 hour and 30 minutes.")
-        if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+(?:$amount|half)\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
+        if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+-?(?:[\\d.,]*\\d|$countWords|half)(?:[\\s.,]+(?:and|half|quarter|[\\d.,]*\\d|$countWords))*\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
             unfinished.findAll(remaining).any { m -> !((m.value.trim() in setOf("in", "at", "on") || partySize.matches(m.value) ||
                     largePartySize.matches(m.value) && bookingWord.containsMatchIn(remaining.substring(0, m.range.first))) &&
                 text.substring(m.range.first + m.value.trimEnd().length).isNotBlank()) } ||
@@ -1213,12 +1217,16 @@ object QuickEntry {
     }
 
     private fun spanMinutes(value: String): Double = when {
-        rx("^(?:for|in) half\\b").containsMatchIn(value) -> 30.0
+        rx("^(?:for|in) (?:a )?half\\b").containsMatchIn(value) -> 30.0
         "quarter" in value -> 15.0
-        else -> durationParts.findAll(value).sumOf { part ->
-            readAmount(part.groupValues[1]) * if (part.groupValues[2].startsWith("h")) 60 else 1
-        } + if (value.endsWith("and a half")) 30.0 else 0.0
-    }
+        // "2 and a half hours".
+        else -> Regex("^(?:for|in) (\\S+) and a half (?:hours?|hrs?|h)$").find(value)?.let { readAmount(it.groupValues[1]) * 60 + 30 }
+            ?: (durationParts.findAll(value).sumOf { part ->
+                readAmount(part.groupValues[1]) * if (part.groupValues[2].startsWith("h")) 60 else 1
+            } + (if (value.endsWith("and a half")) 30.0 else 0.0) +
+                // "1 hour 30", "1h30": the minutes without their unit.
+                (Regex("(?:hours?|hrs?|h) ?(?:and )?([0-5]\\d)$").find(value)?.groupValues?.get(1)?.toDouble() ?: 0.0))
+    }.let { minutes -> Math.round(minutes).toDouble().takeIf { Math.abs(it - minutes) < 1e-6 } ?: minutes } // 1.45 hours is 87
 
     /** Minutes in "10 minutes", "1 hour and 30 minutes", "2 days", "half a day", "the day" (before). */
     private fun reminderSpanMinutes(value: String): Double {

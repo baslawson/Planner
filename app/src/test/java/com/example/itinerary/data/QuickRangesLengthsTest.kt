@@ -49,6 +49,18 @@ class QuickRangesLengthsTest {
         ok("Brunch 11-1 Sunday").let { assertEquals(at(11), it.time); assertEquals(120, it.durationMinutes); assertNull(it.error) }
     }
 
+    @Test fun hoursWithBareMinutesAreALength() {
+        ok("Study for 1 hour 30 tomorrow").let { assertEquals("Study", it.title); assertEquals(90, it.durationMinutes); assertNull(it.time) }
+        ok("Study for 2 h 45 tomorrow").let { assertEquals("Study", it.title); assertEquals(165, it.durationMinutes) }
+        ok("Study for 1h30 tomorrow").let { assertEquals("Study", it.title); assertEquals(90, it.durationMinutes); assertNull(it.time) }
+        ok("Study for 1 hour 30 minutes tomorrow").let { assertEquals("Study", it.title); assertEquals(90, it.durationMinutes) }
+        ok("Call in 1h 30").let { assertEquals("Call", it.title); assertEquals(day(10, 1), it.date); assertEquals(at(11, 40), it.time) }
+        ok("Call in 1h30").let { assertEquals("Call", it.title); assertEquals(at(11, 40), it.time) }
+        ok("Call in 1 hour 30").let { assertEquals("Call", it.title); assertEquals(at(11, 40), it.time) }
+        // A clock time after a length is still a time.
+        ok("Study for 2 hours 10am tomorrow").let { assertEquals(120, it.durationMinutes); assertEquals(at(10), it.time) }
+    }
+
     @Test fun aBackwardsDayRangeInOneMonthIsRefused() {
         for (text in listOf("Trip 28-3 Jan", "Trip Dec 28-3", "Trip 30-2 Nov"))
             assertEquals(text, "End the date range after it starts.", parse(text).error)
@@ -68,5 +80,17 @@ class QuickRangesLengthsTest {
         ok("Trip 30 Sep - 1 Oct").let { assertEquals(day(9, 30), it.date); assertEquals(day(10, 1), it.endDate) }
         // Over before today: next year's.
         ok("Trip 20 Sep - 25 Sep").let { assertEquals(day(9, 20, 2027), it.date); assertEquals(day(9, 25, 2027), it.endDate) }
+    }
+
+    @Test fun moreWaysOfWritingALength() {
+        mapOf("for 1.25 hours" to 75, "for 1.45 hours" to 87, "for 1hr30" to 90, "for a half hour" to 30,
+            "for 2 and a half hours" to 150, "for one and a half hours" to 90, "for .5 hours" to 30, "for half an hour" to 30)
+            .forEach { (length, minutes) ->
+                ok("Study $length tomorrow").let { assertEquals(length, "Study", it.title); assertEquals(length, minutes, it.durationMinutes) }
+            }
+        // Not understood: refused rather than left in the title.
+        assertEquals("Finish the date, time or duration, or put literal title text in quotes.", parse("Study for 1,5 hours tomorrow").error)
+        // Not a length at all: title text, as before.
+        ok("Hike for a few hours Saturday").let { assertEquals("Hike for a few hours", it.title) }
     }
 }
