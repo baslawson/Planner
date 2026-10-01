@@ -1497,7 +1497,8 @@ object QuickEntry {
             d.matches(Regex("\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}")) -> d.split('-', '/', '.').map { it.toInt() }.let { (y, m, day) -> LocalDate.of(y, m, day) }
             rx("^(?:the )?\\d{1,2}(?:st|nd|rd|th)$").matches(d) -> nextDayOfMonth(today, d.removePrefix("the ").takeWhile { it.isDigit() }.toInt())
             rx("\\d").containsMatchIn(d) -> {
-                val parts = d.removePrefix("the ").replace(",", "").replace(" of ", " ").split(' ')
+                // "3 of October", "November the 21st".
+                val parts = d.removePrefix("the ").replace(",", "").replace(" of ", " ").replace(" the ", " ").split(' ')
                 val dayFirst = parts[0].first().isDigit()
                 val monthWord = parts[if (dayFirst) 1 else 0]
                 val day = parts[if (dayFirst) 0 else 1].takeWhile { it.isDigit() }.toInt()
