@@ -1,6 +1,8 @@
 package com.example.itinerary
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -27,9 +29,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.example.itinerary.data.ThemeMode
 import com.example.itinerary.ui.AppLockRule
 import com.example.itinerary.ui.theme.ItineraryTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 // The lock screen, over Planner's own screen (which keeps its place underneath, open editors and dialogs included).
 // With EXTRA_CONFIRM it only confirms it's the user (Settings, turning App lock on or off) and returns RESULT_OK.
@@ -43,10 +48,15 @@ class LockActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Back leaves Planner locked rather than going behind the lock screen.
+        // Back leaves Planner locked rather than going behind the lock screen. In the task of an app that shared something
+        // to Planner, it closes this and the Planner screen under it (finishAffinity stops at that app's own screens)
+        // instead of sending that app away.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { if (confirmOnly) finish() else moveTaskToBack(true) }
+            override fun handleOnBackPressed() { if (confirmOnly) finish() else if (inPlannersTask()) moveTaskToBack(true) else finishAffinity() }
         })
+        // Unlocked on another lock screen (a second Planner screen, opened from a notification or a share while locked,
+        // has its own): this one goes without asking.
+        if (!confirmOnly) lifecycleScope.launch { appLock.locked.first { !it }; close() }
         val settings = (application as ItineraryApp).settings
         setContent {
             val mode by settings.themeMode.collectAsStateWithLifecycle()
@@ -73,6 +83,7 @@ class LockActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!confirmOnly && !appLock.locked.value) { close(); return }
         // Ask straight away on opening and on every return to it; after a cancel the button asks again.
         if (!asked) { asked = true; ask() }
     }
@@ -84,8 +95,20 @@ class LockActivity : FragmentActivity() {
 
     private fun done() {
         if (confirmOnly) setResult(Activity.RESULT_OK) else appLock.onUnlocked()
+        close()
+    }
+
+    private fun close() {
+        if (isFinishing) return
         finish()
         @Suppress("DEPRECATION") overridePendingTransition(0, 0)
+    }
+
+    // Whether this is Planner's own task, not another app's that Planner was shared into (Android lists only the tasks
+    // Planner started as its own).
+    private fun inPlannersTask() = getSystemService(ActivityManager::class.java).appTasks.any { task ->
+        val info = runCatching { task.taskInfo }.getOrNull() ?: return@any false
+        (if (Build.VERSION.SDK_INT >= 29) info.taskId else @Suppress("DEPRECATION") info.id) == taskId
     }
 
     private fun ask() {

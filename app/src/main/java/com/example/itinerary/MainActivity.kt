@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (!isChangingConfigurations) appLock.onLeft()
+        appLock.onStopped(isChangingConfigurations)
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
         super.onStop()
