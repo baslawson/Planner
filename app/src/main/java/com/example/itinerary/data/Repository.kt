@@ -815,6 +815,11 @@ class Repository(
                 itemDao.insertAll(data.items)
                 reminderDao.insertAll(data.reminders)
                 attachmentDao.insertAll(data.attachments)
+                // What was sent to Nextcloud is recorded by event id, and the ids now mean other events: the record goes
+                // with them, in the same step. The synced calendar is then read before anything new is sent, so its files
+                // are linked to events by content, not sent twice (a backup's own record is put back by the restore).
+                db.sentDao().deleteAll()
+                db.outsideDao().sources().filter { it.sendHere }.forEach { db.outsideDao().updateSource(it.copy(ctag = null, fetchedFor = null)) }
             }
         } catch (e: Throwable) {
             dropUncommitted(deleted)

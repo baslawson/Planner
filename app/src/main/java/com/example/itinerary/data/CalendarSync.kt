@@ -207,23 +207,39 @@ class CalendarSync(
     // Upcoming events are sent; past ones are noted and sent once edited; the calendar's own events come into Planner.
     // Choosing another calendar leaves the old one as it is.
     suspend fun setSendTarget(id: Long?) {
-        val sentDao = db.sentDao()
         db.withTransaction {
             val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
             sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
-            val target = sources.firstOrNull { it.id == id && it.writable } ?: return@withTransaction
-            // Its read-only events show like a ticked calendar's; its other events become Planner events.
-            dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null, lastError = null))
-            sentDao.deleteOtherCalendars(target.account, target.href)
-            val known = sentDao.all().mapTo(HashSet()) { it.itemId }
-            val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
-            db.itemDao().all().filter { sendable(it) && it.id !in known && it.lastDay < today }.forEach {
-                sentDao.put(SentEvent(itemId = it.id, account = target.account, calendar = target.href, uid = null, fingerprint = fingerprint(it)))
-            }
+            takeUp(sources.firstOrNull { it.id == id && it.writable } ?: return@withTransaction)
         }
         _sendState.value = State()
         onChanged()
         if (id != null) { sync(); send() }
+    }
+
+    // In a transaction: [target] becomes the synced calendar and is read before anything new is sent there; past events
+    // without a record are only noted.
+    private suspend fun takeUp(target: CalendarSource) {
+        val sentDao = db.sentDao()
+        // Its read-only events show like a ticked calendar's; its other events become Planner events.
+        dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null, lastError = null))
+        sentDao.deleteOtherCalendars(target.account, target.href)
+        val known = sentDao.all().mapTo(HashSet()) { it.itemId }
+        val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
+        db.itemDao().all().filter { sendable(it) && it.id !in known && it.lastDay < today }.forEach {
+            sentDao.put(SentEvent(itemId = it.id, account = target.account, calendar = target.href, uid = null, fingerprint = fingerprint(it)))
+        }
+    }
+
+    // After restoring a backup that doesn't say what was sent (made before backups kept that): the old record named
+    // other events, so none is kept, and the synced calendar is taken up again as when choosing it. The next pull links
+    // its files to the restored events by content; nothing is overwritten or deleted on the strength of an old record.
+    suspend fun forgetSent() {
+        db.withTransaction {
+            db.sentDao().deleteAll()
+            dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }?.let { takeUp(it) }
+        }
+        _sendState.value = State()
     }
 
     // Sends a few seconds after a change in Planner, so a burst of edits is one pass. A send already under way is never

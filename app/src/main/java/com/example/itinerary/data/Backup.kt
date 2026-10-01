@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -42,7 +43,8 @@ class StagedBackup internal constructor(
     val missingFiles: Int,
     // Ticked Nextcloud calendars; null for a backup made before calendar sync, which leaves the current ones alone.
     internal val calendars: List<CalendarChoice>? = null,
-    // Where Planner sends its events on Nextcloud and what it sent (step 5); null for a backup without it (left alone).
+    // Where Planner sends its events on Nextcloud and what it sent (step 5); null for a backup without it (the calendar
+    // stays, the record of what was sent doesn't: see CalendarSync.forgetSent).
     internal val send: Pair<CalendarChoice?, List<SentEvent>>? = null,
 ) {
     val plans: Int get() = data.trips.size
@@ -157,9 +159,17 @@ class BackupManager(
             created.forEach { it.delete() }
             throw BackupException("Couldn't restore the backup. Nothing was changed.")
         }
-        settings.applySnapshot(staged.settings)
-        staged.calendars?.let { calendars?.restoreChoices(it) }
-        staged.send?.let { (target, rows) -> calendars?.restoreSend(target, rows) }
+        // The data is in: each remaining step runs even if one before it failed (the first failure is reported after).
+        // What was sent to Nextcloud always gets replaced: by the backup's record, or by none (an older backup), since
+        // the current record names events that are gone or are other events now.
+        var failure: Exception? = null
+        suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
+        withContext(NonCancellable) {
+            step { settings.applySnapshot(staged.settings) }
+            step { staged.calendars?.let { calendars?.restoreChoices(it) } }
+            step { val send = staged.send; if (send != null) calendars?.restoreSend(send.first, send.second) else calendars?.forgetSent() }
+        }
+        failure?.let { throw it }
         staged.file.delete()
     }
 
@@ -443,7 +453,8 @@ class BackupManager(
             CalendarChoice(account, href, name.take(200), if (it.isNull("color")) null else parseHexColor(it.optString("color")),
                 it.optBoolean("enabled", true))
         }
-        // Optional too. An empty object means "not sending" (restoring it stops sending); a missing one leaves things alone.
+        // Optional too. An empty object means "not sending" (restoring it stops sending); a missing one keeps the
+        // synced calendar but not the record of what was sent.
         val send = root.optJSONObject("calendarSend")?.let { json ->
             val account = json.optString("account"); val href = json.optString("href")
             if (account.isBlank() || !href.startsWith("/")) return@let null to emptyList<SentEvent>()

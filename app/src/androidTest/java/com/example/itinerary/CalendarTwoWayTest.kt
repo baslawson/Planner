@@ -239,6 +239,54 @@ class CalendarTwoWayTest {
         assertOtherCalendarUntouched()
     }
 
+    // D2: a backup from before backups kept what was sent ("calendarSend") must not leave the current record in place:
+    // its event ids now mean other events, and the next send overwrote (or deleted) the wrong files on Nextcloud.
+    @Test fun restoringABackupWithoutTheSendRecordRelinksInsteadOfOverwriting() = runBlocking {
+        save("QA Alpha"); save("QA Gamma", 11)
+        start()
+        assertEquals(2, plannerFiles().size)
+        val gammaFile = plannerFile("QA Gamma").key
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-old-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        // As a backup from before calendar sync (no "calendars", no "calendarSend": the synced calendar stays chosen), and
+        // the event Planner sent as QA Gamma is QA Beta there (same id).
+        val json = org.json.JSONObject(java.util.zip.ZipFile(zip).use { z -> z.getInputStream(z.getEntry("data.json")).bufferedReader().readText() })
+        json.remove("calendarSend"); json.remove("calendars")
+        val events = json.getJSONArray("items")
+        for (i in 0 until events.length()) events.getJSONObject(i).let { if (it.getString("title") == "QA Gamma") it.put("title", "QA Beta") }
+        java.util.zip.ZipOutputStream(zip.outputStream()).use { it.putNextEntry(java.util.zip.ZipEntry("data.json")); it.write(json.toString().toByteArray()); it.closeEntry() }
+        val before = writes().size
+        backup.restore(backup.stage(android.net.Uri.fromFile(zip)))
+        assertTrue(rows().isEmpty())
+        assertNull(database.outsideDao().sources().single { it.sendHere }.fetchedFor)
+        sync.send()
+        assertEquals(before, writes().size) // nothing is written on the strength of the old record
+        syncAgain()
+        // Gamma's file is left as it was (and comes into Planner as the calendar's event); Alpha is linked, not sent again;
+        // Beta is new on Nextcloud.
+        assertTrue(dav.files[gammaFile]!!.second.contains("SUMMARY:QA Gamma"))
+        assertEquals(3, plannerFiles().size)
+        assertEquals(1, plannerFiles().count { dav.files[it]!!.second.contains("SUMMARY:QA Alpha") })
+        assertEquals(1, plannerFiles().count { dav.files[it]!!.second.contains("SUMMARY:QA Beta") })
+        assertEquals(setOf("QA Alpha", "QA Beta", "QA Gamma"), items().map { it.title }.toSet())
+        assertTrue(writes().drop(before).none { it.first == "DELETE" })
+        assertOtherCalendarUntouched()
+    }
+
+    // D2: the record goes in the same step as the events it names, so a restore step that fails later can't leave it.
+    @Test fun replacingAllDataDropsTheSendRecordWithTheEvents() = runBlocking {
+        save("QA Alpha")
+        start()
+        assertEquals(1, rows().size)
+        repo.replaceAll(repo.snapshot())
+        assertTrue(rows().isEmpty())
+        assertNull(database.outsideDao().sources().single { it.sendHere }.fetchedFor)
+        syncAgain()
+        assertEquals(1, plannerFiles().size) // linked again by content, not sent twice
+        assertEquals(1, rows().size)
+    }
+
     @Test fun aLostReplyNeverMakesASecondFile() = runBlocking {
         start()
         dav.loseReplies = 1
