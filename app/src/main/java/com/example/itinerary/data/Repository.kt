@@ -30,6 +30,8 @@ data class PendingMove(
     val title: String,
     val fromDate: java.time.LocalDate,
     val toDate: java.time.LocalDate,
+    // A task's move (itemId 0): the task before and after, so Undo puts it back while it is still as moved.
+    val task: Pair<PlannerTask, PlannerTask>? = null,
 )
 
 class Repository(
@@ -180,6 +182,17 @@ class Repository(
             val saved = taskDao.byId(task.id)
             afterCommit(files = existing?.attachments.orEmpty().map { it.fileName }, taskIds = listOf(task.id),
                 resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt) setOf(task.id) else emptySet())
+        }
+    }
+    // A task's ⋮ "Due tomorrow", with the same Undo bar as an event's move (see undoMove).
+    suspend fun moveTaskToTomorrow(id: String, today: java.time.LocalDate = java.time.LocalDate.now()) = changes.withLock {
+        withContext(NonCancellable) {
+            val before = taskDao.byId(id) ?: error("This task no longer exists")
+            val after = before.dueTomorrow(today)
+            taskDao.update(after)
+            _pendingMoves.value += PendingMove(itemId = 0, title = before.title, fromDate = before.dueDate ?: after.dueDate!!,
+                toDate = after.dueDate!!, task = before to after)
+            afterCommit(taskIds = listOf(id), resetTaskIds = if (before.activeReminderAt != after.activeReminderAt) setOf(id) else emptySet())
         }
     }
     suspend fun setTaskDone(id: String, done: Boolean) = changes.withLock {
@@ -612,6 +625,16 @@ class Repository(
     // Undo only the date. Preserve edits made since the move, and never recreate a deleted event.
     suspend fun undoMove(token: String): Boolean = changes.withLock {
         val move = _pendingMoves.value.find { it.token == token } ?: return@withLock false
+        move.task?.let { (before, after) ->
+            // Only while the task is still as the move left it: an edit since wins.
+            _pendingMoves.value = _pendingMoves.value.filterNot { it.token == token }
+            if (taskDao.byId(after.id) != after) return@withLock false
+            withContext(NonCancellable) {
+                taskDao.update(before)
+                afterCommit(taskIds = listOf(before.id), resetTaskIds = if (before.activeReminderAt != after.activeReminderAt) setOf(before.id) else emptySet())
+            }
+            return@withLock true
+        }
         val (restored, reminders) = db.withTransaction {
             val current = itemDao.byId(move.itemId)
             if (current == null || current.date != move.toDate) false to emptyList<Reminder>()

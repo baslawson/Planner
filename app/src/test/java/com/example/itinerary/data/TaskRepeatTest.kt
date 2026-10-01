@@ -47,6 +47,25 @@ class TaskRepeatTest {
             .nextOccurrence(LocalDate.of(2027, 4, 15))!!.dueDate)
         assertEquals(LocalDate.of(2027, 4, 30), RepeatRule.everyMonths(3).nextAfter(LocalDate.of(2027, 1, 31), LocalDate.of(2027, 1, 31)))
     }
+    // A task's ⋮ "Due tomorrow": the reminder moves by the same days (its clock time kept across daylight saving); an
+    // undated task keeps its reminder; a moved reminder ends a snooze.
+    @Test fun dueTomorrowMovesTheReminderWithTheDate() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        val today = LocalDate.of(2026, 10, 5)
+        fun at(day: LocalDate, hour: Int) = day.atTime(hour, 0).atZone(sydney).toInstant().toEpochMilli()
+        val late = PlannerTask(title = "Late", dueDate = LocalDate.of(2026, 10, 1), reminderAt = at(LocalDate.of(2026, 9, 30), 9),
+            snoozedUntil = at(today, 12))
+        val moved = late.dueTomorrow(today, sydney)
+        assertEquals(LocalDate.of(2026, 10, 6), moved.dueDate)
+        // Five days on, across the 4 October clock change: still 9 am, the day before it's due.
+        assertEquals(at(LocalDate.of(2026, 10, 5), 9), moved.reminderAt)
+        assertNull(moved.snoozedUntil)
+        val undated = PlannerTask(title = "Some day", reminderAt = at(today, 15), snoozedUntil = at(today, 16))
+        val dated = undated.dueTomorrow(today, sydney)
+        assertEquals(LocalDate.of(2026, 10, 6), dated.dueDate)
+        assertEquals(undated.reminderAt, dated.reminderAt); assertEquals(undated.snoozedUntil, dated.snoozedUntil)
+        assertEquals(late.copy(dueDate = moved.dueDate, reminderAt = moved.reminderAt, snoozedUntil = null), moved)
+    }
     @Test fun lateWeeklyCompletionSkipsMissedDatesAndKeepsWeekday() {
         val task = PlannerTask(title = "Weekly", dueDate = LocalDate.of(2026, 9, 1), repeat = "WEEKLY")
         assertEquals(LocalDate.of(2026, 9, 29), task.nextOccurrence(LocalDate.of(2026, 9, 26))!!.dueDate)

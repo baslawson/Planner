@@ -79,13 +79,14 @@ class CalendarSyncUiTest {
         await { find("QA Outside standup") != null && find("QA Own event") != null }
         assertTrue(has("From QA Work"))
         await { has("Starts 9:00") || has("Starts 09:00") } // the long event's real times
-        assertFalse("No ⋮ actions on an outside event", actionsFor("QA Outside standup"))
+        // Its ⋮ has only Copy to Planner and Share (see CardMenusUiTest), nothing that changes it.
+        assertTrue(actionsFor("QA Outside standup"))
         assertTrue(actionsFor("QA Own event"))
         screenshot("agenda")
 
         click("QA Outside standup") // opens the calendar on its day
         await { find("CALENDAR") != null && find("QA Outside standup") != null }
-        assertFalse(actionsFor("QA Outside standup"))
+        assertTrue(actionsFor("QA Outside standup"))
         screenshot("calendar")
         click("QA Outside standup") // the read-only view, not the editor
         await { find("Copy to Planner") != null }

@@ -80,3 +80,12 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
     return copy(id = UUID.randomUUID().toString(), dueDate = next, done = false, reminderAt = nextReminder, snoozedUntil = null,
         repeatAnchorDay = anchor, nextTaskId = null, checklist = checklist.map { it.copy(done = false) })
 }
+
+/** "Due tomorrow" from a task's ⋮ menu: due tomorrow, its reminder moved by the same number of days (as a repeat moves
+ *  it); an undated task keeps its reminder. A moved reminder ends a snooze. */
+fun PlannerTask.dueTomorrow(today: LocalDate, zone: ZoneId = ZoneId.systemDefault()): PlannerTask {
+    val target = today.plusDays(1)
+    val days = dueDate?.let { ChronoUnit.DAYS.between(it, target) } ?: 0L
+    val reminder = reminderAt?.let { Instant.ofEpochMilli(it).atZone(zone).plusDays(days).toInstant().toEpochMilli() }
+    return copy(dueDate = target, reminderAt = reminder, snoozedUntil = if (reminder == reminderAt) snoozedUntil else null)
+}

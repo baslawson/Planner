@@ -189,6 +189,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                                 onMove = { vm.moveToTomorrow(item.id) },
                                 reminderCount = remindersByItem[item.id]?.size ?: 0,
                                 outside = outsideEvents[item.id],
+                                onCopy = { outsideEvents[item.id]?.let { editing = it.event.plannerCopy() } },
                             ) {
                                 val outside = outsideEvents[item.id]
                                 when {
@@ -266,7 +267,7 @@ private fun DayHeader(date: LocalDate) {
 }
 
 @Composable
-private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCount: Int, reminderCount: Int, today: LocalDate, displayedDate: LocalDate, onMove: suspend () -> Unit, outside: com.example.itinerary.data.OutsideInfo? = null, onClick: () -> Unit) {
+private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCount: Int, reminderCount: Int, today: LocalDate, displayedDate: LocalDate, onMove: suspend () -> Unit, outside: com.example.itinerary.data.OutsideInfo? = null, onCopy: () -> Unit = {}, onClick: () -> Unit) {
     // The event's own colour: the bar as it is, the title in a shade that reads well on the current theme.
     val accent = item.accentColor()
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
@@ -333,8 +334,8 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         }
         val context = LocalContext.current
         val format = LocalTimeFormat.current
-        // An outside event has nothing to select and none of these actions: they would change it.
-        if (outside != null) Unit
+        // An outside event has nothing to select, and only actions that leave its calendar as it is.
+        if (outside != null) { if (!selection.active) OutsideActionsMenu(outside, onCopy) }
         else if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(item.id, item.title, item.date, today, onMove,
             billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,

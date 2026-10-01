@@ -31,3 +31,12 @@ fun shareEvent(context: Context, title: String, date: LocalDate, time: LocalTime
         Toast.makeText(context, "No sharing app is available", Toast.LENGTH_SHORT).show()
     }
 }
+
+// A task through the share sheet: its title, due date and notes.
+fun shareTask(context: Context, title: String, due: LocalDate?, notes: String) {
+    val text = listOfNotNull(title, due?.let { "Due " + it.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)) }, notes.trim().takeIf { it.isNotEmpty() })
+        .joinToString("\n")
+    val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text)
+    try { context.startActivity(Intent.createChooser(intent, "Share task")) }
+    catch (_: android.content.ActivityNotFoundException) { Toast.makeText(context, "No sharing app is available", Toast.LENGTH_SHORT).show() }
+}

@@ -17,6 +17,7 @@ import com.example.itinerary.data.OutsideInfo
 import com.example.itinerary.data.SyncMark
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
@@ -99,4 +100,24 @@ fun OutsideEventDialog(info: OutsideInfo, onDismiss: () -> Unit, onCopy: () -> U
             "Copy it to make a Planner event of your own.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+// The ⋮ on an event from another calendar: nothing in it changes that calendar. [onCopy] (null where there is no event
+// editor, as in Search) opens the editor with a Planner copy filled in, as the event's pop-up does.
+@Composable
+fun OutsideActionsMenu(info: OutsideInfo, onCopy: (() -> Unit)?) {
+    val event = info.event
+    val context = LocalContext.current
+    val format = LocalTimeFormat.current
+    OverlayMenuAnchor(title = "Actions for ${event.title}", button = { open ->
+        androidx.compose.material3.IconButton(onClick = open) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "Actions for ${event.title}")
+        }
+    }, items = { close ->
+        if (onCopy != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Copy to Planner") }, onClick = { close(); onCopy() })
+        androidx.compose.material3.DropdownMenuItem(text = { Text("Share event") }, onClick = {
+            close()
+            shareEvent(context, event.title, event.date, event.startTime ?: event.timedStart, event.durationMinutes, event.location, format)
+        })
+    })
 }

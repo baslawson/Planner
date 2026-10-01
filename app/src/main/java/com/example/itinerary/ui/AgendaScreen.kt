@@ -62,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.Agenda
 import com.example.itinerary.data.AgendaEntry
 import com.example.itinerary.data.AgendaRange
+import com.example.itinerary.data.plannerCopy
 import com.example.itinerary.data.AgendaType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
@@ -313,7 +314,8 @@ fun AgendaScreen(
                             items(eventsByDate[date]?.entries.orEmpty(), key = { if (it.continuing) "under-way-${it.event.id}" else it.event.id },
                                 contentType = { "event" }) { entry ->
                                 AgendaEventCard(entry, today, selection,
-                                    onMove = { vm.moveToTomorrow(entry.event.id) }) {
+                                    onMove = { vm.moveToTomorrow(entry.event.id) },
+                                    onCopy = { newEvent.start(it.event.plannerCopy()) }) {
                                     // One under way shown under Today opens the calendar on today, the day it was shown under.
                                     if (selection.active) { if (!OutsideCalendars.isOutside(entry.event.id)) selection.toggle(entry.event.id) }
                                     else onOpenEvent(if (entry.continuing) today else entry.event.date)
@@ -405,7 +407,8 @@ private fun AgendaDayHeading(date: LocalDate, today: LocalDate) {
 
 // One event: time, colour and title.
 @Composable
-private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: EventSelection, onMove: suspend () -> Unit, onClick: () -> Unit) {
+private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: EventSelection, onMove: suspend () -> Unit,
+                            onCopy: (com.example.itinerary.data.OutsideInfo) -> Unit, onClick: () -> Unit) {
     val event = entry.event
     val accent = event.accentColor()
     val outside = LocalOutsideEvents.current[event.id]
@@ -448,8 +451,8 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         }
         val context = LocalContext.current
         val format = LocalTimeFormat.current
-        // An outside event has nothing to select and none of these actions: they would change it.
-        if (outside != null) Unit
+        // An outside event has nothing to select, and only actions that leave its calendar as it is.
+        if (outside != null) { if (!selection.active) OutsideActionsMenu(outside) { onCopy(outside) } }
         else if (selection.active) androidx.compose.material3.Checkbox(checked = event.id in selection.ids, onCheckedChange = null)
         else EventActionsMenu(event.id, event.title, event.date, today, onMove,
             billId = event.id.takeIf { event.category == "Bills" }, paid = event.paid,

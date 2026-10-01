@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import org.json.JSONArray
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -96,6 +97,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, selec
                 }
             }
             if (selecting) Checkbox(checked = selected, onCheckedChange = null)
+            else if (selection != null) TaskActionsMenu(task, today)
         }
     }
 }
@@ -440,4 +442,38 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         dismiss = DialogAction("Keep task") { confirmingDelete = false }) {
         Text("${initial.title} will be kept in Recently deleted for 30 days.")
     }
+}
+
+// A task's ⋮: Due tomorrow (with the Undo bar an event's move has), Share task and Delete task (Undo bar too). Done is
+// the box on the card.
+@Composable
+private fun TaskActionsMenu(task: PlannerTask, today: LocalDate) {
+    val context = LocalContext.current
+    val repo = (context.applicationContext as ItineraryApp).repository
+    val app = context.applicationContext as ItineraryApp
+    var busy by remember(task.id) { mutableStateOf(false) }
+    fun act(failure: String, block: suspend () -> Unit) {
+        busy = true
+        // The app's scope: the card may leave the list once its date changes.
+        app.appScope.launch {
+            try { block() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(context, failure, android.widget.Toast.LENGTH_LONG).show() } }
+            finally { busy = false }
+        }
+    }
+    val tomorrow = today.plusDays(1)
+    OverlayMenuAnchor(title = "Actions for ${task.title}", button = { open ->
+        IconButton(enabled = !busy, onClick = open) {
+            Icon(androidx.compose.material.icons.Icons.Default.MoreVert, contentDescription = "Actions for ${task.title}")
+        }
+    }, items = { close ->
+        DropdownMenuItem(text = { Text(if (task.dueDate == tomorrow) "Already tomorrow" else "Due tomorrow") },
+            enabled = !busy && task.dueDate != tomorrow,
+            onClick = { close(); act("Couldn't change the date. Please try again.") { repo.moveTaskToTomorrow(task.id, today) } })
+        DropdownMenuItem(text = { Text("Share task") }, onClick = { close(); shareTask(context, task.title, task.dueDate, task.notes) })
+        DropdownMenuItem(text = { Text("Delete task", color = MaterialTheme.colorScheme.error) }, enabled = !busy,
+            onClick = { close(); act("Couldn't delete this task. Please try again.") { repo.deleteTask(task.id) } })
+    })
 }

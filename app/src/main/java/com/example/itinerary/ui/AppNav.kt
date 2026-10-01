@@ -173,7 +173,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     withContext(NonCancellable) {
                         if (result == SnackbarResult.ActionPerformed) {
                             if (!app.repository.undoMove(nextMove.token))
-                                Toast.makeText(app, "The event was changed or deleted, so its date wasn't undone.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(app, "The ${if (nextMove.task != null) "task" else "event"} was changed or deleted, so its date wasn't undone.", Toast.LENGTH_LONG).show()
                         } else app.repository.finishMove(nextMove.token)
                     }
                 } catch (e: CancellationException) { throw e }

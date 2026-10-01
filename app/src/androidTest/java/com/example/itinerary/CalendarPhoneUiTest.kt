@@ -93,7 +93,8 @@ class CalendarPhoneUiTest {
             click("Close")
             click("Save")
             await { find("QA Phone dentist") != null && has("From QA test calendar") }
-            assertNull("No ⋮ on a phone event", find("Actions for QA Phone dentist"))
+            // Its ⋮ has only Copy to Planner and Share (see CardMenusUiTest).
+            assertNotNull(find("Actions for QA Phone dentist"))
             screenshot("agenda")
 
             // Changed on the phone while Planner is open: Planner follows without a tap.

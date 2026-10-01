@@ -98,7 +98,7 @@ class CalendarLinkUiTest {
             click("Close")
             click("Save")
             await { find("QA Home match") != null && has("From QA Club fixtures") }
-            assertNull(find("Actions for QA Home match"))
+            assertNotNull(find("Actions for QA Home match")) // only Copy to Planner and Share
             screenshot("agenda")
 
             click("Settings")
