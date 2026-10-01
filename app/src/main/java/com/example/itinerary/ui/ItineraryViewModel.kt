@@ -29,8 +29,8 @@ class ItineraryViewModel(
     // Events of ticked Nextcloud calendars (see CalendarSync.shown).
     outside: Flow<Map<Long, OutsideInfo>> = flowOf(emptyMap()),
 ) : ViewModel() {
-    suspend fun deleteEvents(ids: Set<Long>) = viewModelScope.async {
-        repo.deleteEventsWithUndo(ids)
+    suspend fun deleteEvents(ids: Set<Long>, taskIds: Set<String> = emptySet()) = viewModelScope.async {
+        repo.deleteEventsWithUndo(ids, taskIds)
     }.await()
 
 

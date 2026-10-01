@@ -131,7 +131,8 @@ fun AgendaScreen(
             .map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
-    val selection = rememberEventSelection(selectable)
+    val selectableTasks = remember(shownTasks) { shownTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
+    val selection = rememberEventSelection(selectable, visibleTasks = selectableTasks)
 
     // The rows above the days, in the list's order (the list below uses the same flags).
     val showBackupFailed = backupStatus.failed
@@ -174,7 +175,7 @@ fun AgendaScreen(
 
     OverlayMenuScreen(overlayMenu) {
         Scaffold(
-            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents, selectableTasks) },
             topBar = {
                 TopAppBar(
                     navigationIcon = {
@@ -285,7 +286,7 @@ fun AgendaScreen(
                                 }
                             }
                             if (anytimeExpanded) items(anytimeTasks, key = { "task-${it.id}" }) { task ->
-                                TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
+                                TaskCard(task, today, selection = selection) { editingTaskId = task.id }
                             }
                         }
                         if (showEmpty) item(key = "empty") {
@@ -305,7 +306,7 @@ fun AgendaScreen(
                                 BillTaskCard(bill, today, selection) { editingBillId = bill.id }
                             }
                             items(datedTasks[date].orEmpty(), key = { "task-${it.id}" }, contentType = { "task" }) { task ->
-                                TaskCard(task, today, enabled = !selection.active) { editingTaskId = task.id }
+                                TaskCard(task, today, selection = selection) { editingTaskId = task.id }
                             }
                             // An event under way (a trip, or one from yesterday past midnight) can appear twice (its first
                             // day and Today), so its Today card needs its own key.
@@ -409,7 +410,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
     val accent = event.accentColor()
     val outside = LocalOutsideEvents.current[event.id]
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(event.id) }),
-        selected = (event.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = (event.id in selection.ids).takeIf { selection.active }, arrow = false, tint = outside?.let { Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
                 event.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
@@ -427,7 +428,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(androidx.compose.ui.text.AnnotatedString(event.title), readableOnSurface(accent), event.category == "Bills")
-            outside?.let { OutsideEventLabel(it) }
+            if (outside != null) OutsideEventLabel(outside) else SyncMarkLabel(event.id)
             if (event.skipped) Text("Skipped · reminders paused", style = MaterialTheme.typography.labelMedium)
             if (event.category == "Bills" && event.billAmountMinor != null) Text(com.example.itinerary.data.Bills.format(event.billAmountMinor, event.billCurrency), style = MaterialTheme.typography.bodyMedium)
             if (event.category == "Bills") {

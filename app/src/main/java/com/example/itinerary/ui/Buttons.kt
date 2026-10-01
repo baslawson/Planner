@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.dp
 
 // Shared Matrix controls style ordinary actions; destructive actions retain red.
@@ -63,6 +64,8 @@ fun TappableRow(
     arrow: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     selected: Boolean? = null,
+    // An event from another calendar: the card takes a light wash and an outline of that calendar's colour.
+    tint: androidx.compose.ui.graphics.Color? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     Surface(
@@ -71,8 +74,9 @@ fun TappableRow(
                 onLongClickLabel = if (onLongClick != null) "Select event" else null, role = Role.Button)
             .semantics { if (selected != null) this.selected = selected },
         shape = RoundedCornerShape(12.dp),
-        color = if (selected == true) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), MaterialTheme.colorScheme.outlineVariant),
+        color = if (selected == true) MaterialTheme.colorScheme.secondaryContainer
+            else tint?.copy(alpha = 0.14f)?.compositeOver(MaterialTheme.colorScheme.surfaceContainerLow) ?: MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), tint?.copy(alpha = 0.8f) ?: MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(
             Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = if (arrow) 6.dp else 4.dp)

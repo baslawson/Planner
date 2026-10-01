@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import org.json.JSONArray
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -35,18 +37,30 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.LocalDate
 
+// [selection]: a long press selects the task with the events and bills around it; while anything is selected a tap
+// selects or deselects it, and its done box waits.
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, onEdit: () -> Unit) {
+fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, selection: EventSelection? = null, onEdit: () -> Unit) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
     val scope = rememberCoroutineScope()
     val allTasks by repo.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     val blockers = TaskDependencies.blockers(task, allTasks)
     var busy by remember(task.id) { mutableStateOf(false) }
-    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth().clickable(enabled = enabled && !busy, onClick = onEdit).padding(8.dp),
+    val selecting = selection?.active == true
+    val selected = selection != null && task.id in selection.taskIds
+    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        colors = if (selected) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors()) {
+        Row(Modifier.fillMaxWidth()
+            .combinedClickable(enabled = enabled && !busy,
+                onClick = { if (selecting) selection?.toggleTask(task.id) else onEdit() },
+                onLongClickLabel = if (selection != null) "Select task" else null,
+                onLongClick = selection?.let { { it.toggleTask(task.id) } })
+            .semantics { if (selecting) this.selected = selected }
+            .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = task.done, enabled = enabled && !busy && (task.done || blockers.isEmpty()),
+            Checkbox(checked = task.done, enabled = enabled && !busy && !selecting && (task.done || blockers.isEmpty()),
                 modifier = Modifier.semantics { contentDescription = "Mark ${task.title} ${if (task.done) "incomplete" else "done"}" },
                 onCheckedChange = { done ->
                     busy = true
@@ -81,6 +95,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, onEdi
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
+            if (selecting) Checkbox(checked = selected, onCheckedChange = null)
         }
     }
 }

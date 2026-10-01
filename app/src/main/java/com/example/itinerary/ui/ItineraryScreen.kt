@@ -270,7 +270,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
     // The event's own colour: the bar as it is, the title in a shade that reads well on the current theme.
     val accent = item.accentColor()
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
-        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
                 item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
@@ -288,7 +288,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(androidx.compose.ui.text.AnnotatedString(item.title), readableOnSurface(accent), item.category == "Bills")
-            outside?.let { OutsideEventLabel(it) }
+            if (outside != null) OutsideEventLabel(outside) else SyncMarkLabel(item.id)
             if (item.skipped) Text("Skipped · reminders paused", style = MaterialTheme.typography.labelMedium)
             if (item.category == "Bills" && item.billAmountMinor != null) Text(com.example.itinerary.data.Bills.format(item.billAmountMinor, item.billCurrency), style = MaterialTheme.typography.bodyMedium)
             if (item.category == "Bills") {

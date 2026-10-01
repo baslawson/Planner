@@ -144,7 +144,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
                 val result = snackbar.showSnackbar(
-                    message = if (next.tasks.isNotEmpty()) "Task deleted" else if (next.items.size == 1) "Event deleted" else "${next.items.size} events deleted",
+                    message = deletedMessage(next.items.size, next.tasks.size),
                     actionLabel = "Undo",
                     withDismissAction = true,
                     duration = SnackbarDuration.Long,
@@ -217,7 +217,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }
     }
     val outsideEvents by app.calendarSync.shown.collectAsStateWithLifecycle(initialValue = emptyMap())
-    CompositionLocalProvider(LocalOutsideEvents provides outsideEvents, LocalAppSnackbar provides snackbar) {
+    val syncMarks by app.calendarSync.syncMarks.collectAsStateWithLifecycle(initialValue = emptyMap())
+    CompositionLocalProvider(LocalOutsideEvents provides outsideEvents, LocalAppSnackbar provides snackbar, LocalSyncMarks provides syncMarks) {
     Box(Modifier.fillMaxSize()) {
         NavHost(navController = nav, startDestination = "agenda") {
             composable(
@@ -362,4 +363,11 @@ internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDat
     widgetDate == null -> WidgetDateStep.NOTHING
     openEditors > 0 -> WidgetDateStep.WAIT
     else -> WidgetDateStep.OPEN
+}
+
+// The Undo bar after a deletion: "Event deleted", "3 tasks deleted", "4 items deleted" (events and tasks together).
+internal fun deletedMessage(events: Int, tasks: Int): String {
+    val count = events + tasks
+    val noun = if (tasks == 0) "event" else if (events == 0) "task" else "item"
+    return if (count == 1) "${noun.replaceFirstChar { it.uppercase() }} deleted" else "$count ${noun}s deleted"
 }

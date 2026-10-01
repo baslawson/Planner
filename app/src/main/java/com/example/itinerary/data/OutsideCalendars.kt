@@ -83,6 +83,20 @@ data class SentEvent(
     }
 }
 
+class SentMarkRow(val itemId: Long, val uid: String?, val problem: String?)
+
+// What an event card says about two-way sync: on Nextcloud, or on Nextcloud with something to settle in Calendars.
+enum class SyncMark { SYNCED, PROBLEM;
+    companion object {
+        // A row with no uid was only noted (never sent); a detached one is no longer synced.
+        fun of(uid: String?, problem: String?): SyncMark? = when {
+            uid == null || problem == SentEvent.DETACHED -> null
+            problem == null || problem == SentEvent.PENDING -> SYNCED
+            else -> PROBLEM
+        }
+    }
+}
+
 // What two-way sync needs from Planner's own events: save a change (reminders follow), add one, and move some to
 // Recently deleted. The app passes its Repository (see asPlannerStore); tests may too.
 interface PlannerStore {
@@ -104,6 +118,10 @@ interface SentDao {
 
     @Query("SELECT * FROM sent_events ORDER BY itemId")
     fun observe(): Flow<List<SentEvent>>
+
+    // Only what the event cards show (not the stored calendar files): see CalendarSync.syncMarks.
+    @Query("SELECT itemId, uid, problem FROM sent_events")
+    fun observeMarks(): Flow<List<SentMarkRow>>
 
     @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun put(row: SentEvent): Long

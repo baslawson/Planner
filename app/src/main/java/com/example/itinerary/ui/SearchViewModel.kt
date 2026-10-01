@@ -26,8 +26,8 @@ class SearchViewModel(
     // Events of ticked Nextcloud calendars (see CalendarSync.shown); they are found like any other event.
     outside: Flow<Map<Long, OutsideInfo>> = flowOf(emptyMap()),
 ) : ViewModel() {
-    suspend fun deleteEvents(ids: Set<Long>) = viewModelScope.async {
-        repo.deleteEventsWithUndo(ids)
+    suspend fun deleteEvents(ids: Set<Long>, taskIds: Set<String> = emptySet()) = viewModelScope.async {
+        repo.deleteEventsWithUndo(ids, taskIds)
     }.await()
 
     val tasks = repo.tasks.stateInWhileVisible(viewModelScope, emptyList())

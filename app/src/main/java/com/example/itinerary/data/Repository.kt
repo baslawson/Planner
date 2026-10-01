@@ -248,7 +248,8 @@ class Repository(
     private suspend fun archive(bundle: PendingDeletion, plans: List<Trip>? = null) {
         val owners = plans ?: readIds(bundle.items.map { it.tripId }, tripDao::byIds).sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val label = bundle.items.firstOrNull()?.title ?: bundle.tasks.firstOrNull()?.title ?: owners.firstOrNull()?.name ?: "Deleted events"
-        deletedDao.insert(DeletedEntry(id = bundle.token, label = if (bundle.items.size > 1) "$label + ${bundle.items.size - 1}" else label,
+        val count = bundle.items.size + bundle.tasks.size
+        deletedDao.insert(DeletedEntry(id = bundle.token, label = if (count > 1) "$label + ${count - 1}" else label,
             payload = DeletedCodec.encode(DeletedContents(owners, bundle.items, bundle.attachments, bundle.reminders, bundle.tasks))))
     }
 
@@ -538,22 +539,25 @@ class Repository(
     }
 
     // Delete exactly these occurrences together, with one Undo bundle for the entire selection.
-    suspend fun deleteEventsWithUndo(ids: Set<Long>) = changes.withLock {
+    // Selected events and tasks go together: one Undo, one entry in Recently deleted.
+    suspend fun deleteEventsWithUndo(ids: Set<Long>, taskIds: Set<String> = emptySet()) = changes.withLock {
         requirePlannerEvents(ids)
         withContext(NonCancellable) {
             val deleted = db.withTransaction {
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
-                if (selected.isEmpty()) return@withTransaction null
+                val tasks = taskIds.mapNotNull { taskDao.byId(it) }.sortedBy { it.id }
+                if (selected.isEmpty() && tasks.isEmpty()) return@withTransaction null
                 val selectedIds = selected.mapTo(hashSetOf()) { it.id }
                 val bundle = PendingDeletion(items = selected,
                     attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
-                    reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id })
+                    reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id }, tasks = tasks)
                 archive(bundle)
                 selected.forEach { itemDao.delete(it) }
+                tasks.forEach { taskDao.delete(it.id) }
                 bundle
             } ?: return@withContext
             _pendingDeletions.value += deleted
-            afterCommit(reminderIds = deleted.reminders.map { it.id })
+            afterCommit(reminderIds = deleted.reminders.map { it.id }, taskIds = deleted.tasks.map { it.id })
         }
     }
 

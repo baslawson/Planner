@@ -130,13 +130,16 @@ fun SearchScreen(
     val selectable = remember(searching, visibleOutcome) {
         if (searching && visibleOutcome.invalidDates.isEmpty()) visibleOutcome.hits.filterNot { OutsideCalendars.isOutside(it.item.id) }.map { SelectableEvent(it.item.id, it.item.title, it.item.date, bill = it.item.category == "Bills") } else emptyList()
     }
-    val selection = rememberEventSelection(selectable, prune = outcome !== SearchOutcome.LOADING)
+    val selectableTasks = remember(searching, taskHits, visibleOutcome) {
+        if (searching && visibleOutcome.invalidDates.isEmpty()) taskHits.map { SelectableTask(it.id, it.title, it.dueDate) } else emptyList()
+    }
+    val selection = rememberEventSelection(selectable, prune = outcome !== SearchOutcome.LOADING, visibleTasks = selectableTasks)
 
     // Bill results open their ⋮ menu through this, drawn above the whole screen.
     val overlayMenu = remember { OverlayMenuState() }
     OverlayMenuScreen(overlayMenu) {
         Scaffold(
-            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents, selectableTasks) },
             topBar = {
                 TopAppBar(
                     title = { HeadingText("Search", style = MaterialTheme.typography.titleLarge) },
@@ -264,7 +267,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
         billHits.forEach { hit -> item(key = "bill-${hit.item.id}") {
             BillTaskCard(hit.item.billTaskSummary(), today, selection, hit.documentName) { onBill(hit.item.id) }
         } }
-        taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, enabled = !selection.active) { onTask(task) } } }
+        taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, selection = selection) { onTask(task) } } }
     }
     dayGroups.forEach { (date, hits) ->
         item(key = "day-$date") {
@@ -292,7 +295,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
     val accent = item.accentColor()
     val outside = LocalOutsideEvents.current[item.id]
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
-        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = !selection.active, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = !selection.active, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
             item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
             style = MaterialTheme.typography.labelLarge,
@@ -308,6 +311,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EventTitle(highlight(item.title, tokens), readableOnSurface(accent), item.category == "Bills")
+            if (outside == null) SyncMarkLabel(item.id)
             // Grouped under its first day, so say how far it runs; a match on a later day is inside this span.
             item.endDate?.let { end -> Text(spanLabel(item.date, end), style = MaterialTheme.typography.bodySmall) }
             if (item.durationMinutes != null && item.startTime != null) Text(

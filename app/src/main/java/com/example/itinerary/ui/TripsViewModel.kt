@@ -50,8 +50,8 @@ class TripsViewModel(
     // Nextcloud calendars shown beside Planner's events; null in tests that don't need them.
     private val calendars: CalendarSync? = null,
 ) : ViewModel() {
-    suspend fun deleteEvents(ids: Set<Long>) = viewModelScope.async {
-        repo.deleteEventsWithUndo(ids)
+    suspend fun deleteEvents(ids: Set<Long>, taskIds: Set<String> = emptySet()) = viewModelScope.async {
+        repo.deleteEventsWithUndo(ids, taskIds)
     }.await()
 
 

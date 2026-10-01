@@ -68,6 +68,11 @@ class CalendarSync(
 
     val sources: Flow<List<CalendarSource>> = dao.observeSources()
 
+    // Planner's events on Nextcloud (two-way), by event id, for the cards to mark.
+    val syncMarks: Flow<Map<Long, SyncMark>> = db.sentDao().observeMarks()
+        .map { rows -> rows.mapNotNull { row -> SyncMark.of(row.uid, row.problem)?.let { row.itemId to it } }.toMap() }
+        .distinctUntilChanged()
+
     // Ticked calendars' events with their calendar's name and colour, keyed by the id they are shown under.
     val shown: Flow<Map<Long, OutsideInfo>> = combine(dao.observeShown(), dao.observeSources()) { events, sources ->
         val byId = sources.associateBy { it.id }
