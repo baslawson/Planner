@@ -84,4 +84,16 @@ class MissedRemindersTest {
         assertEquals(mapOf(taskKey("later") to now + hour), left)
         assertTrue(select(left, now = now + 60_000).isEmpty())
     }
+
+    // R-M1: a force stop clears alarms without a reboot. When the app opens, an alarm still in the ledger well after its
+    // time never rang; one only a little late may still be on its way.
+    @Test fun appOpenShowsOnlyAlarmsWellOverdue() {
+        val grace = MissedReminders.GRACE_MS
+        val pending = mapOf("lost" to now - grace, "late" to now - grace + 1, "ahead" to now + hour, "old" to now - MissedReminders.WINDOW_MS)
+        assertEquals(setOf("lost"), MissedReminders.due(pending, now, grace).keys)
+        assertEquals(setOf("late", "ahead"), MissedReminders.remaining(pending, now, grace).keys)
+        // The one shown is forgotten, the late one is shown at a later opening if it still hasn't rung.
+        val left = MissedReminders.remaining(pending, now, grace)
+        assertEquals(setOf("late"), MissedReminders.due(left, now + 60_000, grace).keys)
+    }
 }

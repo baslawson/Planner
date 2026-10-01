@@ -948,9 +948,12 @@ class Repository(
         scheduler.setReminderZone(zone.id)
     }
 
-    /** After a reboot: [post] the [pending] alarms that fell due while the phone was off; missed event reminders then count as delivered. */
-    suspend fun deliverMissedReminders(pending: Map<String, Long>, now: Long, post: (List<MissedReminders.Missed>) -> Unit) = changes.withLock {
-        val due = MissedReminders.due(pending, now)
+    /**
+     * After a reboot, or when the app finds alarms [graceMs] late: [post] the [pending] alarms that fell due without
+     * ringing; missed event reminders then count as delivered.
+     */
+    suspend fun deliverMissedReminders(pending: Map<String, Long>, now: Long, graceMs: Long = 0L, post: (List<MissedReminders.Missed>) -> Unit) = changes.withLock {
+        val due = MissedReminders.due(pending, now, graceMs)
         val events = due.keys.mapNotNull(MissedReminders::eventId).mapNotNull { id ->
             reminderDao.byId(id)?.let { r -> itemDao.byId(r.itemId)?.let { id to (it to r) } } }.toMap()
         val delivered = readIds(events.keys, reminderDao::deliveries).associate { it.reminderId to it.key }

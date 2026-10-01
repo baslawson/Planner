@@ -171,6 +171,8 @@ class MainActivity : ComponentActivity() {
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
         // Cheap and idempotent; picks up exact-alarm permission the user just granted in system settings.
         lifecycleScope.launch(Dispatchers.IO) {
+            // First the reminders whose alarms Android dropped (a force stop), before they are set again.
+            com.example.itinerary.reminders.showMissedReminders(applicationContext, afterBoot = false)
             (application as ItineraryApp).repository.rescheduleAllReminders()
         }
         // The phone's ticked calendars, and ticked Nextcloud calendars at most every 15 minutes (nothing without a login).

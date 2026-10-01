@@ -18,10 +18,7 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 // Only a reboot leaves due alarms unseen for long: a time change fires past ones late, an update takes seconds.
-                if (intent.action == Intent.ACTION_BOOT_COMPLETED) try {
-                    val now = System.currentTimeMillis()
-                    handleMissedReminders(app.repository, app.reminderScheduler.ledger, now) { postMissedReminders(context, it, now) }
-                } catch (e: Exception) { android.util.Log.w("BootReceiver", "Couldn't show missed reminders", e) }
+                if (intent.action == Intent.ACTION_BOOT_COMPLETED) showMissedReminders(context, afterBoot = true)
                 app.repository.rescheduleAllReminders()
             } finally {
                 pending.finish()

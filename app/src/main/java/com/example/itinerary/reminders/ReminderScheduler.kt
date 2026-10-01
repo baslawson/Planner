@@ -69,6 +69,12 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         androidx.core.app.NotificationManagerCompat.from(context).cancel("task:$id", 0)
     }
 
+    // A late alarm already shown as missed (MissedReminders); its notification stays.
+    fun disarm(key: String) {
+        MissedReminders.eventId(key)?.let { cancelCode(it.toInt()) }
+        MissedReminders.taskId(key)?.let { id -> taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() } }
+    }
+
     private fun taskPending(id: String, flags: Int): PendingIntent? = PendingIntent.getBroadcast(
         context, 0, TaskReminderReceiver.intent(context, id), flags or PendingIntent.FLAG_IMMUTABLE)
 

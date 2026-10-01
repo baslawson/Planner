@@ -39,13 +39,33 @@ class AlarmLedger(private val prefs: SharedPreferences) {
     }
 }
 
-/** At boot: shows the reminders missed while the phone was off, then forgets every alarm that is no longer ahead. */
-internal suspend fun handleMissedReminders(repository: Repository, ledger: AlarmLedger, now: Long, post: (List<MissedReminders.Missed>) -> Unit) {
-    repository.deliverMissedReminders(ledger.all(), now) { missed ->
+/**
+ * Shows the reminders whose alarms went without ringing, then forgets those alarms: at boot every one no longer ahead,
+ * when the app opens every one at least [graceMs] late. A late alarm that is still set is [disarm]ed, so it can't show again.
+ */
+internal suspend fun handleMissedReminders(repository: Repository, ledger: AlarmLedger, now: Long, graceMs: Long = 0L,
+                                           disarm: (String) -> Unit = {}, post: (List<MissedReminders.Missed>) -> Unit) {
+    repository.deliverMissedReminders(ledger.all(), now, graceMs) { missed ->
         // Forget them before showing, so a crash can lose a missed note but never repeat it at the next boot.
-        ledger.keepOnly(MissedReminders.remaining(ledger.all(), now))
+        val remaining = MissedReminders.remaining(ledger.all(), now, graceMs)
+        ledger.all().keys.filter { it !in remaining }.forEach(disarm)
+        ledger.keepOnly(remaining)
         post(missed)
     }
+}
+
+/**
+ * After a reboot ([afterBoot]), the reminders due while the phone was off. When the app opens, the ones whose alarm
+ * Android dropped without ringing: a force stop (some phones do one when Planner is swiped away) or the exact-alarm
+ * permission being turned off clears an app's alarms.
+ */
+suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
+    val app = context.applicationContext as ItineraryApp
+    val now = System.currentTimeMillis()
+    try {
+        handleMissedReminders(app.repository, app.reminderScheduler.ledger, now, if (afterBoot) 0L else MissedReminders.GRACE_MS,
+            app.reminderScheduler::disarm) { postMissedReminders(app, it, now, afterBoot) }
+    } catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't show missed reminders", e) }
 }
 
 private const val MISSED_GROUP = "planner.missed"
@@ -54,7 +74,7 @@ private const val MISSED_GROUP = "planner.missed"
  * Normal (never ringing) notifications, in the reminder's own slot so a later real one replaces it. Several go in one group
  * whose summary alone alerts, and at most [MissedReminders.MAX_SHOWN] are shown; the summary counts the rest.
  */
-fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, now: Long) {
+fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, now: Long, afterBoot: Boolean = true) {
     if (missed.isEmpty() || !notificationsEnabled(context)) return
     val grouped = missed.size > 1
     val shown = missed.take(MissedReminders.MAX_SHOWN)
@@ -99,7 +119,7 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
             if (more > 0) style.setSummaryText("+$more more in Planner")
             manager.notify("missed-reminders", 0, NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification).setContentTitle("${missed.size} missed reminders")
-                .setContentText(if (more > 0) "While your phone was off · $more more in Planner" else "While your phone was off")
+                .setContentText((if (afterBoot) "While your phone was off" else "Android stopped their alarms") + if (more > 0) " · $more more in Planner" else "")
                 .setStyle(style).setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setGroup(MISSED_GROUP).setGroupSummary(true).setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
                 .setContentIntent(open(0)).setAutoCancel(true).build())
