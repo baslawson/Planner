@@ -107,7 +107,9 @@ object QuickEntry {
     private const val bareOrdinalValue = "(?:3[01]|[12]\\d|0?[1-9])(?:st|nd|rd|th)"
     private const val bareOrdinal = "$bareOrdinalValue(?=\\s*,?\\s*(?:at\\s+|@\\s*)?\\d)" +
         "(?!\\s*,?\\s*\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:$months)\\b|\\s*,?\\s*(?:\\d{1,2}/|\\d{1,2}\\.\\d{1,2}\\.|\\d{4}[-/.])\\d)"
-    private val moneyAmounts = Regex("(?<=[£€¥$]\\s?)\\d[\\d,]*(?:\\.\\d+)?")
+    // After a currency sign or code, or before a code: "$450", "AUD 20.50", "20.50 AUD".
+    private val currencyCodes = Bills.currencies.joinToString("|")
+    private val moneyAmounts = rx("(?<=[£€¥$]\\s?|\\b(?:$currencyCodes)\\s?)\\d[\\d,]*(?:\\.\\d+)?|(?<![\\w.,])\\d[\\d,]*(?:\\.\\d+)?(?=\\s?(?:$currencyCodes)\\b)")
     // "Call 0491 570 156", "+61 491 570 156", "(08) 5550 1234", "0491-570-156": a phone number, never a time or date. At least
     // nine digits, so "Oct 12 2026 10am" and "0800 1400" keep their dates and times; see parse.
     private val phoneNumbers = Regex("(?<![\\w.:/+(-])(?:\\+\\d{1,3}(?:[ -]\\d{1,5}){2,}|\\(0\\d\\)\\s?\\d{3,4}[ -]?\\d{3,4}|\\d{2,5}(?: \\d{2,5}){2,}|0\\d{2,4}(?:-\\d{3,4}){2})(?![\\w.:/-])")
@@ -322,7 +324,8 @@ object QuickEntry {
         }
         quote.findAll(text).forEach { mask(it.range, '\uE000') }
         literalRanges.filter { it.first >= 0 && it.last < text.length && !it.isEmpty() }.forEach { mask(it, '\uE000') }
-        // "Rent $450pm", "Gym $120 pm": a number right after a currency sign is an amount, never a time or date.
+        // "Rent $450pm", "Gym $120 pm", "Pay Sam AUD 20.50": a number beside a currency sign or code is an amount, never a
+        // time or date.
         moneyAmounts.findAll(remaining).toList().forEach { mask(it.range, '\uE000') }
         phoneNumbers.findAll(remaining).filter { m ->
             m.value.count { it.isDigit() } >= 9 && !rx("\\b(?:$months)\\.?,?\\s*$").containsMatchIn(remaining.substring(0, m.range.first))

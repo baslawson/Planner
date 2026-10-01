@@ -80,6 +80,16 @@ class QuickFixesNamesAndDatesTest {
             parse("Remind me next week to book").error)
     }
 
+    // Q-N3: an amount next to a currency code is never a time.
+    @Test fun anAmountBesideACurrencyCodeIsNotATime() {
+        ok("Pay Sam AUD 20.50 Friday").let { assertEquals("Pay Sam AUD 20.50", it.title); assertEquals(day(10, 2), it.date); assertNull(it.time); assertFalse(it.ambiguousTime) }
+        ok("Pay EUR 9.30 tomorrow").let { assertEquals("Pay EUR 9.30", it.title); assertNull(it.time); assertFalse(it.ambiguousTime) }
+        ok("Pay Sam 20.50 AUD Friday").let { assertEquals("Pay Sam 20.50 AUD", it.title); assertNull(it.time) }
+        ok("Gym USD 120 pm Friday").let { assertEquals("Gym USD 120 pm", it.title); assertNull(it.time) }
+        ok("Pay USD 1,200 rent tomorrow 9am").let { assertEquals("Pay USD 1,200 rent", it.title); assertEquals(at(9), it.time) }
+        // A time beside the amount is still read.
+        ok("Pay 50 EUR tomorrow at 9.30").let { assertEquals("Pay 50 EUR", it.title); assertEquals(listOf(at(9, 30), at(21, 30)), it.timeChoices) }
+    }
 
 
 
