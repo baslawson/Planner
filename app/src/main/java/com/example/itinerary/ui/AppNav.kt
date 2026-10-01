@@ -363,6 +363,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(8.dp))
     }
+    val openEvents by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsStateWithLifecycle()
+    val openTasks by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsStateWithLifecycle()
+    SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || recovered != null)
     }
 
 }
