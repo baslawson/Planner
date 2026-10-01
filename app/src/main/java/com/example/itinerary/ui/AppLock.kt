@@ -51,6 +51,13 @@ object AppLockRule {
     // the way back from picking a file.
     const val OWN_TRIP_GRACE_MS = 5 * 60_000L
 
+    // Marks [launch] as one of Planner's own trips only if the screen opens: when it throws (no app to open it with, say)
+    // the mark is taken back, so the next Home press locks as chosen instead of getting the grace above.
+    inline fun ownTrip(mark: (Boolean) -> Unit, launch: () -> Unit) {
+        mark(true)
+        try { launch() } catch (e: Throwable) { mark(false); throw e }
+    }
+
     // [leftAt]: when Planner was last left while unlocked (elapsed time, counting sleep), null if it never was.
     fun mustUnlock(enabled: Boolean, unlocked: Boolean, leftAt: Long?, ownTrip: Boolean, now: Long, lockAfterMs: Long): Boolean {
         if (!enabled) return false
