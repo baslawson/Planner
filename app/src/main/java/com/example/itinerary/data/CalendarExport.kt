@@ -46,7 +46,7 @@ object CalendarExport {
     }
 
     fun stamp(now: Instant): String = timestamp.format(now)
-    private fun escape(value: String) = value.replace("\\", "\\\\").replace("\r\n", "\n").replace("\r", "\n")
+    internal fun escape(value: String) = value.replace("\\", "\\\\").replace("\r\n", "\n").replace("\r", "\n")
         .replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
         .filter { it == '\t' || it.code >= 32 && it.code != 127 }
     fun fold(line: String): String = buildString {

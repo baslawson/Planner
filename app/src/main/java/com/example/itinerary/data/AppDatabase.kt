@@ -8,8 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class,
-        CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class],
-    version = 29,
+        CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class, SentTask::class],
+    version = 30,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -23,6 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reminderDao(): ReminderDao
     abstract fun outsideDao(): OutsideDao
     abstract fun sentDao(): SentDao
+    abstract fun sentTaskDao(): SentTaskDao
 }
 
 val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -305,7 +306,21 @@ val MIGRATION_28_29 = object : Migration(28, 29) {
     }
 }
 
+// Task sync: what each calendar can hold (every calendar so far could hold events; whether it holds tasks is learned at
+// the next sync), the chosen task list, and the record of synced tasks.
+val MIGRATION_29_30 = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `calendar_sources` ADD COLUMN `events` INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("ALTER TABLE `calendar_sources` ADD COLUMN `tasks` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `calendar_sources` ADD COLUMN `tasksHere` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `calendar_sources` ADD COLUMN `taskCtag` TEXT")
+        db.execSQL("ALTER TABLE `calendar_sources` ADD COLUMN `taskError` TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `sent_tasks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `taskId` TEXT NOT NULL, `account` TEXT NOT NULL, `list` TEXT NOT NULL, `uid` TEXT, `etag` TEXT, `fingerprint` TEXT NOT NULL, `problem` TEXT, `href` TEXT, `ics` TEXT, `conflict` TEXT)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_sent_tasks_taskId` ON `sent_tasks` (`taskId`)")
+    }
+}
+
 // Every upgrade step, oldest first: the app opens its database with these, and the migration tests use the same list.
 val ALL_MIGRATIONS = arrayOf(
-    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30,
 )

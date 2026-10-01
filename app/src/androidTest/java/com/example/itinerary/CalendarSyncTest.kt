@@ -86,7 +86,8 @@ class CalendarSyncTest {
     }
 
     private val dao get() = database.outsideDao()
-    private fun sources() = runBlocking { dao.sources() }
+    // The calendars that can show events (a tasks-only list is kept too, for task sync, but isn't one of them).
+    private fun sources() = runBlocking { dao.sources() }.filter { it.events }
     private fun source(name: String) = sources().single { it.name == name }
     private fun shown() = runBlocking { sync.shown.first() }
     private fun reports() = fixture.requests.filter { it.method == "REPORT" }
@@ -95,6 +96,8 @@ class CalendarSyncTest {
         assertTrue(sync.sync())
         assertEquals(listOf("Personal", "Work"), sources().map { it.name })
         assertTrue(sources().none { it.enabled })
+        // The tasks-only list is kept for task sync, as a list without events.
+        assertTrue(runBlocking { dao.sources() }.single { it.name == "Tasks" }.let { it.tasks && !it.events && !it.enabled })
         assertEquals(0xFFE01B24.toInt(), source("Personal").color)
         assertNull(source("Work").color)
         assertEquals("$home" + "personal/", source("Personal").href)

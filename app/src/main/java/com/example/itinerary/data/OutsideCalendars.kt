@@ -47,7 +47,55 @@ data class CalendarSource(
     // at most one calendar).
     @ColumnInfo(defaultValue = "1") val writable: Boolean = true,
     @ColumnInfo(defaultValue = "0") val sendHere: Boolean = false,
+    // Nextcloud only: what it can hold. A Nextcloud Tasks list often holds tasks only; it isn't listed with the calendars.
+    @ColumnInfo(defaultValue = "1") val events: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val tasks: Boolean = false,
+    // Task sync: Planner's tasks are kept in sync with this list (at most one). [taskCtag]: its change marker when its
+    // tasks were last read ("" when the server gives none; null = not read since it was chosen, so nothing new is sent
+    // yet). [taskError]: why the last read failed. Kept apart from the event columns: one calendar may hold both.
+    @ColumnInfo(defaultValue = "0") val tasksHere: Boolean = false,
+    val taskCtag: String? = null,
+    val taskError: String? = null,
 )
+
+// Task sync: one Planner task kept in sync with a task file in the chosen Nextcloud list, as SentEvent is for events
+// (the same meaning for every column; [taskId] is the Planner task, [list] the list's path). No foreign key: a row whose
+// task is gone is how a deletion in Planner is noticed.
+@Entity(tableName = "sent_tasks", indices = [Index(value = ["taskId"], unique = true)])
+data class SentTask(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val taskId: String,
+    val account: String,
+    val list: String,
+    val uid: String?,
+    val etag: String? = null,
+    val fingerprint: String,
+    val problem: String? = null,
+    val href: String? = null,
+    val ics: String? = null,
+    val conflict: String? = null,
+)
+
+@Dao
+interface SentTaskDao {
+    @Query("SELECT * FROM sent_tasks ORDER BY taskId")
+    suspend fun all(): List<SentTask>
+
+    @Query("SELECT * FROM sent_tasks ORDER BY taskId")
+    fun observe(): Flow<List<SentTask>>
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun put(row: SentTask): Long
+
+    @Query("DELETE FROM sent_tasks WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM sent_tasks")
+    suspend fun deleteAll()
+
+    @Insert
+    suspend fun insertAll(rows: List<SentTask>)
+}
 
 // Steps 5–6: one Planner event kept in sync with a file in the Nextcloud calendar, so each pass can tell what changed on
 // which side. No foreign key on purpose: a row whose event is gone is how a deletion in Planner is noticed. [uid] null =

@@ -9,6 +9,7 @@ import com.example.itinerary.data.BackupManager
 import com.example.itinerary.data.CalendarSync
 import com.example.itinerary.data.NextcloudAccountStore
 import com.example.itinerary.data.asPlannerStore
+import com.example.itinerary.data.asTaskStore
 import com.example.itinerary.data.NextcloudBackups
 import com.example.itinerary.data.Repository
 import com.example.itinerary.data.SettingsRepository
@@ -43,8 +44,8 @@ class ItineraryApp : Application() {
 
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
-            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend() },
-            onDeletionFinished = { calendarSync.requestSend() })
+            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend(); taskSync.requestSend() },
+            onDeletionFinished = { calendarSync.requestSend(); taskSync.requestSend() })
     }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
@@ -58,11 +59,20 @@ class ItineraryApp : Application() {
         CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
             phone = phoneCalendars, scope = appScope, planner = repository.asPlannerStore(),
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
+            .also { it.tasks = taskSync }
+    }
+
+    // Two-way sync of Planner's tasks with one Nextcloud task list, read and sent alongside the calendars.
+    val taskSync: com.example.itinerary.data.TaskSync by lazy {
+        com.example.itinerary.data.TaskSync(database, NextcloudAccountStore(this), client = { calendarSync.client },
+            store = repository.asTaskStore(), scope = appScope,
+            pendingDeleted = { repository.pendingDeletions.value.flatMap { it.tasks }.mapTo(HashSet()) { it.id } },
+            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) })
     }
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }
 
-    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync) }
+    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync) }
 
     val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup) }
 

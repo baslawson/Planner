@@ -107,24 +107,26 @@ internal object Ics {
 
     fun isDate(p: Property): Boolean =p.params["VALUE"] == "DATE" || p.value.matches(Regex("[0-9]{8}"))
 
-    // The properties of each VEVENT, in file order; those of components inside an event (such as an alarm) are left out.
-    fun events(lines: List<String>, max: Int, tooMany: String, unfinished: String = "Incomplete calendar component."): List<List<Property>> {
+    // The properties of each VEVENT (or [component], such as VTODO), in file order; those of components inside one (such as
+    // an alarm) are left out.
+    fun events(lines: List<String>, max: Int, tooMany: String, unfinished: String = "Incomplete calendar component.",
+               component: String = "VEVENT"): List<List<Property>> {
         val stack = mutableListOf<String>(); val events = mutableListOf<List<Property>>(); var current: MutableList<Property>? = null
         for (line in lines) {
             val p = property(line)
             when (p.name) {
                 "BEGIN" -> {
-                    val component = p.value.uppercase()
-                    if (component == "VEVENT") { require(current == null); current = mutableListOf() }
-                    stack += component
+                    val name = p.value.uppercase()
+                    if (name == component) { require(current == null); current = mutableListOf() }
+                    stack += name
                 }
                 "END" -> {
-                    val component = p.value.uppercase()
-                    require(stack.lastOrNull() == component) { "Incomplete calendar component." }
-                    if (component == "VEVENT") { events += requireNotNull(current).toList(); current = null; require(events.size <= max) { tooMany } }
+                    val name = p.value.uppercase()
+                    require(stack.lastOrNull() == name) { "Incomplete calendar component." }
+                    if (name == component) { events += requireNotNull(current).toList(); current = null; require(events.size <= max) { tooMany } }
                     stack.removeAt(stack.lastIndex)
                 }
-                else -> if (stack.lastOrNull() == "VEVENT") current?.add(p)
+                else -> if (stack.lastOrNull() == component) current?.add(p)
             }
         }
         require(stack.isEmpty()) { unfinished }

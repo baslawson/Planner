@@ -12,10 +12,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  *  PUT/DELETE honouring If-Match / If-None-Match. Files in Work get the fixed ETag "w-orig". [code] fails everything;
  *  [loseReplies] saves that many PUTs and then drops the connection instead of answering (a reply lost on the way).
  *  [queries] records each calendar-query's start date (yyyyMMdd); one starting before [refuseBefore] fails with a 500;
- *  [onQuery] runs first. */
-class FakeCalDav(private val home: String, private val user: String, private val password: String) : Dispatcher() {
+ *  [onQuery] runs first. With [taskList], a third calendar "Tasks" that holds tasks only (as a Nextcloud Tasks list does);
+ *  calendar-queries return only the kind they ask for (VEVENT or VTODO). */
+class FakeCalDav(private val home: String, private val user: String, private val password: String, private val taskList: Boolean = false) : Dispatcher() {
     val synced = "${home}planner/"
     val other = "${home}work/"
+    val tasks = "${home}tasks/"
     val files = ConcurrentHashMap<String, Pair<String, String>>()
     val requests = CopyOnWriteArrayList<Triple<String, String, String?>>()
     @Volatile var code: Int? = null
@@ -41,10 +43,11 @@ class FakeCalDav(private val home: String, private val user: String, private val
         val current = files[path]
         return when (request.method) {
             "PROPFIND" -> when (path) {
-                home -> ms(listOf("planner" to "Planner", "work" to "Work").joinToString("") { (slug, name) ->
-                    """<d:response><d:href>$home$slug/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><cal:calendar/></d:resourcetype><d:displayname>$name</d:displayname><cs:getctag>$slug-$version-${files.size}</cs:getctag><d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+                home -> ms((listOf("planner" to "Planner", "work" to "Work") + listOfNotNull(("tasks" to "Tasks").takeIf { taskList })).joinToString("") { (slug, name) ->
+                    val components = if (slug == "tasks") """<cal:supported-calendar-component-set><cal:comp name="VTODO"/></cal:supported-calendar-component-set>""" else ""
+                    """<d:response><d:href>$home$slug/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><cal:calendar/></d:resourcetype><d:displayname>$name</d:displayname><cs:getctag>$slug-$version-${files.size}</cs:getctag>$components<d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
                 })
-                synced, other -> ms("""<d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>""" +
+                synced, other, tasks -> ms("""<d:response><d:href>$path</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>""" +
                     files.filterKeys { it.startsWith(path) }.entries.joinToString("") { entry(it.key, it.value, false) })
                 else -> if (current != null) ms(entry(path, current, false)) else MockResponse().setResponseCode(404)
             }
@@ -53,9 +56,12 @@ class FakeCalDav(private val home: String, private val user: String, private val
                 // calendar-query: events from the window start on (or repeating); multiget: the listed files.
                 val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
                 if (start != null) { queries += start; onQuery?.invoke(start); if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
+                val todo = body.contains("name=\"VTODO\"")
                 ms(files.filterKeys { it.startsWith(path) }.filter { (p, v) ->
                     if (body.contains("calendar-multiget")) p in wanted
-                    else v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
+                    // A calendar-query returns only the kind it asks for.
+                    else if (todo != v.second.contains("BEGIN:VTODO")) false
+                    else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
                 }.entries.joinToString("") { entry(it.key, it.value, true) })
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)

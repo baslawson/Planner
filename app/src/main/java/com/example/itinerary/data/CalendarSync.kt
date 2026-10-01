@@ -48,6 +48,8 @@ class CalendarSync(
 
     private val dao = db.outsideDao()
     private val lock = Mutex()
+    // Task sync with a Nextcloud task list, read and sent alongside (set by the app; null in tests of events only).
+    internal var tasks: TaskSync? = null
     private var lastAttempt = 0L
 
     private val _state = MutableStateFlow(State())
@@ -93,15 +95,15 @@ class CalendarSync(
     // "Sync now" (Settings → Calendars, or a tap on the sync icon): phone calendars and links, then two-way Nextcloud both ways.
     suspend fun syncNow() {
         refreshPhone(); refreshLinks()
-        if (hasAccount()) { sync(); send() }
+        if (hasAccount()) { sync(); send(); tasks?.send() }
     }
 
     suspend fun syncIfDue() {
         refreshPhone()
         if (now() - lastLinkAttempt >= LINK_INTERVAL_MS && dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
         if (now() - lastAttempt < MIN_INTERVAL_MS) return
-        if (dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD } && hasAccount()) sync()
-        send()
+        if (dao.sources().any { (it.enabled || it.tasksHere) && it.kind == OutsideCalendars.KIND_NEXTCLOUD } && hasAccount()) sync()
+        send(); tasks?.send()
     }
 
     // A background run (see CalendarBackground): everything that has something to sync — phone calendars, links (at most
@@ -110,8 +112,8 @@ class CalendarSync(
     suspend fun backgroundSync() {
         refreshPhone()
         if (dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
-        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere) } && hasAccount()) sync()
-        send()
+        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) } && hasAccount()) sync()
+        send(); tasks?.send()
     }
 
     fun phonePermitted(): Boolean = phone?.permitted() == true
@@ -209,7 +211,7 @@ class CalendarSync(
         db.withTransaction {
             val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
             sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
-            takeUp(sources.firstOrNull { it.id == id && it.writable } ?: return@withTransaction)
+            takeUp(sources.firstOrNull { it.id == id && it.writable && it.events } ?: return@withTransaction)
         }
         _sendState.value = State()
         onChanged()
@@ -715,9 +717,10 @@ class CalendarSync(
     }
 
     // Lists the calendars on the server (new ones start unticked) and downloads each ticked calendar that changed since
-    // its last download. Returns false when another sync was already running.
-    suspend fun sync(): Boolean {
-        if (!lock.tryLock()) return false
+    // its last download. Returns false when another sync was already running; with [wait], waits for it and then syncs
+    // (a choice just made must be read, not left to the next sync).
+    suspend fun sync(wait: Boolean = false): Boolean {
+        if (wait) lock.lock() else if (!lock.tryLock()) return false
         try {
             lastAttempt = now()
             _state.value = State(running = true, message = "Syncing calendars…")
@@ -747,10 +750,13 @@ class CalendarSync(
             remote.values.forEach { calendar ->
                 val old = kept[calendar.href]
                 if (old == null) dao.insertSource(CalendarSource(account = key, href = calendar.href, name = calendar.name, color = calendar.color,
-                    writable = calendar.writable))
-                else if (old.name != calendar.name || old.color != calendar.color || old.writable != calendar.writable)
+                    writable = calendar.writable, events = calendar.events, tasks = calendar.tasks))
+                else if (old.name != calendar.name || old.color != calendar.color || old.writable != calendar.writable ||
+                    old.events != calendar.events || old.tasks != calendar.tasks)
                     dao.updateSource(old.copy(name = calendar.name, color = calendar.color, writable = calendar.writable,
-                        sendHere = old.sendHere && calendar.writable))
+                        events = calendar.events, tasks = calendar.tasks,
+                        enabled = old.enabled && calendar.events, sendHere = old.sendHere && calendar.writable && calendar.events,
+                        tasksHere = old.tasksHere && calendar.writable && calendar.tasks))
             }
         }
         val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
@@ -759,7 +765,7 @@ class CalendarSync(
         val window = "$from|${zone().id}"
         var failed = 0
         var skipped = 0
-        for (source in dao.sources().filter { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD && !it.sendHere }) {
+        for (source in dao.sources().filter { it.enabled && it.events && it.kind == OutsideCalendars.KIND_NEXTCLOUD && !it.sendHere }) {
             val calendar = remote[source.href] ?: continue
             if (calendar.ctag != null && calendar.ctag == source.ctag && source.fetchedFor == window && source.lastError == null) continue
             try {
@@ -800,12 +806,14 @@ class CalendarSync(
                 }
             }
         }
+        // The task list kept in sync (its own state says how it went).
+        tasks?.pull(account, remote)
         onChanged()
         val ticked = dao.sources().count { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
         return buildString {
             append(when {
                 remote.isEmpty() -> "No calendars found on Nextcloud."
-                ticked == 0 -> "Tick the calendars to show in Planner."
+                ticked == 0 && dao.sources().none { it.tasksHere } -> "Tick the calendars to show in Planner."
                 failed > 0 -> "Synced, but $failed calendar${if (failed == 1) "" else "s"} couldn't be downloaded."
                 else -> "Calendars are up to date."
             })
@@ -828,6 +836,7 @@ class CalendarSync(
     suspend fun clearNextcloud() {
         // What Planner sent stays on Nextcloud; the record of it goes with the login.
         db.withTransaction { dao.deleteEventsOfKind(OutsideCalendars.KIND_NEXTCLOUD); dao.deleteSourcesOfKind(OutsideCalendars.KIND_NEXTCLOUD); db.sentDao().deleteAll() }
+        tasks?.clear()
         _sendState.value = State()
         lastAttempt = 0L
         _state.value = State()
@@ -837,6 +846,7 @@ class CalendarSync(
     // Everything, both kinds (the test runner's clean start).
     suspend fun clearAll() {
         db.withTransaction { dao.deleteAllEvents(); dao.deleteAllSources(); db.sentDao().deleteAll() }
+        tasks?.clear()
         _sendState.value = State()
         lastAttempt = 0L; lastLinkAttempt = 0L
         _state.value = State(); _phoneState.value = State(); _linkState.value = State()
@@ -956,7 +966,8 @@ class CalendarSync(
             if (inSync(row.fingerprint, now, zone)) ServerEvents.apply(now, server) else null
 
         // Whether the copy of [row] may be deleted on Nextcloud: sent, and with nothing to settle first.
-        internal fun deletable(row: SentEvent) = row.uid != null && (row.problem == null || row.problem == SentEvent.PENDING)
+        internal fun deletable(row: SentEvent) = deletable(row.uid, row.problem)
+        internal fun deletable(uid: String?, problem: String?) = uid != null && (problem == null || problem == SentEvent.PENDING)
 
         // The row of an event deleted in Planner once its copy's delete was tried ([result]; null = not tried): forgotten
         // (null), or kept as CHANGED when the copy changed on Nextcloud first, so the next pull makes it a conflict

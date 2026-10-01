@@ -25,8 +25,10 @@ import javax.net.ssl.SSLException
 data class NextcloudBackup(val name: String, val size: Long?, val modified: String?, val etag: String?)
 
 // A calendar in the account's calendar home. [href] is its path on the server; [ctag] changes whenever its events do;
-// [writable]: this login may add events to it.
-data class RemoteCalendar(val href: String, val name: String, val color: Int?, val ctag: String?, val writable: Boolean = true)
+// [writable]: this login may add events to it. [events] / [tasks]: it can hold events / tasks (a Nextcloud Tasks list
+// often holds tasks only).
+data class RemoteCalendar(val href: String, val name: String, val color: Int?, val ctag: String?, val writable: Boolean = true,
+                          val events: Boolean = true, val tasks: Boolean = false)
 
 // What happened to a write (step 5). Changed: the copy on the server isn't the one Planner last wrote (or, for a new one,
 // something already has that name), so nothing was written. Missing: it's no longer on the server.
@@ -134,8 +136,8 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
                 prop("getlastmodified")?.textContent, prop("getetag")?.textContent)
         }
 
-    // Every calendar in the account's calendar home that can hold events. Inbox, outbox, trash bin and subscriptions
-    // aren't calendars of this kind, so they are left out.
+    // Every calendar in the account's calendar home that can hold events or tasks. Inbox, outbox, trash bin and
+    // subscriptions aren't calendars of this kind, so they are left out.
     fun calendars(account: NextcloudAccount): List<RemoteCalendar> {
         val home = account.calendarsRoot
         return multistatus(account, "PROPFIND", home, CALENDAR_PROPERTIES, "1", calendar = true,
@@ -146,7 +148,9 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             if (!inside(resolved, home)) return@mapNotNull null
             if (prop("resourcetype")?.children("calendar", CALDAV)?.isNotEmpty() != true) return@mapNotNull null
             val components = prop("supported-calendar-component-set", CALDAV)?.children("comp", CALDAV).orEmpty()
-            if (components.isNotEmpty() && components.none { it.attributes["name"].equals("VEVENT", ignoreCase = true) }) return@mapNotNull null
+            // A server that doesn't say takes both.
+            fun holds(kind: String) = components.isEmpty() || components.any { it.attributes["name"].equals(kind, ignoreCase = true) }
+            if (!holds("VEVENT") && !holds("VTODO")) return@mapNotNull null
             val name = prop("displayname")?.textContent?.trim()?.takeIf { it.isNotEmpty() }
                 ?: resolved.pathSegments.lastOrNull { it.isNotEmpty() } ?: return@mapNotNull null
             // Without a privilege list, assume it can be written; the server still refuses a write it doesn't allow.
@@ -154,7 +158,8 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             RemoteCalendar(path.let { if (it.endsWith('/')) it else "$it/" }, name.take(200),
                 prop("calendar-color", APPLE_ICAL)?.textContent?.let(::parseColor),
                 (prop("getctag", CALENDARSERVER) ?: prop("sync-token"))?.textContent?.trim()?.takeIf { it.isNotEmpty() },
-                writable = privileges == null || privileges.any { it in setOf("all", "write", "write-content", "bind") })
+                writable = privileges == null || privileges.any { it in setOf("all", "write", "write-content", "bind") },
+                events = holds("VEVENT"), tasks = holds("VTODO"))
         }.distinctBy { it.href }
     }
 
@@ -233,6 +238,12 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">""" +
             """<c:time-range $range/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>""")
     }
+
+    // Task sync: every task file in [list] (any date, done or not) as it is.
+    fun taskFiles(account: NextcloudAccount, list: String): List<ServerFile> =
+        files(account, list, """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
+            """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/>""" +
+            """</c:comp-filter></c:filter></c:calendar-query>""")
 
     // Step 6: these event files of [calendar], in one request.
     fun multiget(account: NextcloudAccount, calendar: String, hrefs: Collection<String>): List<ServerFile> {

@@ -243,6 +243,43 @@ class Repository(
         }
     }
 
+    // Task sync: [change] made to task [id] as it is at that moment, with no other change in between (null leaves it): the
+    // task as saved, or null when nothing was saved (also when it's gone). Done there completes it as here (a repeating
+    // task's next one is made), without asking for its prerequisites first: it was already done on Nextcloud.
+    suspend fun saveTaskIf(id: String, change: (PlannerTask) -> PlannerTask?): PlannerTask? = changes.withLock {
+        withContext(NonCancellable) {
+            val result: Pair<List<String>, Set<String>>? = db.withTransaction {
+                val task = taskDao.byId(id) ?: return@withTransaction null
+                val changed = change(task) ?: return@withTransaction null
+                val clean = Tasks.capText(changed.copy(title = changed.title.trim(), notes = changed.notes.trim()))
+                Tasks.validate(clean)
+                val next = if (clean.done && !task.done && task.nextTaskId == null) clean.nextOccurrence() else null
+                if (next != null) taskDao.insert(next)
+                val saved = clean.copy(nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (clean.done) null else task.snoozedUntil)
+                taskDao.update(saved)
+                listOfNotNull(id, next?.id) to (if (saved.activeReminderAt != task.activeReminderAt) setOf(id) else emptySet())
+            }
+            val (ids, reset) = result ?: return@withContext null
+            afterCommit(taskIds = ids, resetTaskIds = reset)
+            taskDao.byId(id)
+        }
+    }
+
+    // Task sync: a task deleted on Nextcloud goes to Recently deleted (restorable there), without the Undo message a
+    // deletion in Planner shows; only if [still] holds for it at that moment. True when it was moved.
+    suspend fun archiveTask(id: String, still: (PlannerTask) -> Boolean): Boolean = changes.withLock {
+        withContext(NonCancellable) {
+            val moved = archiving { archived ->
+                val task = taskDao.byId(id)?.takeIf(still) ?: return@archiving false
+                archive(PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task)), archived, emptyList())
+                taskDao.delete(id)
+                true
+            }
+            if (moved) afterCommit(taskIds = listOf(id))
+            moved
+        }
+    }
+
     private val deletedDao = db.deletedDao()
     private val payloads = store.deletedPayloads()
     private fun contents(entry: DeletedEntry) = DeletedCodec.decode(payloads.read(entry.payload))
