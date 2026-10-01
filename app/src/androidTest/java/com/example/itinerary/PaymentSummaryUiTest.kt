@@ -52,6 +52,8 @@ class PaymentSummaryUiTest {
         await { var n = find(text); while (n != null && !n.isClickable) n = n.parent; n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true }
         Thread.sleep(500)
     }
+    // What a screen reader hears as the state of the clickable control holding [text] (Android 11 and later).
+    private fun state(text: String): String? { var n = find(text); while (n != null && !n.isClickable) n = n.parent; return n?.stateDescription?.toString() }
     private fun top(text: String): Int { val r = Rect(); visible().first { it.text?.toString()?.startsWith(text) == true }.getBoundsInScreen(r); return r.top }
 
     @Test fun summaryThenHistory() = runBlocking {
@@ -74,6 +76,7 @@ class PaymentSummaryUiTest {
         reveal { has("AUD 450.00 of AUD 700.00 paid · AUD 250.00 remaining") && find("Payment history (4)") != null }
         assertTrue(has("Last payment: AUD 200.00 on "))
         assertFalse(has("Bank transfer")); assertFalse(has("Reversed")); assertNull(find("Reverse"))
+        if (android.os.Build.VERSION.SDK_INT >= 30) assertEquals("Collapsed", state("Payment history (4)"))
         screenshot("summary")
         // Opened: newest first (the reversed one on the 4th, then the 1st, 20 Aug, 3 Aug), Reverse on those that count.
         click("Payment history (4)")
@@ -82,6 +85,7 @@ class PaymentSummaryUiTest {
         assertTrue(top("AUD 50.00 · ") < top("AUD 200.00 · ") && top("AUD 200.00 · ") < top("AUD 150.00 · ") && top("AUD 150.00 · ") < top("AUD 100.00 · "))
         assertEquals(3, visible().count { it.text?.toString() == "Reverse" })
         screenshot("history")
+        if (android.os.Build.VERSION.SDK_INT >= 30) { reveal(back = true) { find("Payment history (4)") != null }; assertEquals("Expanded", state("Payment history (4)")) }
         // Reversing one updates the summary.
         click("Reverse")
         click("Reverse payment")

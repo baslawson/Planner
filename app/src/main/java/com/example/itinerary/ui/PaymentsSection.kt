@@ -10,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.*
 import java.time.LocalDate
@@ -45,7 +47,8 @@ fun PaymentSummary(amount: Long?, currency: String, paid: Boolean, payments: Lis
 fun PaymentHistory(payments: List<BillPayment>, currency: String, onReverse: ((BillPayment) -> Unit)?) {
     if (payments.isEmpty()) return
     var open by rememberSaveable { mutableStateOf(false) }
-    TextButton(onClick = { open = !open }) {
+    // A screen reader hears whether the list is open, as with the unpaid bills card (MonthlyBills).
+    TextButton(onClick = { open = !open }, modifier = Modifier.semantics { stateDescription = if (open) "Expanded" else "Collapsed" }) {
         Text("Payment history (${payments.size})")
         Icon(if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
             contentDescription = null)
