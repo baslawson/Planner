@@ -885,10 +885,9 @@ object QuickEntry {
             if (parts.size == 3 && parts[2].length !in setOf(2, 4)) return error("Use a four-digit year, for example 03/04/2027.")
             // A two-digit year is this century: 3/10/26 is 2026.
             val year = parts.getOrNull(2)?.toIntOrNull()?.let { if (parts[2].length == 2) 2000 + it else it } ?: today.year
-            fun candidate(day: Int, month: Int): LocalDate? = runCatching {
-                val value = LocalDate.of(year, month, day)
-                if (parts.size == 2 && value < today) LocalDate.of(year + 1, month, day) else value
-            }.getOrNull()?.takeIf { it.year in 1..9999 }
+            fun candidate(day: Int, month: Int): LocalDate? =
+                (if (parts.size == 2) nextDayMonth(today, month, day) else runCatching { LocalDate.of(year, month, day) }.getOrNull())
+                    ?.takeIf { it.year in 1..9999 }
             // Each reading remembers whether it was day-first, so the date-format setting can pick one.
             var readings = listOfNotNull(candidate(parts[0].toInt(), parts[1].toInt())?.let { true to it },
                 candidate(parts[1].toInt(), parts[0].toInt())?.let { false to it }).distinctBy { it.second }
@@ -1373,6 +1372,10 @@ object QuickEntry {
         return null
     }
 
+    /** A day and month without a year: the next on or after [today], so 29 February is the next leap year's. */
+    private fun nextDayMonth(today: LocalDate, month: Int, day: Int): LocalDate? =
+        (0..8).asSequence().mapNotNull { runCatching { LocalDate.of(today.year + it, month, day) }.getOrNull() }.firstOrNull { it >= today }
+
     private fun readAmount(value: String): Double {
         if (value == "a" || value == "an") return 1.0
         val words = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
@@ -1519,9 +1522,7 @@ object QuickEntry {
                 val monthWord = parts[if (dayFirst) 1 else 0]
                 val day = parts[if (dayFirst) 0 else 1].takeWhile { it.isDigit() }.toInt()
                 val month = Month.entries.first { it.name.lowercase(Locale.ROOT).startsWith(monthWord.take(3)) }
-                val year = parts.getOrNull(2)?.toInt() ?: today.year
-                val candidate = LocalDate.of(year, month, day)
-                if (parts.size == 2 && candidate < today) LocalDate.of(year + 1, month, day) else candidate
+                parts.getOrNull(2)?.let { LocalDate.of(it.toInt(), month, day) } ?: nextDayMonth(today, month.value, day)!!
             }
             else -> {
                 val word = d.substringAfterLast(' ')

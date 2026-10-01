@@ -145,4 +145,18 @@ class QuickFixesNamesAndDatesTest {
         ok("Midnight Mass Christmas Eve").let { assertEquals("Midnight Mass Christmas Eve", it.title); assertNull(it.time) }
     }
 
+    // Q-N11: 29 February without a year is the next one there is.
+    @Test fun the29thOfFebruaryWithoutAYearIsTheNextOne() {
+        ok("Lunch 29/2").let { assertEquals("Lunch", it.title); assertEquals(day(2, 29, 2028), it.date) }
+        ok("Lunch 2/29", dayFirst = false).let { assertEquals(day(2, 29, 2028), it.date) }
+        ok("Dentist Feb 29").let { assertEquals("Dentist", it.title); assertEquals(day(2, 29, 2028), it.date) }
+        ok("Dentist 29 February").let { assertEquals(day(2, 29, 2028), it.date) }
+        ok("Dentist February the twenty-ninth").let { assertEquals(day(2, 29, 2028), it.date) }
+        // With a year it must be a leap year, and other days still need to exist.
+        assertEquals("That date isn't valid.", parse("Dentist 29 Feb 2027").error)
+        assertEquals("That date isn't valid.", parse("Dentist 30/2").error)
+        assertEquals("That date isn't valid.", parse("Dentist 31 April").error)
+        ok("Dentist 29 Feb 2028").let { assertEquals(day(2, 29, 2028), it.date) }
+        ok("Dentist 28/2").let { assertEquals(day(2, 28, 2027), it.date) }
+    }
 }
