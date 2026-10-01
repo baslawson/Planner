@@ -115,7 +115,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             }
         }
     }
-    var recovered by remember { mutableStateOf(runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }.getOrNull()) }
+    var recovered by remember { mutableStateOf(runCatching {
+        draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value) { com.example.itinerary.data.EditorDraftStore(app).read() }
+    }.getOrNull()) }
 
     var shortcutItem by remember { mutableStateOf<com.example.itinerary.data.ItineraryItem?>(null) }
     var shortcutScan by remember { mutableStateOf(false) }
@@ -366,6 +368,10 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 internal const val WIDGET_WAITS_FOR_EDITOR = "Close this event first. Then the widget's day opens."
 
 internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
+
+// U3: the event draft on disk is recovered only while no event editor is open in this process. One open in another
+// Planner window (a share, an .ics file or a shortcut can open a second one) is still writing that draft.
+internal fun <T> draftToRecover(openEditors: Int, read: () -> T?): T? = if (openEditors > 0) null else read()
 
 // What a widget tap does now: nothing to open, wait for the open editor(s) to be closed, or open the day.
 internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDateStep = when {

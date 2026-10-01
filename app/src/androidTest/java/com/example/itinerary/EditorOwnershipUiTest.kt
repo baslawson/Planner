@@ -15,6 +15,8 @@ import java.time.LocalDate
 /**
  * Only one editor at a time on the same draft.
  * U2: a bill editor that Agenda reopens while AppNav's recovery editor already has that bill's draft closes again.
+ * U3: a second Planner window (here a share) doesn't recover the draft of an editor still open in the first, and
+ * sharing to an event says an event is open.
  * Run only with an external backup/restore harness for the shared emulator (it adds events and tasks).
  */
 @Suppress("DEPRECATION")
@@ -53,6 +55,39 @@ class EditorOwnershipUiTest {
         app.settings.lastViewCalendar = false
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await { find("AGENDA") != null }
+    }
+
+    private fun setText(old: String, value: String) {
+        await { pickEditable(nodes(), old) != null }
+        assertTrue(pickEditable(nodes(), old)!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+        })); Thread.sleep(350)
+    }
+
+    @Test fun aSecondWindowDoesNotRecoverTheOpenEditorsDraft() = runBlocking {
+        assertNull(EditorDraftStore(context).read())
+        app.settings.setAgendaRange(AgendaRange.ALL)
+        app.repository.saveItem(ItineraryItem(tripId = 0, date = LocalDate.now().plusDays(3), startTime = null, title = "QA window bill", category = "Bills"))
+        launch()
+        click("QA window bill")
+        await { find("Edit bill task") != null }
+        setText("QA window bill", "QA window bill edited")
+        await { EditorDraftStore(context).read() != null }
+        // A share opens Planner again in its own task while the first window's editor is open.
+        ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, "QA shared while editing")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT))
+        await { find("Add to Planner") != null }
+        Thread.sleep(1500)
+        // No recovery editor here on the first window's draft.
+        assertNull(pickEditable(nodes(), "QA window bill edited"))
+        click("Add event")
+        await { find("An event is open in Planner. Close this share, then save or close that event before sharing again.") != null }
+        screenshot("second-window-share")
+        click("Cancel")
+        // The first window's draft is untouched.
+        assertEquals("QA window bill edited", DraftCodec.item(EditorDraftStore(context).read()!!.getJSONObject("item")).title)
+        EditorDraftStore(context).clear() // test data only; the harness restores the rest
     }
 
     @Test fun aBillEditorLeavesARecoveredBillToTheRecoveryEditor() = runBlocking {
