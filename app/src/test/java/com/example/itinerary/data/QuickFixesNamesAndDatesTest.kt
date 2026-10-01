@@ -120,6 +120,20 @@ class QuickFixesNamesAndDatesTest {
         ok("Exam October 21st").let { assertEquals("Exam", it.title); assertEquals(day(10, 21), it.date) }
     }
 
+    // Q-N7: "the sun" and a place called "… Sun" are not Sunday.
+    @Test fun theSunIsNotSunday() {
+        ok("Watch the sun").let { assertEquals("Watch the sun", it.title); assertFalse(it.dateSpecified) }
+        ok("Dinner at the Sun").let { assertEquals("Dinner", it.title); assertEquals("the Sun", it.location); assertFalse(it.dateSpecified) }
+        ok("Lunch at Rising Sun").let { assertEquals("Lunch", it.title); assertEquals("Rising Sun", it.location); assertFalse(it.dateSpecified) }
+        ok("Lunch at Rising Sun 1pm").let { assertEquals("Rising Sun", it.location); assertEquals(at(13), it.time); assertFalse(it.dateSpecified) }
+        ok("Watch the sun rise tomorrow").let { assertEquals("Watch the sun rise", it.title); assertEquals(day(10, 2), it.date) }
+        // Sun as a day is unchanged.
+        ok("Lunch Sun").let { assertEquals("Lunch", it.title); assertEquals(day(10, 4), it.date) }
+        ok("Dentist sun 3pm").let { assertEquals("Dentist", it.title); assertEquals(day(10, 4), it.date); assertEquals(at(15), it.time) }
+        ok("Lunch with Sam Sun").let { assertEquals("Lunch with Sam", it.title); assertEquals(day(10, 4), it.date) }
+        ok("Lunch at Nobu on Sun").let { assertEquals("Nobu", it.location); assertEquals(day(10, 4), it.date) }
+        ok("Buy sun cream Friday").let { assertEquals("Buy sun cream", it.title); assertEquals(day(10, 2), it.date) }
+    }
 
 
 }

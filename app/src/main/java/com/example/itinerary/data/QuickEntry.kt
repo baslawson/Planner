@@ -293,7 +293,10 @@ object QuickEntry {
     // A frequency word naming something: "Weekly report", "The Daily Telegraph", "the Every Day Cafe". Group 1 is the
     // adjective form, group 2 the word after it; see parse.
     private val frequencyNames = rx("(?<![\\w-])(?:(daily|weekly|bi-?weekly|fortnightly|monthly|quarterly|yearly|annually)|every\\s+day)(?=\\s+(\\p{L}+))")
-    private val determinerBefore = rx("\\b(?:the|a|an|my|our|your|his|her|their)\\s+$")
+    // Also with a word already kept as title text between: "the midnight sun".
+    private val determinerBefore = rx("\\b(?:the|a|an|my|our|your|his|her|their)\\s+(?:+\\s+)*$")
+    // Capitalised words right after "at": the place's name so far ("at Rising "). Not a possessive: "at Mum's Sun" is Sunday.
+    private val placeNameBefore = Regex("(?:\\b[Aa][Tt]\\s+|(?<!\\S)@\\s*)(?:\\p{Lu}[\\p{L}&-]*\\s+)+$")
 
     private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|tonight|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo)\\b")
     private val vagueTimes = rx("(?:morning|afternoon|arvo|evening|night|tonight|breakfast|lunch|dinner|work|lunch\\s*time|first\\s+thing)$")
@@ -340,8 +343,15 @@ object QuickEntry {
         titleWordCandidates.findAll(remaining).toList().forEach { match ->
             val clockWord = match.value.lowercase(Locale.ROOT) in setOf("noon", "midnight", "midday")
             val lead = if (clockWord) "at|from|until|till?|to|by" else "on|next|this|last|every|each|from|until|till?|to|by"
-            if (rx("(?:\\b(?:$lead)\\s+|[-–—]\\s*)$").containsMatchIn(remaining.substring(0, match.range.first))) return@forEach
-            val following = nextWord.find(remaining.substring(match.range.last + 1))?.groupValues?.get(1)?.lowercase(Locale.ROOT) ?: return@forEach
+            val before = remaining.substring(0, match.range.first)
+            if (rx("(?:\\b(?:$lead)\\s+|[-–—]\\s*)$").containsMatchIn(before)) return@forEach
+            val following = nextWord.find(remaining.substring(match.range.last + 1))?.groupValues?.get(1)?.lowercase(Locale.ROOT)
+            // "Watch the sun", "Dinner at the Sun", "Lunch at Rising Sun": after "the", or ending a place's name, a word.
+            if (determinerBefore.containsMatchIn(before) ||
+                following == null && match.value.equals("sun", ignoreCase = true) && placeNameBefore.containsMatchIn(before)) {
+                mask(match.range, ''); return@forEach
+            }
+            if (following == null) return@forEach
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
         }
