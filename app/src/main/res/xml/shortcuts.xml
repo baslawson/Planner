@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut android:shortcutId="add_event" android:enabled="true" android:icon="@drawable/shortcut_event" android:shortcutShortLabel="@string/shortcut_add_event">
-        <intent android:action="com.example.itinerary.ADD_EVENT" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.MainActivity" />
+        <intent android:action="com.example.itinerary.ADD_EVENT" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.EntryShortcutActivity" />
     </shortcut>
     <shortcut android:shortcutId="add_bill" android:enabled="true" android:icon="@drawable/shortcut_bill" android:shortcutShortLabel="@string/shortcut_add_bill">
-        <intent android:action="com.example.itinerary.ADD_BILL" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.MainActivity" />
+        <intent android:action="com.example.itinerary.ADD_BILL" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.EntryShortcutActivity" />
     </shortcut>
     <shortcut android:shortcutId="scan_document" android:enabled="true" android:icon="@drawable/shortcut_scan" android:shortcutShortLabel="@string/shortcut_scan">
-        <intent android:action="com.example.itinerary.SCAN_DOCUMENT" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.MainActivity" />
+        <intent android:action="com.example.itinerary.SCAN_DOCUMENT" android:targetPackage="io.github.baslawson.planner" android:targetClass="com.example.itinerary.EntryShortcutActivity" />
     </shortcut>
 </shortcuts>

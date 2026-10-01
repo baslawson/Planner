@@ -54,6 +54,15 @@
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
+        <!--
+            Launcher shortcuts (res/xml/shortcuts.xml) land here, in a task of its own, and are passed on to Planner's
+            task (EntryShortcuts.kt). Android starts a static shortcut with NEW_TASK | CLEAR_TASK; aimed at MainActivity
+            that closed the running Planner and any editor open in it. Exported like MainActivity, which takes the same
+            three actions.
+        -->
+        <activity android:name=".EntryShortcutActivity" android:exported="true" android:taskAffinity=""
+            android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.NoDisplay" />
+
         <!-- App lock (ui/AppLock.kt): covers Planner until the user unlocks; dialogs and editors stay open underneath. -->
         <activity android:name=".LockActivity" android:exported="false" android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|fontScale|uiMode|density|locale|layoutDirection" />
