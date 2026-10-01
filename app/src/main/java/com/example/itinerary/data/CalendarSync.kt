@@ -312,8 +312,12 @@ class CalendarSync(
             val pending = row?.problem == SentEvent.PENDING
             if (row?.problem != null && !pending) continue // settled by the next pull or by the user
             if (!sendable(item)) {
-                // A bill now, or a skipped date: its copy goes.
-                if (row != null) { removeCopy(account, target, row); sentDao.delete(row.id) }
+                // A bill now, or a skipped date: its copy goes, as for an event deleted in Planner (below): changed on
+                // Nextcloud first, the row stays for the next pull to make it a conflict, not a new event.
+                if (row != null) {
+                    val kept = afterDelete(row, removeCopy(account, target, row)).takeIf { planner != null }
+                    if (kept == null) sentDao.delete(row.id) else if (kept != row) sentDao.put(kept)
+                }
                 continue
             }
             val print = fingerprint(item)
@@ -495,8 +499,8 @@ class CalendarSync(
                 // Now repeating, or otherwise more than Planner can hold: it's read-only from now on; Planner's event stays.
                 server == null -> { sentDao.put(row.copy(etag = file.etag, ics = file.data, problem = SentEvent.DETACHED, conflict = null))
                     readOnly += runCatching { shown(file) }.getOrDefault(emptyList()) }
-                // Deleted in Planner meanwhile.
-                item == null || row.itemId in waiting -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
+                // Deleted in Planner meanwhile, or no longer on Nextcloud (a bill now, a skipped date).
+                item == null || row.itemId in waiting || !sendable(item) -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
                 // Unchanged in Planner since the last sync: take Nextcloud's version (Planner-only details stay). Made to the
                 // event as it is when saved: one edited or deleted in Planner while this pull ran is compared as below.
                 inSync(row.fingerprint, item) -> {
@@ -514,7 +518,8 @@ class CalendarSync(
         for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val item = items[row.itemId]
             when {
-                item == null -> sentDao.delete(row.id)
+                // Gone, or its copy was to go anyway (a bill now, a skipped date): the event itself stays as it is.
+                item == null || !sendable(item) -> sentDao.delete(row.id)
                 // Only if still unchanged when it's moved: one edited while this pull ran is a conflict too.
                 inSync(row.fingerprint, item) && store.archive(item.id) { inSync(row.fingerprint, it) } -> sentDao.delete(row.id)
                 db.itemDao().byId(item.id) == null -> sentDao.delete(row.id)
@@ -542,7 +547,10 @@ class CalendarSync(
                 val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.href == row.calendar }
                     ?: throw BackupException("Choose the calendar to keep in sync with first.")
                 val href = hrefOf(target, row)
-                val item = db.itemDao().byId(row.itemId)
+                val stored = db.itemDao().byId(row.itemId)
+                // One that is a bill now, or a skipped date, has no copy on Nextcloud any more: settled as if deleted in
+                // Planner (Planner's: the file goes; Nextcloud's: it comes in as an event of its own). The bill stays.
+                val item = stored?.takeIf { sendable(it) }
                 val current = client.getFile(account, target.href, href)
                 val stamp = java.time.Instant.ofEpochMilli(now())
                 fun changedAgain(): Nothing = throw BackupException("It changed on Nextcloud again. Check it and choose once more.")
@@ -578,7 +586,7 @@ class CalendarSync(
                     }
                     Resolution.BOTH -> {
                         val server = current?.let { ServerEvents.parse(it.data, zone()).item }
-                        require(item != null && current != null && server != null) { "Both versions are needed to keep both." }
+                        require(stored != null && current != null && server != null) { "Both versions are needed to keep both." }
                         // Nextcloud's file now belongs to a new Planner event; Planner's own event is sent as a new file.
                         val id = store.add(server)
                         val saved = db.itemDao().byId(id) ?: return@withContext

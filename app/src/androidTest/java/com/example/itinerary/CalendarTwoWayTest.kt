@@ -255,6 +255,40 @@ class CalendarTwoWayTest {
         assertTrue(conflicts().isEmpty())
     }
 
+    // E2: made a bill in Planner while edited on Nextcloud: the refused delete keeps the row, as for a deleted event, so the
+    // pull makes it a conflict instead of bringing the file in as a second event. Keeping Nextcloud's makes it an event of
+    // its own; the bill stays.
+    @Test fun aCopyRefusedOnTheWayOutBecomesAConflictNotADuplicate() = runBlocking {
+        save("QA Turned bill")
+        start()
+        val path = plannerFile("QA Turned bill").key
+        dav.edit(path) { it.replace("SUMMARY:QA Turned bill", "SUMMARY:QA Edited there") }
+        repo.saveItem(item("QA Turned bill").copy(category = "Bills", billAmountMinor = 1000, startTime = null, durationMinutes = null))
+        sync.send()
+        assertTrue(dav.files.containsKey(path)) // the server refused the delete
+        assertEquals(SentEvent.CHANGED, rows().single().problem)
+        syncAgain()
+        assertEquals(listOf("QA Turned bill"), items().map { it.title }) // not brought in as a new event
+        assertTrue(conflicts().single().conflict!!.contains("SUMMARY:QA Edited there"))
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.NEXTCLOUD)
+        assertEquals(setOf("QA Turned bill", "QA Edited there"), items().map { it.title }.toSet())
+        assertEquals("Bills", item("QA Turned bill").category)
+        assertTrue(conflicts().isEmpty())
+        syncAgain()
+        assertEquals(listOf(path), plannerFiles()) // Nextcloud's file stays, now the new event's
+        assertEquals(2, items().size)
+        // Keeping Planner's instead: the file goes and the bill stays.
+        val other = plannerFile("QA Edited there").key
+        dav.edit(other) { it.replace("SUMMARY:QA Edited there", "SUMMARY:QA Edited there again") }
+        repo.saveItem(item("QA Edited there").copy(category = "Bills", billAmountMinor = 500, startTime = null, durationMinutes = null))
+        sync.send(); syncAgain()
+        sync.resolve(conflicts().single().id, CalendarSync.Resolution.PLANNER)
+        assertTrue(plannerFiles().isEmpty())
+        assertEquals(2, items().count { it.category == "Bills" })
+        assertTrue(rows().isEmpty())
+        assertOtherCalendarUntouched()
+    }
+
     private fun plannerFiles() = dav.files.keys.filter { it.startsWith(synced) }
 
     @Test fun reconnectingLinksTheFilesAlreadyThereInsteadOfCopyingThem() = runBlocking {
