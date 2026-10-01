@@ -29,7 +29,8 @@ class QuickFixesHuntThreeTest {
             assertTrue(it.clarificationOnly); assertEquals(listOf(at(9), at(21)), it.timeChoices); assertEquals(90, it.durationMinutes)
         }
         ok("Gym every Monday 6.30 until 7.30").let {
-            assertEquals("Gym", it.title); assertEquals(day(10, 5), it.date); assertEquals(at(6, 30), it.time); assertEquals(60, it.durationMinutes)
+            // 1 Oct review: without am/pm, 6.30 could be morning or evening, as for 6.30 alone.
+            assertEquals("Gym", it.title); assertEquals(day(10, 5), it.date); assertEquals(listOf(at(6, 30), at(18, 30)), it.timeChoices); assertEquals(60, it.durationMinutes)
         }
         ok("Work weekdays 0900 until 17.30").let {
             assertEquals("Work", it.title); assertEquals(RepeatRule.WEEKDAYS, it.repeat); assertEquals(at(9), it.time); assertEquals(510, it.durationMinutes)

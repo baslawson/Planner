@@ -90,7 +90,8 @@ internal fun rememberSearchOutcome(
     return shownOutcome(request, last)
 }
 
-private val WORD = Regex("[\\p{L}\\p{N}]+")
+// Combining marks belong to their word: an accent stored apart ("e" + U+0300) does not split it.
+private val WORD = Regex("[\\p{L}\\p{M}\\p{N}]+")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -362,15 +363,16 @@ private fun highlight(text: String, tokens: List<String>): AnnotatedString {
     return remember(text, tokens, color) {
         buildAnnotatedString {
             var last = 0
-            WORD.findAll(text).forEach { match ->
-                val word = Search.normalize(match.value)
-                if (tokens.any { Search.matchesWord(word, it) }) {
-                    append(text.substring(last, match.range.first))
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = color)) { append(match.value) }
-                    last = match.range.last + 1
-                }
+            matchedWords(text, tokens).forEach { range ->
+                append(text.substring(last, range.first))
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = color)) { append(text.substring(range)) }
+                last = range.last + 1
             }
             append(text.substring(last))
         }
     }
 }
+
+/** Where the words of [text] that match a search token are. */
+internal fun matchedWords(text: String, tokens: List<String>): List<IntRange> =
+    WORD.findAll(text).filter { match -> Search.normalize(match.value).let { word -> tokens.any { Search.matchesWord(word, it) } } }.map { it.range }.toList()

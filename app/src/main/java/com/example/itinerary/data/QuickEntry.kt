@@ -38,6 +38,8 @@ data class QuickEntrySuggestion(
     val extraTimes: List<LocalTime> = emptyList(),
     /** The date is before today on purpose ("yesterday", "last Friday"): logging something that happened. */
     val pastDate: Boolean = false,
+    /** "8pm and 2am": the last this many [extraTimes] are after midnight, on the day after [date]. */
+    val nextDayTimes: Int = 0,
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -111,8 +113,9 @@ object QuickEntry {
     private val phoneNumbers = Regex("(?<![\\w.:/+(-])(?:\\+\\d{1,3}(?:[ -]\\d{1,5}){2,}|\\(0\\d\\)\\s?\\d{3,4}[ -]?\\d{3,4}|\\d{2,5}(?: \\d{2,5}){2,}|0\\d{2,4}(?:-\\d{3,4}){2})(?![\\w.:/-])")
     // "Bus 2 - 3pm", "Ferry 12 till 10am": a number naming a bus, room or gate stays in the title rather than starting a range.
     // Written tight against the dash ("Court 1-2pm") it is still a range.
-    private const val numberLabels = "bus|route|ferry|train|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|row|seat|line|no\\.?|number"
-    private val labelledNumbers = rx("(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
+    // Train and row are also things to do ("Train 6 - 7pm"): after them only a number that can't be an hour is a label.
+    private const val numberLabels = "bus|route|ferry|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|seat|line|no\\.?|number"
+    private val labelledNumbers = rx("(?:(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)|(?<=\\b(?:train|row)\\s{1,3})(?!(?:[1-9]|1[0-2])\\b))\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
     private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
@@ -158,15 +161,17 @@ object QuickEntry {
     private const val shortClock = "\\d{1,2}(?::\\d{2})?[ap]|\\d{1,2}\\.[0-5]\\d"
     private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:.h])(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
     private val shortClocks = rx("(?<![\\w.:/])($shortClock)(?![\\w.])")
-    private const val amount = "(?:-?\\d+(?:\\.\\d+)?|$countWords)"
+    private const val amount = "(?:-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
     private const val minutes = "(?:minutes?|mins?|m)"
-    private const val fraction = "(?:half\\s+(?:an?\\s+)?hour|(?:a\\s+)?quarter\\s+of\\s+an?\\s+hour)"
-    private const val span = "(?:$fraction|$amount\\s*$hours(?:\\s+and\\s+a\\s+half|\\s*(?:and\\s+)?$amount\\s*$minutes)?|$amount\\s*$minutes)"
-    private val durations = rx("\\bfor\\s+$span\\b")
+    private const val fraction = "(?:(?:a\\s+)?half\\s+(?:an?\\s+)?hour|(?:a\\s+)?quarter\\s+of\\s+an?\\s+hour)"
+    private const val span = "(?:$fraction|$amount\\s+and\\s+a\\s+half\\s+$hours|$amount\\s*$hours(?:\\s+and\\s+a\\s+half|\\s*(?:and\\s+)?$amount\\s*$minutes)?|$amount\\s*$minutes)"
+    // After for or in, minutes may follow the hours without a unit: "for 1 hour 30", "in 1h30". Not before a month: "2 hours 20 Oct".
+    private const val wordSpan = "(?:$amount\\s*$hours\\s*(?:and\\s+)?[0-5]\\d(?![\\w:.])(?!\\s*$minutes\\b)(?!\\s+(?:of\\s+)?(?:$months)\\b)|$span)"
+    private val durations = rx("\\bfor\\s+$wordSpan\\b")
     // A length right after a time, without "for": "1pm 1.5 hours", "3pm 45 mins" (see where it's read).
     private val bareDurations = rx("(?<![\\w.])$span(?![\\w])")
-    private val relativeTimes = rx("\\bin\\s+$span\\b")
+    private val relativeTimes = rx("\\bin\\s+$wordSpan\\b")
     private val durationParts = rx("($amount)\\s*($hours|$minutes)(?![a-z])")
     private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)")
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
@@ -521,7 +526,7 @@ object QuickEntry {
                 return@let
             }
             fun day(v: String) = v.takeWhile { it.isDigit() }
-            val (start, end) = when {
+            var (start, end) = when {
                 g[4].isNotEmpty() -> { // 3 Oct – 7 Oct, 3–7 Oct
                     val startMonth = g[2].ifEmpty { g[5] }
                     parseDate(("${day(g[1])} $startMonth${g[3].let { if (it.isEmpty()) g[6].let { y -> if (y.isEmpty()) "" else " $y" } else " $it" }}").lowercase(Locale.ROOT), today) to
@@ -536,8 +541,21 @@ object QuickEntry {
                 }
             }
             if (start == null || end == null) return error("That date isn't valid.")
+            // "28-3 Jan", "Dec 28-3": one month named once, so the end can't be in another year.
+            val oneMonth = g[4].isNotEmpty() && g[2].isEmpty() || g[7].isNotEmpty() && g[9].isEmpty()
+            if (oneMonth && day(if (g[4].isNotEmpty()) g[4] else g[10]).toInt() < day(if (g[4].isNotEmpty()) g[1] else g[8]).toInt())
+                return error("End the date range after it starts.")
+            val hasYear = Regex("\\d{4}").containsMatchIn(match.value)
+            // "28 Dec – 3 Jan 2027": a year on the end only, across New Year, starts the range the year before.
+            val endYearOnly = g[4].isNotEmpty() && g[3].isEmpty() && g[6].isNotEmpty() || g[7].isNotEmpty() && g[11].isNotEmpty()
+            if (endYearOnly && start.monthValue > end.monthValue) start = start.minusYears(1)
             // "28 Dec – 3 Jan" without years ends in the next year.
-            val last = if (end < start && !Regex("\\d{4}").containsMatchIn(match.value)) end.plusYears(1) else end
+            var last = if (end < start && !hasYear) end.plusYears(1) else end
+            // "30 Sep – 4 Oct" on 1 October: the range under way, not next year's.
+            if (!hasYear && g[12].isEmpty() && start > today && start.minusYears(1) <= today) {
+                val earlierLast = if (end < start.minusYears(1)) end.plusYears(1) else end
+                if (earlierLast >= today && earlierLast < start) { start = start.minusYears(1); last = earlierLast }
+            }
             if (last <= start) return error("End the date range after it starts.")
             if (java.time.temporal.ChronoUnit.DAYS.between(start, last) >= MultiDay.MAX_DAYS)
                 return error("A date range can cover at most ${MultiDay.MAX_DAYS} days.")
@@ -926,6 +944,8 @@ object QuickEntry {
                 (it.end <= match.range.first && text.substring(it.end, match.range.first).matches(Regex("[\\s,]*")) ||
                     it.start > match.range.last && text.substring(match.range.last + 1, it.start).matches(Regex("[\\s,]*"))) }
             val money = rx("[£€¥$]\\s*$").containsMatchIn(before)
+            // "for 1.25 hours": a length, read as one below.
+            if (!money && rx("^\\s*(?:$hours|$minutes)(?![a-z])").containsMatchIn(after)) return@forEach
             val timeLike = !money && besideDate || !money && rx("(?:\\b(?:at|from|until|till?|to|by|actually)\\s+|@\\s*|$approx|[-–—]\\s*)$").containsMatchIn(before) ||
                 rx("^\\s*(?:-?ish\\b|[-–—]|to\\b|until\\b|till?\\b)").containsMatchIn(after)
             if (!timeLike) mask(match.range, '\uE000')
@@ -984,18 +1004,20 @@ object QuickEntry {
             val endpoints = rangeEnds(range).toList().map(::normaliseClock)
             val hasMeridiem = endpoints.map { rx("(?:am|pm)$").containsMatchIn(it) }
             val twelveHour = Regex("([1-9]|1[0-2])(?::([0-5]\\d))?")
-            // Only where a bare hour made the range unreadable before; "9:00-10:30" keeps reading as written.
-            if (hasMeridiem.none { it } && endpoints.all { twelveHour.matches(it) } && endpoints.any { ':' !in it }) {
+            // "9-5", "7:30-9:30", "7.30-9.30": either half of the day, as for a single 7:30. A leading zero, an hour of 0
+            // or above 12, four digits or "9h30" read one way only: "08:00-09:30", "9:00-17:30", "1000-1200".
+            if (hasMeridiem.none { it } && rangeEnds(range).toList().all { Regex("([1-9]|1[0-2])(?:[:.][0-5]\\d)?").matches(it.trim()) }) {
                 // "2 till 4", "12 till 1", "4:30-6": morning or afternoon is asked, as for a single time. Both readings last
                 // as long: the end is the first one after the start, within 12 hours.
                 fun at(value: String, pm: Boolean) = twelveHour.matchEntire(value)!!.destructured.let { (h, m) ->
                     LocalTime.of(h.toInt() % 12 + if (pm) 12 else 0, m.ifEmpty { "0" }.toInt()) }
                 val starts = listOf(at(endpoints[0], false), at(endpoints[0], true))
-                // "9-5", "10 till 2": an end hour below the start is the working day, morning to afternoon. Not across
-                // noon from 12, and not for night work ("Night shift 10-6"), which still ask.
+                // "9-5", "10 till 2", "Brunch 11-1": a start from 6 to 11 and an end from 2 to 6 (1 after a start of 10 or
+                // 11) is the working day, morning to afternoon. Others still ask: "Party 8-1" may run past midnight, "Match
+                // 2-1" is a score, "Night shift 10-6" is at night.
                 val (startHour, endHour) = endpoints.map { twelveHour.matchEntire(it)!!.groupValues[1].toInt() }
                 // With a part of the day ("tonight 10-2") that decides am/pm instead.
-                if (endHour < startHour && startHour != 12 && timePrompt == null && !rx("\\bnight").containsMatchIn(text)) {
+                if (startHour in 6..11 && (endHour in 2..6 || endHour == 1 && startHour >= 10) && timePrompt == null && !rx("\\bnight").containsMatchIn(text)) {
                     val length = at(endpoints[1], true).toSecondOfDay() / 60 - starts[0].toSecondOfDay() / 60
                     if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
                     time = starts[0]; duration = length
@@ -1038,11 +1060,12 @@ object QuickEntry {
             time = LocalTime.of(17, 0); endOfDaySaid = true
             consume(found.single().range, QuickPhraseKind.TIME)
         }
-        // "Brekkie Sunday 9": an hour right after the date, when nothing else follows but schedule words.
+        // "Brekkie Sunday 9", "Gym every Monday 6": an hour right after the date or a weekday repeat, when nothing else follows
+        // but schedule words. Not after "daily": "Pills daily 2" may be a count.
         val bareHour = if (rs.isNotEmpty() || timePrompt != null || endOfDaySaid || times.containsMatchIn(remaining)) null
             else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:./-])").findAll(remaining).firstOrNull { m ->
                 m.value.toInt() in 1..12 &&
-                    phrases.any { it.kind == QuickPhraseKind.DATE && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(Regex("[\\s,]*")) } &&
+                    phrases.any { (it.kind == QuickPhraseKind.DATE || it.kind == QuickPhraseKind.REPEAT && rx("(?:$weekdays|$pluralWeekdays)$").containsMatchIn(text.substring(it.start, it.end))) && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(Regex("[\\s,]*")) } &&
                     remaining.substring(m.range.last + 1).let { after -> after.isBlank() ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
@@ -1052,6 +1075,7 @@ object QuickEntry {
             .replace(Regex("\\s*-?ish$|\\s+sharp$"), "").trim()).let { r -> if (Regex("\\d{1,2}\\.\\d{2}").matches(r)) r.replace('.', ':') else r }
         // "8am and 8pm", "8am, 2pm and 8pm": one event at each time. Each time must be clear on its own.
         var extraTimes = emptyList<LocalTime>()
+        var nextDayTimes = 0
         if (ts.size in 2..3 && rs.isEmpty() && bareHour == null && timePrompt == null &&
             ts.zipWithNext().all { (a, b) -> timeJoin.matches(remaining.substring(a.range.last + 1, b.range.first)) }) {
             val read = ts.map { m -> clockText(m.value).takeUnless { Regex("([1-9]|1[0-2])(?::[0-5]\\d)?").matches(it) }?.let(::readTime) }
@@ -1059,9 +1083,15 @@ object QuickEntry {
                 phrases += ts.map { QuickEntryPhrase(it.range.first, it.range.last + 1, QuickPhraseKind.TIME) }
                 return error("Add am or pm to each time, for example 8am and 8pm.")
             }
-            val sorted = read.filterNotNull().distinct().sorted()
+            val written = read.filterNotNull()
+            val sorted = written.distinct().sorted()
             if (sorted.size != ts.size) return error("Use different times, for example 8am and 8pm.")
-            time = sorted.first(); extraTimes = sorted.drop(1)
+            // "8pm and 2am": early hours written after a later time are after midnight, the next day. Otherwise in order.
+            val wrap = (1 until written.size).firstOrNull { written[it] < written[it - 1] }
+            if (wrap != null && written.drop(wrap).let { after -> after == after.sorted() && after.all { it < LocalTime.of(6, 0) } && after.last() < written.first() } &&
+                written.take(wrap) == written.take(wrap).sorted()) {
+                time = written.first(); extraTimes = written.drop(1); nextDayTimes = written.size - wrap
+            } else { time = sorted.first(); extraTimes = sorted.drop(1) }
             consume(ts.first().range.first..ts.last().range.last, QuickPhraseKind.TIME)
             ts = emptyList()
         }
@@ -1090,9 +1120,10 @@ object QuickEntry {
                 timeChoices = listOf(LocalTime.of(hour, minute), LocalTime.of(hour + 12, minute))
             } else if (time == null) {
                 if (raw.matches(Regex("\\d{1,2}")) && raw.toInt() in 0..23) {
-                    ambiguous = true
                     val hour = raw.toInt()
-                    timeChoices = if (hour in 1..12) listOf(LocalTime.of(hour % 12, 0), LocalTime.of(hour % 12 + 12, 0)) else listOf(LocalTime.of(hour, 0))
+                    // "at 13", "at 0": a 24-hour hour, one reading only.
+                    if (hour in 1..12) { ambiguous = true; timeChoices = listOf(LocalTime.of(hour % 12, 0), LocalTime.of(hour % 12 + 12, 0)) }
+                    else time = LocalTime.of(hour, 0)
                 }
                 else return error("That time isn't valid.")
             }
@@ -1128,12 +1159,13 @@ object QuickEntry {
             val name = zoneOffsets.keys.firstOrNull { it.equals(said, ignoreCase = true) } ?: said
             val from: ZoneId = zoneOffsets[name] ?: placeZones.getValue(said.lowercase(Locale.ROOT).removeSuffix(" time"))
             val at = time ?: return error("Add am or pm to the time to use $name, for example 3pm $name.")
-            fun converted(t: LocalTime) = LocalDateTime.of(date, t).atZone(from).withZoneSameInstant(zone).toLocalDateTime()
+            fun converted(t: LocalTime, days: Long = 0) = LocalDateTime.of(date.plusDays(days), t).atZone(from).withZoneSameInstant(zone).toLocalDateTime()
+            fun extraDays(i: Int) = if (i >= extraTimes.size - nextDayTimes) 1L else 0L
             val local = converted(at)
             if (local.toLocalDate() != date && (repeat != RepeatRule.NONE || dateChoices.isNotEmpty() || rangeEnd != null || (spanLength ?: 0) > 1))
                 return error("In your time zone that is ${longDate(local.toLocalDate())}. Type the date and time in your own time zone.")
-            val others = extraTimes.map(::converted)
-            if (others.any { it.toLocalDate() != local.toLocalDate() })
+            val others = extraTimes.mapIndexed { i, t -> converted(t, extraDays(i)) }
+            if (others.withIndex().any { (i, it) -> it.toLocalDate() != local.toLocalDate().plusDays(extraDays(i)) })
                 return error("In your time zone these times fall on different days. Type them in your own time zone.")
             zoneMovedDate = local.toLocalDate() != date
             date = local.toLocalDate(); time = local.toLocalTime(); extraTimes = others.map { it.toLocalTime() }
@@ -1164,7 +1196,7 @@ object QuickEntry {
         // Scheduling-shaped fragments must not silently turn into part of a saved title.
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))
             return error("Finish the duration, for example for 1 hour and 30 minutes.")
-        if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+(?:$amount|half)\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
+        if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+-?(?:[\\d.,]*\\d|$countWords|half)(?:[\\s.,]+(?:and|half|quarter|[\\d.,]*\\d|$countWords))*\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
             unfinished.findAll(remaining).any { m -> !((m.value.trim() in setOf("in", "at", "on") || partySize.matches(m.value) ||
                     largePartySize.matches(m.value) && bookingWord.containsMatchIn(remaining.substring(0, m.range.first))) &&
                 text.substring(m.range.first + m.value.trimEnd().length).isNotBlank()) } ||
@@ -1194,16 +1226,20 @@ object QuickEntry {
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
-            taskHint, reminderImplied, endDate, extraTimes, pastSaid)
+            taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes)
     }
 
     private fun spanMinutes(value: String): Double = when {
-        rx("^(?:for|in) half\\b").containsMatchIn(value) -> 30.0
+        rx("^(?:for|in) (?:a )?half\\b").containsMatchIn(value) -> 30.0
         "quarter" in value -> 15.0
-        else -> durationParts.findAll(value).sumOf { part ->
-            readAmount(part.groupValues[1]) * if (part.groupValues[2].startsWith("h")) 60 else 1
-        } + if (value.endsWith("and a half")) 30.0 else 0.0
-    }
+        // "2 and a half hours".
+        else -> Regex("^(?:for|in) (\\S+) and a half (?:hours?|hrs?|h)$").find(value)?.let { readAmount(it.groupValues[1]) * 60 + 30 }
+            ?: (durationParts.findAll(value).sumOf { part ->
+                readAmount(part.groupValues[1]) * if (part.groupValues[2].startsWith("h")) 60 else 1
+            } + (if (value.endsWith("and a half")) 30.0 else 0.0) +
+                // "1 hour 30", "1h30": the minutes without their unit.
+                (Regex("(?:hours?|hrs?|h) ?(?:and )?([0-5]\\d)$").find(value)?.groupValues?.get(1)?.toDouble() ?: 0.0))
+    }.let { minutes -> Math.round(minutes).toDouble().takeIf { Math.abs(it - minutes) < 1e-6 } ?: minutes } // 1.45 hours is 87
 
     /** Minutes in "10 minutes", "1 hour and 30 minutes", "2 days", "half a day", "the day" (before). */
     private fun reminderSpanMinutes(value: String): Double {
@@ -1259,6 +1295,16 @@ object QuickEntry {
         val whole = time.truncatedTo(ChronoUnit.MINUTES)
         val minute = if (whole < time) whole.plusMinutes(1) else whole
         return minute.plusMinutes(((5 - minute.minute % 5) % 5).toLong())
+    }
+
+    /** A weekday with next, this, last or nothing, as quick entry and search read it: next Friday is next week's (weeks run
+     *  Monday to Sunday), this Friday this week's (it may have passed), last Friday the latest before today, Friday the
+     *  coming one (today included). */
+    fun weekdayDate(day: DayOfWeek, modifier: String, today: LocalDate): LocalDate = when (modifier) {
+        "next" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(1).with(day)
+        "this" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).with(day)
+        "last" -> today.with(TemporalAdjusters.previous(day))
+        else -> today.with(TemporalAdjusters.nextOrSame(day))
     }
 
     private fun monthOf(word: String): Month = Month.entries.first { it.name.lowercase(Locale.ROOT).startsWith(word.take(3)) }
@@ -1439,9 +1485,9 @@ object QuickEntry {
                 when {
                     // "this coming Monday": the next one after today.
                     d.startsWith("this coming ") || d.startsWith("coming ") -> today.with(TemporalAdjusters.next(day))
-                    d.startsWith("next ") || d.startsWith("nxt ") -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(1).with(day)
-                    d.startsWith("this ") -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).with(day)
-                    else -> today.with(TemporalAdjusters.nextOrSame(day))
+                    d.startsWith("next ") || d.startsWith("nxt ") -> weekdayDate(day, "next", today)
+                    d.startsWith("this ") -> weekdayDate(day, "this", today)
+                    else -> weekdayDate(day, "", today)
                 }
             }
         }
