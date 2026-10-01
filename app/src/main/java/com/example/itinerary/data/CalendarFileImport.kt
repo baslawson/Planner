@@ -213,6 +213,13 @@ object CalendarFileImport {
     fun chosen(entries: List<Entry>, ticked: Set<Int>, reviewed: Set<Int>): List<Entry> =
         entries.filter { it.id in ticked && it.id !in reviewed }
 
+    // The file's rows saved through Edit ([saved]: row id to the event saved) whose event is still in Planner ([items]).
+    fun stillSaved(saved: Map<Int, Long>, items: List<ItineraryItem>): Set<Int> {
+        if (saved.isEmpty()) return emptySet()
+        val ids = items.mapTo(HashSet()) { it.id }
+        return saved.filterValues { it in ids }.keys
+    }
+
     fun existingKeys(items: List<ItineraryItem>): Set<Triple<String, LocalDate, LocalTime?>> =
         items.mapTo(HashSet()) { Triple(it.title, it.date, it.startTime) }
 }

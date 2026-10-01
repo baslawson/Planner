@@ -233,8 +233,11 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     var includePast by remember { mutableStateOf(false) }
     // The row being reviewed in the event editor, and the event it opened with.
     var editing by remember { mutableStateOf<Pair<Int, ItineraryItem>?>(null) }
-    // Rows saved through Edit: already in Planner, perhaps changed, so Add and Select all leave them out (U1).
-    var reviewed by remember { mutableStateOf(emptySet<Int>()) }
+    // Rows saved through Edit, with the event each became: already in Planner, perhaps changed, so Add and Select all
+    // leave them out (U1). Only while that event is still there: one deleted again (in that editor or anywhere) is not
+    // "Added" any more, and Undo brings it back (U-N7).
+    var savedRows by remember { mutableStateOf(emptyMap<Int, Long>()) }
+    val reviewed = remember(savedRows, existingItems) { CalendarFileImport.stillSaved(savedRows, existingItems) }
     var added by remember { mutableStateOf<List<Long>?>(null) }
     var addedSeries by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -256,7 +259,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                 }
                 result = read
                 includePast = false
-                reviewed = emptySet()
+                savedRows = emptyMap()
                 ticked = read.entries.filter { !it.past(today) && !CalendarFileImport.duplicate(it, existing, today, false) }.mapTo(HashSet()) { it.id }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: "Could not read this calendar file."; result = null }
@@ -273,7 +276,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
     LaunchedEffect(duplicates, reviewed) { ticked = ticked - duplicates - reviewed }
     val pastIds = remember(entries, today) { entries.filter { it.past(today) }.mapTo(HashSet()) { it.id } }
 
-    editing?.let { (id, item) -> NewPlanningEventEditor(item, onSaved = { reviewed = reviewed + id }) { editing = null }; return }
+    editing?.let { (id, item) -> NewPlanningEventEditor(item, onSaved = { saved -> savedRows = savedRows + (id to saved) }) { editing = null }; return }
     added?.let { ids ->
         PlannerDialog("Calendar imported", onDismissRequest = { if (!busy) onDismiss() },
             primary = DialogAction("Done", enabled = !busy, onClick = onDismiss),
@@ -404,7 +407,7 @@ private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, c
 }
 
 @Composable
-fun NewPlanningEventEditor(item: ItineraryItem, onSaved: () -> Unit = {}, onDismiss: () -> Unit) {
+fun NewPlanningEventEditor(item: ItineraryItem, onSaved: (Long) -> Unit = {}, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val scope = rememberCoroutineScope()
     val categories = remember(app) { CategoryState(app.repository, app.settings, scope) }
@@ -413,7 +416,7 @@ fun NewPlanningEventEditor(item: ItineraryItem, onSaved: () -> Unit = {}, onDism
     PlanningOverlay(onDismiss) {
     ItemEditorSheet(item, emptyList(), emptyList(), counts, hidden, categories::remove, categories::show, onDismiss,
         onSave = { event, added, removed, reminders, removedReminders, options ->
-            app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also { onSaved() } },
+            app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also(onSaved) },
         onDelete = { event, series -> app.repository.deleteWithUndo(event, series) })
     }
 }
