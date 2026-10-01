@@ -45,16 +45,25 @@ class ReminderSeriesFixesDataTest {
         assertNull(repo.snapshot().reminders.single().snoozedUntil)
     }
 
-    @Test fun reminderReaddedFromEditorDropsItsSnooze() = fixture { repo, _, _ ->
+    // Review R4: toggling "Ring until I stop it" changes the reminder in place, so its snooze still rings. A reminder
+    // added anew (no id) starts unsnoozed.
+    @Test fun ringToggleKeepsTheReminderAndItsSnooze() = fixture { repo, alarms, _ ->
         repo.saveItem(event(), addedReminders = listOf(reminder()))
         val item = repo.snapshot().items.single()
         val alarm = repo.snapshot().reminders.single()
-        repo.snoozeReminder(alarm.id, System.currentTimeMillis() + 600_000)
+        val until = System.currentTimeMillis() + 600_000
+        repo.snoozeReminder(alarm.id, until)
         val snoozed = repo.snapshot().reminders.single()
-        // What the editor does when "ring until dismissed" is toggled.
-        repo.saveItem(item, addedReminders = listOf(snoozed.copy(id = 0, itemId = 0, ringUntilDismissed = true)), removedReminders = listOf(snoozed))
+        // What the editor does when "ring until dismissed" is toggled: the saved one removed, its changed copy added.
+        alarms.scheduled.clear()
+        repo.saveItem(item, addedReminders = listOf(snoozed.copy(ringUntilDismissed = true)), removedReminders = listOf(snoozed))
         val saved = repo.snapshot().reminders.single()
-        assertTrue(saved.ringUntilDismissed); assertNull(saved.snoozedUntil)
+        assertEquals(snoozed.copy(ringUntilDismissed = true), saved); assertEquals(until, saved.snoozedUntil)
+        // Its alarm is set again, now to ring.
+        assertEquals(listOf(alarm.id), alarms.scheduled)
+        repo.saveItem(item, addedReminders = listOf(saved.copy(id = 0, itemId = 0)), removedReminders = listOf(saved))
+        val readded = repo.snapshot().reminders.single()
+        assertNotEquals(saved.id, readded.id); assertTrue(readded.ringUntilDismissed); assertNull(readded.snoozedUntil)
     }
 
     @Test fun deliveredReminderIsNotScheduledAgain() = fixture { repo, alarms, _ ->

@@ -922,12 +922,12 @@ private fun ItemEditorForm(
                     if (reminder in addedReminders) addedReminders.remove(reminder) else removedReminders += reminder
                 },
                 onToggleRing = { reminder, ring ->
-                    val changed = reminder.copy(id = 0, itemId = 0, ringUntilDismissed = ring)
+                    val changed = reminder.copy(ringUntilDismissed = ring)
                     val index = addedReminders.indexOf(reminder)
                     if (index >= 0) {
                         addedReminders[index] = changed
                     } else {
-                        // A saved reminder is replaced by a changed copy when the event is saved.
+                        // A saved reminder's changed copy keeps its id: Save updates it in place, keeping its snooze.
                         removedReminders += reminder
                         addedReminders += changed
                     }

@@ -472,7 +472,7 @@ class Repository(
                     added.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                     removed.filter { it.itemId == saved.id }.forEach { attachmentDao.delete(it); removedFiles.add(it.fileName) }
                 }
-                // A reminder copied from the editor (e.g. after toggling "ring until dismissed") must not keep an old snooze.
+                // A reminder copied to another occurrence or added anew must not keep an old snooze.
                 if (newSeries && saved.id != item.id) {
                     selectedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                 } else if (seriesSave && saved.id != item.id) {
@@ -480,8 +480,14 @@ class Repository(
                     drop.forEach { reminderDao.delete(it); cancelled.add(it) }
                     add.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                 } else {
-                    addedReminders.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
-                    removedReminders.filter { it.itemId == saved.id }.forEach { reminderDao.delete(it); cancelled.add(it) }
+                    // A saved reminder changed in the editor ("Ring until I stop it") comes back with its id, in place of
+                    // itself: it is updated, keeping its snooze and delivery record, not deleted and added again.
+                    val changed = addedReminders.filter { new -> new.id != 0L && removedReminders.any { it.id == new.id } &&
+                        reminderDao.byId(new.id)?.itemId == saved.id }
+                    changed.forEach { reminderDao.setRing(it.id, it.ringUntilDismissed) }
+                    addedReminders.filterNot { it in changed }.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
+                    removedReminders.filter { old -> old.itemId == saved.id && changed.none { it.id == old.id } }
+                        .forEach { reminderDao.delete(it); cancelled.add(it) }
                 }
                 if (previous?.paid != saved.paid) {
                     reminderDao.forItem(saved.id).forEach { reminderDao.snooze(it.id, null) }
