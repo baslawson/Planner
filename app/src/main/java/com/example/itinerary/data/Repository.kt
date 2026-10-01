@@ -290,6 +290,9 @@ class Repository(
     // A task as saved, for an editor that goes on editing it after Save.
     suspend fun task(id: String): PlannerTask? = taskDao.byId(id)
 
+    // One task as stored, as it changes (null once gone): an open editor notices a sync pull's update, or its deletion.
+    fun observeTask(id: String): Flow<PlannerTask?> = taskDao.observe(id).distinctUntilChanged()
+
     suspend fun eventDetails(id: Long): Triple<ItineraryItem, List<Attachment>, List<Reminder>>? = db.withTransaction {
         itemDao.byId(id)?.let { Triple(it, attachmentDao.forItem(id), reminderDao.forItem(id)) }
     }

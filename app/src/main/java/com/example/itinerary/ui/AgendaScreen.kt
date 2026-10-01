@@ -352,7 +352,7 @@ fun AgendaScreen(
         )
         editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
         editingTaskId?.let { id ->
-            val task = tasks.find { it.id == id }
+            val task = rememberEditedTask(id, tasks.find { it.id == id })
             if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
         }
         SettingsHost(vm = vm, show = showSettings, onDismiss = { showSettings = false }, showCalendars = showCalendars, onShowCalendars = { showCalendars = it })

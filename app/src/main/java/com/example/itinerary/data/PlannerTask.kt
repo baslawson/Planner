@@ -42,6 +42,7 @@ interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY id") fun observe(): Flow<List<PlannerTask>>
     @Query("SELECT * FROM tasks ORDER BY id") suspend fun all(): List<PlannerTask>
     @Query("SELECT * FROM tasks WHERE id = :id") suspend fun byId(id: String): PlannerTask?
+    @Query("SELECT * FROM tasks WHERE id = :id") fun observe(id: String): Flow<PlannerTask?>
     @Insert suspend fun insert(task: PlannerTask)
     @Insert suspend fun insertAll(tasks: List<PlannerTask>)
     @Update suspend fun update(task: PlannerTask)

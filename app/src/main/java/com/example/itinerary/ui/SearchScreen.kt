@@ -226,7 +226,7 @@ fun SearchScreen(
         }
     }
     editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
-    editingTaskId?.let { id -> tasks.find { it.id == id }?.let { task ->
+    editingTaskId?.let { id -> rememberEditedTask(id, tasks.find { it.id == id })?.let { task ->
         key(id) { TaskEditor(task, creating = false) { editingTaskId = null } }
     } }
 }

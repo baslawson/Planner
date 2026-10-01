@@ -80,6 +80,19 @@ object EditorRules {
     // of "Moved … to tomorrow", U6), and the editor can't tell which it was.
     fun changedElsewhereBanner(bill: Boolean): String = "This ${if (bill) "bill" else "event"} was changed elsewhere"
 
+    // U-N1: the same for a task: [stored] differs from [baseline] in what Save would write over (title, notes, due date,
+    // priority; Save keeps done as stored). Planner-only changes made elsewhere (done, a snooze) don't count, nor does a
+    // task gone meanwhile (see taskDeletedElsewhere).
+    fun taskChangedElsewhere(baseline: com.example.itinerary.data.PlannerTask, stored: com.example.itinerary.data.PlannerTask?): Boolean =
+        stored != null && stored.id == baseline.id && (stored.title != baseline.title || stored.notes != baseline.notes ||
+            stored.dueDate != baseline.dueDate || stored.priority != baseline.priority)
+
+    fun taskChangedElsewhereBanner(): String = "This task was changed elsewhere"
+
+    // U-N2: the task this editor opened is no longer stored (deleted by sync, or elsewhere in Planner).
+    fun taskDeletedElsewhereBanner(): String = "This task was deleted elsewhere. Restore it from Recently deleted to save your " +
+        "changes, or keep them as a new task with Duplicate task."
+
     // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
     fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
         fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),

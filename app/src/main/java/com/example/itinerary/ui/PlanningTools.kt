@@ -451,7 +451,8 @@ fun LinkedTaskSection(id: String) {
         "Linked task: ${task.title} · ${if (task.done) "Completed" else "Not completed"}")
     if (LocalEditingTaskId.current == id) Text("Close this block to return to the task.", style = MaterialTheme.typography.bodySmall)
     else if (task != null) TextButton(onClick = { open = true }) { Text("Open linked task") }
-    if (open && task != null) PlanningOverlay({ open = false }) { TaskEditor(task, false) { open = false } }
+    val edited = rememberEditedTask(id, task)
+    if (open && edited != null) PlanningOverlay({ open = false }) { TaskEditor(edited, false) { open = false } }
 }
 
 @Composable

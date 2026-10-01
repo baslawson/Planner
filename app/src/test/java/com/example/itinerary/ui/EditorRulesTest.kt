@@ -115,4 +115,18 @@ class EditorRulesTest {
         assertEquals("This event was changed elsewhere", EditorRules.changedElsewhereBanner(bill = false))
         assertEquals("This bill was changed elsewhere", EditorRules.changedElsewhereBanner(bill = true))
     }
+
+    // U-N1: a task changed underneath its open editor in what Save would write over; done and snoozes don't count.
+    @Test fun taskChangedElsewhereIsWhatSaveWouldOverwrite() {
+        val opened = com.example.itinerary.data.PlannerTask(id = "t", title = "Pay rent", dueDate = oct3, notes = "n")
+        assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened))
+        assertEquals(false, EditorRules.taskChangedElsewhere(opened, null)) // gone: the deleted banner, not this one
+        assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened.copy(done = true, snoozedUntil = 5, reminderAt = 4)))
+        listOf(opened.copy(title = "Pay rent today"), opened.copy(notes = "m"), opened.copy(dueDate = oct7),
+            opened.copy(priority = com.example.itinerary.data.TaskPriority.HIGH)).forEach {
+            assertEquals(true, EditorRules.taskChangedElsewhere(opened, it))
+        }
+        assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened.copy(id = "other", title = "x")))
+        assertEquals("This task was changed elsewhere", EditorRules.taskChangedElsewhereBanner())
+    }
 }

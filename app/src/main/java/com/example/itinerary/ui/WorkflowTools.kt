@@ -95,7 +95,7 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
         }
     }
     opening?.let { id ->
-        val task = tasks.find { it.id == id }
+        val task = rememberEditedTask(id, tasks.find { it.id == id })
         if (task != null) PlanningOverlay({ opening = null }) { TaskEditor(task, false) { opening = null } }
         else LaunchedEffect(id) { opening = null }
     }
