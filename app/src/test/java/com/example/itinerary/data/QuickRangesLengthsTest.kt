@@ -48,4 +48,25 @@ class QuickRangesLengthsTest {
         ok("Work 9-5 weekdays").let { assertEquals(at(9), it.time); assertNull(it.error) }
         ok("Brunch 11-1 Sunday").let { assertEquals(at(11), it.time); assertEquals(120, it.durationMinutes); assertNull(it.error) }
     }
+
+    @Test fun aBackwardsDayRangeInOneMonthIsRefused() {
+        for (text in listOf("Trip 28-3 Jan", "Trip Dec 28-3", "Trip 30-2 Nov"))
+            assertEquals(text, "End the date range after it starts.", parse(text).error)
+        ok("Trip 3-7 Nov").let { assertEquals(day(11, 3), it.date); assertEquals(day(11, 7), it.endDate) }
+        ok("Trip 28 Dec - 3 Jan").let { assertEquals(day(12, 28), it.date); assertEquals(day(1, 3, 2027), it.endDate) }
+    }
+
+    @Test fun aYearOnTheEndOnlyCanStartTheYearBefore() {
+        ok("Trip 28 Dec - 3 Jan 2027").let { assertEquals("Trip", it.title); assertEquals(day(12, 28), it.date); assertEquals(day(1, 3, 2027), it.endDate) }
+        ok("Holiday Dec 20 - Jan 5, 2027").let { assertEquals("Holiday", it.title); assertEquals(day(12, 20), it.date); assertEquals(day(1, 5, 2027), it.endDate) }
+        ok("Trip 3 Jan - 5 Jan 2027").let { assertEquals(day(1, 3, 2027), it.date); assertEquals(day(1, 5, 2027), it.endDate) }
+    }
+
+    @Test fun aRangeUnderWayStaysThisYear() {
+        ok("Trip 30 Sep to 4 Oct").let { assertEquals(day(9, 30), it.date); assertEquals(day(10, 4), it.endDate) }
+        ok("Trip Sep 30 - Oct 4").let { assertEquals(day(9, 30), it.date); assertEquals(day(10, 4), it.endDate) }
+        ok("Trip 30 Sep - 1 Oct").let { assertEquals(day(9, 30), it.date); assertEquals(day(10, 1), it.endDate) }
+        // Over before today: next year's.
+        ok("Trip 20 Sep - 25 Sep").let { assertEquals(day(9, 20, 2027), it.date); assertEquals(day(9, 25, 2027), it.endDate) }
+    }
 }

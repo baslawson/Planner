@@ -521,7 +521,7 @@ object QuickEntry {
                 return@let
             }
             fun day(v: String) = v.takeWhile { it.isDigit() }
-            val (start, end) = when {
+            var (start, end) = when {
                 g[4].isNotEmpty() -> { // 3 Oct – 7 Oct, 3–7 Oct
                     val startMonth = g[2].ifEmpty { g[5] }
                     parseDate(("${day(g[1])} $startMonth${g[3].let { if (it.isEmpty()) g[6].let { y -> if (y.isEmpty()) "" else " $y" } else " $it" }}").lowercase(Locale.ROOT), today) to
@@ -536,8 +536,21 @@ object QuickEntry {
                 }
             }
             if (start == null || end == null) return error("That date isn't valid.")
+            // "28-3 Jan", "Dec 28-3": one month named once, so the end can't be in another year.
+            val oneMonth = g[4].isNotEmpty() && g[2].isEmpty() || g[7].isNotEmpty() && g[9].isEmpty()
+            if (oneMonth && day(if (g[4].isNotEmpty()) g[4] else g[10]).toInt() < day(if (g[4].isNotEmpty()) g[1] else g[8]).toInt())
+                return error("End the date range after it starts.")
+            val hasYear = Regex("\\d{4}").containsMatchIn(match.value)
+            // "28 Dec – 3 Jan 2027": a year on the end only, across New Year, starts the range the year before.
+            val endYearOnly = g[4].isNotEmpty() && g[3].isEmpty() && g[6].isNotEmpty() || g[7].isNotEmpty() && g[11].isNotEmpty()
+            if (endYearOnly && start.monthValue > end.monthValue) start = start.minusYears(1)
             // "28 Dec – 3 Jan" without years ends in the next year.
-            val last = if (end < start && !Regex("\\d{4}").containsMatchIn(match.value)) end.plusYears(1) else end
+            var last = if (end < start && !hasYear) end.plusYears(1) else end
+            // "30 Sep – 4 Oct" on 1 October: the range under way, not next year's.
+            if (!hasYear && g[12].isEmpty() && start > today && start.minusYears(1) <= today) {
+                val earlierLast = if (end < start.minusYears(1)) end.plusYears(1) else end
+                if (earlierLast >= today && earlierLast < start) { start = start.minusYears(1); last = earlierLast }
+            }
             if (last <= start) return error("End the date range after it starts.")
             if (java.time.temporal.ChronoUnit.DAYS.between(start, last) >= MultiDay.MAX_DAYS)
                 return error("A date range can cover at most ${MultiDay.MAX_DAYS} days.")
