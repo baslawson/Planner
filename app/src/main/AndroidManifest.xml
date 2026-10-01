@@ -54,6 +54,10 @@
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- App lock (ui/AppLock.kt): covers Planner until the user unlocks; dialogs and editors stay open underneath. -->
+        <activity android:name=".LockActivity" android:exported="false" android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|fontScale|uiMode|density|locale|layoutDirection" />
+
         <activity android:name=".reminders.SnoozeActivity" android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" />
 

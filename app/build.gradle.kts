@@ -108,6 +108,8 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     ksp(libs.androidx.room.compiler)
     implementation(libs.okhttp)
+    // App lock: fingerprint, face or the phone's PIN/pattern/password (Settings → App lock).
+    implementation(libs.androidx.biometric)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Plain JVM tests (app/src/test), e.g. the agenda ordering and filtering in AgendaTest.
     testImplementation("junit:junit:4.13.2")

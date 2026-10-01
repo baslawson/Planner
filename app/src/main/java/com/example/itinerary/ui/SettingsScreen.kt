@@ -169,6 +169,7 @@ fun SettingsScreen(
                             Toast.makeText(context, "Long-press your home screen, choose Widgets, then Planner.", Toast.LENGTH_LONG).show()
                         }
                     }
+                    AppLockSettingsSection()
                     SettingsHeading("Calendars")
                     Text("Show other calendars beside your own. Only Nextcloud can sync both ways; phone calendars and links are read-only.", style = MaterialTheme.typography.bodySmall)
                     StackedButton("Calendars", onCalendars)

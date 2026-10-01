@@ -8,6 +8,11 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -128,8 +133,24 @@ class MainActivity : ComponentActivity() {
     // While Planner is on screen, changes to the phone's calendars are read in (see CalendarSync.refreshPhone).
     private var stopWatchingCalendars: (() -> Unit)? = null
 
+    private val appLock get() = (application as ItineraryApp).appLock
+
+    // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
+    // through one of these two, so leaving for it is not treated like going to the home screen (see AppLockRule).
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        appLock.ownTripStarting = true
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
+    override fun startIntentSenderForResult(intent: android.content.IntentSender, requestCode: Int, fillInIntent: Intent?,
+                                            flagsMask: Int, flagsValues: Int, extraFlags: Int, options: Bundle?) {
+        appLock.ownTripStarting = true
+        super.startIntentSenderForResult(intent, requestCode, fillInIntent, flagsMask, flagsValues, extraFlags, options)
+    }
+
     override fun onResume() {
         super.onResume()
+        appLock.onResumed()
         // Also after the calendar permission was just granted (the permission prompt only pauses the screen).
         if (stopWatchingCalendars == null) (application as ItineraryApp).let { app ->
             stopWatchingCalendars = app.phoneCalendars.watch { app.appScope.launch { app.calendarSync.refreshPhone() } }
@@ -137,6 +158,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (!isChangingConfigurations) appLock.onLeft()
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
         super.onStop()
@@ -144,6 +166,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (appLock.checkOnStart())
+            startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
         // Cheap and idempotent; picks up exact-alarm permission the user just granted in system settings.
         lifecycleScope.launch(Dispatchers.IO) {
@@ -161,6 +185,10 @@ class MainActivity : ComponentActivity() {
             sharedSubject = savedInstanceState.getString("sharedSubject")
         }
         val settings = (application as ItineraryApp).settings
+        // With App lock on, the recent-apps list shows a blank card instead of the last screen (Android 13 and later).
+        if (android.os.Build.VERSION.SDK_INT >= 33) lifecycleScope.launch {
+            appLock.enabled.collect { setRecentsScreenshotEnabled(!it) }
+        }
 
         setContent {
             val mode by settings.themeMode.collectAsStateWithLifecycle()
@@ -206,7 +234,11 @@ class MainActivity : ComponentActivity() {
                 LocalHeadingColor provides ComposeColor(headingColor),
                 LocalScrollBar provides ScrollBarStyle(ComposeColor(scrollBarColor), scrollBarSeeThrough),
             ) {
-                ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN }) }
+                ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { Box { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN })
+                    // Under the lock screen (LockActivity), so Planner's content never shows in the moment before it.
+                    val locked by appLock.locked.collectAsStateWithLifecycle()
+                    if (locked) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
+                } }
             }
         }
     }

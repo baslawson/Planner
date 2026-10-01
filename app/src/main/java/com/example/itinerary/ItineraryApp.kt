@@ -30,6 +30,8 @@ class ItineraryApp : Application() {
             attachmentStore.clearThumbnails()
     }
 
+    val appLock: com.example.itinerary.ui.AppLock by lazy { com.example.itinerary.ui.AppLock(this) }
+
     val reminderScheduler: ReminderScheduler by lazy { ReminderScheduler(this) }
 
     // Internal so instrumented tests can put outside-calendar events in place without a server.
