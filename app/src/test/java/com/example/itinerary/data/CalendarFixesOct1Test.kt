@@ -34,4 +34,29 @@ class CalendarFixesOct1Test {
         assertEquals(1, CalendarFileImport.read(ics(berlin, "UID:z\r\nDTSTART;TZID=Imaginary/Zone:20261005T090000\r\nSUMMARY:Where"), utc,
             LocalDate.of(2026, 10, 1)).skipped)
     }
+
+    // S3: a repeating event whose start is in UTC repeats on UTC dates (RFC 5545), each then shown on the phone's clock.
+    @Test fun aRepeatingUtcEventRepeatsOnUtcDates() {
+        val weekly = "UID:u\r\nDTSTART:20260105T230000Z\r\nDTEND:20260106T000000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4\r\nSUMMARY:Standup"
+        val entry = CalendarFileImport.read(ics(weekly), sydney, LocalDate.of(2026, 1, 1)).entries.single()
+        assertEquals((6..27 step 7).map { LocalDate.of(2026, 1, it) }, entry.dates) // Tuesdays in Sydney
+        assertEquals(LocalTime.of(10, 0), entry.item.startTime)
+        assertEquals(60, entry.item.durationMinutes)
+        val shown = CalendarFileImport.window(ics(weekly), sydney, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31)).events
+        assertEquals((6..27 step 7).map { LocalDate.of(2026, 1, it) to LocalTime.of(10, 0) }, shown.map { it.date to it.startTime })
+        // The clock follows the instant across a daylight-saving change (Sydney's ends on 5 April 2026): 10:00, then 09:00.
+        val acrossDst = "UID:d\r\nDTSTART:20260329T230000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=WEEKLY;COUNT=2\r\nSUMMARY:Call"
+        assertEquals(listOf(LocalDate.of(2026, 3, 30) to LocalTime.of(10, 0), LocalDate.of(2026, 4, 6) to LocalTime.of(9, 0)),
+            CalendarFileImport.window(ics(acrossDst), sydney, LocalDate.of(2026, 3, 1), LocalDate.of(2026, 4, 30)).events.map { it.date to it.startTime })
+        // The series Planner saves never names weekdays its dates don't fall on (Monday and Wednesday in UTC are Tuesday and
+        // Thursday in Sydney); a rule that still fits is kept.
+        val twice = CalendarFileImport.read(ics(weekly.replace("BYDAY=MO;COUNT=4", "BYDAY=MO,WE;COUNT=4")), sydney, LocalDate.of(2026, 1, 1)).entries.single()
+        assertEquals(listOf(6, 8, 13, 15).map { LocalDate.of(2026, 1, it) }, twice.dates)
+        assertEquals(RepeatRule.NONE, twice.repeat)
+        assertEquals(RepeatRule.WEEKLY, entry.repeat)
+        // An excluded date in UTC removes that occurrence.
+        val skipped = weekly.replace("SUMMARY", "EXDATE:20260112T230000Z\r\nSUMMARY")
+        assertEquals(listOf(6, 20, 27).map { LocalDate.of(2026, 1, it) },
+            CalendarFileImport.window(ics(skipped), sydney, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31)).events.map { it.date })
+    }
 }
