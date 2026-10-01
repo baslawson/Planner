@@ -832,7 +832,8 @@ private fun ItemEditorForm(
             if (category != "Bills" && payments.isNotEmpty()) {
                 Text("Payment history", style = MaterialTheme.typography.titleMedium)
                 Text("Recorded payments are kept when you change the category.", style = MaterialTheme.typography.bodySmall)
-                payments.forEach { Text("${Bills.format(it.amount, billCurrency)} · ${it.date.fullLabel()}${if (it.reversed) " · Reversed" else ""}") }
+                PaymentSummary(Bills.parse(billAmountText), billCurrency, paid, payments)
+                PaymentHistory(payments, billCurrency, onReverse = null)
             }
             if (!billTask && clashes.isNotEmpty()) {
                 Text(

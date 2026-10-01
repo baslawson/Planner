@@ -63,4 +63,31 @@ class PaymentsTest {
         val clear=BillSuggestions.parse("Power company\nAmount due: AUD 100.00\nDue date: 2026-09-30")
         assertEquals(setOf("title"),clear.warnings.keys)
     }
+
+    // The bill editor's summary: paid so far (reversed payments don't count), what's left, progress, the latest payment.
+    @Test fun summaryOfPartPayments() {
+        val d=LocalDate.of(2026,9,1)
+        val payments=listOf(BillPayment(id="a",amount=10000,date=d.minusDays(29)), BillPayment(id="b",amount=20000,date=d),
+            BillPayment(id="c",amount=5000,date=d.plusDays(3),reversed=true), BillPayment(id="d",amount=15000,date=d.minusDays(12)))
+        val s=Payments.summary(70000,false,payments)
+        assertEquals(45000L,s.paid); assertEquals(25000L,s.remaining)
+        assertEquals(45f/70f,s.progress!!,0.0001f)
+        // The newest that still counts: the reversed one on the 4th is skipped.
+        assertEquals("b",s.last!!.id)
+        assertEquals(listOf("c","b","d","a"),Payments.newestFirst(payments).map { it.id })
+    }
+    @Test fun summaryWhenPaidInFullOrWithoutAmount() {
+        val one=listOf(BillPayment(id="a",amount=3000))
+        assertEquals(0L,Payments.summary(10000,true,one).remaining); assertEquals(1f,Payments.summary(10000,true,one).progress)
+        assertNull(Payments.summary(null,false,one).progress); assertNull(Payments.summary(null,false,one).remaining)
+        // Only reversed payments: nothing paid, no latest payment.
+        val gone=Payments.summary(10000,false,listOf(BillPayment(amount=3000,reversed=true)))
+        assertEquals(0L,gone.paid); assertNull(gone.last); assertEquals(0f,gone.progress)
+    }
+    @Test fun samedayPaymentsNewestRecordedFirst() {
+        val d=LocalDate.of(2026,9,1)
+        val list=listOf(BillPayment(id="x",amount=1,date=d),BillPayment(id="y",amount=1,date=d))
+        assertEquals(listOf("y","x"),Payments.newestFirst(list).map { it.id })
+        assertEquals("y",Payments.summary(10,false,list).last!!.id)
+    }
 }

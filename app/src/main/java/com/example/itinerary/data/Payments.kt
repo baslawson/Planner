@@ -44,6 +44,20 @@ object Payments {
     fun remaining(amount: Long?, paid: Boolean, payments: List<BillPayment>): Long? =
         amount?.let { if (paid) 0 else (it - total(payments)).coerceAtLeast(0) }
 
+    // The bill editor's summary instead of every payment: what's paid (reversed ones don't count), what's left, how far
+    // along (0..1, null without an amount) and the latest payment that still counts (by date; of two on one day, the one
+    // recorded later).
+    data class Summary(val paid: Long, val remaining: Long?, val progress: Float?, val last: BillPayment?)
+    fun summary(amount: Long?, paid: Boolean, payments: List<BillPayment>): Summary {
+        val total = total(payments)
+        return Summary(total, remaining(amount, paid, payments),
+            amount?.takeIf { it > 0 }?.let { if (paid) 1f else (total.toFloat() / it).coerceIn(0f, 1f) },
+            newestFirst(payments).firstOrNull { !it.reversed })
+    }
+    // Newest first by date; of two on one day, the one recorded later first.
+    fun newestFirst(payments: List<BillPayment>): List<BillPayment> = payments.withIndex()
+        .sortedWith(compareByDescending<IndexedValue<BillPayment>> { it.value.date }.thenByDescending { it.index }).map { it.value }
+
     fun validate(item: ItineraryItem) {
         validate(item.payments)
         val total = total(item.payments)
