@@ -135,5 +135,14 @@ class QuickFixesNamesAndDatesTest {
         ok("Buy sun cream Friday").let { assertEquals("Buy sun cream", it.title); assertEquals(day(10, 2), it.date) }
     }
 
+    // Q-N8: "Midnight in Paris" is a name, not a time.
+    @Test fun midnightInANameIsNotATime() {
+        ok("Watch Midnight in Paris Friday").let { assertEquals("Watch Midnight in Paris", it.title); assertEquals(day(10, 2), it.date); assertNull(it.time) }
+        // Midnight as a time is unchanged.
+        ok("Flight at midnight").let { assertEquals("Flight", it.title); assertEquals(LocalTime.MIDNIGHT, it.time) }
+        ok("Party midnight Friday").let { assertEquals("Party", it.title); assertEquals(LocalTime.MIDNIGHT, it.time); assertEquals(day(10, 2), it.date) }
+        ok("Call midnight in Perth").let { assertEquals(LocalTime.MIDNIGHT, it.time) }
+        ok("Midnight Mass Christmas Eve").let { assertEquals("Midnight Mass Christmas Eve", it.title); assertNull(it.time) }
+    }
 
 }

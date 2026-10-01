@@ -351,6 +351,12 @@ object QuickEntry {
                 following == null && match.value.equals("sun", ignoreCase = true) && placeNameBefore.containsMatchIn(before)) {
                 mask(match.range, ''); return@forEach
             }
+            // "Watch Midnight in Paris": a capitalised clock word before in/at/of and a name is a title. Written in lower
+            // case it is still the time: "Call midnight in Perth".
+            if (clockWord && match.value[0].isUpperCase() &&
+                Regex("^\\s+(?:in|at|of)\\s+(?:the\\s+)?\\p{Lu}").containsMatchIn(remaining.substring(match.range.last + 1))) {
+                mask(match.range, ''); return@forEach
+            }
             if (following == null) return@forEach
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
