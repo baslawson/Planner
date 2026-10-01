@@ -148,7 +148,7 @@ class Repository(
         val keep = attachmentDao.allFileNames().toHashSet()
         taskDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
-        deletedDao.all().flatMap { DeletedCodec.decode(it.payload).storedAttachments }.forEach { keep.add(it.fileName) }
+        deletedDao.all().flatMap { contents(it).storedAttachments }.forEach { keep.add(it.fileName) }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         candidates.filter { it.isNotBlank() && it !in keep }.distinct().forEach(store::delete)
     }
@@ -160,7 +160,7 @@ class Repository(
     private val taskDao = db.taskDao()
     val tasks = taskDao.observe()
     suspend fun saveTask(task: PlannerTask, create: Boolean = true) = changes.withLock {
-        val clean = task.copy(title = task.title.trim(), notes = task.notes.trim())
+        val clean = Tasks.capText(task.copy(title = task.title.trim(), notes = task.notes.trim()))
         Tasks.validate(clean)
         val allTasks = taskDao.all()
         val oldIds = allTasks.find { it.id == clean.id }?.prerequisiteIds.orEmpty()
@@ -231,10 +231,10 @@ class Repository(
     }
     suspend fun deleteTask(id: String) = changes.withLock {
         withContext(NonCancellable) {
-            val bundle = db.withTransaction {
-                val task = taskDao.byId(id) ?: return@withTransaction null
+            val bundle = archiving { archived ->
+                val task = taskDao.byId(id) ?: return@archiving null
                 val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task))
-                archive(deleted, emptyList())
+                archive(deleted, archived, emptyList())
                 taskDao.delete(id)
                 deleted
             } ?: return@withContext
@@ -244,6 +244,8 @@ class Repository(
     }
 
     private val deletedDao = db.deletedDao()
+    private val payloads = store.deletedPayloads()
+    private fun contents(entry: DeletedEntry) = DeletedCodec.decode(payloads.read(entry.payload))
     val recentlyDeleted = deletedDao.observe().map { entries ->
         entries.filter { it.deletedAt > System.currentTimeMillis() - TRASH_RETENTION_MS }
     }
@@ -258,22 +260,38 @@ class Repository(
     // One event as stored, as it changes (null once gone): an open editor notices a sync pull's update of it.
     fun observeItem(id: Long): Flow<ItineraryItem?> = itemDao.observe(id).distinctUntilChanged()
 
-    private suspend fun archive(bundle: PendingDeletion, plans: List<Trip>? = null) {
+    private suspend fun archive(bundle: PendingDeletion, archived: MutableList<DeletedEntry>, plans: List<Trip>? = null) {
         val owners = plans ?: readIds(bundle.items.map { it.tripId }, tripDao::byIds).sortedWith(compareBy({ it.sortOrder }, { it.id }))
         val label = bundle.items.firstOrNull()?.title ?: bundle.tasks.firstOrNull()?.title ?: owners.firstOrNull()?.name ?: "Deleted events"
         val count = bundle.items.size + bundle.tasks.size
-        deletedDao.insert(DeletedEntry(id = bundle.token, label = if (count > 1) "$label + ${count - 1}" else label,
-            payload = DeletedCodec.encode(DeletedContents(owners, bundle.items, bundle.attachments, bundle.reminders, bundle.tasks))))
+        val entry = DeletedEntry(id = bundle.token, label = if (count > 1) "$label + ${count - 1}" else label,
+            payload = payloads.store(DeletedCodec.encode(DeletedContents(owners, bundle.items, bundle.attachments, bundle.reminders, bundle.tasks))))
+        archived += entry
+        deletedDao.insert(entry)
+    }
+
+    // A transaction that archives: if it doesn't commit, a payload file archive() wrote for it goes again.
+    private suspend fun <T> archiving(block: suspend (MutableList<DeletedEntry>) -> T): T {
+        val archived = mutableListOf<DeletedEntry>()
+        try { return db.withTransaction { block(archived) } }
+        catch (e: Throwable) { dropUncommitted(archived); throw e }
+    }
+
+    // After a failed transaction: the payload files of [entries] whose rows didn't get saved.
+    private suspend fun dropUncommitted(entries: List<DeletedEntry>) = withContext(NonCancellable) {
+        runCatching { entries.forEach { if (deletedDao.byId(it.id)?.payload != it.payload) payloads.delete(it.payload) } }
     }
 
     suspend fun restoreDeleted(id: String) = changes.withLock { restoreDeletedLocked(id) }
 
     private suspend fun restoreDeletedLocked(id: String) {
         val restoredTasks = mutableListOf<String>()
+        var stored: String? = null
         val reminderIds = db.withTransaction {
             val entry = deletedDao.byId(id) ?: return@withTransaction emptyList<Long>()
             check(entry.deletedAt > System.currentTimeMillis() - TRASH_RETENTION_MS) { "The recovery period has expired" }
-            val data = DeletedCodec.decode(entry.payload)
+            val data = contents(entry)
+            stored = entry.payload
             data.tasks.forEach { task ->
                 val restored = task.copy(id = if (taskDao.byId(task.id) == null) task.id else UUID.randomUUID().toString())
                 taskDao.insert(restored)
@@ -291,13 +309,16 @@ class Repository(
             deletedDao.delete(id)
             restored
         }
+        stored?.let(payloads::delete)
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
         afterCommit(reminderIds = reminderIds, taskIds = restoredTasks)
     }
 
     suspend fun permanentlyDelete(id: String) = changes.withLock {
-        val files = deletedDao.byId(id)?.let { DeletedCodec.decode(it.payload).storedAttachments.map { a -> a.fileName } }.orEmpty()
+        val entry = deletedDao.byId(id)
+        val files = entry?.let { contents(it).storedAttachments.map { a -> a.fileName } }.orEmpty()
         deletedDao.delete(id)
+        entry?.let { payloads.delete(it.payload) }
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
         afterCommit(files = files, notify = false)
     }
@@ -305,8 +326,9 @@ class Repository(
     private suspend fun purgeExpiredDeleted() {
         val expired = deletedDao.all().filter { it.deletedAt <= System.currentTimeMillis() - TRASH_RETENTION_MS }
         if (expired.isEmpty()) return
-        val files = expired.flatMap { DeletedCodec.decode(it.payload).storedAttachments }.map { it.fileName }
+        val files = expired.flatMap { contents(it).storedAttachments }.map { it.fileName }
         db.withTransaction { expired.forEach { deletedDao.delete(it.id) } }
+        expired.forEach { payloads.delete(it.payload) }
         val ids = expired.map { it.id }.toSet()
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token in ids }
         afterCommit(files = files, notify = false)
@@ -338,15 +360,15 @@ class Repository(
 
     suspend fun deleteTrips(trips: List<Trip>) = changes.withLock {
         if (trips.isEmpty()) return@withLock
-        val (files, reminders) = db.withTransaction {
+        val (files, reminders) = archiving { archived ->
             val selected = tripDao.all().filter { current -> trips.any { it.id == current.id } }
-            if (selected.isEmpty()) return@withTransaction emptyList<String>() to emptyList<Reminder>()
+            if (selected.isEmpty()) return@archiving emptyList<String>() to emptyList<Reminder>()
             val candidates = selected.flatMap { attachmentDao.fileNamesForTrip(it.id) }.toSet()
             val alarms = selected.flatMap { reminderDao.forTrip(it.id) }
             val selectedIds = selected.map { it.id }.toSet()
             val events = itemDao.all().filter { it.tripId in selectedIds }
             val eventIds = events.map { it.id }.toSet()
-            archive(PendingDeletion(items = events, attachments = attachmentDao.all().filter { it.itemId in eventIds }, reminders = alarms), selected)
+            archive(PendingDeletion(items = events, attachments = attachmentDao.all().filter { it.itemId in eventIds }, reminders = alarms), archived, selected)
             selected.forEach { tripDao.delete(it) }
             // Imported backups can share attachment files between plans.
             val keep = attachmentDao.allFileNames().toHashSet()
@@ -534,8 +556,8 @@ class Repository(
 
     suspend fun deleteWithUndo(item: ItineraryItem, entireSeries: Boolean = false) = changes.withLock {
         requirePlannerEvent(item.id)
-        val deleted = db.withTransaction {
-            val current = itemDao.byId(item.id) ?: return@withTransaction null
+        val deleted = archiving { archived ->
+            val current = itemDao.byId(item.id) ?: return@archiving null
             val selected = if (entireSeries && current.seriesId != null) {
                 itemDao.forSeries(current.seriesId).sortedBy { it.id }
             } else listOf(current)
@@ -543,7 +565,7 @@ class Repository(
             val bundle = PendingDeletion(items = selected,
                 attachments = readIds(ids, attachmentDao::forItems).sortedBy { it.id },
                 reminders = readIds(ids, reminderDao::forItems).sortedBy { it.id })
-            archive(bundle)
+            archive(bundle, archived)
             selected.forEach { itemDao.delete(it) }
             bundle
         } ?: return@withLock
@@ -556,15 +578,15 @@ class Repository(
     suspend fun deleteEventsWithUndo(ids: Set<Long>, taskIds: Set<String> = emptySet()) = changes.withLock {
         requirePlannerEvents(ids)
         withContext(NonCancellable) {
-            val deleted = db.withTransaction {
+            val deleted = archiving { archived ->
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
                 val tasks = taskIds.mapNotNull { taskDao.byId(it) }.sortedBy { it.id }
-                if (selected.isEmpty() && tasks.isEmpty()) return@withTransaction null
+                if (selected.isEmpty() && tasks.isEmpty()) return@archiving null
                 val selectedIds = selected.mapTo(hashSetOf()) { it.id }
                 val bundle = PendingDeletion(items = selected,
                     attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
                     reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id }, tasks = tasks)
-                archive(bundle)
+                archive(bundle, archived)
                 selected.forEach { itemDao.delete(it) }
                 tasks.forEach { taskDao.delete(it.id) }
                 bundle
@@ -578,14 +600,14 @@ class Repository(
     // message a deletion in Planner shows.
     suspend fun archiveEvents(ids: Set<Long>) = changes.withLock {
         withContext(NonCancellable) {
-            val reminders = db.withTransaction {
+            val reminders = archiving { archived ->
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
-                if (selected.isEmpty()) return@withTransaction emptyList()
+                if (selected.isEmpty()) return@archiving emptyList()
                 val selectedIds = selected.mapTo(hashSetOf()) { it.id }
                 val bundle = PendingDeletion(items = selected,
                     attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
                     reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id })
-                archive(bundle)
+                archive(bundle, archived)
                 selected.forEach { itemDao.delete(it) }
                 bundle.reminders
             }
@@ -760,9 +782,11 @@ class Repository(
         if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) deliver(task)
     }
 
-    // Everything in the database, read in one go so the pieces agree with each other (for backups).
+    // Everything in the database, read in one go so the pieces agree with each other (for backups). Recently deleted
+    // bundles come with their JSON, wherever it is kept.
     suspend fun snapshot(): DataSnapshot = db.withTransaction {
-        DataSnapshot(tripDao.all(), itemDao.all(), reminderDao.all(), attachmentDao.all(), db.templateDao().all(), deletedDao.all(), taskDao.all())
+        DataSnapshot(tripDao.all(), itemDao.all(), reminderDao.all(), attachmentDao.all(), db.templateDao().all(),
+            deletedDao.all().map { it.copy(payload = payloads.read(it.payload)) }, taskDao.all())
     }
 
     // Throws away all current data and puts [data] in its place, keeping its ids. The attachment
@@ -773,20 +797,30 @@ class Repository(
         require(data.tasks.map { it.id }.distinct().size == data.tasks.size)
         val oldTasks = taskDao.all()
         val oldReminders = reminderDao.all()
-        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + deletedDao.all().flatMap { DeletedCodec.decode(it.payload).storedAttachments }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
-        db.withTransaction {
-            taskDao.deleteAll()
-            taskDao.insertAll(data.tasks)
-            deletedDao.deleteAll()
-            deletedDao.insertAll(data.deleted)
-            db.templateDao().deleteAll()
-            db.templateDao().insertAll(data.templates)
-            tripDao.deleteAll()
-            tripDao.insertAll(data.trips)
-            itemDao.insertAll(data.items)
-            reminderDao.insertAll(data.reminders)
-            attachmentDao.insertAll(data.attachments)
+        val oldDeleted = deletedDao.all()
+        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + oldDeleted.flatMap { contents(it).storedAttachments }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
+        // New files for big bundles; the old ones go once the new data is in.
+        val deleted = mutableListOf<DeletedEntry>()
+        try {
+            data.deleted.forEach { deleted += it.copy(payload = payloads.store(payloads.read(it.payload))) }
+            db.withTransaction {
+                taskDao.deleteAll()
+                taskDao.insertAll(data.tasks)
+                deletedDao.deleteAll()
+                deletedDao.insertAll(deleted)
+                db.templateDao().deleteAll()
+                db.templateDao().insertAll(data.templates)
+                tripDao.deleteAll()
+                tripDao.insertAll(data.trips)
+                itemDao.insertAll(data.items)
+                reminderDao.insertAll(data.reminders)
+                attachmentDao.insertAll(data.attachments)
+            }
+        } catch (e: Throwable) {
+            dropUncommitted(deleted)
+            throw e
         }
+        oldDeleted.forEach { payloads.delete(it.payload) }
         _pendingDeletions.value = emptyList()
         _pendingMoves.value = emptyList()
         _pendingPayments.value = emptyList()

@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import com.example.itinerary.reminders.ReminderAlarms
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.json.JSONArray
@@ -112,6 +113,43 @@ class TasksDataTest {
             try { backup.stage(Uri.fromFile(bad));fail("Accepted $kind") } catch (_: BackupException) { }
             assertEquals(before,repo.snapshot())
         }
+    }
+    // D1: a Recently deleted bundle far bigger than the 2 MB cursor window stays readable everywhere: the list, backups,
+    // restores and Undo. Before, the one row holding it made every read of the table throw SQLiteBlobTooBigException.
+    @Test fun aHugeDeletedBundleStaysReadableBackedUpAndRestorable()=fixture { repo,db,backup,dir ->
+        val plan=db.tripDao().upsert(Trip(name="Imported",destination="",startDate=LocalDate.of(2026,10,1),endDate=LocalDate.of(2026,10,30)))
+        val store=AttachmentStore(object:ContextWrapper(InstrumentationRegistry.getInstrumentation().targetContext) { override fun getFilesDir()=File(dir,"files") })
+        val ids=(1..12).map { n ->
+            val id=db.itemDao().upsert(ItineraryItem(tripId=plan,date=LocalDate.of(2026,10,n),startTime=null,title="Scanned $n"))
+            store.writableFileFor("scan$n.pdf").writeText("pdf")
+            db.attachmentDao().insert(Attachment(itemId=id,name="Scan $n",fileName="scan$n.pdf",mimeType="application/pdf",
+                recognizedText="Ä".repeat(200_000),textStatus="READY"))
+            id
+        }.toSet()
+        val before=repo.snapshot()
+        repo.deleteEventsWithUndo(ids);val token=repo.pendingDeletions.value.single().token
+        val kept=File(dir,"files/recently-deleted")
+        assertEquals(1,kept.listFiles()!!.size)
+        assertTrue(db.deletedDao().all().single().payload.length<100)
+        assertEquals("Scanned 1 + 11",repo.recentlyDeleted.first().single().label)
+        assertEquals(12,DeletedCodec.decode(repo.snapshot().deleted.single().payload).attachments.size)
+        val file=File(dir,"huge.zip");backup.export(Uri.fromFile(file))
+        backup.restore(backup.stage(Uri.fromFile(file)))
+        assertEquals(1,kept.listFiles()!!.size) // the restored bundle's file; the old one went
+        repo.restoreDeleted(token)
+        assertEquals(before.items,repo.snapshot().items);assertEquals(before.attachments,repo.snapshot().attachments)
+        assertTrue(repo.snapshot().deleted.isEmpty());assertTrue(kept.listFiles()!!.isEmpty())
+        // A deletion that fails leaves no file behind.
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_item_delete BEFORE DELETE ON items BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
+        try { repo.deleteEventsWithUndo(ids);fail("Deletion should fail") } catch (_: android.database.sqlite.SQLiteException) { }
+        assertTrue(kept.listFiles()!!.isEmpty());assertTrue(repo.snapshot().deleted.isEmpty())
+    }
+    @Test fun aTaskKeepsOneDocumentsWorthOfRecognisedText()=fixture { repo,_,_,_ ->
+        val docs=List(20) { Attachment(itemId=0,name="Page $it",fileName="page$it.jpg",mimeType="image/jpeg",recognizedText="x".repeat(200_000),textStatus="READY") }
+        val task=task().copy(attachments=docs);repo.saveTask(task)
+        val saved=repo.snapshot().tasks.single()
+        assertEquals(20,saved.attachments.size);assertEquals(Tasks.MAX_TEXT,saved.attachments.sumOf { it.recognizedText.length })
+        repo.saveTask(saved);assertEquals(saved,repo.snapshot().tasks.single()) // retrying the save is still the same task
     }
     private fun writeJson(file:File,value:JSONObject) {
         ZipOutputStream(file.outputStream()).use { it.putNextEntry(ZipEntry("data.json"));it.write(value.toString().toByteArray());it.closeEntry() }

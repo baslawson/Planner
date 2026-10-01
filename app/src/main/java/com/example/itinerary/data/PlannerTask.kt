@@ -68,6 +68,19 @@ object Tasks {
                 })
         }.sortedWith(order)
     }
+    // A task's attachments are stored in its own row, which must stay well inside Android's 2 MB cursor window or the
+    // whole task list can't be read. Their recognised text (for search and scanning) is kept up to one document's worth
+    // in total; the rest is cut and marked partly read, as for a long document. The attachments themselves all stay.
+    const val MAX_TEXT = 200_000
+    fun capText(task: PlannerTask): PlannerTask {
+        var left = MAX_TEXT
+        if (task.attachments.sumOf { it.recognizedText.length } <= left) return task
+        return task.copy(attachments = task.attachments.map { attachment ->
+            val kept = attachment.recognizedText.take(left)
+            left -= kept.length
+            if (kept.length == attachment.recognizedText.length) attachment else attachment.copy(recognizedText = kept, textStatus = "PARTIAL")
+        })
+    }
     fun validate(task: PlannerTask) {
         require(task.id.isNotBlank() && task.id.length <= 100)
         require(task.title.isNotBlank() && task.title.length <= 500)
@@ -81,6 +94,7 @@ object Tasks {
         require(task.attachments.size <= 100)
         require(task.attachments.map { it.fileName }.distinct().size == task.attachments.size)
         require(task.attachments.all { it.url == null && Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.fileName) && it.name.isNotBlank() })
+        require(task.attachments.sumOf { it.recognizedText.length } <= MAX_TEXT)
         require(task.reminderAt == null || task.reminderAt in 1..253402300799999L)
         require(task.snoozedUntil == null || task.snoozedUntil in 1..253402300799999L)
     }
@@ -120,6 +134,7 @@ object TaskCodec {
                 require(timestamp is Long || timestamp is Int) { "Invalid task snooze time" }
                 (timestamp as Number).toLong()
             })
-            .also(Tasks::validate)
+            // A task saved before the cap may have more text; it is cut rather than refusing the whole file.
+            .let(Tasks::capText).also(Tasks::validate)
     }.also { tasks -> require(tasks.map { it.id }.distinct().size == tasks.size) }
 }

@@ -4,6 +4,8 @@ import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.time.LocalDate
 import java.util.UUID
 
@@ -22,6 +24,39 @@ interface DeletedDao {
     @Insert suspend fun insertAll(entries: List<DeletedEntry>)
     @Query("DELETE FROM recently_deleted WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM recently_deleted") suspend fun deleteAll()
+}
+
+// One database row bigger than Android's 2 MB cursor window can't be read back, and every read of this table (the list,
+// Undo, backups, restores) would then fail. So a big bundle (an undone calendar import, a series whose documents carry
+// long recognised text) is kept in a file of its own and its row holds only "file:<name>". Small ones stay in the row.
+class DeletedPayloads(private val dir: File) {
+    // What the row keeps for [payload]. The file is written and synced before the row, so a saved row never points at nothing.
+    fun store(payload: String): String {
+        if (payload.length <= INLINE_LIMIT) return payload
+        dir.mkdirs()
+        val name = "${UUID.randomUUID()}.json"
+        val temp = File(dir, "$name.tmp")
+        try {
+            FileOutputStream(temp).use { out -> out.write(payload.toByteArray(Charsets.UTF_8)); out.fd.sync() }
+            check(temp.renameTo(File(dir, name))) { "Couldn't keep the deleted items" }
+        } catch (e: Throwable) { temp.delete(); throw e }
+        return PREFIX + name
+    }
+    // The bundle's JSON, whether it is in the row (as before) or in a file.
+    fun read(stored: String): String = fileOf(stored)?.readText(Charsets.UTF_8) ?: stored
+    fun delete(stored: String) { fileOf(stored)?.delete() }
+    private fun fileOf(stored: String): File? {
+        if (!stored.startsWith(PREFIX)) return null // a bundle's JSON starts with "{"
+        val name = stored.removePrefix(PREFIX)
+        require(NAME.matches(name)) { "Unreadable deleted items" }
+        return File(dir, name)
+    }
+    companion object {
+        // Characters: at most about 600 KB as UTF-8, well inside the window.
+        const val INLINE_LIMIT = 200_000
+        private const val PREFIX = "file:"
+        private val NAME = Regex("[0-9a-f-]{36}\\.json")
+    }
 }
 
 data class DeletedContents(val trips: List<Trip>, val items: List<ItineraryItem>,
