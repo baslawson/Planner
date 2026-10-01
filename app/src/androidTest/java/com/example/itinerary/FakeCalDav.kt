@@ -26,6 +26,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var refuseBefore: String? = null
     // Called with each calendar-query's start date before it's answered (something happening while a sync runs).
     @Volatile var onQuery: ((String) -> Unit)? = null
+    // A PUT whose body this returns a code for is answered with it and not stored (Nextcloud refusing one file).
+    @Volatile var refuse: ((String) -> Int?)? = null
     @Volatile private var version = 0
     fun bump() { version++ }
     fun put(path: String, body: String) { files[path] = (if (path.startsWith(other)) "\"w-orig\"" else "\"s${++version}\"") to body }
@@ -66,6 +68,7 @@ class FakeCalDav(private val home: String, private val user: String, private val
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)
             "PUT" -> {
+                refuse?.invoke(body)?.let { return MockResponse().setResponseCode(it) }
                 val ifMatch = request.getHeader("If-Match"); val ifNone = request.getHeader("If-None-Match")
                 when {
                     ifNone == "*" && current != null -> MockResponse().setResponseCode(412)

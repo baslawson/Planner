@@ -106,8 +106,8 @@ object ServerTasks {
 
     // [original] with only the managed properties [task] changed replaced by [task]'s, plus a fresh DTSTAMP/LAST-MODIFIED
     // and a higher SEQUENCE. Everything else (start date, categories, alarms, subtask links, unknown properties) is kept
-    // exactly as it was, lines and folding included. A start date after a new due date is dropped (a task can't start
-    // after it's due).
+    // exactly as it was, lines and folding included. A start that doesn't go with a new due date is dropped (a task can't
+    // start after it's due, and both must be dates or both date-times: Nextcloud refuses the file otherwise).
     fun patch(original: String, task: PlannerTask, zone: ZoneId, now: Instant): String {
         val before = read(original, zone, limited = false).fields
         fun same(theirs: String, mine: String, max: Int) = theirs == mine || theirs.length > max && theirs.take(max) == mine
@@ -140,9 +140,10 @@ object ServerTasks {
                 stack.lastOrNull() == "VTODO" && n == "DTSTART" && start == null -> start = unfolded(block)
             }
         }
-        val dropStart = "DUE" in replaced && task.dueDate != null && start?.let { line ->
-            runCatching { dueDate(Ics.property(line), zone) > task.dueDate }.getOrDefault(false)
-        } == true
+        // A new due date and a start that wouldn't go with it (after it, or a date where the other has a time; a server may
+        // refuse the file): the start is dropped.
+        val newDue = if ("DUE" in replaced) managed("DUE", task, now, oldDue, zone).singleOrNull() else null
+        val dropStart = newDue != null && start?.let { !startFits(it, newDue, zone) } == true
         val out = mutableListOf<String>()
         stack.clear()
         var done = false
@@ -169,6 +170,17 @@ object ServerTasks {
         require(done) { "No task in this file" }
         return out.joinToString("\r\n", postfix = "\r\n")
     }
+
+    // Whether start line [start] may stay with due line [due] (RFC 5545: the same kind of value, and not after it; compared
+    // as moments when they have a time). Unreadable counts as not.
+    private fun startFits(start: String, due: String, zone: ZoneId): Boolean = runCatching {
+        val s = Ics.property(start); val d = Ics.property(due)
+        when {
+            Ics.isDate(s) != Ics.isDate(d) -> false
+            Ics.isDate(s) -> Ics.date(s) <= Ics.date(d)
+            else -> !Ics.time(s, zone, strictGap = false, Ics::zone).toInstant().isAfter(Ics.time(d, zone, strictGap = false, Ics::zone).toInstant())
+        }
+    }.getOrDefault(false)
 
     // The most text Planner takes in a task (see Tasks.validate).
     const val MAX_TITLE = 500

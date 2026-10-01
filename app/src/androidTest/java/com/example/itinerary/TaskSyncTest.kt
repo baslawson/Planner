@@ -283,6 +283,31 @@ class TaskSyncTest {
         assertEquals(2, all().size); assertEquals(1, repo.snapshot().items.size)
     }
 
+    // T1: a file Nextcloud refuses (415, as sabre/vobject answers an invalid one) holds up only its own task.
+    @Test fun aRefusedTaskDoesntHoldUpTheOthers() = runBlocking {
+        add("QA Refused new"); add("QA Fine new")
+        dav.put("${list}web.ics", todo("web-1", "QA Refused edit"))
+        dav.refuse = { body -> if (body.contains("QA Refused")) 415 else null }
+        start()
+        assertNotNull(fileOf("QA Fine new"))
+        assertTrue(listFiles().values.none { it.second.contains("QA Refused new") })
+        assertTrue(tasks.state.value.error)
+        assertTrue(tasks.state.value.message.orEmpty(), tasks.state.value.message.orEmpty().contains("HTTP 415"))
+        // An edit refused, one to another task still goes.
+        repo.saveTask(task("QA Refused edit").copy(notes = "Refused note"), create = false)
+        repo.saveTask(task("QA Fine new").copy(notes = "Fine note"), create = false)
+        tasks.send()
+        assertTrue(fileOf("QA Fine new").value.second.contains("DESCRIPTION:Fine note"))
+        assertFalse(dav.files["${list}web.ics"]!!.second.contains("Refused note"))
+        // Accepted again: both are sent at the next pass.
+        dav.refuse = null
+        syncAgain()
+        assertNotNull(fileOf("QA Refused new"))
+        assertTrue(dav.files["${list}web.ics"]!!.second.contains("DESCRIPTION:Refused note"))
+        assertFalse(tasks.state.value.error)
+        assertTrue(rows().all { it.problem == null })
+    }
+
     @Test fun aBackupKeepsTheListAndWhatWasSynced() = runBlocking {
         add("QA Backed up")
         start()

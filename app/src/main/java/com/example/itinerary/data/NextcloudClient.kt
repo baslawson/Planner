@@ -197,7 +197,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
                 200, 201, 204 -> WriteResult.Ok(response.header("ETag") ?: currentEtag(account, url))
                 412 -> WriteResult.Changed
                 404 -> WriteResult.Missing
-                else -> fail(response.code, calendar = true)
+                else -> fail(response.code, calendar = true, write = true)
             }
         }
     }
@@ -213,7 +213,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
                 200, 204 -> WriteResult.Ok(null)
                 412 -> WriteResult.Changed
                 404 -> WriteResult.Missing
-                else -> fail(response.code, calendar = true)
+                else -> fail(response.code, calendar = true, write = true)
             }
         }
     }
@@ -412,7 +412,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    private fun fail(code: Int, calendar: Boolean = false): Nothing = throw BackupException(if (calendar) when (code) {
+    // [write]: a calendar file's PUT or DELETE, which Nextcloud may refuse for that file alone (RefusedException).
+    private fun fail(code: Int, calendar: Boolean = false, write: Boolean = false): Nothing {
+        if (write && refused(code)) throw RefusedException(code, "Nextcloud refused a change (HTTP $code).")
+        failWith(code, calendar)
+    }
+
+    private fun failWith(code: Int, calendar: Boolean): Nothing = throw BackupException(if (calendar) when (code) {
         401 -> "Nextcloud rejected the login. Check your username and app password."
         403 -> "Nextcloud denied access to your calendars (or doesn't allow adding events to this one)."
         404 -> "The calendar wasn't found on Nextcloud. It may have been deleted."
@@ -445,6 +451,11 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
         // Paths compared by their decoded segments: Nextcloud writes some characters percent-encoded that OkHttp leaves
         // as they are (an apostrophe in a username is %27 there, ' here), and both name the same folder.
+        // A reply that refuses this one request (what was sent), not the login, the calendar, or the server as a whole:
+        // a client error other than login (401), access (403), not found (404), method (405), proxy login (407), timeout
+        // (408), version (412), lock (423) and too many requests (429).
+        internal fun refused(code: Int) = code in 400..499 && code !in setOf(401, 403, 404, 405, 407, 408, 412, 423, 429)
+
         private fun segments(url: HttpUrl) = url.pathSegments.dropLastWhile { it.isEmpty() }
         internal fun samePath(url: HttpUrl, other: HttpUrl) = segments(url) == segments(other)
         // [url] is somewhere inside the folder [folder] (not the folder itself).

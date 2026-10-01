@@ -137,6 +137,40 @@ class ServerTasksTest {
         assertFalse(ServerTasks.patch(original, task.copy(dueDate = LocalDate.of(2026, 10, 1)), perth, now).contains("DTSTART"))
     }
 
+    // T1: the start and the new due date must make a pair Nextcloud accepts: the same kind of value, the start not after
+    // the due moment (same-day times count).
+    @Test fun aStartThatDoesntGoWithTheNewDueIsDropped() {
+        // A timed start and no due: the new due is a date, so the timed start goes.
+        val timed = file("SUMMARY:x", "DTSTART:20261005T100000Z")
+        val t1 = ServerTasks.apply(PlannerTask(id = "t"), fields(timed)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        val p1 = ServerTasks.patch(timed, t1, perth, now)
+        assertTrue(p1, p1.contains("DUE;VALUE=DATE:20261009")); assertFalse(p1, p1.contains("DTSTART"))
+        // Due moved to the start's own day, but earlier in it.
+        val sameDay = file("SUMMARY:x", "DTSTART;TZID=Australia/Perth:20261009T180000", "DUE;TZID=Australia/Perth:20261010T090000")
+        val t2 = ServerTasks.apply(PlannerTask(id = "t"), fields(sameDay)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        val p2 = ServerTasks.patch(sameDay, t2, perth, now)
+        assertTrue(p2, p2.contains("DUE;TZID=Australia/Perth:20261009T090000")); assertFalse(p2, p2.contains("DTSTART"))
+        // A timed start before the timed due stays, and so does one at the very same moment.
+        val fine = file("SUMMARY:x", "DTSTART;TZID=Australia/Perth:20261001T080000", "DUE;TZID=Australia/Perth:20261005T090000")
+        val t3 = ServerTasks.apply(PlannerTask(id = "t"), fields(fine)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        assertTrue(ServerTasks.patch(fine, t3, perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+        assertTrue(ServerTasks.patch(fine, t3.copy(dueDate = LocalDate.of(2026, 10, 1)), perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+        // A date start with a timed due: not the same kind, dropped.
+        val mixed = file("SUMMARY:x", "DTSTART;VALUE=DATE:20261001", "DUE:20261005T013000Z")
+        val t4 = ServerTasks.apply(PlannerTask(id = "t"), fields(mixed)!!).copy(dueDate = LocalDate.of(2026, 10, 9))
+        assertFalse(ServerTasks.patch(mixed, t4, perth, now).contains("DTSTART"))
+        // Due date removed: the start stays (a task may have a start alone).
+        assertTrue(ServerTasks.patch(fine, t3.copy(dueDate = null), perth, now).contains("DTSTART;TZID=Australia/Perth:20261001T080000"))
+    }
+
+    // T1: which write replies refuse that one file (sync goes on with the others) and which stop the pass.
+    @Test fun aRefusedFileIsTellableFromAFailedSync() {
+        listOf(400, 409, 413, 415, 422).forEach { assertTrue("$it", NextcloudClient.refused(it)) }
+        listOf(200, 401, 403, 404, 405, 407, 408, 412, 423, 429, 500, 503, 302).forEach { assertFalse("$it", NextcloudClient.refused(it)) }
+        assertEquals("Nextcloud refused 2 tasks (HTTP 415). The others were sent; Planner tries again at the next sync.", TaskSync.refusedMessage(2, 415))
+        assertTrue(TaskSync.refusedMessage(1, 400).startsWith("Nextcloud refused 1 task (HTTP 400)."))
+    }
+
     @Test fun foldedLinesSurviveUntouched() {
         val long = "DESCRIPTION:" + "word ".repeat(30).trim()
         val folded = long.chunked(70).let { parts -> parts.first() + parts.drop(1).joinToString("") { "\r\n $it" } }
