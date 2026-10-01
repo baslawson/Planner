@@ -224,4 +224,17 @@ class ServerTasksTest {
         val single = TaskSync.relink(listOf(Triple("/l/2.ics", "planner-task-x@planner", f("Bread", LocalDate.of(2026, 1, 1)))), listOf(b))
         assertEquals(mapOf("/l/2.ics" to "b"), single)
     }
+
+    // T3: a file already done on Nextcloud is never taken for a new open Planner task, by either pass.
+    @Test fun relinkLeavesDoneFilesAlone() {
+        val a = PlannerTask(id = "a", title = "Milk", dueDate = LocalDate.of(2026, 10, 5))
+        val b = PlannerTask(id = "b", title = "Bread")
+        val done = ServerTasks.Fields("Milk", "", LocalDate.of(2026, 10, 5), TaskPriority.NORMAL, true)
+        val doneOwn = ServerTasks.Fields("Bread", "", LocalDate.of(2025, 1, 1), TaskPriority.NORMAL, true)
+        assertEquals(emptyMap<String, String>(), TaskSync.relink(listOf(Triple("/l/1.ics", "other", done),
+            Triple("/l/2.ics", "planner-task-x@planner", doneOwn)), listOf(a, b)))
+        // An open one with the same title is still found.
+        assertEquals(mapOf("/l/3.ics" to "a"), TaskSync.relink(listOf(Triple("/l/1.ics", "other", done),
+            Triple("/l/3.ics", "other", done.copy(done = false))), listOf(a)))
+    }
 }

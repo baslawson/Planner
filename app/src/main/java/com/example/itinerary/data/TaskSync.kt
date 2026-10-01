@@ -422,9 +422,11 @@ class TaskSync(
 
         // Which files ([href], uid, the task as Planner would hold it) are [candidates] already (Planner's open tasks without
         // a file): first exactly (title and due date); then, for files Planner itself created, the one task with that title.
-        // Each task is used once; anything unsure is left alone.
-        internal fun relink(files: List<Triple<String, String?, ServerTasks.Fields>>, candidates: List<PlannerTask>): Map<String, String> {
+        // Each task is used once; anything unsure is left alone. Files already done on Nextcloud stay there only (T3: an
+        // old completed one is never a new open task's file).
+        internal fun relink(all: List<Triple<String, String?, ServerTasks.Fields>>, candidates: List<PlannerTask>): Map<String, String> {
             fun key(title: String, due: java.time.LocalDate?) = title.trim().take(ServerTasks.MAX_TITLE).ifEmpty { "(No title)" } to due
+            val files = all.filter { !it.third.done }
             val free = candidates.sortedBy { it.id }.toMutableList()
             val result = LinkedHashMap<String, String>()
             for ((href, _, server) in files) free.firstOrNull { key(it.title, it.dueDate) == key(server.title, server.dueDate) }
