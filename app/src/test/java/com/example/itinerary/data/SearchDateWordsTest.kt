@@ -49,4 +49,38 @@ class SearchDateWordsTest {
         assertEquals(setOf(6L), hits("4 march"))
         assertEquals(setOf(1L, 2L, 3L, 5L), hits("october"))
     }
+
+    // Second bug hunt of 1 Oct 2026 (Q-N10): the date words quick entry reads.
+    @Test fun dayOfMonthWithOf() {
+        assertEquals(setOf(1L), hits("dentist 1st of october"))
+        assertEquals(setOf(6L), hits("4th of march"))
+        assertEquals(setOf(6L), hits("dentist the 4th of march 2027"))
+        assertEquals(setOf(6L), hits("4 of mar"))
+    }
+
+    @Test fun abbreviatedWeekdaysAndTomorrow() {
+        assertEquals(setOf(2L), hits("gym fri"))
+        assertEquals(setOf(2L), hits("gym tmrw"))
+        assertEquals(setOf(2L), hits("gym tmr"))
+        assertEquals(setOf(2L), hits("gym tomoz"))
+        assertEquals(setOf(3L), hits("gym next fri"))
+        assertEquals(setOf(4L), hits("gym this mon"))
+        assertEquals(setOf(7L), hits("gym last fri"))
+        for (words in listOf("fri", "thurs", "tue", "next fri", "this mon", "tmrw"))
+            assertEquals(words, QuickEntry.parse("Gym $words", today, dayFirst = true).date,
+                Search.run(words, emptySet(), plans, (0L..30L).map { event(100 + it, today.minusDays(10).plusDays(it), "x") }, emptyList(), today)
+                    .hits.single().item.date)
+    }
+
+    @Test fun sunSatAndWedAloneMayBeTitleWords() {
+        val list = listOf(event(1, LocalDate.of(2026, 10, 4), "Brunch"), event(2, LocalDate.of(2026, 10, 9), "Sun cream"),
+            event(3, LocalDate.of(2026, 10, 9), "Lunch"), event(4, LocalDate.of(2026, 10, 9), "Sat nav"))
+        fun found(query: String) = Search.run(query, emptySet(), plans, list, emptyList(), today).hits.map { it.item.id }.toSet()
+        // As quick entry reads "Buy sun cream" and "Lunch Sun": the day, or the word.
+        assertEquals(setOf(1L, 2L), found("sun"))
+        assertEquals(setOf(2L), found("sun cream"))
+        assertEquals(setOf(1L), found("brunch sun"))
+        assertEquals(setOf(4L), found("sat"))
+        assertEquals(setOf(1L), found("this sun"))
+    }
 }

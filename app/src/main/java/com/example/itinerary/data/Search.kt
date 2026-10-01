@@ -41,6 +41,12 @@ object Search {
     private val MODIFIERS = setOf("next", "this", "last")
 
     private val WEEKDAYS: Map<String, DayOfWeek> = DayOfWeek.entries.associateBy { it.name.lowercase(Locale.ROOT) }
+    // The short forms quick entry reads as weekdays.
+    private val WEEKDAY_ABBREVIATIONS: Map<String, DayOfWeek> = mapOf(
+        "mon" to DayOfWeek.MONDAY, "tue" to DayOfWeek.TUESDAY, "tues" to DayOfWeek.TUESDAY, "wed" to DayOfWeek.WEDNESDAY,
+        "weds" to DayOfWeek.WEDNESDAY, "thu" to DayOfWeek.THURSDAY, "thur" to DayOfWeek.THURSDAY, "thurs" to DayOfWeek.THURSDAY,
+        "fri" to DayOfWeek.FRIDAY, "sat" to DayOfWeek.SATURDAY, "sun" to DayOfWeek.SUNDAY)
+    private val TITLE_WORD_WEEKDAYS = setOf("sun", "sat", "wed")
     private val MONTHS: Map<String, Month> = Month.entries.associateBy { it.name.lowercase(Locale.ROOT) }
     private val MONTH_ABBREVIATIONS: Map<String, Month> =
         Month.entries.associateBy { it.name.lowercase(Locale.ROOT).take(3) } + ("sept" to Month.SEPTEMBER)
@@ -221,6 +227,7 @@ object Search {
 
     private class DateFilter(val label: String, val test: (LocalDate) -> Boolean)
 
+    // A word that is a date or a title word: a month alone ("march"), or "sun", "sat" and "wed" (its [month] is that day).
     private class MonthOrWord(val word: String, val month: DateFilter)
 
     private class Parsed(val words: List<String>, val dates: List<DateFilter>, val invalidDates: List<String>, val monthOrWord: MonthOrWord? = null)
@@ -244,14 +251,27 @@ object Search {
             val next = tokens.getOrNull(i + 1)
             when {
                 token == "today" -> { dates += exact(today); i++ }
-                token == "tomorrow" -> { dates += exact(today.plusDays(1)); i++ }
+                // "tomorrow", "tmrw", "tmr": the spellings quick entry reads.
+                token in QuickEntry.tomorrowSpellings -> { dates += exact(today.plusDays(1)); i++ }
                 token == "yesterday" -> { dates += exact(today.minusDays(1)); i++ }
-                // As quick entry reads them: next Friday is next week's, this Friday this week's.
-                token in MODIFIERS && next in WEEKDAYS -> {
-                    dates += exact(QuickEntry.weekdayDate(WEEKDAYS.getValue(next!!), token, today))
+                // As quick entry reads them: next Friday is next week's, this Friday this week's. Also "next fri".
+                token in MODIFIERS && next != null && weekdayOf(next) != null -> {
+                    dates += exact(QuickEntry.weekdayDate(weekdayOf(next)!!, token, today))
                     i += 2
                 }
-                token in WEEKDAYS -> { dates += exact(QuickEntry.weekdayDate(WEEKDAYS.getValue(token), "", today)); i++ }
+                // "sun", "sat", "wed" alone may be title words ("sun cream", "sat nav"): the day or the word, as a month alone.
+                token in TITLE_WORD_WEEKDAYS -> {
+                    loneMonths += MonthOrWord(token, exact(QuickEntry.weekdayDate(weekdayOf(token)!!, "", today)))
+                    i++
+                }
+                weekdayOf(token) != null -> { dates += exact(QuickEntry.weekdayDate(weekdayOf(token)!!, "", today)); i++ }
+                // "1st of October", "4 of March 2027".
+                dayNumber(token) != null && next == "of" && tokens.getOrNull(i + 2)?.let(::monthOf) != null -> {
+                    val year = yearAt(tokens, i + 3)
+                    val size = if (year != null) 4 else 3
+                    named(dayNumber(token)!!, monthOf(tokens[i + 2])!!, year, tokens.subList(i, i + size), dates, invalidDates)
+                    i += size
+                }
                 dayNumber(token) != null && next != null && monthOf(next) != null -> {
                     val year = yearAt(tokens, i + 2)
                     val size = if (year != null) 3 else 2
@@ -294,6 +314,8 @@ object Search {
     private fun dayNumber(token: String): Int? = DAY_NUMBER.matchEntire(token)?.groupValues?.get(1)?.toInt()?.takeIf { it in 1..31 }
 
     private fun monthOf(token: String): Month? = MONTHS[token] ?: MONTH_ABBREVIATIONS[token]
+
+    private fun weekdayOf(token: String): DayOfWeek? = WEEKDAYS[token] ?: WEEKDAY_ABBREVIATIONS[token]
 
     private fun yearAt(tokens: List<String>, index: Int): Int? =
         tokens.getOrNull(index)?.takeIf { it.length == 4 }?.toIntOrNull()?.takeIf { it in 1900..2100 }

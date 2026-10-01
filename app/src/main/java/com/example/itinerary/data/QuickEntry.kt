@@ -102,12 +102,15 @@ object QuickEntry {
     // Right after a day number, am or pm makes it a time: "Call Jan 3 pm" is 3pm, with Jan (a name) left in the title.
     private const val notClockHour = "(?!\\d{1,2}\\s*(?:am|pm|a\\.m|p\\.m)(?![a-z]))"
     // "Dentist 3rd 2pm": a day number (1–31) with st/nd/rd/th and no "the" is a date right before a time, not before a
-    // date ("Sam's 21st 17 Oct"), and only when the entry has no other date (see parse); with "on", also at the end or
-    // before at/from/for ("Dentist on 3rd at 2pm"). Before other words it stays in the title: "3rd floor".
+    // date ("Sam's 21st 17 Oct"), and only when the entry has no other date (see parse); with "on", "by" or "due", also at
+    // the end or before at/from/for ("Dentist on 3rd at 2pm", "Rent due 15th"). Before other words it stays in the title:
+    // "3rd floor".
     private const val bareOrdinalValue = "(?:3[01]|[12]\\d|0?[1-9])(?:st|nd|rd|th)"
     private const val bareOrdinal = "$bareOrdinalValue(?=\\s*,?\\s*(?:at\\s+|@\\s*)?\\d)" +
         "(?!\\s*,?\\s*\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:$months)\\b|\\s*,?\\s*(?:\\d{1,2}/|\\d{1,2}\\.\\d{1,2}\\.|\\d{4}[-/.])\\d)"
-    private val moneyAmounts = Regex("(?<=[£€¥$]\\s?)\\d[\\d,]*(?:\\.\\d+)?")
+    // After a currency sign or code, or before a code: "$450", "AUD 20.50", "20.50 AUD".
+    private val currencyCodes = Bills.currencies.joinToString("|")
+    private val moneyAmounts = rx("(?<=[£€¥$]\\s?|\\b(?:$currencyCodes)\\s?)\\d[\\d,]*(?:\\.\\d+)?|(?<![\\w.,])\\d[\\d,]*(?:\\.\\d+)?(?=\\s?(?:$currencyCodes)\\b)")
     // "Call 0491 570 156", "+61 491 570 156", "(08) 5550 1234", "0491-570-156": a phone number, never a time or date. At least
     // nine digits, so "Oct 12 2026 10am" and "0800 1400" keep their dates and times; see parse.
     private val phoneNumbers = Regex("(?<![\\w.:/+(-])(?:\\+\\d{1,3}(?:[ -]\\d{1,5}){2,}|\\(0\\d\\)\\s?\\d{3,4}[ -]?\\d{3,4}|\\d{2,5}(?: \\d{2,5}){2,}|0\\d{2,4}(?:-\\d{3,4}){2})(?![\\w.:/-])")
@@ -117,9 +120,9 @@ object QuickEntry {
     private const val numberLabels = "bus|route|ferry|tram|flight|gate|platform|terminal|stop|bay|room|rm|level|floor|table|court|seat|line|no\\.?|number"
     private val labelledNumbers = rx("(?:(?<=\\b(?:$numberLabels)\\s{1,3}|#\\s?)|(?<=\\b(?:train|row)\\s{1,3})(?!(?:[1-9]|1[0-2])\\b))\\d{1,3}(?=\\s+(?:[-–—]|till?|'til|until)\\s)")
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
-    private const val onOrdinal = "on\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
+    private const val onOrdinal = "(?:on|by|due(?:\\s+(?:on|by))?)\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
-    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
+    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+(?:the\\s+)?$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
     // "before Friday" is a deadline: the date is Friday, "before" leaves the title.
     private val dates = rx("\\b(?:(?:(?<!-)(?:on|by|before|due(?:\\s+(?:on|by))?)\\s+)?(?:$datePhrases)|$onOrdinal)\\b")
     // A four-digit number after a month-name date ("3 Oct 1500", "Oct 3, 1930", "3-7 Oct 0800"): group 2 is its year only
@@ -287,6 +290,13 @@ object QuickEntry {
         "tonight", "morning", "afternoon", "arvo", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all",
         "yesterday", "last", "ago") +
         weekdays.split('|') + months.split('|') + tomorrowSpellings).toSet()
+    // A frequency word naming something: "Weekly report", "The Daily Telegraph", "the Every Day Cafe". Group 1 is the
+    // adjective form, group 2 the word after it; see parse.
+    private val frequencyNames = rx("(?<![\\w-])(?:(daily|weekly|bi-?weekly|fortnightly|monthly|quarterly|yearly|annually)|every\\s+day)(?=\\s+(\\p{L}+))")
+    // Also with a word already kept as title text between: "the midnight sun".
+    private val determinerBefore = rx("\\b(?:the|a|an|my|our|your|his|her|their)\\s+(?:\uE000+\\s+)*$")
+    // Capitalised words right after "at": the place's name so far ("at Rising "). Not a possessive: "at Mum's Sun" is Sunday.
+    private val placeNameBefore = Regex("(?:\\b[Aa][Tt]\\s+|(?<!\\S)@\\s*)(?:\\p{Lu}[\\p{L}&-]*\\s+)+$")
 
     private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|tonight|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo)\\b")
     private val vagueTimes = rx("(?:morning|afternoon|arvo|evening|night|tonight|breakfast|lunch|dinner|work|lunch\\s*time|first\\s+thing)$")
@@ -318,7 +328,8 @@ object QuickEntry {
         }
         quote.findAll(text).forEach { mask(it.range, '\uE000') }
         literalRanges.filter { it.first >= 0 && it.last < text.length && !it.isEmpty() }.forEach { mask(it, '\uE000') }
-        // "Rent $450pm", "Gym $120 pm": a number right after a currency sign is an amount, never a time or date.
+        // "Rent $450pm", "Gym $120 pm", "Pay Sam AUD 20.50": a number beside a currency sign or code is an amount, never a
+        // time or date.
         moneyAmounts.findAll(remaining).toList().forEach { mask(it.range, '\uE000') }
         phoneNumbers.findAll(remaining).filter { m ->
             m.value.count { it.isDigit() } >= 9 && !rx("\\b(?:$months)\\.?,?\\s*$").containsMatchIn(remaining.substring(0, m.range.first))
@@ -332,15 +343,40 @@ object QuickEntry {
         titleWordCandidates.findAll(remaining).toList().forEach { match ->
             val clockWord = match.value.lowercase(Locale.ROOT) in setOf("noon", "midnight", "midday")
             val lead = if (clockWord) "at|from|until|till?|to|by" else "on|next|this|last|every|each|from|until|till?|to|by"
-            if (rx("(?:\\b(?:$lead)\\s+|[-–—]\\s*)$").containsMatchIn(remaining.substring(0, match.range.first))) return@forEach
-            val following = nextWord.find(remaining.substring(match.range.last + 1))?.groupValues?.get(1)?.lowercase(Locale.ROOT) ?: return@forEach
+            val before = remaining.substring(0, match.range.first)
+            if (rx("(?:\\b(?:$lead)\\s+|[-–—]\\s*)$").containsMatchIn(before)) return@forEach
+            val following = nextWord.find(remaining.substring(match.range.last + 1))?.groupValues?.get(1)?.lowercase(Locale.ROOT)
+            // "Watch the sun", "Dinner at the Sun", "Lunch at Rising Sun": after "the", or ending a place's name, a word.
+            if (determinerBefore.containsMatchIn(before) ||
+                following == null && match.value.equals("sun", ignoreCase = true) && placeNameBefore.containsMatchIn(before)) {
+                mask(match.range, '\uE000'); return@forEach
+            }
+            // "Watch Midnight in Paris": a capitalised clock word before in/at/of and a name is a title. Written in lower
+            // case it is still the time: "Call midnight in Perth".
+            if (clockWord && match.value[0].isUpperCase() &&
+                Regex("^\\s+(?:in|at|of)\\s+(?:the\\s+)?\\p{Lu}").containsMatchIn(remaining.substring(match.range.last + 1))) {
+                mask(match.range, '\uE000'); return@forEach
+            }
+            if (following == null) return@forEach
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
+        }
+        // A frequency word before an ordinary word is part of a name, not a repeat, where a name would be: first in the entry,
+        // capitalised, or after "the" ("Weekly report due Friday", "Read The Daily Telegraph"). "Every day" only after "the"
+        // or written as a name ("Every Day Cafe"). "Gym weekly", "Standup daily 9am", "Call mum weekly please" still repeat.
+        frequencyNames.findAll(remaining).toList().forEach { match ->
+            val following = match.groupValues[2]
+            if (following.lowercase(Locale.ROOT) in scheduleVocabulary) return@forEach
+            val before = remaining.substring(0, match.range.first)
+            val named = determinerBefore.containsMatchIn(before) || if (match.groups[1] != null) before.isBlank() || match.value[0].isUpperCase()
+                else match.value.split(' ').last()[0].isUpperCase() && following[0].isUpperCase()
+            if (named) mask(match.range, '\uE000')
         }
         var taskHint = false
         // Where "remind me" starts, after any masked title in front.
         fun remindStart(match: MatchResult) = match.range.first + match.value.indexOfFirst { !it.isWhitespace() && it != '\uE000' }
-        remindTo.find(remaining)?.let { match ->
+        // Words before "to" that aren't a when are the start of the title: "Remind me about the trip to Paris tomorrow".
+        remindTo.find(remaining)?.takeIf { match -> match.groups[1]?.let { readsAsWhen(it.value) } != false }?.let { match ->
             taskHint = true
             // The when between "remind me" and "to" is left for the date and time parsers.
             val between = match.groups[1]
@@ -849,10 +885,9 @@ object QuickEntry {
             if (parts.size == 3 && parts[2].length !in setOf(2, 4)) return error("Use a four-digit year, for example 03/04/2027.")
             // A two-digit year is this century: 3/10/26 is 2026.
             val year = parts.getOrNull(2)?.toIntOrNull()?.let { if (parts[2].length == 2) 2000 + it else it } ?: today.year
-            fun candidate(day: Int, month: Int): LocalDate? = runCatching {
-                val value = LocalDate.of(year, month, day)
-                if (parts.size == 2 && value < today) LocalDate.of(year + 1, month, day) else value
-            }.getOrNull()?.takeIf { it.year in 1..9999 }
+            fun candidate(day: Int, month: Int): LocalDate? =
+                (if (parts.size == 2) nextDayMonth(today, month, day) else runCatching { LocalDate.of(year, month, day) }.getOrNull())
+                    ?.takeIf { it.year in 1..9999 }
             // Each reading remembers whether it was day-first, so the date-format setting can pick one.
             var readings = listOfNotNull(candidate(parts[0].toInt(), parts[1].toInt())?.let { true to it },
                 candidate(parts[1].toInt(), parts[0].toInt())?.let { false to it }).distinctBy { it.second }
@@ -1229,6 +1264,13 @@ object QuickEntry {
             taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes)
     }
 
+    /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */
+    private fun readsAsWhen(words: String): Boolean =
+        sequenceOf(dates, numericDate, ranges, times, relativeTimes, unsupported, wordDateMatches, holidays, endOfDay, nowWords, allDay,
+            everyPeriod, monthlyWeekdays, monthDayRepeat, weekdayLists, repeats)
+            .fold(words) { left, phrase -> phrase.replace(left, " ") }
+            .let { rx("[\\s,]*(?:\\b(?:at|on|in|by|from|and|then|the)\\b[\\s,]*)*").matches(it) }
+
     private fun spanMinutes(value: String): Double = when {
         rx("^(?:for|in) (?:a )?half\\b").containsMatchIn(value) -> 30.0
         "quarter" in value -> 15.0
@@ -1329,6 +1371,10 @@ object QuickEntry {
         }
         return null
     }
+
+    /** A day and month without a year: the next on or after [today], so 29 February is the next leap year's. */
+    private fun nextDayMonth(today: LocalDate, month: Int, day: Int): LocalDate? =
+        (0..8).asSequence().mapNotNull { runCatching { LocalDate.of(today.year + it, month, day) }.getOrNull() }.firstOrNull { it >= today }
 
     private fun readAmount(value: String): Double {
         if (value == "a" || value == "an") return 1.0
@@ -1470,14 +1516,13 @@ object QuickEntry {
             d.matches(Regex("\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}")) -> d.split('-', '/', '.').map { it.toInt() }.let { (y, m, day) -> LocalDate.of(y, m, day) }
             rx("^(?:the )?\\d{1,2}(?:st|nd|rd|th)$").matches(d) -> nextDayOfMonth(today, d.removePrefix("the ").takeWhile { it.isDigit() }.toInt())
             rx("\\d").containsMatchIn(d) -> {
-                val parts = d.removePrefix("the ").replace(",", "").replace(" of ", " ").split(' ')
+                // "3 of October", "November the 21st".
+                val parts = d.removePrefix("the ").replace(",", "").replace(" of ", " ").replace(" the ", " ").split(' ')
                 val dayFirst = parts[0].first().isDigit()
                 val monthWord = parts[if (dayFirst) 1 else 0]
                 val day = parts[if (dayFirst) 0 else 1].takeWhile { it.isDigit() }.toInt()
                 val month = Month.entries.first { it.name.lowercase(Locale.ROOT).startsWith(monthWord.take(3)) }
-                val year = parts.getOrNull(2)?.toInt() ?: today.year
-                val candidate = LocalDate.of(year, month, day)
-                if (parts.size == 2 && candidate < today) LocalDate.of(year + 1, month, day) else candidate
+                parts.getOrNull(2)?.let { LocalDate.of(it.toInt(), month, day) } ?: nextDayMonth(today, month.value, day)!!
             }
             else -> {
                 val word = d.substringAfterLast(' ')
