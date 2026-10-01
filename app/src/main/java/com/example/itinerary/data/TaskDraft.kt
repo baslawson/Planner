@@ -31,5 +31,13 @@ class TaskDraftStore(context: Context) {
             }.getOrDefault(emptyList())
         }.toSet()
     }
-    companion object { private val lock = Any() }
+    companion object {
+        private val lock = Any()
+
+        // U4: which editor has each existing task open, in any Planner window. The first one owns it; a second editor
+        // on the same task would share its draft, and its Discard draft would delete the first one's new files.
+        private val owners = HashMap<String, Any>()
+        fun claim(taskId: String, editor: Any): Boolean = synchronized(owners) { owners.getOrPut(taskId) { editor } === editor }
+        fun release(taskId: String, editor: Any) { synchronized(owners) { if (owners[taskId] === editor) owners.remove(taskId) } }
+    }
 }

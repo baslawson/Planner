@@ -17,6 +17,7 @@ import java.time.LocalDate
  * U2: a bill editor that Agenda reopens while AppNav's recovery editor already has that bill's draft closes again.
  * U3: a second Planner window (here a share) doesn't recover the draft of an editor still open in the first, and
  * sharing to an event says an event is open.
+ * U4: the widget's task editor doesn't open on a task already open in the agenda's (they shared one draft).
  * Run only with an external backup/restore harness for the shared emulator (it adds events and tasks).
  */
 @Suppress("DEPRECATION")
@@ -88,6 +89,38 @@ class EditorOwnershipUiTest {
         // The first window's draft is untouched.
         assertEquals("QA window bill edited", DraftCodec.item(EditorDraftStore(context).read()!!.getJSONObject("item")).title)
         EditorDraftStore(context).clear() // test data only; the harness restores the rest
+    }
+
+    private fun openWidgetTask(id: String) {
+        context.startActivity(Intent(context, MainActivity::class.java).apply {
+            action = "com.example.itinerary.widget.OPEN_TASK"
+            putExtra("task_id", id)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        })
+        Thread.sleep(500)
+    }
+
+    @Test fun theWidgetDoesNotOpenATaskAlreadyBeingEdited() = runBlocking {
+        app.settings.setAgendaRange(AgendaRange.ALL)
+        val task = PlannerTask(title = "QA owned task", dueDate = LocalDate.now().plusDays(2)).also { app.repository.saveTask(it) }
+        launch()
+        click("QA owned task")
+        await { find("Edit task") != null }
+        setText("QA owned task", "QA owned task edited")
+        await { TaskDraftStore(context).read(task.id) != null }
+        openWidgetTask(task.id)
+        await { find("Task already open") != null }
+        // No "Unfinished task" question on the agenda editor's draft, so nothing to discard there.
+        assertNull(find("Unfinished task"))
+        screenshot("task-already-open")
+        click("Close")
+        await { find("Task already open") == null && pickEditable(nodes(), "QA owned task edited") != null }
+        assertEquals("QA owned task edited", TaskDraftStore(context).read(task.id)!!.optString("title"))
+        click("Close")
+        await { find("Save changes?") != null }
+        click("Discard")
+        await { find("Edit task") == null }
+        assertEquals("QA owned task", data().tasks.single { it.id == task.id }.title)
     }
 
     @Test fun aBillEditorLeavesARecoveredBillToTheRecoveryEditor() = runBlocking {
