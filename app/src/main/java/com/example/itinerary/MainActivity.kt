@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import com.example.itinerary.data.ThemeMode
 import com.example.itinerary.data.TimeFormat
 import com.example.itinerary.reminders.AlarmService
+import com.example.itinerary.ui.AppLockRule
 import com.example.itinerary.ui.AppNav
 import com.example.itinerary.ui.LocalDateFormat
 import com.example.itinerary.ui.LocalHeadingColor
@@ -142,16 +143,14 @@ class MainActivity : ComponentActivity() {
 
     // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
     // through one of these two, so leaving for it is not treated like going to the home screen (see AppLockRule).
-    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
-        appLock.ownTripStarting = true
-        super.startActivityForResult(intent, requestCode, options)
-    }
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) =
+        AppLockRule.ownTrip({ appLock.ownTripStarting = it }) { super.startActivityForResult(intent, requestCode, options) }
 
     override fun startIntentSenderForResult(intent: android.content.IntentSender, requestCode: Int, fillInIntent: Intent?,
-                                            flagsMask: Int, flagsValues: Int, extraFlags: Int, options: Bundle?) {
-        appLock.ownTripStarting = true
-        super.startIntentSenderForResult(intent, requestCode, fillInIntent, flagsMask, flagsValues, extraFlags, options)
-    }
+                                            flagsMask: Int, flagsValues: Int, extraFlags: Int, options: Bundle?) =
+        AppLockRule.ownTrip({ appLock.ownTripStarting = it }) {
+            super.startIntentSenderForResult(intent, requestCode, fillInIntent, flagsMask, flagsValues, extraFlags, options)
+        }
 
     override fun onResume() {
         super.onResume()
@@ -163,7 +162,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (!isChangingConfigurations) appLock.onLeft()
+        appLock.onStopped(isChangingConfigurations)
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
         super.onStop()

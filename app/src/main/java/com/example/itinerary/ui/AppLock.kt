@@ -3,6 +3,8 @@ package com.example.itinerary.ui
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -51,6 +53,13 @@ object AppLockRule {
     // the way back from picking a file.
     const val OWN_TRIP_GRACE_MS = 5 * 60_000L
 
+    // Marks [launch] as one of Planner's own trips only if the screen opens: when it throws (no app to open it with, say)
+    // the mark is taken back, so the next Home press locks as chosen instead of getting the grace above.
+    inline fun ownTrip(mark: (Boolean) -> Unit, launch: () -> Unit) {
+        mark(true)
+        try { launch() } catch (e: Throwable) { mark(false); throw e }
+    }
+
     // [leftAt]: when Planner was last left while unlocked (elapsed time, counting sleep), null if it never was.
     fun mustUnlock(enabled: Boolean, unlocked: Boolean, leftAt: Long?, ownTrip: Boolean, now: Long, lockAfterMs: Long): Boolean {
         if (!enabled) return false
@@ -70,8 +79,9 @@ object AppLockRule {
 // App lock: the setting lives in its own preferences file, so Planner's backups neither carry nor restore it (a backup
 // opened on another phone never locks anyone out). Whether Planner is unlocked is process memory only: a fresh start
 // is always locked.
-class AppLock(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+// [now]: elapsed time, counting sleep (a plain test passes its own clock).
+class AppLock(private val prefs: SharedPreferences, private val now: () -> Long = SystemClock::elapsedRealtime) {
+    constructor(context: Context) : this(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, false))
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
     private val _lockAfter = MutableStateFlow(LockAfter.fromName(prefs.getString(KEY_LOCK_AFTER, null)))
@@ -84,8 +94,9 @@ class AppLock(context: Context) {
     private var leftOnOwnTrip = false
     // Set when Planner itself opens another screen (see MainActivity.startActivityForResult).
     @Volatile var ownTripStarting = false
-
-    private fun now() = SystemClock.elapsedRealtime()
+    // How many of Planner's screens (MainActivity) are started. A second one opened over the first (a notification or
+    // share tapped while Planner is open or locked) hides the first and later closes again: neither is leaving Planner.
+    private var started = 0
 
     // Called only after the user has confirmed it is them, so turning it on leaves Planner unlocked.
     fun setEnabled(on: Boolean) {
@@ -102,6 +113,7 @@ class AppLock(context: Context) {
 
     // Planner is coming into view: true means the lock screen must be shown first.
     fun checkOnStart(): Boolean {
+        started++
         val must = AppLockRule.mustUnlock(_enabled.value, unlocked, leftAt, leftOnOwnTrip, now(), _lockAfter.value.millis)
         if (must) unlocked = false
         _locked.value = must
@@ -109,9 +121,11 @@ class AppLock(context: Context) {
         return must
     }
 
-    // Planner went out of sight.
-    fun onLeft() {
-        if (unlocked && leftAt == null) { leftAt = now(); leftOnOwnTrip = ownTripStarting }
+    // One of Planner's screens stopped; Planner went out of sight when none is left (a rotation comes straight back).
+    fun onStopped(changingConfigurations: Boolean) {
+        started = maxOf(0, started - 1)
+        if (changingConfigurations) return
+        if (started == 0 && unlocked && leftAt == null) { leftAt = now(); leftOnOwnTrip = ownTripStarting }
         ownTripStarting = false
     }
 
@@ -153,8 +167,11 @@ fun AppLockSettingsSection() {
         Text("Lock Planner", Modifier.weight(1f))
         Switch(checked = enabled, onCheckedChange = null)
     }
+    // Android 13 and later get a blank card in recent apps (MainActivity); earlier versions have no way to hide it short
+    // of blocking screenshots.
     Text("Ask for your fingerprint, face, or the phone's PIN, pattern or password to open Planner. Reminders and the " +
-        "home screen widget still show.", style = MaterialTheme.typography.bodySmall)
+        "home screen widget still show." + if (Build.VERSION.SDK_INT < 33) " On this Android version, recent apps may " +
+        "still show Planner's last screen." else "", style = MaterialTheme.typography.bodySmall)
     if (enabled) {
         Spacer(Modifier.height(8.dp))
         SettingsDropdown(label = "Lock again", current = lockAfter.label, options = LockAfter.entries,

@@ -68,9 +68,17 @@ class ChecklistAnchor {
     var bottom by mutableStateOf<Float?>(null)
 }
 
+object ChecklistJump {
+    // Shown only while the checklist has items, its place is known, none of it is on screen, the keyboard is closed and
+    // the form is not scrolled to within [zone] of its end ([scrollLeft]: how far it can still scroll down), where the
+    // button would sit on the last controls (reminder chips, Take photo) with nothing left to scroll them out from under it.
+    fun shows(hasItems: Boolean, known: Boolean, inView: Boolean, imeVisible: Boolean, scrollLeft: Int, zone: Float): Boolean =
+        hasItems && known && !inView && !imeVisible && scrollLeft >= zone
+}
+
 // A floating "Checklist 2/5" button over a long editor ([scroll] is its scroll state; this goes in ScrollHints' overlay):
-// one tap scrolls the checklist up to the top of the screen. Shown only while the checklist has items, none of it is on
-// screen and the keyboard is closed (so it never covers what's being typed).
+// one tap scrolls the checklist up to the top of the screen. Shown only while the checklist is out of sight, the keyboard
+// is closed (so it never covers what's being typed) and the form is not at its end (see ChecklistJump.shows).
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BoxScope.ChecklistJumpButton(entries: List<ChecklistEntry>, anchor: ChecklistAnchor, scroll: ScrollState) {
@@ -81,7 +89,9 @@ fun BoxScope.ChecklistJumpButton(entries: List<ChecklistEntry>, anchor: Checklis
     val top = anchor.top; val bottom = anchor.bottom; val vTop = viewTop; val vBottom = viewBottom
     val inView = top != null && bottom != null && vTop != null && vBottom != null && bottom > vTop && top < vBottom
     val known = top != null && bottom != null && vTop != null && vBottom != null
-    val show = entries.isNotEmpty() && known && !inView && !WindowInsets.isImeVisible
+    // The button and its bottom margin, plus a little: within this of the end of the form it would cover the last controls.
+    val zone = with(LocalDensity.current) { 88.dp.toPx() }
+    val show = ChecklistJump.shows(entries.isNotEmpty(), known, inView, WindowInsets.isImeVisible, scroll.maxValue - scroll.value, zone)
     val scope = rememberCoroutineScope()
     val margin = with(LocalDensity.current) { 12.dp.toPx() }
     fun jump() {

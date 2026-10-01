@@ -20,7 +20,8 @@ import com.example.itinerary.ui.PlannerDialog
 import com.example.itinerary.ui.theme.ItineraryTheme
 import kotlinx.coroutines.launch
 
-/** An activity PendingIntent opens directly from the notification, including on Android 12+. */
+/** An activity PendingIntent opens directly from the notification, including on Android 12+. In a task of its own (see
+ *  the manifest), so Planner's own screen, and with App lock on the lock screen, never comes up under it. */
 class SnoozeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,12 +69,12 @@ class SnoozeActivity : ComponentActivity() {
     }
     companion object {
         fun taskAction(context: Context, id: String, trigger: Long): PendingIntent = PendingIntent.getActivity(context, 0,
-            Intent(context, SnoozeActivity::class.java)
+            Intent(context, SnoozeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 .setData(android.net.Uri.Builder().scheme("planner").authority("task-snooze").appendPath(id).appendQueryParameter("trigger", trigger.toString()).build())
                 .putExtra("taskId", id).putExtra("trigger", trigger),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         fun action(context: Context, id: Long, token: String): PendingIntent = PendingIntent.getActivity(context, id.toInt(),
-            Intent(context, SnoozeActivity::class.java)
+            Intent(context, SnoozeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 .setData(android.net.Uri.parse("planner://event-snooze/$id/$token"))
                 .putExtra(ReminderScheduler.EXTRA_REMINDER_ID, id)
                 .putExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN, token),

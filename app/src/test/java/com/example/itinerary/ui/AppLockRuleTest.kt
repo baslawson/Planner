@@ -45,6 +45,18 @@ class AppLockRuleTest {
         assertTrue(must(ownTrip = true, now = 15 * minute, lockAfter = LockAfter.FIFTEEN_MINUTES))
     }
 
+    @Test fun ownTripMarkStaysOnlyWhenTheScreenOpened() {
+        var mark = false
+        AppLockRule.ownTrip({ mark = it }) {}
+        assertTrue(mark)
+        // Nothing to open it with (ActivityNotFoundException, say): the next Home press is not an own trip.
+        mark = false
+        val failure = RuntimeException("no activity")
+        val thrown = runCatching { AppLockRule.ownTrip({ mark = it }) { assertTrue(mark); throw failure } }.exceptionOrNull()
+        assertEquals(failure, thrown)
+        assertFalse(mark)
+    }
+
     @Test fun unknownSavedChoiceFallsBackToOneMinute() {
         assertEquals(LockAfter.ONE_MINUTE, LockAfter.fromName(null))
         assertEquals(LockAfter.ONE_MINUTE, LockAfter.fromName("SOMETIMES"))

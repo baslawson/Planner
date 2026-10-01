@@ -70,8 +70,11 @@
         <activity android:name=".LockActivity" android:exported="false" android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|fontScale|fontWeightAdjustment|uiMode|colorMode|density|locale|layoutDirection|grammaticalGender" />
 
+        <!-- Its own task (no affinity): opening it from a notification must not bring Planner's screen forward under it,
+             which would show the App lock screen over the snooze choices. -->
         <activity android:name=".reminders.SnoozeActivity" android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" />
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true"
+            android:taskAffinity="" />
 
         <receiver
             android:name=".reminders.ReminderReceiver"
