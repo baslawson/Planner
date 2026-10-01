@@ -305,14 +305,15 @@ class CalendarTwoWayTest {
         sync.send()
         assertEquals(before, writes().size) // nothing is written on the strength of the old record
         syncAgain()
-        // Gamma's file is left as it was (and comes into Planner as the calendar's event); Alpha is linked, not sent again;
-        // Beta is new on Nextcloud.
+        // Gamma's file is left as it was; Alpha is linked, not sent again. Beta sits where Planner's Gamma file is (same
+        // day and time; see relink), so it is linked to that file as a choice for the user — nothing is overwritten.
         assertTrue(dav.files[gammaFile]!!.second.contains("SUMMARY:QA Gamma"))
-        assertEquals(3, plannerFiles().size)
+        assertEquals(2, plannerFiles().size)
         assertEquals(1, plannerFiles().count { dav.files[it]!!.second.contains("SUMMARY:QA Alpha") })
-        assertEquals(1, plannerFiles().count { dav.files[it]!!.second.contains("SUMMARY:QA Beta") })
-        assertEquals(setOf("QA Alpha", "QA Beta", "QA Gamma"), items().map { it.title }.toSet())
-        assertTrue(writes().drop(before).none { it.first == "DELETE" })
+        val beta = items().single { it.title == "QA Beta" }
+        assertEquals(SentEvent.CONFLICT, rows().single { it.itemId == beta.id }.problem)
+        assertEquals(setOf("QA Alpha", "QA Beta"), items().map { it.title }.toSet())
+        assertTrue(writes().drop(before).none { it.first == "DELETE" || it.first == "PUT" })
         assertOtherCalendarUntouched()
     }
 
