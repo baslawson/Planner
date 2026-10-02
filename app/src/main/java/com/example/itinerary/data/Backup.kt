@@ -168,11 +168,15 @@ class BackupManager(
                 else "Couldn't copy the attachments out of the backup. Nothing was changed.")
         }
         var failure: Exception? = null
-        // No calendar send or pull runs from before the events are replaced until the record of what was sent is (see
-        // CalendarSync.paused): one would put rows for the old events back over the restored record, or bring the
-        // calendar's files in as new events beside the restored ones. (The task list's sync has its own lock; the same
-        // would apply to it around tasks?.restore.)
-        suspend fun paused(block: suspend () -> Unit) { val sync = calendars; if (sync != null) sync.paused(block) else block() }
+        // No calendar or task send or pull runs from before the events and tasks are replaced until the record of what was
+        // sent is (see CalendarSync.paused, TaskSync.paused): one would put rows for the old ones back over the restored
+        // record, delete a restored one's file, or bring the files in as new ones beside the restored ones. Calendars'
+        // lock first, then the task list's (a pull takes them one after the other, never the other way round).
+        suspend fun paused(block: suspend () -> Unit) {
+            val sync = calendars; val taskSync = tasks
+            val inner: suspend () -> Unit = { if (taskSync != null) taskSync.paused(block) else block() }
+            if (sync != null) sync.paused(inner) else inner()
+        }
         paused {
             try {
                 repo.replaceAll(staged.data)
@@ -186,10 +190,10 @@ class BackupManager(
             suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
             withContext(NonCancellable) {
                 step { settings.applySnapshot(staged.settings) }
-                step { staged.calendars?.let { calendars?.restoreChoices(it) } }
+                step { staged.calendars?.let { calendars?.restoreChoices(it, keepSend = staged.send == null, keepTasks = staged.taskSend == null) } }
                 step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
                 // After the calendars, whose restore rebuilds the list rows.
-                step { val send = staged.taskSend; if (send != null) tasks?.restore(send.first, send.second) else tasks?.forget() }
+                step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
             }
         }
         failure?.let { throw it }
@@ -492,12 +496,12 @@ class BackupManager(
             if (account.isBlank() || !href.startsWith("/")) return@let null to emptyList<SentEvent>()
             val rows = json.optJSONArray("sent")?.objects().orEmpty().mapNotNull {
                 val itemId = it.optLong("itemId", -1).takeIf { id -> id > 0 && id in itemIds } ?: return@mapNotNull null
+                // The file of an event that came from Nextcloud (step 6); only inside that calendar.
+                val file = if (it.isNull("href")) null else it.optString("href").takeIf { h -> h.startsWith(href) && h.length > href.length && '/' !in h.removePrefix(href) }
                 SentEvent(itemId = itemId, account = account, calendar = href,
-                    uid = if (it.isNull("uid")) null else it.optString("uid").takeIf { u -> u.matches(Regex("[A-Za-z0-9@._-]{1,200}")) } ?: return@mapNotNull null,
+                    uid = if (it.isNull("uid")) null else storableUid(it.optString("uid"), file) ?: return@mapNotNull null,
                     etag = if (it.isNull("etag")) null else it.optString("etag"), fingerprint = it.optString("fingerprint"),
-                    problem = if (it.isNull("problem")) null else it.optString("problem"),
-                    // The file of an event that came from Nextcloud (step 6); only inside that calendar.
-                    href = if (it.isNull("href")) null else it.optString("href").takeIf { h -> h.startsWith(href) && h.length > href.length && '/' !in h.removePrefix(href) })
+                    problem = if (it.isNull("problem")) null else it.optString("problem"), href = file)
             }.distinctBy { it.itemId }
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud calendar" }.take(200), null, false) to rows
         }
@@ -509,11 +513,11 @@ class BackupManager(
             if (account.isBlank() || !href.startsWith("/")) return@let null to emptyList<SentTask>()
             val rows = json.optJSONArray("sent")?.objects().orEmpty().mapNotNull {
                 val taskId = it.optString("taskId").takeIf { id -> id in taskIds } ?: return@mapNotNull null
+                val file = if (it.isNull("href")) null else it.optString("href").takeIf { h -> h.startsWith(href) && h.length > href.length && '/' !in h.removePrefix(href) }
                 SentTask(taskId = taskId, account = account, list = href,
-                    uid = if (it.isNull("uid")) null else it.optString("uid").takeIf { u -> u.matches(Regex("[A-Za-z0-9@._-]{1,200}")) } ?: return@mapNotNull null,
+                    uid = if (it.isNull("uid")) null else storableUid(it.optString("uid"), file) ?: return@mapNotNull null,
                     etag = if (it.isNull("etag")) null else it.optString("etag"), fingerprint = it.optString("fingerprint"),
-                    problem = if (it.isNull("problem")) null else it.optString("problem"),
-                    href = if (it.isNull("href")) null else it.optString("href").takeIf { h -> h.startsWith(href) && h.length > href.length && '/' !in h.removePrefix(href) })
+                    problem = if (it.isNull("problem")) null else it.optString("problem"), href = file)
             }.distinctBy { it.taskId }
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud tasks" }.take(200), null, false) to rows
         }
@@ -542,6 +546,16 @@ class BackupManager(
         internal const val MAX_DATA_BYTES = 64L * 1024 * 1024
         internal const val MAX_ATTACHMENT_BYTES = 2L * 1024 * 1024 * 1024
         private const val MIN_FREE_BYTES = 100L * 1024 * 1024
+
+        // A synced row's uid from a backup, or null to leave the row out. E-8: a file made on Nextcloud keeps its own UID
+        // ("urn:uuid:…", "{GUID}", base64 with + / =, long ones), found by its own name ([file]); any UID that is plain
+        // printable text of a sensible length is kept for it. Only a row without a file name builds the name from its uid
+        // ("<uid>.ics"), so only that one needs the narrow form Planner itself writes.
+        internal fun storableUid(uid: String, file: String?): String? = uid.takeIf {
+            if (file == null) it.matches(PLANNER_NAME) else it.trim() == it && it.length in 1..MAX_UID && it.none { c -> c.isISOControl() || c == '�' }
+        }
+        private val PLANNER_NAME = Regex("[A-Za-z0-9@._-]{1,200}")
+        private const val MAX_UID = 1000
 
         // All of [input], or null when it holds more than [limit] bytes (read no further than that).
         internal fun readLimited(input: java.io.InputStream, limit: Long): ByteArray? {

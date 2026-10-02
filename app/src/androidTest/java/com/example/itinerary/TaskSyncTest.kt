@@ -385,4 +385,42 @@ class TaskSyncTest {
         assertEquals(1, listFiles().size)
         assertTrue(fileOf("QA Backed up").value.second.contains("DESCRIPTION:After restore"))
     }
+
+    // E-3: a task changed in both places is kept in a backup (as an event's conflict is), so a restore neither brings
+    // Nextcloud's file in as a second task nor sends Planner's as a second file; Nextcloud's side is read again.
+    @Test fun aRestoredTaskConflictStaysOneTaskInBothPlaces() = runBlocking {
+        dav.put("${list}web.ics", todo("web-1", "QA From the web"))
+        start()
+        dav.edit("${list}web.ics") { it.replace("SUMMARY:QA From the web", "SUMMARY:QA Renamed there") }
+        repo.saveTask(task("QA From the web").copy(dueDate = day.plusDays(3)), create = false)
+        syncAgain()
+        assertEquals(1, tasks.conflicts.first().size)
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync, tasks)
+        val zip = File(context.cacheDir, "tasksync-conflict-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        backup.restore(backup.stage(android.net.Uri.fromFile(zip)))
+        dav.bump(); syncAgain()
+        assertEquals(1, all().size)
+        assertEquals(1, listFiles().size)
+        assertTrue(tasks.conflicts.first().single().conflict!!.contains("SUMMARY:QA Renamed there"))
+    }
+
+    // E-11: deleted in Planner (Undo still on offer) and on Nextcloud, then undone: not made again on Nextcloud; handled as
+    // any task deleted there (to Recently deleted, as it is unchanged in Planner).
+    @Test fun undoingADeletionMadeOnBothSidesDoesntMakeItAgain() = runBlocking {
+        add("QA Deleted twice")
+        start()
+        repo.deleteEventsWithUndo(emptySet(), setOf(task("QA Deleted twice").id))
+        dav.files.remove(fileOf("QA Deleted twice").key); dav.bump()
+        syncAgain()
+        assertEquals(SentEvent.DELETED, rows().single().problem)
+        repo.undoDeletion(repo.pendingDeletions.value.single().token)
+        tasks.send()
+        assertTrue(listFiles().values.none { it.second.contains("QA Deleted twice") })
+        syncAgain()
+        assertTrue(all().none { it.title == "QA Deleted twice" })
+        assertTrue(repo.recentlyDeleted.first().any { it.label == "QA Deleted twice" })
+        assertTrue(listFiles().values.none { it.second.contains("QA Deleted twice") })
+        assertTrue(rows().isEmpty())
+    }
 }
