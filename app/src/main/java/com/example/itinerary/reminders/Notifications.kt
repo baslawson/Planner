@@ -81,6 +81,8 @@ fun ringingAlarmsEnabled(context: Context): Boolean = ringsAsAlarm(
     NotificationManagerCompat.from(context).areNotificationsEnabled(),
     context.getSystemService(NotificationManager::class.java).getNotificationChannel(ALARM_CHANNEL_ID)?.importance)
 
+const val COULD_NOT_RING = "Android didn't let this ring as an alarm. Allow Alarms & reminders for Planner so it can."
+
 // Returns false if it could not be shown because notifications are off.
 fun postReminderNotification(
     context: Context,
@@ -91,6 +93,8 @@ fun postReminderNotification(
     reminderId: Long? = null,
     billToken: String? = null,
     snoozeToken: String? = null,
+    // A "Ring until I stop it" reminder that Android didn't let ring (ReminderReceiver).
+    couldNotRing: Boolean = false,
 ): Boolean {
     if (!notificationsEnabled(context)) return false
     val open = PendingIntent.getActivity(
@@ -113,8 +117,16 @@ fun postReminderNotification(
                 if (billToken != null) addAction(0, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))
                 if (snoozeToken != null) addAction(0, "Snooze", SnoozeActivity.action(context, reminderId, snoozeToken))
             }
+            if (couldNotRing) {
+                setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$COULD_NOT_RING"))
+                if (android.os.Build.VERSION.SDK_INT >= 31) addAction(0, "Allow alarms", PendingIntent.getActivity(context, 0,
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", context.packageName, null)),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            }
         }
         .build()
+        // Its sound repeats until the notification is opened or dismissed: the nearest to ringing without the alarm.
+        .apply { if (couldNotRing) flags = flags or android.app.Notification.FLAG_INSISTENT }
     return try {
         NotificationManagerCompat.from(context).notify(notificationId, notification)
         true
