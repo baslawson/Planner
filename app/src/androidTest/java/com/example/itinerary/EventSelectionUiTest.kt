@@ -146,4 +146,36 @@ class EventSelectionUiTest {
         screenshot("search-selection");click("Delete");click("Keep items");click("Cancel")
         assertEquals(before,data())
     }
+
+    private fun selectAllChecked():Boolean {
+        var node=find("Select all");while(node!=null && !node.isCheckable)node=node.parent
+        return node!!.isChecked
+    }
+
+    @Test fun selectAllTicksEverythingTheScreenCanDeleteAndASecondTapClears() = runBlocking {
+        EditorDraftStore(context).clear()
+        app.settings.setAgendaRange(AgendaRange.ALL)
+        val day = LocalDate.now()
+        app.repository.saveItem(ItineraryItem(tripId=0, date=day, startTime=java.time.LocalTime.NOON, title="QA all one"))
+        app.repository.saveItem(ItineraryItem(tripId=0, date=day, startTime=java.time.LocalTime.of(15,0), title="QA all two"))
+        app.repository.saveItem(ItineraryItem(tripId=0, date=day.plusDays(40), startTime=null, title="QA all later")) // off screen
+        app.repository.saveTask(PlannerTask(title="QA all task", dueDate=day))
+        val before = data()
+        open()
+        // Before the fix the bar had no "Select all": this fails at the first click.
+        longTouch("QA all one");assertFalse(selectAllChecked())
+        click("Select all");await { find("4 selected")!=null };assertTrue(selectAllChecked());screenshot("all-selected")
+        click("Delete");await { find("Delete 4 items?")!=null }
+        listOf("QA all one","QA all two","QA all later","QA all task").forEach { assertNotNull(it,find(it)) }
+        click("Keep items");assertEquals(before,data())
+        click("Select all");await { find("4 selected")==null && find("Select all")==null } // cleared, bar gone
+        // Some selected → select all fills the rest.
+        longTouch("QA all one");click("QA all task");await { find("2 selected")!=null };assertFalse(selectAllChecked())
+        click("Select all");await { find("4 selected")!=null };click("Cancel");await { find("Add menu")!=null }
+        // The calendar selects only the chosen day's events.
+        click("QA all one");await { find("CALENDAR")!=null }
+        longTouch("QA all two");click("Select all");await { find("2 selected")!=null };screenshot("calendar-all")
+        click("Cancel")
+        assertEquals(before,data())
+    }
 }

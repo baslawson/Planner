@@ -5,10 +5,15 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -31,6 +36,9 @@ class EventSelection {
         if (!busy) taskIds = if (id in taskIds) taskIds - id else taskIds + id
     }
     fun clear() { if (!busy) { ids = emptyList(); taskIds = emptyList() } }
+    fun selectAll(events: List<SelectableEvent>, tasks: List<SelectableTask>) {
+        if (!busy) { ids = events.map { it.id }; taskIds = tasks.map { it.id } }
+    }
 }
 
 @Composable
@@ -72,10 +80,21 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
         visibleTasks.filter { it.id in ids }
     }
     val count = chosen.size + chosenTasks.size
+    val total = visible.size + visibleTasks.size
+    // Everything the screen can select (scrolled off or not); a second tap clears the selection, like Cancel.
+    val all = when (count) { 0 -> ToggleableState.Off; total -> ToggleableState.On; else -> ToggleableState.Indeterminate }
     if (selection.active || selection.busy) Surface(tonalElevation = 3.dp) {
         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text("${selection.size} selected", modifier = Modifier.weight(1f))
+            // The count is the select-all box's label, as in a mail app, so the bar fits at large text sizes.
+            Row(Modifier.weight(1f)
+                .triStateToggleable(state = all, enabled = !selection.busy && total > 0, role = Role.Checkbox,
+                    onClick = { if (all == ToggleableState.On) selection.clear() else selection.selectAll(visible, visibleTasks) })
+                .semantics { contentDescription = "Select all" },
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                TriStateCheckbox(state = all, onClick = null, enabled = !selection.busy && total > 0)
+                Text("${selection.size} selected")
+            }
             OutlinedButton(onClick = selection::clear, enabled = !selection.busy) { Text("Cancel") }
             DangerOutlinedButton(onClick = { confirming = true; error = null }, enabled = !selection.busy && count > 0) {
                 Text(if (selection.busy) "Deleting…" else "Delete")
