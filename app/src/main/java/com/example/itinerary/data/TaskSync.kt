@@ -70,21 +70,32 @@ class TaskSync(
     // Keeps Planner's tasks in sync with list [id], or stops (null; the tasks stay in both places). Choosing another list
     // leaves the old one as it is. The list is read before anything is sent there, so a list chosen again links its tasks
     // to Planner's instead of sending them twice.
+    // E-4: not while a send, pull or choice is under way (see paused).
     suspend fun setTarget(id: Long?) {
-        db.withTransaction {
-            val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-            sources.filter { it.tasksHere && it.id != id }.forEach { dao.updateSource(it.copy(tasksHere = false, taskCtag = null, taskError = null)) }
-            val chosen = sources.firstOrNull { it.id == id && it.tasks && it.writable } ?: return@withTransaction
-            rowsDao.all().filter { it.account != chosen.account || it.list != chosen.href }.forEach { rowsDao.delete(it.id) }
-            dao.updateSource(chosen.copy(tasksHere = true, taskCtag = null, taskError = null))
+        lock.withLock {
+            db.withTransaction {
+                val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
+                sources.filter { it.tasksHere && it.id != id }.forEach { dao.updateSource(it.copy(tasksHere = false, taskCtag = null, taskError = null)) }
+                val chosen = sources.firstOrNull { it.id == id && it.tasks && it.writable } ?: return@withTransaction
+                rowsDao.all().filter { it.account != chosen.account || it.list != chosen.href }.forEach { rowsDao.delete(it.id) }
+                dao.updateSource(chosen.copy(tasksHere = true, taskCtag = null, taskError = null))
+            }
+            _state.value = CalendarSync.State(); _hidden.value = 0
         }
-        _state.value = CalendarSync.State(); _hidden.value = 0
         onChanged()
     }
 
+    // E-4, as CalendarSync.paused: runs [block] with no task send, pull or conflict choice under way, and none starting until
+    // it's done (one running across a restore would write rows for the old tasks back over the restored record, or delete
+    // the file of a task the restore brought back). Inside, use the *Locked functions only (the lock isn't reentrant).
+    suspend fun <T> paused(block: suspend () -> T): T = lock.withLock { block() }
+
     // After restoring a backup that doesn't say what was synced: nothing is kept, and the next read links the list's files
     // to the restored tasks by content; nothing is overwritten or deleted on the strength of an old record.
-    suspend fun forget() {
+    suspend fun forget() = paused { forgetLocked() }
+
+    // forget, inside paused.
+    suspend fun forgetLocked() {
         db.withTransaction {
             rowsDao.deleteAll()
             target()?.let { dao.updateSource(it.copy(taskCtag = null, taskError = null)) }
@@ -93,7 +104,7 @@ class TaskSync(
     }
 
     // After disconnecting Nextcloud (its calendars go with it) or the test runner's clean start.
-    suspend fun clear() {
+    suspend fun clear() = paused {
         rowsDao.deleteAll()
         _state.value = CalendarSync.State(); _hidden.value = 0
     }
@@ -166,18 +177,23 @@ class TaskSync(
                 }
                 row.fingerprint != print -> {
                     val href = hrefOf(target, row)
-                    val base = row.ics ?: client().getFile(account, target.href, href)?.let { file ->
-                        if (file.etag == row.etag) file.data
-                        else { rowsDao.put(alreadyThere(row, file, task, zone()) ?: row.copy(problem = SentEvent.CHANGED)); null }
+                    // As for events (CalendarSync.fetchedBase): fetched if the text or the version is unknown.
+                    val synced = if (row.ics != null && row.etag != null) row else {
+                        val file = client().getFile(account, target.href, href)
+                        if (file == null) { rowsDao.put(row.copy(problem = SentEvent.DELETED)); continue }
+                        val (next, send) = fetchedBase(row, file, task, zone())
+                        if (!send) { rowsDao.put(next); continue }
+                        next
                     }
-                    if (base == null) { if (rowsDao.all().none { it.id == row.id && it.problem != null }) rowsDao.put(row.copy(problem = SentEvent.DELETED)); continue }
-                    val body = ServerTasks.patch(base, task, zone(), stamp())
-                    when (val result = client().putFile(account, target.href, href, body, row.etag)) {
-                        is WriteResult.Ok -> rowsDao.put(row.copy(etag = result.etag, ics = body, fingerprint = print))
-                        WriteResult.Changed -> rowsDao.put(try { client().getFile(account, target.href, href)?.let { alreadyThere(row, it, task, zone()) } }
+                    // The due date as last synced stays exactly as written unless it was changed in Planner (a UTC one
+                    // read after travelling would otherwise move a day).
+                    val body = ServerTasks.patch(synced.ics!!, task, zone(), stamp(), synced.fingerprint)
+                    when (val result = client().putFile(account, target.href, href, body, synced.etag!!)) {
+                        is WriteResult.Ok -> rowsDao.put(synced.copy(etag = result.etag, ics = body, fingerprint = print))
+                        WriteResult.Changed -> rowsDao.put(try { client().getFile(account, target.href, href)?.let { alreadyThere(synced, it, task, zone()) } }
                             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
-                            ?: row.copy(problem = SentEvent.CHANGED))
-                        WriteResult.Missing -> rowsDao.put(row.copy(problem = SentEvent.DELETED))
+                            ?: synced.copy(problem = SentEvent.CHANGED))
+                        WriteResult.Missing -> rowsDao.put(synced.copy(problem = SentEvent.DELETED))
                     }
                 }
             } } catch (e: RefusedException) { refused += e }
@@ -185,7 +201,7 @@ class TaskSync(
         // Deleted in Planner (and past its Undo): the copy goes too, unless it was changed on Nextcloud meanwhile; then the
         // row stays for the next pull to make it a conflict.
         for (row in rows.values) if (row.taskId !in present && row.taskId !in waiting && row.problem != SentEvent.CONFLICT) {
-            val result = try { if (CalendarSync.deletable(row.uid, row.problem)) client().deleteFile(account, target.href, hrefOf(target, row), row.etag) else null }
+            val result = try { removeCopy(account, target, row) }
                 catch (e: RefusedException) { refused += e; continue }
             val kept = afterDelete(row, result)
             if (kept == null) rowsDao.delete(row.id) else if (kept != row) rowsDao.put(kept)
@@ -194,6 +210,17 @@ class TaskSync(
             if (refused.isEmpty()) state
             else CalendarSync.State(message = listOfNotNull(refusedMessage(refused.size, refused.first().code), state.message).joinToString(" "), error = true)
         }
+    }
+
+    // See CalendarSync.removeCopy: only at the version Planner synced, learnt first when the row doesn't know it (E-7).
+    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentTask): WriteResult? {
+        if (!CalendarSync.deletable(row.uid, row.problem)) return null
+        val href = hrefOf(target, row)
+        val etag = row.etag ?: run {
+            val file = client().getFile(account, target.href, href) ?: return WriteResult.Missing
+            CalendarSync.deleteVersion(row.problem, row.ics, file) ?: return WriteResult.Changed
+        }
+        return client().deleteFile(account, target.href, href, etag)
     }
 
     private suspend fun summary(target: CalendarSource): CalendarSync.State {
@@ -212,16 +239,21 @@ class TaskSync(
     // Called by CalendarSync.sync with the lists the server has (it has just brought the calendar rows up to date). False
     // when reading the list failed; the reason stays on the list (taskError) until a read works.
     internal suspend fun pull(account: NextcloudAccount, remote: Map<String, RemoteCalendar>): Boolean {
-        val target = target()?.takeIf { it.account == CalendarSync.accountKey(account) } ?: return true
-        val list = remote[target.href] ?: return true
+        // E-5: the list is read inside the lock, so a restore or a new choice made while waiting is what's pulled.
+        var target: CalendarSource? = null
         return try {
-            lock.withLock { pullLocked(account, target, list.ctag) }
-            _state.value = summary(target)
+            lock.withLock {
+                val current = target()?.takeIf { it.account == CalendarSync.accountKey(account) }
+                val list = current?.let { remote[it.href] } ?: return@withLock
+                target = current
+                pullLocked(account, current, list.ctag)
+            }
+            target?.let { _state.value = summary(it) }
             true
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             val message = (e as? BackupException)?.message ?: "Couldn't download the task list. Planner tries again at the next sync."
-            db.withTransaction { dao.source(target.id)?.let { dao.updateSource(it.copy(taskError = message)) } }
+            target?.let { pulled -> db.withTransaction { dao.source(pulled.id)?.let { dao.updateSource(it.copy(taskError = message)) } } }
             false
         }
     }
@@ -262,11 +294,14 @@ class TaskSync(
                     etag = file.etag, ics = file.data, fingerprint = ServerTasks.fingerprint(added)))
                 continue
             }
-            if (row.problem == SentEvent.CONFLICT) { if (file.etag != row.etag) rowsDao.put(row.copy(conflict = file.data)); continue }
+            // Nextcloud's side of a conflict, kept up to date; read again after a restore (E-3: backups keep the conflict, not it).
+            if (row.problem == SentEvent.CONFLICT) { if (!NextcloudClient.sameEtag(file.etag, row.etag) || row.conflict == null) rowsDao.put(row.copy(conflict = file.data)); continue }
             if (row.problem == SentEvent.PENDING) { rowsDao.put(adopted(row, file, tasks[row.taskId], zone())); continue }
             val detached = row.problem == SentEvent.DETACHED
-            if (detached && p.fields == null) { if (file.etag != row.etag) rowsDao.put(row.copy(etag = file.etag, ics = file.data)); continue }
-            if (file.etag == row.etag && !detached) { if (row.ics == null) rowsDao.put(row.copy(ics = file.data)); continue }
+            if (detached && p.fields == null) { if (!NextcloudClient.sameEtag(file.etag, row.etag)) rowsDao.put(row.copy(etag = file.etag, ics = file.data)); continue }
+            // Unchanged there; one a write found changed or gone is there as synced after all (see CalendarSync.pullLocked).
+            if (NextcloudClient.sameEtag(file.etag, row.etag) && !detached) {
+                if (row.ics == null || row.problem != null) rowsDao.put(row.copy(ics = row.ics ?: file.data, problem = null)); continue }
             // Changed on Nextcloud (or a detached one Planner can hold again).
             val server = p.fields
             val task = tasks[row.taskId]
@@ -275,9 +310,10 @@ class TaskSync(
                 server == null -> rowsDao.put(row.copy(etag = file.etag, ics = file.data, problem = SentEvent.DETACHED, conflict = null))
                 // Deleted in Planner meanwhile.
                 task == null || row.taskId in waiting -> rowsDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
-                // Unchanged in Planner since the last sync: take Nextcloud's version, made to the task as it is when saved.
+                // Unchanged in Planner since the last sync: take Nextcloud's version, made to the task as it is when saved
+                // (a due date written as it was last synced stays Planner's, see syncedDue).
                 ServerTasks.inSync(row.fingerprint, task) -> {
-                    val saved = store.update(task.id) { if (ServerTasks.inSync(row.fingerprint, it)) ServerTasks.apply(it, server) else null }
+                    val saved = store.update(task.id) { if (ServerTasks.inSync(row.fingerprint, it)) ServerTasks.apply(it, syncedDue(server, file.data, row, it, zone())) else null }
                     rowsDao.put(if (saved != null) row.copy(etag = file.etag, ics = file.data, fingerprint = ServerTasks.fingerprint(saved), problem = null, conflict = null)
                         else db.taskDao().byId(task.id)?.let { alreadyThere(row, file, it, zone()) } ?: row.copy(problem = SentEvent.CONFLICT, conflict = file.data))
                 }
@@ -290,6 +326,8 @@ class TaskSync(
         for ((href, row) in synced) if (href !in listing && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val task = tasks[row.taskId]
             when {
+                // E-11, as for events (CalendarSync.pullLocked): deleted in Planner too, Undo still on offer.
+                row.taskId in waiting -> if (row.problem != SentEvent.DELETED) rowsDao.put(row.copy(problem = SentEvent.DELETED))
                 task == null -> rowsDao.delete(row.id)
                 ServerTasks.inSync(row.fingerprint, task) && store.archive(task.id) { ServerTasks.inSync(row.fingerprint, it) } -> rowsDao.delete(row.id)
                 db.taskDao().byId(task.id) == null -> rowsDao.delete(row.id)
@@ -323,7 +361,7 @@ class TaskSync(
                 fun changedAgain(): Nothing = throw BackupException("It changed on Nextcloud again. Check it and choose once more.")
                 when (choice) {
                     Resolution.PLANNER -> when {
-                        task == null -> { if (current != null && client().deleteFile(account, target.href, href, current.etag) == WriteResult.Changed) changedAgain(); rowsDao.delete(row.id) }
+                        task == null -> { if (current != null && client().deleteFile(account, target.href, href, current.etag ?: changedAgain()) == WriteResult.Changed) changedAgain(); rowsDao.delete(row.id) }
                         current == null -> {
                             val uid = "planner-task-${java.util.UUID.randomUUID()}@planner"
                             val body = ServerTasks.encode(task, uid, stamp())
@@ -333,7 +371,7 @@ class TaskSync(
                         }
                         else -> {
                             val body = ServerTasks.patch(current.data, task, zone(), stamp())
-                            val result = client().putFile(account, target.href, href, body, current.etag) as? WriteResult.Ok ?: changedAgain()
+                            val result = client().putFile(account, target.href, href, body, current.etag ?: changedAgain()) as? WriteResult.Ok ?: changedAgain()
                             rowsDao.put(row.copy(etag = result.etag, ics = body, fingerprint = ServerTasks.fingerprint(task), problem = null, conflict = null))
                         }
                     }
@@ -367,16 +405,20 @@ class TaskSync(
         send()
     }
 
-    // For backups: which list Planner keeps its tasks in sync with and what it synced. Conflicts aren't kept (checked again).
+    // For backups: which list Planner keeps its tasks in sync with and what it synced. E-3: conflicts are kept, without
+    // Nextcloud's side (the next pull reads it again), as for events: left out, a task from Nextcloud changed on both sides
+    // would match no file by content and come back as a second task in both places.
     suspend fun snapshot(): Pair<CalendarChoice, List<SentTask>>? {
         val target = target() ?: return null
         return CalendarChoice(target.account, target.href, target.name, target.color, false) to
-            rowsDao.all().filter { it.account == target.account && it.list == target.href && it.problem != SentEvent.CONFLICT }
+            rowsDao.all().filter { it.account == target.account && it.list == target.href }
     }
 
+    suspend fun restore(target: CalendarChoice?, rows: List<SentTask>) = paused { restoreLocked(target, rows) }
+
     // After restoring a backup (after CalendarSync's own restore, which rebuilds the calendar rows): its list and record,
-    // or none.
-    suspend fun restore(target: CalendarChoice?, rows: List<SentTask>) {
+    // or none. Inside paused.
+    suspend fun restoreLocked(target: CalendarChoice?, rows: List<SentTask>) {
         db.withTransaction {
             rowsDao.deleteAll()
             dao.sources().filter { it.tasksHere }.forEach { dao.updateSource(it.copy(tasksHere = false, taskCtag = null, taskError = null)) }
@@ -407,12 +449,36 @@ class TaskSync(
             }
         }
 
-        // [file] already holds [task] as Planner has it now: the row takes it as synced. Null otherwise.
+        // [file] already holds [task] as Planner has it now: the row takes it as synced. Null otherwise. The due date is
+        // compared as in syncedDue, so Planner's own write is recognised in any time zone. (adopted needs no such care: a
+        // pending file is one Planner wrote new, whose due is a plain date.)
         internal fun alreadyThere(row: SentTask, file: ServerFile, task: PlannerTask, zone: ZoneId): SentTask? {
-            val server = ServerTasks.parse(file.data, zone).fields ?: return null
+            val server = syncedDue(ServerTasks.parse(file.data, zone).fields ?: return null, file.data, row, task, zone)
             val print = ServerTasks.fingerprint(task)
             if (ServerTasks.fingerprint(ServerTasks.apply(task, server)) != print) return null
             return row.copy(etag = file.etag, ics = file.data, fingerprint = print, problem = null, conflict = null)
+        }
+
+        // [server] (what file [text] says) with [task]'s due date when the file's DUE is exactly the one last synced
+        // ([row]'s text) and the due date hasn't changed in Planner since: a UTC due time ("…Z") counts on the phone's day
+        // (see ServerTasks.dueDate), so after travelling the same DUE reads as another day, which isn't a change on either
+        // side. Otherwise [server] as it is.
+        internal fun syncedDue(server: ServerTasks.Fields, text: String, row: SentTask, task: PlannerTask, zone: ZoneId): ServerTasks.Fields {
+            val synced = row.ics ?: return server
+            if (server.dueDate == task.dueDate) return server
+            val due = ServerTasks.dueLine(text) ?: return server
+            return if (due == ServerTasks.dueLine(synced) && ServerTasks.dueUnchanged(synced, row.fingerprint, task, zone)) server.copy(dueDate = task.dueDate) else server
+        }
+
+        // See CalendarSync.fetchedBase: the row to send [task]'s update on, and true, when [file] (fetched: the text or
+        // version was unknown) still has what was last synced; otherwise the row as settled, and false.
+        internal fun fetchedBase(row: SentTask, file: ServerFile, task: PlannerTask, zone: ZoneId): Pair<SentTask, Boolean> {
+            if (NextcloudClient.sameEtag(file.etag, row.etag)) return row.copy(etag = file.etag, ics = file.data) to true
+            alreadyThere(row, file, task, zone)?.let { return it to false }
+            val server = ServerTasks.parse(file.data, zone).fields
+            return if (file.etag != null && server != null && ServerTasks.inSync(row.fingerprint, ServerTasks.apply(task, server)))
+                row.copy(etag = file.etag, ics = file.data) to true
+            else row.copy(problem = SentEvent.CHANGED) to false
         }
 
         // A file found for an unlinked Planner task: what Nextcloud has counts as synced; if Planner's task differs, the

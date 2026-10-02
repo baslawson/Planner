@@ -731,4 +731,48 @@ class CalendarTwoWayTest {
         assertTrue(conflicts().isEmpty())
         assertEquals(1, plannerFiles().size)
     }
+
+    // E-1: a file Nextcloud refuses (413: a body over a proxy's limit; 403: a private event in a shared calendar) holds up
+    // only its own event, as T1 does for tasks; both are sent once accepted.
+    @Test fun aRefusedEventDoesntHoldUpTheOthers() = runBlocking {
+        save("QA Refused new"); save("QA Fine new", 10)
+        dav.refuse = { body -> if (body.contains("QA Refused")) 413 else null }
+        start()
+        assertNotNull(plannerFile("QA Fine new"))
+        assertTrue(dav.files.values.none { it.second.contains("QA Refused new") })
+        assertTrue(sync.sendState.value.error)
+        assertTrue(sync.sendState.value.message.orEmpty(), sync.sendState.value.message.orEmpty().contains("HTTP 413"))
+        dav.refuse = { body -> if (body.contains("LOCATION:Private")) 403 else null }
+        repo.saveItem(item("QA Fine new").copy(location = "Private"))
+        save("QA After", 11)
+        sync.send()
+        assertNotNull(plannerFile("QA Refused new"))
+        assertNotNull(plannerFile("QA After"))
+        assertFalse(plannerFile("QA Fine new").value.second.contains("Private"))
+        assertTrue(sync.sendState.value.message.orEmpty(), sync.sendState.value.message.orEmpty().contains("HTTP 403"))
+        dav.refuse = null
+        syncAgain()
+        assertTrue(plannerFile("QA Fine new").value.second.contains("LOCATION:Private"))
+        assertFalse(sync.sendState.value.error)
+        assertTrue(rows().all { it.problem == null })
+    }
+
+    // E-11: deleted in Planner (Undo still on offer) and on Nextcloud, then undone: not made again on Nextcloud; handled as
+    // any event deleted there (to Recently deleted, as it is unchanged in Planner).
+    @Test fun undoingADeletionMadeOnBothSidesDoesntMakeItAgain() = runBlocking {
+        save("QA Deleted twice")
+        start()
+        repo.deleteWithUndo(item("QA Deleted twice"))
+        dav.files.remove(plannerFile("QA Deleted twice").key); dav.bump()
+        syncAgain()
+        assertEquals(SentEvent.DELETED, rows().single().problem)
+        repo.undoDeletion(repo.pendingDeletions.value.single().token)
+        sync.send()
+        assertTrue(dav.files.values.none { it.second.contains("QA Deleted twice") })
+        syncAgain()
+        assertTrue(items().none { it.title == "QA Deleted twice" })
+        assertEquals(1, repo.snapshot().deleted.size)
+        assertTrue(dav.files.values.none { it.second.contains("QA Deleted twice") })
+        assertTrue(rows().isEmpty())
+    }
 }

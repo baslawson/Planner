@@ -35,6 +35,9 @@ data class RemoteCalendar(val href: String, val name: String, val color: Int?, v
 // An event file in a calendar (step 6): its path on the server, version marker and text.
 data class ServerFile(val href: String, val etag: String?, val data: String)
 
+// A reply larger than Planner reads at once (see NextcloudClient.multistatus): the caller may ask for less at a time.
+class ReplyTooLargeException(message: String) : BackupException(message)
+
 sealed class WriteResult {
     class Ok(val etag: String?) : WriteResult()
     object Changed : WriteResult()
@@ -194,7 +197,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         request(account, "PUT", url, body.toRequestBody("text/calendar; charset=utf-8".toMediaType()),
             if (etag == null) mapOf("If-None-Match" to "*") else mapOf("If-Match" to etag)).use { response ->
             return when (response.code) {
-                200, 201, 204 -> WriteResult.Ok(response.header("ETag") ?: currentEtag(account, url))
+                200, 201, 204 -> WriteResult.Ok(etag(response.header("ETag")) ?: currentEtag(account, url))
                 412 -> WriteResult.Changed
                 404 -> WriteResult.Missing
                 else -> fail(response.code, calendar = true, write = true)
@@ -203,12 +206,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     }
 
     // Step 5: deletes Planner's event [uid] in [calendar], only if the server still has version [etag].
-    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String?): WriteResult =
+    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String): WriteResult =
         deleteFile(account, calendar, eventUrl(account, calendar, uid).encodedPath, etag)
 
-    fun deleteFile(account: NextcloudAccount, calendar: String, href: String, etag: String?): WriteResult {
+    // Always conditional (E-7): a caller that doesn't know the version fetches the file first.
+    fun deleteFile(account: NextcloudAccount, calendar: String, href: String, etag: String): WriteResult {
         val url = fileUrl(account, calendar, href)
-        request(account, "DELETE", url, null, etag?.let { mapOf("If-Match" to it) }.orEmpty()).use { response ->
+        request(account, "DELETE", url, null, mapOf("If-Match" to etag)).use { response ->
             return when (response.code) {
                 200, 204 -> WriteResult.Ok(null)
                 412 -> WriteResult.Changed
@@ -219,14 +223,16 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     }
 
     // Step 6: every event file in [calendar] with its version marker (any date), to notice changes and deletions there.
+    // E-9: only the two properties needed, so a large calendar fits (about twice as many files as with the four of a file
+    // list); the limit stays, since the whole reply is held as a tree. Beyond it: ReplyTooLargeException.
     fun eventEtags(account: NextcloudAccount, calendar: String): Map<String, String?> {
         val folder = calendarUrl(account, calendar)
-        return multistatus(account, "PROPFIND", folder, PROPERTIES, "1", calendar = true, limit = 8 * 1024 * 1024,
+        return multistatus(account, "PROPFIND", folder, ETAG_PROPERTIES, "1", calendar = true, limit = 8 * 1024 * 1024,
             tooLarge = "This calendar has too many events to check.", invalid = "The server returned an invalid calendar. Try again later.",
             empty = "The server returned an empty calendar.").mapNotNull { (resolved, prop) ->
             val path = resolved.encodedPath
             if (!path.startsWith(folder.encodedPath) || path == folder.encodedPath || prop("resourcetype")?.children("collection")?.isNotEmpty() == true) null
-            else path to prop("getetag")?.textContent
+            else path to etag(prop("getetag")?.textContent)
         }.toMap()
     }
 
@@ -241,7 +247,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     // Task sync: every task file in [list] (any date, done or not) as it is.
     fun taskFiles(account: NextcloudAccount, list: String): List<ServerFile> =
-        files(account, list, """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
+        files(account, list, tooLarge = "This task list has too many tasks for Planner to download.", query = """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
             """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/>""" +
             """</c:comp-filter></c:filter></c:calendar-query>""")
 
@@ -254,24 +260,26 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
             """<d:prop><d:getetag/><c:calendar-data/></d:prop>$list</c:calendar-multiget>""")
     }
 
-    // Step 6: one event file as it is now; null when it's no longer there.
+    // Step 6: one event file as it is now; null when it's no longer there. Its version as the listings give it (see etag),
+    // asked for separately when the reply has none.
     fun getFile(account: NextcloudAccount, calendar: String, href: String): ServerFile? {
         val url = fileUrl(account, calendar, href)
-        request(account, "GET", url).use { response ->
+        val (header, bytes) = request(account, "GET", url).use { response ->
             if (response.code == 404) return null
             if (response.code != 200) fail(response.code, calendar = true)
-            val bytes = (response.body ?: return null).byteStream().use { it.readBytesLimited(2 * 1024 * 1024, "This event is too large.") }
-            return ServerFile(url.encodedPath, response.header("ETag"), bytes.toString(Charsets.UTF_8))
+            response.header("ETag") to (response.body ?: return null).byteStream().use { it.readBytesLimited(2 * 1024 * 1024, "This event is too large.") }
         }
+        return ServerFile(url.encodedPath, etag(header) ?: currentEtag(account, url), bytes.toString(Charsets.UTF_8))
     }
 
-    private fun files(account: NextcloudAccount, calendar: String, query: String): List<ServerFile> {
+    private fun files(account: NextcloudAccount, calendar: String, query: String,
+                      tooLarge: String = "This calendar has too many events to download."): List<ServerFile> {
         val folder = calendarUrl(account, calendar)
         return multistatus(account, "REPORT", folder, query, "1", calendar = true, limit = 16 * 1024 * 1024,
-            tooLarge = "This calendar has too many events to download.", invalid = "The server returned an invalid calendar. Try again later.",
+            tooLarge = tooLarge, invalid = "The server returned an invalid calendar. Try again later.",
             empty = "The server returned an empty calendar.").mapNotNull { (resolved, prop) ->
             val data = prop("calendar-data", CALDAV)?.textContent?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            if (!resolved.encodedPath.startsWith(folder.encodedPath)) null else ServerFile(resolved.encodedPath, prop("getetag")?.textContent, data)
+            if (!resolved.encodedPath.startsWith(folder.encodedPath)) null else ServerFile(resolved.encodedPath, etag(prop("getetag")?.textContent), data)
         }
     }
 
@@ -297,8 +305,8 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     // A server that doesn't return the new version marker with the write is asked for it.
     private fun currentEtag(account: NextcloudAccount, url: HttpUrl): String? = runCatching {
-        multistatus(account, "PROPFIND", url, PROPERTIES, "0", tooLarge = "", invalid = "", empty = "", calendar = true)
-            .firstOrNull()?.second?.invoke("getetag")?.textContent
+        etag(multistatus(account, "PROPFIND", url, ETAG_PROPERTIES, "0", tooLarge = "", invalid = "", empty = "", calendar = true)
+            .firstOrNull()?.second?.invoke("getetag")?.textContent)
     }.getOrNull()
 
     private fun eventUrl(account: NextcloudAccount, calendar: String, uid: String): HttpUrl {
@@ -389,7 +397,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         while (true) {
             val n = read(buffer)
             if (n == -1) break
-            if (output.size() + n > limit) throw BackupException(tooLarge)
+            if (output.size() + n > limit) throw ReplyTooLargeException(tooLarge)
             output.write(buffer, 0, n)
         }
         return output.toByteArray()
@@ -412,9 +420,11 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    // [write]: a calendar file's PUT or DELETE, which Nextcloud may refuse for that file alone (RefusedException).
+    // [write]: a calendar file's PUT or DELETE, which Nextcloud may refuse for that file alone (RefusedException). A 403
+    // there too (E-1: a private event of the owner in a shared calendar): a calendar this login can't write to at all
+    // shows in the calendar list already, so it is that one file.
     private fun fail(code: Int, calendar: Boolean = false, write: Boolean = false): Nothing {
-        if (write && refused(code)) throw RefusedException(code, "Nextcloud refused a change (HTTP $code).")
+        if (write && (refused(code) || code == 403)) throw RefusedException(code, "Nextcloud refused a change (HTTP $code).")
         failWith(code, calendar)
     }
 
@@ -449,6 +459,28 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/><d:current-user-privilege-set/></d:prop></d:propfind>"""
         private val EMPTY = ByteArray(0).toRequestBody(null)
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
+        private const val ETAG_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getetag/></d:prop></d:propfind>"""
+
+        // E-6: a version marker as the calendar's listings give it. A front end that compresses a reply changes the one in
+        // its ETag header (Apache's mod_deflate adds "-gzip", nginx makes it weak: W/"…") but never the one inside a
+        // listing, and Nextcloud compares If-Match with its own. Taken off here, so every marker Planner keeps and sends
+        // back is in the server's own form. Null for none.
+        internal fun etag(raw: String?): String? {
+            var text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            if (text.startsWith("W/")) text = text.drop(2)
+            val quoted = text.length >= 2 && text.startsWith('"') && text.endsWith('"')
+            var core = if (quoted) text.substring(1, text.length - 1) else text
+            COMPRESSED.firstOrNull { core.endsWith(it) && core.length > it.length }?.let { core = core.removeSuffix(it) }
+            return if (quoted) "\"$core\"" else core
+        }
+        private val COMPRESSED = listOf("-gzip", "-br", "-deflate")
+
+        // Whether two markers name the same version (quotes, weakness and a compression suffix aside). Unknown is never
+        // the same: a write needs a version to be conditional.
+        internal fun sameEtag(a: String?, b: String?): Boolean {
+            val x = etag(a)?.removeSurrounding("\"") ?: return false
+            return x == etag(b)?.removeSurrounding("\"")
+        }
         // Paths compared by their decoded segments: Nextcloud writes some characters percent-encoded that OkHttp leaves
         // as they are (an apostrophe in a username is %27 there, ' here), and both name the same folder.
         // A reply that refuses this one request (what was sent), not the login, the calendar, or the server as a whole:

@@ -116,13 +116,15 @@ object ServerTasks {
     // and a higher SEQUENCE. Everything else (start date, categories, alarms, subtask links, unknown properties) is kept
     // exactly as it was, lines and folding included. A start that doesn't go with a new due date is dropped (a task can't
     // start after it's due, and both must be dates or both date-times: Nextcloud refuses the file otherwise).
-    fun patch(original: String, task: PlannerTask, zone: ZoneId, now: Instant): String {
+    // [syncedPrint]: the fingerprint of the task when [original] was last synced, if it was; a due date unchanged in Planner
+    // since then keeps its DUE exactly as written, even where it reads as another day here (a UTC one after travelling).
+    fun patch(original: String, task: PlannerTask, zone: ZoneId, now: Instant, syncedPrint: String? = null): String {
         val before = read(original, zone, limited = false).fields
         fun same(theirs: String, mine: String, max: Int) = theirs == mine || theirs.length > max && theirs.take(max) == mine
         val kept = if (before == null) emptySet() else buildSet {
             if (same(before.title, task.title, MAX_TITLE)) add("SUMMARY")
             if (same(before.notes, task.notes, MAX_NOTES)) add("DESCRIPTION")
-            if (before.dueDate == task.dueDate) add("DUE")
+            if (before.dueDate == task.dueDate || syncedPrint != null && dueUnchanged(before, syncedPrint, task)) add("DUE")
             if (before.priority == task.priority) add("PRIORITY")
             if (before.done == task.done) addAll(listOf("STATUS", "COMPLETED", "PERCENT-COMPLETE"))
         }
@@ -178,6 +180,37 @@ object ServerTasks {
         require(done) { "No task in this file" }
         return out.joinToString("\r\n", postfix = "\r\n")
     }
+
+    // Whether [task]'s due date is the one it had when [synced] (a task file's text) was last synced with fingerprint
+    // [syncedPrint], however the file's due reads in [zone] now. The other synced fields read the same anywhere, so the
+    // fingerprint then was the file's fields with that day's due date: tried with Planner's due date now.
+    fun dueUnchanged(synced: String, syncedPrint: String, task: PlannerTask, zone: ZoneId): Boolean =
+        read(synced, zone, limited = false).fields?.let { dueUnchanged(it, syncedPrint, task) } == true
+
+    private fun dueUnchanged(synced: Fields, syncedPrint: String, task: PlannerTask) = fingerprint(synced.copy(dueDate = task.dueDate)) == syncedPrint
+
+    // The task's own DUE line in [text] (unfolded, not one of an alarm inside it); null when it has none.
+    fun dueLine(text: String): String? = runCatching {
+        val stack = ArrayDeque<String>()
+        var block: StringBuilder? = null
+        var found: String? = null
+        fun finish() {
+            val line = block?.toString() ?: return
+            block = null
+            val name = line.substringBefore(':').substringBefore(';').uppercase()
+            when {
+                name == "BEGIN" -> stack.addLast(line.substringAfter(':').trim().uppercase())
+                name == "END" -> stack.removeLastOrNull()
+                name == "DUE" && stack.lastOrNull() == "VTODO" && found == null -> found = line
+            }
+        }
+        for (line in text.removePrefix("﻿").replace("\r\n", "\n").replace("\r", "\n").split("\n")) {
+            if ((line.startsWith(" ") || line.startsWith("\t")) && block != null) block!!.append(line.drop(1))
+            else { finish(); if (line.isNotEmpty()) block = StringBuilder(line) }
+        }
+        finish()
+        found
+    }.getOrNull()
 
     // Whether start line [start] may stay with due line [due] (RFC 5545: the same kind of value, and not after it; compared
     // as moments when they have a time). Unreadable counts as not.
