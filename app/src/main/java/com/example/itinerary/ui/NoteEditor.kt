@@ -37,6 +37,7 @@ import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.Markdown
 import com.example.itinerary.data.Notes
 import com.example.itinerary.data.PlannerNote
+import com.example.itinerary.data.snoozedAt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -66,13 +67,17 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val attachments = remember(attachmentsJson) { com.example.itinerary.data.DraftCodec.attachments(org.json.JSONArray(attachmentsJson)) }
     fun setAttachments(list: List<Attachment>) { attachmentsJson = com.example.itinerary.data.DraftCodec.attachments(list).toString() }
     var pendingPhoto by rememberSaveable { mutableStateOf<String?>(null) }
+    var reminderAt by rememberSaveable { mutableStateOf(initial.reminderAt) }
+    var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
+    var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
+    var choosingReminderTime by rememberSaveable { mutableStateOf(false) }
     var preview by rememberSaveable { mutableStateOf(!creating && initial.content.isNotBlank()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var askingToSave by rememberSaveable { mutableStateOf(false) }
     var justSaved by remember { mutableStateOf(false) }
     val current = (saved ?: initial).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned,
-        tags = tags, attachments = attachments)
+        tags = tags, attachments = attachments, reminderAt = reminderAt)
     val base = saved ?: initial.takeIf { !creating }
     val unsaved = base == null && (title.isNotBlank() || content.text.isNotBlank() || attachments.isNotEmpty()) ||
         base != null && Notes.clean(current) != Notes.clean(base)
@@ -115,6 +120,10 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
 
     fun save(then: () -> Unit = {}) {
         if (busy) return
+        // A reminder set or changed here must be ahead; one already saved that has rung can stay as it is.
+        if (reminderAt != null && reminderAt != base?.reminderAt && reminderAt!! <= System.currentTimeMillis()) {
+            error = "Choose a future reminder date and time."; return
+        }
         busy = true; error = null
         scope.launch {
             try {
@@ -197,6 +206,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     if (suggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         suggestions.forEach { tag -> FilterChip(selected = false, onClick = { if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, label = { Text("#$tag") }) }
                     }
+                    NoteReminderSection(reminderAt, saved?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
+                        enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                     Text("Colour", style = MaterialTheme.typography.titleSmall)
                     ColorChoices(color) { color = it }
                     FilterChip(selected = pinned, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
@@ -230,12 +241,58 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             }
         }
     }
+    if (choosingReminderDate) SingleDateDialog(
+        reminderAt?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() } ?: java.time.LocalDate.now(),
+        onDismiss = { choosingReminderDate = false },
+        onConfirm = { reminderDateDraft = it.toString(); choosingReminderDate = false; choosingReminderTime = true })
+    if (choosingReminderTime) TimePickerDialog(
+        initial = reminderAt?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalTime() }
+            ?: com.example.itinerary.data.taskReminderDefault(null).toLocalTime(),
+        onDismiss = { choosingReminderTime = false },
+        onConfirm = { time ->
+            reminderAt = com.example.itinerary.data.taskReminderInstant(java.time.LocalDate.parse(reminderDateDraft!!), time)
+            choosingReminderTime = false; error = null
+        })
     if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
         primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(onDismiss) },
         dismiss = DialogAction("Keep editing") { askingToSave = false },
         extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
         Text("Your changes to this note haven't been saved.")
     }
+}
+
+// A note's one reminder: In 1 hour, Tomorrow 09:00 or Custom; once set, its time with Remove (and a snooze, if any).
+@Composable
+private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as ItineraryApp
+    val notifications = rememberNotificationState()
+    var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { exactAllowed = app.reminderScheduler.canScheduleExact() }
+    var stale by remember { mutableIntStateOf(0) }
+    val presets = remember(reminderAt, stale) { com.example.itinerary.data.taskReminderPresets(null) }
+    val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
+    ReminderSectionFrame(notifications.enabled, notifications.enable,
+        hints = listOfNotNull(if (reminderAt != null && !exactAllowed) "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing." else null),
+        chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
+            (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
+                // Timed from the tap; a choice that has passed since goes.
+                val at = com.example.itinerary.data.taskReminderPresetAt(preset, null)
+                if (at != null) onSet(at) else stale += 1
+            }
+        } + ("Custom" to onCustom),
+        enabled = enabled) {
+        reminderAt?.let { at ->
+            ReminderRow(noteReminderLabel(at), snoozedUntil?.let { "Snoozed until ${noteReminderLabel(it)}. Changing the reminder ends the snooze." },
+                onRemove = { onSet(null) }, enabled = enabled)
+        }
+    }
+}
+
+@Composable
+internal fun noteReminderLabel(timestamp: Long): String {
+    val at = java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault())
+    return "${at.toLocalDate().dayLabel(LocalDateFormat.current)}, ${at.toLocalTime().label(LocalTimeFormat.current, LocalContext.current)}"
 }
 
 // Bold, italic, strike, heading, list, checklist and code, applied to the selection (or where the cursor is).

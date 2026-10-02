@@ -6,6 +6,7 @@ import com.example.itinerary.data.Reminder
 import com.example.itinerary.data.ReminderDeliveries
 import com.example.itinerary.data.ReminderUnit
 import com.example.itinerary.data.reminderTrigger
+import com.example.itinerary.data.inTimeZone
 import com.example.itinerary.reminders.MissedReminders.eventKey
 import com.example.itinerary.reminders.MissedReminders.taskKey
 import org.junit.Assert.*
@@ -29,6 +30,30 @@ class MissedRemindersTest {
         assertEquals(7L, MissedReminders.eventId(eventKey(7)))
         assertEquals("a:b", MissedReminders.taskId(taskKey("a:b")))
         assertNull(MissedReminders.eventId(taskKey("7"))); assertNull(MissedReminders.taskId(eventKey(7)))
+    }
+
+    @Test fun noteRemindersAreMissedOnlyAtTheirCurrentTime() {
+        val note = com.example.itinerary.data.PlannerNote(id = "n1", title = "Pay rent", reminderAt = trigger - hour)
+        assertEquals("n1", MissedReminders.noteId(MissedReminders.noteKey("n1")))
+        assertNull(MissedReminders.noteId(taskKey("n1"))); assertNull(MissedReminders.taskId(MissedReminders.noteKey("n1")))
+        fun pick(n: com.example.itinerary.data.PlannerNote, due: Long) = MissedReminders.select(MissedReminders.due(mapOf(MissedReminders.noteKey("n1") to due), now),
+            emptyMap(), emptyMap(), emptyMap(), mapOf(n.id to n))
+        assertEquals(listOf(MissedReminders.Note(note, trigger - hour)), pick(note, trigger - hour))
+        // Changed or cleared since, the old time isn't missed; a snooze is.
+        assertTrue(pick(note.copy(reminderAt = trigger), trigger - hour).isEmpty())
+        assertTrue(pick(note.copy(reminderAt = null), trigger - hour).isEmpty())
+        assertEquals(1, pick(note.copy(snoozedUntil = trigger - hour / 2), trigger - hour / 2).size)
+    }
+
+    @Test fun noteRemindersKeepTheirClockTimeAcrossZones() {
+        val paris = java.time.ZoneId.of("Europe/Paris"); val sydney = java.time.ZoneId.of("Australia/Sydney")
+        val nine = java.time.LocalDateTime.of(2026, 11, 2, 9, 0)
+        val at = nine.atZone(paris).toInstant().toEpochMilli()
+        val note = com.example.itinerary.data.PlannerNote(title = "Call", reminderAt = at)
+        val moved = note.inTimeZone(paris, sydney, now = at - 30L * 24 * hour)
+        assertEquals(nine, java.time.Instant.ofEpochMilli(moved.reminderAt!!).atZone(sydney).toLocalDateTime())
+        assertNull(moved.snoozedUntil)
+        assertEquals(note, note.copy(reminderAt = null).inTimeZone(paris, sydney, at).copy(reminderAt = at))
     }
 
     @Test fun windowIsTheLast24HoursUpToNow() {

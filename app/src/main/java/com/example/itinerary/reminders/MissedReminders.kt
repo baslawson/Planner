@@ -25,10 +25,13 @@ object MissedReminders {
     fun taskKey(taskId: String) = "t:$taskId"
     fun eventId(key: String): Long? = key.removePrefix("e:").takeIf { key.startsWith("e:") }?.toLongOrNull()
     fun taskId(key: String): String? = key.removePrefix("t:").takeIf { key.startsWith("t:") && it.isNotEmpty() }
+    fun noteKey(noteId: String) = "n:$noteId"
+    fun noteId(key: String): String? = key.removePrefix("n:").takeIf { key.startsWith("n:") && it.isNotEmpty() }
 
     sealed interface Missed { val due: Long }
     data class Event(val item: ItineraryItem, val reminder: Reminder, override val due: Long) : Missed
     data class Task(val task: PlannerTask, override val due: Long) : Missed
+    data class Note(val note: com.example.itinerary.data.PlannerNote, override val due: Long) : Missed
 
     /** Alarms that fell due at most 24 hours ago, and at least [graceMs] ago. */
     fun due(pending: Map<String, Long>, now: Long, graceMs: Long = 0L): Map<String, Long> =
@@ -42,7 +45,7 @@ object MissedReminders {
      * done, paid or skipped, and an event reminder was not already delivered.
      */
     fun select(due: Map<String, Long>, events: Map<Long, Pair<ItineraryItem, Reminder>>, delivered: Map<Long, String>,
-               tasks: Map<String, PlannerTask>): List<Missed> = due.mapNotNull { (key, trigger) ->
+               tasks: Map<String, PlannerTask>, notes: Map<String, com.example.itinerary.data.PlannerNote> = emptyMap()): List<Missed> = due.mapNotNull { (key, trigger) ->
         eventId(key)?.let { id ->
             val (item, reminder) = events[id] ?: return@mapNotNull null
             val expected = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder.offsetMinutes).toInstant().toEpochMilli()
@@ -50,5 +53,6 @@ object MissedReminders {
             if (item.paid || item.skipped || trigger != expected || ReminderDeliveries.delivered(delivered[id], item, reminder)) null
             else Event(item, reminder, trigger)
         } ?: taskId(key)?.let { id -> tasks[id]?.takeIf { !it.done && it.activeReminderAt == trigger }?.let { Task(it, trigger) } }
+            ?: noteId(key)?.let { id -> notes[id]?.takeIf { it.reminderAt?.let { at -> it.snoozedUntil ?: at } == trigger }?.let { Note(it, trigger) } }
     }.sortedByDescending { it.due }
 }

@@ -123,6 +123,9 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
                 is MissedReminders.Task -> manager.notify("task:${m.task.id}", 0, builder(m.task.title, dueText(m.due), 0)
                     .setSubText("Task reminder").setWhen(m.due).setShowWhen(true)
                     .addAction(0, "Done", TaskActionReceiver.done(context, m.task.id, m.due)).build())
+                is MissedReminders.Note -> manager.notify("note:${m.note.id}", 0, builder(com.example.itinerary.data.Notes.label(m.note), dueText(m.due), 0)
+                    .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
+                    .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build())
             }
         }
         if (grouped) {
@@ -142,4 +145,6 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
     }
 }
 
-private fun MissedReminders.Missed.title() = when (this) { is MissedReminders.Event -> item.title; is MissedReminders.Task -> task.title }
+private fun MissedReminders.Missed.title() = when (this) {
+    is MissedReminders.Event -> item.title; is MissedReminders.Task -> task.title; is MissedReminders.Note -> com.example.itinerary.data.Notes.label(note)
+}

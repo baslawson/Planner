@@ -29,6 +29,21 @@ data class PlannerNote(
     val snoozedUntil: Long? = null,
 )
 
+/** When the note's reminder is due now: the snooze if there is one, else [PlannerNote.reminderAt]. */
+val PlannerNote.activeReminderAt: Long? get() = reminderAt?.let { snoozedUntil ?: it }
+
+/** The snooze time while it is still ahead of [now]. */
+fun PlannerNote.snoozedAt(now: Long): Long? = snoozedUntil?.takeIf { reminderAt != null && it > now }
+
+/** After a time-zone change the reminder keeps its clock time, as a task's does (see PlannerTask.inTimeZone). */
+fun PlannerNote.inTimeZone(from: java.time.ZoneId, to: java.time.ZoneId, now: Long): PlannerNote {
+    val at = reminderAt ?: return this
+    val moved = java.time.Instant.ofEpochMilli(at).atZone(from).toLocalDateTime().atZone(to).toInstant().toEpochMilli()
+    if (moved == at) return this
+    val keep = snoozedUntil != null || at <= now || moved <= now
+    return copy(reminderAt = moved, snoozedUntil = if (keep) snoozedUntil ?: at else null)
+}
+
 @Dao
 interface NoteDao {
     @Query("SELECT * FROM notes ORDER BY id") fun observe(): Flow<List<PlannerNote>>

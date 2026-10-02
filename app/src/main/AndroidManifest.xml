@@ -86,6 +86,8 @@
         <receiver android:name=".reminders.TaskActionReceiver" android:exported="false" />
 
         <receiver android:name=".reminders.TaskReminderReceiver" android:exported="false" />
+        <receiver android:name=".reminders.NoteReminderReceiver" android:exported="false" />
+        <receiver android:name=".reminders.NoteActionReceiver" android:exported="false" />
 
         <receiver android:name=".reminders.BillPaymentReceiver" android:exported="false" />
         <receiver android:name=".reminders.SnoozeReceiver" android:exported="false" />

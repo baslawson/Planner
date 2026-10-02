@@ -99,7 +99,8 @@ class Repository(
 
     private suspend fun afterCommit(files: Collection<String> = emptyList(), reminderIds: Collection<Long> = emptyList(),
                                     cancelFirst: Set<Long> = emptySet(), notify: Boolean = true, taskIds: Collection<String> = emptyList(),
-                                    resetTaskIds: Set<String> = emptySet()) {
+                                    resetTaskIds: Set<String> = emptySet(), noteIds: Collection<String> = emptyList(),
+                                    resetNoteIds: Set<String> = emptySet()) {
         cleanupFiles.addAll(files.filter { it.isNotBlank() })
         val work = linkedMapOf<String, suspend () -> Unit>()
         if (cleanupFiles.isNotEmpty()) work["cleanup"] = {
@@ -120,8 +121,15 @@ class Repository(
                 if (task != null) scheduler.scheduleTask(task)
             }
         }
+        noteIds.distinct().forEach { id ->
+            work["reminders:note:$id"] = {
+                val note = noteDao.byId(id)
+                if (note == null || id in resetNoteIds) scheduler.cancelNote(id)
+                if (note != null) scheduler.scheduleNote(note)
+            }
+        }
         // A long series can leave too many alarms armed, a deletion too few while later ones wait (AlarmWindow).
-        if (reminderIds.isNotEmpty() || taskIds.isNotEmpty()) work["reminders:window"] = {
+        if (reminderIds.isNotEmpty() || taskIds.isNotEmpty() || noteIds.isNotEmpty()) work["reminders:window"] = {
             if (AlarmWindow.needsRefill(scheduler.armedCount(), scheduler.armHorizon())) armReminders()
         }
         if (notify) work["widget"] = { onChanged() }
@@ -246,11 +254,16 @@ class Repository(
 
     // A new note ([create]) or the one being edited, stamped with the time it changed (unless nothing did). Returns it as saved.
     suspend fun saveNote(note: PlannerNote, create: Boolean): PlannerNote = changes.withLock {
-        val clean = Notes.clean(note).let { if (it == noteDao.byId(it.id)) it else it.copy(modified = System.currentTimeMillis()) }
+        val old = noteDao.byId(note.id)
+        // A changed reminder time ends its snooze, as a task's does.
+        val withSnooze = note.copy(snoozedUntil = if (note.reminderAt != null && note.reminderAt == old?.reminderAt) old.snoozedUntil else null)
+        val clean = Notes.clean(withSnooze).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
         Notes.validate(clean)
         withContext(NonCancellable) {
             if (create) noteDao.insert(clean)
-            else { check(noteDao.byId(clean.id) != null) { "This note was deleted" }; noteDao.update(clean) }
+            else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
+            afterCommit(noteIds = listOf(clean.id),
+                resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
         }
         clean
     }
@@ -265,6 +278,7 @@ class Repository(
             // Pinning and archiving only file it differently; the note itself changed only if its words did.
             val stamped = if (changed.content != note.content || changed.title != note.title) changed.copy(modified = System.currentTimeMillis()) else changed
             noteDao.update(stamped)
+            afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt) setOf(id) else emptySet())
             stamped
         }
     }
@@ -280,7 +294,30 @@ class Repository(
                 deleted
             } ?: return@withContext
             _pendingDeletions.value += bundle
+            afterCommit(noteIds = listOf(id))
         }
+    }
+
+    // A note reminder's alarm: [deliver] shows it, if the note still has that reminder at that time.
+    suspend fun deliverNoteReminder(id: String, trigger: Long, deliver: (PlannerNote) -> Unit) = changes.withLock {
+        val note = noteDao.byId(id) ?: return@withLock
+        if (note.activeReminderAt == trigger && trigger <= System.currentTimeMillis()) {
+            deliver(note)
+            scheduler.markDelivered(MissedReminders.noteKey(id), trigger)
+        }
+    }
+
+    // From a note reminder's notification: Done clears the reminder; Snooze moves it to [snoozeUntil]. False when the
+    // note no longer has that reminder (changed or deleted since).
+    suspend fun actOnNoteReminder(id: String, trigger: Long, snoozeUntil: Long? = null): Boolean = changes.withLock {
+        val note = noteDao.byId(id) ?: return@withLock false
+        if (note.activeReminderAt != trigger || trigger > System.currentTimeMillis()) return@withLock false
+        if (snoozeUntil != null) require(snoozeUntil > System.currentTimeMillis())
+        withContext(NonCancellable) {
+            noteDao.update(if (snoozeUntil == null) note.copy(reminderAt = null, snoozedUntil = null) else note.copy(snoozedUntil = snoozeUntil))
+            afterCommit(noteIds = listOf(id), resetNoteIds = setOf(id))
+        }
+        true
     }
 
     suspend fun deleteTask(id: String) = changes.withLock {
@@ -381,6 +418,7 @@ class Repository(
 
     private suspend fun restoreDeletedLocked(id: String) {
         val restoredTasks = mutableListOf<String>()
+        val restoredNotes = mutableListOf<String>()
         var stored: String? = null
         val reminderIds = db.withTransaction {
             val entry = deletedDao.byId(id) ?: return@withTransaction emptyList<Long>()
@@ -394,7 +432,10 @@ class Repository(
             }
             TaskDependencies.validateGraph(taskDao.all())
             // A note whose id came back meanwhile (a backup restored since) returns as a copy beside it.
-            data.notes.forEach { note -> noteDao.insert(note.copy(id = if (noteDao.byId(note.id) == null) note.id else UUID.randomUUID().toString())) }
+            data.notes.forEach { note ->
+                val restored = note.copy(id = if (noteDao.byId(note.id) == null) note.id else UUID.randomUUID().toString())
+                noteDao.insert(restored); restoredNotes += restored.id
+            }
             val planIds = tripDao.all().mapTo(hashSetOf()) { it.id }
             data.trips.filter { it.id !in planIds }.forEach { tripDao.upsert(it) }
             val itemIds = itemDao.all().mapTo(hashSetOf()) { it.id }
@@ -408,7 +449,7 @@ class Repository(
         }
         stored?.let(payloads::delete)
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
-        afterCommit(reminderIds = reminderIds, taskIds = restoredTasks)
+        afterCommit(reminderIds = reminderIds, taskIds = restoredTasks, noteIds = restoredNotes)
     }
 
     // Recently deleted's selection: each entry on its own, as one Restore / Delete forever would; one that fails doesn't
@@ -983,7 +1024,8 @@ class Repository(
         paymentUndo.clear()
         afterCommit(oldFiles, (oldReminders + data.reminders).map { it.id },
             cancelFirst = oldReminders.mapTo(hashSetOf()) { it.id }, taskIds = (oldTasks + data.tasks).map { it.id },
-            resetTaskIds = oldTasks.mapTo(hashSetOf()) { it.id })
+            resetTaskIds = oldTasks.mapTo(hashSetOf()) { it.id }, noteIds = (oldNotes + data.notes).map { it.id },
+            resetNoteIds = oldNotes.mapTo(hashSetOf()) { it.id })
     }
 
     // After a reboot, update or time change, and whenever the app opens (the exact-alarm permission may have changed).
@@ -1004,14 +1046,16 @@ class Repository(
         val items = readIds(reminders.map { it.itemId }, itemDao::byIds).associateBy { it.id }
         val delivered = readIds(reminders.map { it.id }, reminderDao::deliveries).associate { it.reminderId to it.key }
         val tasks = taskDao.all()
+        val notes = noteDao.all()
         val triggers = reminders.mapNotNull { r -> items[r.itemId]?.takeIf { !it.paid && !it.skipped && !ReminderDeliveries.delivered(delivered[r.id], it, r) }
-            ?.let { eventReminderAt(it, r) } } + tasks.mapNotNull { t -> t.activeReminderAt?.takeIf { !t.done } }
+            ?.let { eventReminderAt(it, r) } } + tasks.mapNotNull { t -> t.activeReminderAt?.takeIf { !t.done } } + notes.mapNotNull { it.activeReminderAt }
         scheduler.setArmHorizon(AlarmWindow.horizon(triggers, System.currentTimeMillis()))
         // The latest first, so the alarms of the ones that now wait are freed before nearer ones are set.
         val jobs: List<Pair<Long, () -> Unit>> = reminders.mapNotNull { reminder -> items[reminder.itemId]?.let { item -> eventReminderAt(item, reminder) to {
             if (item.paid || item.skipped) scheduler.cancel(reminder.id)
             else if (!ReminderDeliveries.delivered(delivered[reminder.id], item, reminder)) scheduler.reconcile(item, reminder)
-        } } } + tasks.map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } }
+        } } } + tasks.map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } } +
+            notes.filter { it.reminderAt != null }.map { note -> note.activeReminderAt!! to { scheduler.scheduleNote(note) } }
         var failure: Exception? = null
         jobs.sortedByDescending { it.first }.forEach { (_, job) -> try { job() } catch (e: Exception) { failure = e } }
         failure?.let { throw it }
@@ -1025,6 +1069,7 @@ class Repository(
             val now = System.currentTimeMillis()
             db.withTransaction {
                 taskDao.all().forEach { task -> task.inTimeZone(from, zone, now).let { if (it != task) taskDao.update(it) } }
+                noteDao.all().forEach { note -> note.inTimeZone(from, zone, now).let { if (it != note) noteDao.update(it) } }
             }
         }
         scheduler.setReminderZone(zone.id)
@@ -1040,13 +1085,15 @@ class Repository(
             reminderDao.byId(id)?.let { r -> itemDao.byId(r.itemId)?.let { id to (it to r) } } }.toMap()
         val delivered = readIds(events.keys, reminderDao::deliveries).associate { it.reminderId to it.key }
         val tasks = due.keys.mapNotNull(MissedReminders::taskId).mapNotNull { taskDao.byId(it) }.associateBy { it.id }
-        val missed = MissedReminders.select(due, events, delivered, tasks)
+        val notes = due.keys.mapNotNull(MissedReminders::noteId).mapNotNull { noteDao.byId(it) }.associateBy { it.id }
+        val missed = MissedReminders.select(due, events, delivered, tasks, notes)
         post(missed)
         missed.forEach { m ->
             when (m) {
                 is MissedReminders.Event -> ReminderDeliveries.key(m.item, m.reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(m.reminder.id, it)) }
                     ?: scheduler.markDelivered(MissedReminders.eventKey(m.reminder.id), m.due)
                 is MissedReminders.Task -> scheduler.markDelivered(MissedReminders.taskKey(m.task.id), m.due)
+                is MissedReminders.Note -> scheduler.markDelivered(MissedReminders.noteKey(m.note.id), m.due)
             }
         }
     }

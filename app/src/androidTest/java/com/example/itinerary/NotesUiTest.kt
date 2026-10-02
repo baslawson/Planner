@@ -160,6 +160,21 @@ class NotesUiTest {
         await { !store.fileFor("qa-note-receipt.txt").exists() }
     }
 
+    @Test fun reminderChipSetsAndShowsOnTheCard() {
+        openNotes()
+        click("New note"); await { find("Title") != null }
+        type(0, "QA remind me")
+        click("Tomorrow 09:00")
+        await { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ") == true } }
+        screenshot("editor-reminder")
+        click("Save")
+        val tomorrowNine = java.time.LocalDate.now().plusDays(1).atTime(9, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        await { notes().singleOrNull()?.reminderAt == tomorrowNine }
+        click("Close")
+        await { nodes().any { it.contentDescription?.toString()?.startsWith("Reminder, ") == true } }
+        screenshot("card-reminder")
+    }
+
     @Test fun gridLooksInTheDarkTheme() {
         runBlocking {
             listOf(

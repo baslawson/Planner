@@ -176,6 +176,10 @@ private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (note.tags.isNotEmpty()) Text(note.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium,
                     color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                note.reminderAt?.let { at ->
+                    val due = noteReminderLabel(note.snoozedUntil ?: at)
+                    Text("⏰ $due", style = MaterialTheme.typography.labelMedium, color = text, modifier = Modifier.semantics { contentDescription = "Reminder, $due" })
+                }
                 if (note.attachments.isNotEmpty()) Text("📎 ${note.attachments.size}", style = MaterialTheme.typography.labelMedium, color = soft,
                     modifier = Modifier.semantics { contentDescription = "${note.attachments.size} attachment${if (note.attachments.size == 1) "" else "s"}" })
             }

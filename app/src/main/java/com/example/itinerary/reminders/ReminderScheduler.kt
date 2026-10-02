@@ -15,6 +15,8 @@ interface ReminderAlarms {
     fun reconcile(item: ItineraryItem, reminder: Reminder) = schedule(item, reminder)
     fun scheduleTask(task: com.example.itinerary.data.PlannerTask) {}
     fun cancelTask(id: String) {}
+    fun scheduleNote(note: com.example.itinerary.data.PlannerNote) {}
+    fun cancelNote(id: String) {}
     fun cancel(reminderId: Long)
     // The time zone task reminders were last set in, so that after a change they keep their clock time (Repository).
     fun reminderZone(): String? = null
@@ -76,10 +78,39 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         androidx.core.app.NotificationManagerCompat.from(context).cancel("task:$id", 0)
     }
 
+    // A note's reminder, set and cleared as a task's is (a note has no "done": Done clears its reminder).
+    override fun scheduleNote(note: com.example.itinerary.data.PlannerNote) {
+        val key = MissedReminders.noteKey(note.id)
+        val triggerAt = note.reminderAt?.let { note.snoozedUntil ?: it }
+        if (triggerAt == null) { cancelNote(note.id); return }
+        if (triggerAt <= System.currentTimeMillis()) return
+        if (delivered.delivered(key, triggerAt)) return
+        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+            notePending(note.id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
+            ledger.remove(key)
+            return
+        }
+        val intent = NoteReminderReceiver.intent(context, note.id).putExtra("trigger", triggerAt)
+        val updated = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        ledger.set(key, triggerAt)
+        setAlarm(triggerAt, updated)
+    }
+
+    override fun cancelNote(id: String) {
+        notePending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
+        ledger.remove(MissedReminders.noteKey(id))
+        delivered.forget(MissedReminders.noteKey(id))
+        androidx.core.app.NotificationManagerCompat.from(context).cancel("note:$id", 0)
+    }
+
+    private fun notePending(id: String, flags: Int): PendingIntent? = PendingIntent.getBroadcast(
+        context, 0, NoteReminderReceiver.intent(context, id), flags or PendingIntent.FLAG_IMMUTABLE)
+
     // A late alarm already shown as missed (MissedReminders); its notification stays.
     fun disarm(key: String) {
         MissedReminders.eventId(key)?.let { cancelCode(it.toInt()) }
         MissedReminders.taskId(key)?.let { id -> taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() } }
+        MissedReminders.noteId(key)?.let { id -> notePending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() } }
     }
 
     private fun taskPending(id: String, flags: Int): PendingIntent? = PendingIntent.getBroadcast(
