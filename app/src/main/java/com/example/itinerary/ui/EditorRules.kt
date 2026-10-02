@@ -81,11 +81,13 @@ object EditorRules {
     fun changedElsewhereBanner(bill: Boolean): String = "This ${if (bill) "bill" else "event"} was changed elsewhere"
 
     // U-N1: the same for a task: [stored] differs from [baseline] in what Save would write over (title, notes, due date,
-    // priority; Save keeps done as stored). Planner-only changes made elsewhere (done, a snooze) don't count, nor does a
-    // task gone meanwhile (see taskDeletedElsewhere).
+    // priority, and R-5: the reminder time, repeat and checklist; a time-zone change moves the reminder underneath, and
+    // Save would set the old instant again). Done and a snooze alone don't count: Save keeps both as stored while the
+    // reminder time is unchanged (Repository.saveTask). Nor does a task gone meanwhile (see taskDeletedElsewhere).
     fun taskChangedElsewhere(baseline: com.example.itinerary.data.PlannerTask, stored: com.example.itinerary.data.PlannerTask?): Boolean =
         stored != null && stored.id == baseline.id && (stored.title != baseline.title || stored.notes != baseline.notes ||
-            stored.dueDate != baseline.dueDate || stored.priority != baseline.priority)
+            stored.dueDate != baseline.dueDate || stored.priority != baseline.priority || stored.reminderAt != baseline.reminderAt ||
+            stored.repeat != baseline.repeat || stored.repeatDays != baseline.repeatDays || stored.checklist != baseline.checklist)
 
     fun taskChangedElsewhereBanner(): String = "This task was changed elsewhere"
 

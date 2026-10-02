@@ -121,4 +121,16 @@ class MissedRemindersTest {
         val left = MissedReminders.remaining(pending, now, grace)
         assertEquals(setOf("late"), MissedReminders.due(left, now + 60_000, grace).keys)
     }
+    // R-3: without exact alarms Android may deliver one up to an hour late. Opening the app in that hour must neither show
+    // it as missed nor disarm it.
+    @Test fun inexactAlarmsGetAnHourBeforeTheyCountAsMissed() {
+        assertEquals(MissedReminders.GRACE_MS, MissedReminders.openGraceMs(exactAlarms = true))
+        val grace = MissedReminders.openGraceMs(exactAlarms = false)
+        assertTrue(grace > hour)
+        val pending = mapOf("late" to now - 35 * 60_000L, "lost" to now - grace)
+        assertEquals(setOf("lost"), MissedReminders.due(pending, now, grace).keys)
+        assertEquals(setOf("late"), MissedReminders.remaining(pending, now, grace).keys)
+        // With exact alarms the same 35 minutes means it was lost.
+        assertEquals(setOf("late", "lost"), MissedReminders.due(pending, now, MissedReminders.openGraceMs(true)).keys)
+    }
 }

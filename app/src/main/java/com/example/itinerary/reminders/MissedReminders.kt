@@ -10,7 +10,7 @@ import com.example.itinerary.data.reminderTrigger
 /**
  * A reboot clears Android's alarms, and so does a force stop (some phones do one when an app is swiped away). Planner keeps its own list of the alarms it set (key → trigger, see AlarmLedger); after a
  * boot, the ones that fell due while the phone was off are shown once as "missed"; when the app opens, the ones over
- * [GRACE_MS] overdue (an alarm that still exists has gone off by then: it is taken off the list as it rings). Only alarms that were really set count, so
+ * [GRACE_MS] overdue ([INEXACT_GRACE_MS] without exact alarms; an alarm that still exists has gone off by then: it is taken off the list as it rings). Only alarms that were really set count, so
  * a reminder saved or synced with a time already past is never "missed", and the list is emptied of everything due, so a
  * second reboot shows nothing again.
  */
@@ -20,6 +20,17 @@ object MissedReminders {
     // When the app opens, a reminder this late has lost its alarm. Android lets a late one through at the latest when
     // the phone wakes up or the app opens, so a shorter wait would show it as missed just before it rings.
     const val GRACE_MS = 10 * 60_000L
+    // R-3: without exact alarms Android may deliver one up to an hour after its time (its inexact window is capped at
+    // an hour), and Doze's allow-while-idle limit can add some minutes more. Opening the app doesn't make Android deliver
+    // it any sooner, so until then a late one is still on its way, not lost.
+    const val INEXACT_GRACE_MS = 90 * 60_000L
+    // How long the app waits after opening before it looks: an alarm Android releases as the phone wakes up (the same
+    // moment the user opens Planner) reaches ReminderReceiver first and is taken off the ledger, instead of being
+    // shown as missed and disarmed just before it rings.
+    const val SETTLE_MS = 5_000L
+
+    /** How late an alarm must be, when the app opens, before it counts as lost: see [GRACE_MS] and [INEXACT_GRACE_MS]. */
+    fun openGraceMs(exactAlarms: Boolean): Long = if (exactAlarms) GRACE_MS else INEXACT_GRACE_MS
 
     fun eventKey(reminderId: Long) = "e:$reminderId"
     fun taskKey(taskId: String) = "t:$taskId"

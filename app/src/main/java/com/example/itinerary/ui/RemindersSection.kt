@@ -58,8 +58,12 @@ fun RemindersSection(
     val zone = rememberCurrentZoneId()
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    val scheduler = (context.applicationContext as com.example.itinerary.ItineraryApp).reminderScheduler
+    var exactAllowed by remember { mutableStateOf(scheduler.canScheduleExact()) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { exactAllowed = scheduler.canScheduleExact() }
+
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
-    ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint),
+    ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
         chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom" to { customOpen = true })) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder.offsetMinutes, zone)
@@ -87,6 +91,19 @@ fun RemindersSection(
             onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
         )
     }
+}
+
+const val LATE_REMINDER_HINT = "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing."
+
+/**
+ * The warning under [reminders] while exact alarms are off (the default from Android 14): they may come late, and one set
+ * to "Ring until I stop it" can't ring at all (Android starts the ringing alarm only from an exact alarm), so it says so.
+ */
+internal fun exactAlarmHint(exactAllowed: Boolean, reminders: List<Reminder>): String? = when {
+    exactAllowed || reminders.isEmpty() -> null
+    reminders.any { it.ringUntilDismissed } -> "Exact alarms are off: reminders may come late, and \"Ring until I stop it\" can't " +
+        "ring, only notify. Enable Alarms & reminders in app settings so it can ring."
+    else -> LATE_REMINDER_HINT
 }
 
 /**

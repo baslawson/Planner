@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import com.example.itinerary.reminders.ReminderAlarms
 import com.example.itinerary.reminders.MissedReminders
 import com.example.itinerary.reminders.AlarmWindow
@@ -60,6 +61,10 @@ class Repository(
         taskDao.all().filter { !it.done && it.dueDate != null && it.dueDate <= day }
             .sortedWith(compareBy<PlannerTask> { it.dueDate }.then(Tasks.order))
 
+    // Those of [tasks] still waiting on a prerequisite: the widget shows them without an active Complete, as the app does.
+    suspend fun widgetBlockedTasks(tasks: List<PlannerTask>): Set<String> =
+        if (tasks.none { it.prerequisiteIds.isNotEmpty() }) emptySet() else TaskDependencies.blockedIds(tasks, taskDao.all())
+
     private val changes = Mutex()
 
     // Events from other calendars are shown with negative ids and belong to their calendar, not to Planner.
@@ -68,12 +73,17 @@ class Repository(
     private val _pendingPayments = MutableStateFlow<List<PendingPayment>>(emptyList())
     val pendingPayments = _pendingPayments.asStateFlow()
     // Snackbar dismissal must not invalidate a still-visible notification Undo action.
-    private val paymentUndo = mutableMapOf<String, Pair<PendingPayment, Long>>()
+    private val paymentUndo = PaymentUndos()
+    private val undoTimers = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
     private fun recordPayment(change: PendingPayment) {
         val now = System.currentTimeMillis()
-        paymentUndo.entries.removeAll { it.value.first.before.id == change.before.id || it.value.second < now }
-        paymentUndo[change.token] = change to (now + 60_000)
-        _pendingPayments.value = _pendingPayments.value.filterNot { it.before.id == change.before.id } + change
+        paymentUndo.record(change, now)
+        _pendingPayments.value = paymentUndo.live(_pendingPayments.value.filterNot { it.before.id == change.before.id } + change, now)
+        // Its bar goes when its Undo does, also when no screen was open to show it (paid from a notification).
+        undoTimers.launch {
+            kotlinx.coroutines.delay(PaymentUndos.UNDO_MS + 1_000)
+            changes.withLock { _pendingPayments.value = paymentUndo.live(_pendingPayments.value, System.currentTimeMillis()) }
+        }
     }
 
     private val _pendingMoves = MutableStateFlow<List<PendingMove>>(emptyList())
@@ -943,8 +953,8 @@ class Repository(
     }
 
     suspend fun undoPayment(token: String): Boolean = changes.withLock {
-        val (change, expires) = paymentUndo.remove(token) ?: return@withLock false
-        if (expires < System.currentTimeMillis()) {
+        // Expired or gone, its bar goes too: otherwise it would stay first in the queue (R-4).
+        val change = paymentUndo.take(token, System.currentTimeMillis()) ?: run {
             _pendingPayments.value = _pendingPayments.value.filterNot { it.token == token }
             return@withLock false
         }

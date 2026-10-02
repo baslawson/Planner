@@ -30,12 +30,20 @@ class ReminderReceiver : BroadcastReceiver() {
     private fun show(context: Context, intent: Intent) {
         val id = intent.getLongExtra(ReminderScheduler.EXTRA_REMINDER_ID, 0L)
         val content = reminderContent(context, intent.extras) ?: return
+        var couldNotRing = false
         if (intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false) && ringingAlarmsEnabled(context)) {
             try {
                 ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java).putExtras(intent))
                 return
-            } catch (_: Exception) { /* Fall back to a normal notification. */ }
+            } catch (e: Exception) {
+                // Android 12+ lets a background app start the ringing service from an exact alarm only. Without "Alarms &
+                // reminders" (off by default from Android 14) this alarm came inexact, and nothing else allowed then can
+                // ring: setAlarmClock needs the same permission, and full-screen intents are for calling and clock apps.
+                // So the notification itself keeps sounding until it is seen, and says why it didn't ring.
+                android.util.Log.w("ReminderReceiver", "Couldn't start the ringing alarm", e)
+                couldNotRing = true
+            }
         }
-        postReminderNotification(context, id.toInt(), content.title, content.text, content.subText, id, intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN))
+        postReminderNotification(context, id.toInt(), content.title, content.text, content.subText, id, intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN), couldNotRing)
     }
 }

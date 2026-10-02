@@ -102,11 +102,13 @@ class TodayWidget : AppWidgetProvider() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         // Bounded native RemoteViews stay small even with hundreds of events. The footer always opens the complete day.
-        fun render(context: Context, events: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList()): RemoteViews {
-            return renderDay(context, widgetEventsOnDay(events, today), today, format, heightDp, tasks.filter { !it.done && it.dueDate != null && it.dueDate <= today }.sortedBy { it.dueDate })
+        fun render(context: Context, events: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList(),
+                   blocked: Set<String> = emptySet()): RemoteViews {
+            return renderDay(context, widgetEventsOnDay(events, today), today, format, heightDp, tasks.filter { !it.done && it.dueDate != null && it.dueDate <= today }.sortedBy { it.dueDate }, blocked)
         }
 
-        private fun renderDay(context: Context, shown: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList()): RemoteViews {
+        private fun renderDay(context: Context, shown: List<ItineraryItem>, today: LocalDate, format: TimeFormat, heightDp: Int, tasks: List<PlannerTask> = emptyList(),
+                              blocked: Set<String> = emptySet()): RemoteViews {
             val fontScale = context.resources.configuration.fontScale.coerceAtLeast(1f)
             val capacity = ((heightDp - 108 * fontScale) / (64 * fontScale)).toInt().coerceIn(1, 6)
             return RemoteViews(context.packageName, R.layout.widget_today).apply {
@@ -123,9 +125,18 @@ class TodayWidget : AppWidgetProvider() {
                 tasks.take(taskSlots).forEach { task ->
                     addView(R.id.widget_rows, RemoteViews(context.packageName, R.layout.widget_task).apply {
                         setTextViewText(R.id.widget_task_title, task.title)
-                        setTextViewText(R.id.widget_task_due, if (task.dueDate!! < today) "Overdue · ${task.dueDate.shortLabel()}" else "Task · Due today")
-                        setContentDescription(R.id.widget_task_done, "Complete ${task.title}")
-                        setOnClickPendingIntent(R.id.widget_task_done, completeTaskIntent(context, task.id))
+                        val waiting = task.id in blocked
+                        setTextViewText(R.id.widget_task_due, (if (task.dueDate!! < today) "Overdue · ${task.dueDate.shortLabel()}" else "Task · Due today") +
+                            if (waiting) " · Waiting on prerequisites" else "")
+                        if (waiting) {
+                            // Like the app's disabled checkbox: a dimmed box that opens the task instead of completing it.
+                            setTextColor(R.id.widget_task_done, 0x55A5E5DC)
+                            setContentDescription(R.id.widget_task_done, "${task.title} is waiting on prerequisites")
+                            setOnClickPendingIntent(R.id.widget_task_done, taskIntent(context, task.id))
+                        } else {
+                            setContentDescription(R.id.widget_task_done, "Complete ${task.title}")
+                            setOnClickPendingIntent(R.id.widget_task_done, completeTaskIntent(context, task.id))
+                        }
                         setOnClickPendingIntent(R.id.widget_task_open, taskIntent(context, task.id))
                     })
                 }
@@ -160,10 +171,11 @@ class TodayWidget : AppWidgetProvider() {
             // Planner's own events and those of ticked Nextcloud calendars, in one day order.
             val events = widgetEventsOnDay(app.repository.widgetEvents(today) + app.calendarSync.widgetItems(today), today)
             val tasks = app.repository.widgetTasks(today)
+            val blocked = app.repository.widgetBlockedTasks(tasks)
             ids.forEach { id ->
                 val options = manager.getAppWidgetOptions(id)
                 val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220)
-                manager.updateAppWidget(id, renderDay(context, events, today, app.settings.timeFormat.value, height, tasks))
+                manager.updateAppWidget(id, renderDay(context, events, today, app.settings.timeFormat.value, height, tasks, blocked))
             }
             // Inexact, non-waking midnight refresh plus the platform's periodic update. No new alarm permission.
             alarm.set(AlarmManager.RTC, today.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(), refreshIntent(context))

@@ -34,6 +34,15 @@ class WorkflowToolsTest {
         assertEquals(listOf("a"),b.duplicateForEditing().prerequisiteIds)
         assertEquals(listOf("a"),b.copy(repeat="DAILY").nextOccurrence(day)!!.prerequisiteIds)
     }
+    // R-6: the widget offers Complete only where the app's checkbox is enabled.
+    @Test fun widgetKnowsWhichTasksAreBlocked() {
+        val a=PlannerTask(id="a", title="A")
+        val b=PlannerTask(id="b", title="B",prerequisiteIds=listOf("a"))
+        val c=PlannerTask(id="c", title="C",prerequisiteIds=listOf("gone"))
+        assertEquals(setOf("b","c"),TaskDependencies.blockedIds(listOf(a,b,c),listOf(a,b,c)))
+        assertEquals(setOf("c"),TaskDependencies.blockedIds(listOf(b,c),listOf(a.copy(done=true),b,c)))
+        assertTrue(TaskDependencies.blockedIds(listOf(a),listOf(a,b)).isEmpty())
+    }
     @Test fun longDependencyChainDoesNotOverflow() {
         val tasks=(0..5000).map { PlannerTask(id="$it", prerequisiteIds=if(it==0)emptyList() else listOf("${it-1}")) }
         TaskDependencies.validateGraph(tasks.reversed())

@@ -405,7 +405,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 val presets = remember(date, reminderAt, presetsStale) { taskReminderPresets(date?.let(LocalDate::parse)) }
                 val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
                 ReminderSectionFrame(notifications.enabled, notifications.enable,
-                    hints = listOfNotNull(if (reminderAt != null && !exactAllowed) "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing." else null),
+                    hints = listOfNotNull(if (reminderAt != null && !exactAllowed) LATE_REMINDER_HINT else null),
                     chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
                         when (preset) {
                             TaskReminderPreset.ON_THE_DAY -> "On the day $nine"

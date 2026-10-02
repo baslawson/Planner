@@ -13,6 +13,9 @@ object TaskDependencies {
         val byId = tasks.associateBy { it.id }
         return task.prerequisiteIds.filter { byId[it]?.done != true }
     }
+    /** The ids among [shown] that can't be completed yet ([blockers] in [all]): the widget offers no Complete for them. */
+    fun blockedIds(shown: List<PlannerTask>, all: List<PlannerTask>): Set<String> =
+        shown.filter { it.prerequisiteIds.isNotEmpty() && blockers(it, all).isNotEmpty() }.mapTo(HashSet()) { it.id }
     fun validateGraph(tasks: List<PlannerTask>) {
         val byId = tasks.associateBy { it.id }
         val visited = HashSet<String>()

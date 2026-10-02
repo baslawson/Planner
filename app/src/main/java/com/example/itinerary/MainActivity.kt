@@ -173,6 +173,7 @@ class MainActivity : ComponentActivity() {
         if (appLock.checkOnStart())
             startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
+        AlarmService.stopIfUnseen(this)
         // Cheap and idempotent; picks up exact-alarm permission the user just granted in system settings.
         lifecycleScope.launch(Dispatchers.IO) {
             // First the reminders whose alarms Android dropped (a force stop), before they are set again.

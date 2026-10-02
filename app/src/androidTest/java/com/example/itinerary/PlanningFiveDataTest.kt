@@ -121,6 +121,10 @@ class PlanningFiveDataTest {
             assertEquals("Complete Overdue test", view.findViewById<View>(R.id.widget_task_done).contentDescription)
             assertEquals(2, view.findViewById<LinearLayout>(R.id.widget_rows).childCount)
             assertEquals("Appointment", view.findViewById<TextView>(R.id.widget_event_title).text.toString())
+            // R-6: a task waiting on a prerequisite gets no Complete, as in the app.
+            val blocked = TodayWidget.render(context, events, day, TimeFormat.HOUR_24, 400, tasks, setOf(tasks[0].id)).apply(context, null)
+            assertEquals("Overdue test is waiting on prerequisites", blocked.findViewById<View>(R.id.widget_task_done).contentDescription)
+            assertTrue(blocked.findViewById<TextView>(R.id.widget_task_due).text.endsWith("Waiting on prerequisites"))
         }
     }
 }
