@@ -22,6 +22,17 @@ class CalendarFileImportUiTest {
     private val context get() = ins.targetContext
     private val app get() = context.applicationContext as ItineraryApp
     private val today get() = LocalDate.now()
+    // As a file manager or another app hands one over: a content: URI (Planner refuses file: URIs, Q-6). Served by
+    // Planner's own file provider from its attachment store, and removed after the test.
+    private val served = mutableListOf<String>()
+    private fun asContent(file: java.io.File): Uri {
+        val name = "qa-import-${'$'}{file.name}"
+        file.copyTo(app.attachmentStore.fileFor(name).apply { parentFile?.mkdirs() }, overwrite = true)
+        served += name
+        return app.attachmentStore.uriFor(name)
+    }
+    @org.junit.After fun removeServed() { served.forEach { app.attachmentStore.fileFor(it).delete() } }
+
     private fun data() = runBlocking { app.repository.snapshot() }
     private fun nodes(): List<AccessibilityNodeInfo> {
         val result = mutableListOf<AccessibilityNodeInfo>()
@@ -73,7 +84,7 @@ class CalendarFileImportUiTest {
         try {
             app.settings.lastViewCalendar = false
             ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .setDataAndType(asContent(file), "text/calendar")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             await { find("Import calendar file") != null && find("5 events in this file (1 repeating)") != null }
             screenshot("list")
@@ -132,7 +143,7 @@ class CalendarFileImportUiTest {
         try {
             app.settings.lastViewCalendar = false
             val activity = ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .setDataAndType(asContent(file), "text/calendar")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             await { find("Add 1 event") != null }
             ins.runOnMainSync { activity.recreate() }
@@ -155,7 +166,7 @@ class CalendarFileImportUiTest {
         try {
             app.settings.lastViewCalendar = false
             ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .setDataAndType(asContent(file), "text/calendar")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             await { find("Add 1 event") != null }
             click("Edit")
@@ -191,7 +202,7 @@ class CalendarFileImportUiTest {
         try {
             app.settings.lastViewCalendar = false
             ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.fromFile(file), "text/calendar")
+                .setDataAndType(asContent(file), "text/calendar")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             await { find("Add 2 events") != null }
             // Only the one-off row offers Edit; a repeating one doesn't.
