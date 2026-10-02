@@ -39,6 +39,8 @@ class WidgetDateStepTest {
         assertEquals("Close this event first. Then the widget's day opens.", widgetWaitMessage(1, 0))
         assertEquals("Close this task first. Then the widget's day opens.", widgetWaitMessage(0, 1))
         assertEquals("Close the open event and task first. Then the widget's day opens.", widgetWaitMessage(1, 2))
+        assertEquals("Close this note first. Then the widget's day opens.", widgetWaitMessage(0, 0, 1))
+        assertEquals("Close the open editors first. Then the widget's day opens.", widgetWaitMessage(1, 0, 1))
     }
 
     // U-N5: an editor open in another Planner window (a share opened in the browser's task) doesn't hold up this

@@ -209,7 +209,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 try {
                     if (result == SnackbarResult.ActionPerformed) {
                         if (!app.repository.undoPayment(payment.token))
-                            Toast.makeText(app, "This bill changed; payment was not undone.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(app, "Undo has expired or this bill changed; the payment stays.", Toast.LENGTH_LONG).show()
                     } else app.repository.finishPayment(payment.token)
                 } catch (_: Exception) {
                     app.repository.finishPayment(payment.token)
@@ -319,11 +319,13 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         // stays where it is. Snapshot state: the tap that brings Planner back sees the current count at once.
         val openEventEditors = windowEditors.events
         val openTaskEditors = windowEditors.tasks
-        val openEditors = openEventEditors + openTaskEditors
+        // A note being written counts too (Q-1): moving to the day would close the Notes page with it.
+        val openNoteEditors by com.example.itinerary.data.NoteDraftStore.openEditors.collectAsStateWithLifecycle()
+        val openEditors = openEventEditors + openTaskEditors + openNoteEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.WAIT)
-                Toast.makeText(app, widgetWaitMessage(openEventEditors, openTaskEditors), Toast.LENGTH_LONG).show()
+                Toast.makeText(app, widgetWaitMessage(openEventEditors, openTaskEditors, openNoteEditors), Toast.LENGTH_LONG).show()
         }
         LaunchedEffect(widgetDate, waitingForEditor) {
             if (widgetDateStep(widgetDate, openEditors) == WidgetDateStep.OPEN) {
@@ -375,13 +377,16 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     }
     val openEvents by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsStateWithLifecycle()
     val openTasks by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsStateWithLifecycle()
-    SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || recovered != null)
+    val openNotes by com.example.itinerary.data.NoteDraftStore.openEditors.collectAsStateWithLifecycle()
+    SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || openNotes > 0 || recovered != null)
     }
     }
 }
 
 // What the widget's day waits for, named by what is open.
-internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int): String = when {
+internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int, noteEditors: Int = 0): String = when {
+    noteEditors > 0 && eventEditors == 0 && taskEditors == 0 -> "Close this note first. Then the widget's day opens."
+    noteEditors > 0 -> "Close the open editors first. Then the widget's day opens."
     taskEditors == 0 -> "Close this event first. Then the widget's day opens."
     eventEditors == 0 -> "Close this task first. Then the widget's day opens."
     else -> "Close the open event and task first. Then the widget's day opens."
