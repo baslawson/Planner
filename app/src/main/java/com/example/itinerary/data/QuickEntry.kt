@@ -1150,8 +1150,10 @@ object QuickEntry {
             if (duration != null) return error("Use ‘$said’ or a duration, not both.")
             time = block.first; duration = block.second
         }
+        var midnightSaid = false
         ts.firstOrNull()?.let {
             val raw = clockText(it.value)
+            midnightSaid = normaliseClock(raw) == "midnight"
             // 7:30 could be morning or evening; 07:30 and 19:30 are unambiguous.
             val twelveHour = Regex("([1-9]|1[0-2]):([0-5]\\d)").matchEntire(raw)
             time = if (twelveHour != null) null else readTime(raw)
@@ -1185,6 +1187,11 @@ object QuickEntry {
                 }
                 ?: return error("${fitting.joinToString(" or ")} isn't in the $period. Correct the time, or remove ‘$period’.")
             timeChoices = emptyList(); ambiguous = false; timePrompt = null
+        }
+        // "by midnight Friday", "Friday midnight": the end of that day, like "midnight tonight", not the night before it.
+        // 00:00 of the next day, so a deadline or a start then is exact. "midnight" with no date stays tonight's 00:00.
+        if (midnightSaid && time == LocalTime.MIDNIGHT && (ds.isNotEmpty() || numeric.isNotEmpty() || orDates != null)) {
+            date = date.plusDays(1); dateChoices = dateChoices.map { it.plusDays(1) }
         }
         if (relative && (timePrompt != null || ts.isNotEmpty() || rs.isNotEmpty() || extraTimes.isNotEmpty()))
             return error("Use one time: ‘in …’ or a clock time.")

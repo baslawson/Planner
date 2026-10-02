@@ -148,7 +148,8 @@ class QuickFixesNamesAndDatesTest {
         ok("Watch Midnight in Paris Friday").let { assertEquals("Watch Midnight in Paris", it.title); assertEquals(day(10, 2), it.date); assertNull(it.time) }
         // Midnight as a time is unchanged.
         ok("Flight at midnight").let { assertEquals("Flight", it.title); assertEquals(LocalTime.MIDNIGHT, it.time) }
-        ok("Party midnight Friday").let { assertEquals("Party", it.title); assertEquals(LocalTime.MIDNIGHT, it.time); assertEquals(day(10, 2), it.date) }
+        // With a day it is the end of that day (bug hunt 2 Oct, Q-3): 00:00 on Saturday.
+        ok("Party midnight Friday").let { assertEquals("Party", it.title); assertEquals(LocalTime.MIDNIGHT, it.time); assertEquals(day(10, 3), it.date) }
         ok("Call midnight in Perth").let { assertEquals(LocalTime.MIDNIGHT, it.time) }
         ok("Midnight Mass Christmas Eve").let { assertEquals("Midnight Mass Christmas Eve", it.title); assertNull(it.time) }
     }
