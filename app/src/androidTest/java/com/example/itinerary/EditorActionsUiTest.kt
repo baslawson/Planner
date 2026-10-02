@@ -62,6 +62,7 @@ class EditorActionsUiTest {
             assertEquals("$name: same height", close.height().toFloat(), save.height().toFloat(), 2f)
         }
     }
+    private fun closeEditor() { click("Close"); await { find("Edit task") == null && find("Edit event") == null } }
     private fun openTask(task: PlannerTask) {
         ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(com.example.itinerary.widget.TodayWidget.OPEN_TASK)
             .putExtra("task_id", task.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -81,9 +82,11 @@ class EditorActionsUiTest {
 
     @Test fun taskEditorBar() {
         val task = PlannerTask(title = "QA bar task", dueDate = LocalDate.now()); runBlocking { app.repository.saveTask(task) }
-        themed(ThemeMode.DARK) { openTask(task); checkBar("task-dark", wrapped = false) }
-        themed(ThemeMode.LIGHT) { openTask(task); checkBar("task-light", wrapped = false) }
-        themed(ThemeMode.DARK, TextSize.MAX_PERCENT) { openTask(task); checkBar("task-dark-large", wrapped = true) }
+        // Closed before the next opening: a widget task reopened while its editor is still closing in the screen being
+        // replaced is (rightly) refused as "already open".
+        themed(ThemeMode.DARK) { openTask(task); checkBar("task-dark", wrapped = false); closeEditor() }
+        themed(ThemeMode.LIGHT) { openTask(task); checkBar("task-light", wrapped = false); closeEditor() }
+        themed(ThemeMode.DARK, TextSize.MAX_PERCENT) { openTask(task); checkBar("task-dark-large", wrapped = true); closeEditor() }
     }
 
     @Test fun eventEditorBar() {
