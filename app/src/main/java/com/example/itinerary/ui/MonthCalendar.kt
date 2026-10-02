@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -209,13 +210,25 @@ private fun MonthPager(
             if (request.target == null && landed != currentMonth) currentOnMonthChange(landed)
         }
     }
+    // The pager is as tall as the current month needs (4 to 6 weeks), so short months don't leave a gap. It follows the
+    // settled page, so it changes once a move has landed, not during it: pages that change size under an animation
+    // make it stop short (between a 5-week and a 6-week month the grid stayed ~10 dp too high or too low).
+    val fullHeight = LocalCalendarRowHeight.current * weeksIn(month, firstDow)
+    val height by animateDpAsState(LocalCalendarRowHeight.current * weeksIn(monthOfPage(pagerState.settledPage), firstDow), label = "monthHeight")
+
     // ...and when the month is changed some other way (arrows, Today) the pager follows, and ends snapped on it.
-    LaunchedEffect(month) {
+    // (Keyed on the height too, so a new row height — landscape — can't leave it waiting for one it never reaches.)
+    LaunchedEffect(month, fullHeight) {
         val target = pageOf(month)
         try {
             if (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f) {
                 request.target = target
                 pagerState.animateScrollToPage(target)
+                // A tap during the last move's height change still moves pages that change size: once the height
+                // has settled, finish the move.
+                snapshotFlow { height }.first { it == fullHeight }
+                if (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f)
+                    pagerState.animateScrollToPage(target)
             }
         } finally {
             // Done, or stopped by a swipe (whose page then counts); left alone when a newer month has set its own target.
@@ -223,8 +236,6 @@ private fun MonthPager(
         }
     }
 
-    // The pager is as tall as the current month needs (4 to 6 weeks), so short months don't leave a gap.
-    val height by animateDpAsState(LocalCalendarRowHeight.current * weeksIn(month, firstDow), label = "monthHeight")
     VerticalPager(
         state = pagerState,
         modifier = Modifier.fillMaxWidth().height(height),

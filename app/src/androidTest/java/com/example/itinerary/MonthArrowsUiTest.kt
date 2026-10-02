@@ -17,6 +17,8 @@ import java.util.Locale
 /**
  * Fourth bug hunt D5: two quick taps on "Next month" move two months, and the month grid ends snapped on that month
  * (a second tap late in the first page animation used to be undone, leaving the pager between two months).
+ * Also: moving between a 5-week and a 6-week month used to leave the grid ~10 dp too high or too low for good — the
+ * pager's height changes during the page animation — so every check also measures the first row's height.
  * Needs window animations on (the pager animation is what is being raced). Requires external backup/restore of the
  * shared emulator's app data (opening the Calendar from the widget intent remembers the Calendar view).
  */
@@ -66,6 +68,17 @@ class MonthArrowsUiTest {
     }
     private fun visible(text: String) = nodes().filter { it.isVisibleToUser && !it.isEditable && it.text?.toString() == text }
 
+    private fun bounds(node: AccessibilityNodeInfo) = Rect().also(node::getBoundsInScreen)
+    // How far day 1 is, downwards, from the centre of the month title (which never moves): the same in every month when
+    // the pager has snapped. Checked first: a grid left too high covers the weekday names, which then drop out of the tree.
+    private fun dayOneHeight(month: YearMonth): Int {
+        val title = nodes().filter { it.isVisibleToUser && it.text?.toString() == month.label() }
+        assertEquals("title $month", 1, title.size)
+        val ones = visible("1")
+        assertEquals("one visible day 1 in $month", 1, ones.size)
+        return bounds(ones.single()).centerY() - bounds(title.single()).centerY()
+    }
+    private var restingHeight = 0
     // How far day 1 is, sideways, from the centre of its own weekday name: 0 when the pager has snapped to that month.
     private fun dayOneDrift(month: YearMonth): Int {
         val weekday = month.atDay(1).dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
@@ -80,8 +93,11 @@ class MonthArrowsUiTest {
         val dir = java.io.File(ins.targetContext.cacheDir, "qa-month-arrows").apply { mkdirs() }
         ins.uiAutomation.takeScreenshot()?.let { b -> java.io.File(dir, "$name.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; b.recycle() }
     }
-    private fun assertSnapped(month: YearMonth) {
+    private fun rest(month: YearMonth) { restingHeight = dayOneHeight(month); restingDrift = dayOneDrift(month) }
+    private fun assertSnapped(month: YearMonth, what: String = "") {
         shot("month-$month")
+        val height = dayOneHeight(month)
+        assertTrue("first row of $month in place$what (day 1 is $height px below the title, resting $restingHeight px)", kotlin.math.abs(height - restingHeight) <= 3)
         val drift = dayOneDrift(month)
         assertTrue("day 1 of $month centred under its weekday (drift $drift px, resting ${restingDrift} px)", kotlin.math.abs(drift - restingDrift) <= 3)
     }
@@ -89,7 +105,7 @@ class MonthArrowsUiTest {
         openCalendar()
         var month = YearMonth.from(start)
         await("start month") { find(month.label()) != null }
-        shot("start-$month"); restingDrift = dayOneDrift(month)
+        shot("start-$month"); rest(month)
         for (gap in listOf(150L, 200L, 250L, 350L)) {
             click("Next month")
             Thread.sleep(gap)
@@ -115,7 +131,7 @@ class MonthArrowsUiTest {
         openCalendar()
         var month = YearMonth.from(start)
         await("start month") { find(month.label()) != null }
-        restingDrift = dayOneDrift(month)
+        rest(month)
         for (gap in listOf(60L, 90L, 120L, 150L, 180L)) {
             await("Next month") { find("Next month") != null }
             var node = find("Next month")
@@ -129,8 +145,23 @@ class MonthArrowsUiTest {
             Thread.sleep(1500)
             shot("touch-$gap-$expected")
             assertNotNull("header $expected after touches $gap ms apart (shows: ${nodes().mapNotNull { it.text }.firstOrNull { t -> t.contains(" 20") }})", find(expected.label()))
-            val drift = dayOneDrift(expected)
-            assertTrue("day 1 of $expected centred after touches $gap ms apart (drift $drift px)", kotlin.math.abs(drift - restingDrift) <= 3)
+            assertSnapped(expected, " after touches $gap ms apart")
+        }
+    }
+
+    // One tap at a time from April 2036 (5 weeks) through August and November (6 weeks) and back: each month in place.
+    @Test fun singleTapsBetweenFiveAndSixWeekMonthsKeepTheGridInPlace() {
+        openCalendar()
+        var month = YearMonth.from(start)
+        await("start month") { find(month.label()) != null }
+        rest(month)
+        repeat(9) {
+            click("Next month")
+            month = month.plusMonths(1)
+            val expected = month
+            await("header $expected") { find(expected.label()) != null }
+            Thread.sleep(1500)
+            assertSnapped(expected, " after one tap")
         }
     }
 }
