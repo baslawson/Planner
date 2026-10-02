@@ -50,7 +50,8 @@ import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: () -> Unit, onOpenSettings: () -> Unit, onOpenCalendars: () -> Unit) {
+fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: () -> Unit, onOpenSettings: () -> Unit, onOpenCalendars: () -> Unit,
+                    onOpenNotes: () -> Unit) {
     val today = rememberCurrentDate()
     val allItems by vm.items.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -128,7 +129,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings)
+                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = onOpenSettings, onNotes = onOpenNotes)
                     },
                 )
             },

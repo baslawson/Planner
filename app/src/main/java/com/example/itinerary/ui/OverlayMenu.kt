@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -110,8 +111,11 @@ fun OverlayMenuAnchor(title: String, items: @Composable ColumnScope.(close: () -
 
 /** The ⋮ menu in the Agenda and Calendar top bars. */
 @Composable
-fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit) {
+fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit, onNotes: () -> Unit) {
     OverlayMenuAnchor(title = "More options", items = { close ->
+        DropdownMenuItem(text = { Text("Notes") },
+            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+            onClick = { close(); onNotes() })
         PlanningToolMenuItems(planningTools) { close() }
         DropdownMenuItem(text = { Text("Themes") },
             leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },

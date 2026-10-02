@@ -25,6 +25,7 @@ data class PendingDeletion(
     val attachments: List<Attachment>,
     val reminders: List<Reminder>,
     val tasks: List<PlannerTask> = emptyList(),
+    val notes: List<PlannerNote> = emptyList(),
 )
 
 data class PendingMove(
@@ -154,6 +155,7 @@ class Repository(
     private suspend fun deleteUnusedFiles(candidates: Collection<String>) {
         val keep = attachmentDao.allFileNames().toHashSet()
         taskDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
+        noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
         deletedDao.all().flatMap { contents(it).storedAttachments }.forEach { keep.add(it.fileName) }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
@@ -236,6 +238,51 @@ class Repository(
     suspend fun releaseTaskFiles(files: Collection<String>) = changes.withLock {
         afterCommit(files = files, notify = false)
     }
+    private val noteDao = db.noteDao()
+    val notes = noteDao.observe()
+    suspend fun note(id: String): PlannerNote? = noteDao.byId(id)
+    // One note as stored, as it changes (null once gone): an open editor notices a change made elsewhere.
+    fun observeNote(id: String): Flow<PlannerNote?> = noteDao.observe(id).distinctUntilChanged()
+
+    // A new note ([create]) or the one being edited, stamped with the time it changed (unless nothing did). Returns it as saved.
+    suspend fun saveNote(note: PlannerNote, create: Boolean): PlannerNote = changes.withLock {
+        val clean = Notes.clean(note).let { if (it == noteDao.byId(it.id)) it else it.copy(modified = System.currentTimeMillis()) }
+        Notes.validate(clean)
+        withContext(NonCancellable) {
+            if (create) noteDao.insert(clean)
+            else { check(noteDao.byId(clean.id) != null) { "This note was deleted" }; noteDao.update(clean) }
+        }
+        clean
+    }
+
+    // Pin, archive or tick a checklist line from the Notes page: [change] made to the note as it is at that moment.
+    suspend fun updateNote(id: String, change: (PlannerNote) -> PlannerNote): PlannerNote? = changes.withLock {
+        withContext(NonCancellable) {
+            val note = noteDao.byId(id) ?: return@withContext null
+            val changed = Notes.clean(change(note))
+            if (changed == note) return@withContext note
+            Notes.validate(changed)
+            // Pinning and archiving only file it differently; the note itself changed only if its words did.
+            val stamped = if (changed.content != note.content || changed.title != note.title) changed.copy(modified = System.currentTimeMillis()) else changed
+            noteDao.update(stamped)
+            stamped
+        }
+    }
+
+    // To Recently deleted, with the Undo bar, as a task goes.
+    suspend fun deleteNote(id: String) = changes.withLock {
+        withContext(NonCancellable) {
+            val bundle = archiving { archived ->
+                val note = noteDao.byId(id) ?: return@archiving null
+                val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), notes = listOf(note))
+                archive(deleted, archived, emptyList())
+                noteDao.delete(id)
+                deleted
+            } ?: return@withContext
+            _pendingDeletions.value += bundle
+        }
+    }
+
     suspend fun deleteTask(id: String) = changes.withLock {
         withContext(NonCancellable) {
             val bundle = archiving { archived ->
@@ -309,10 +356,11 @@ class Repository(
 
     private suspend fun archive(bundle: PendingDeletion, archived: MutableList<DeletedEntry>, plans: List<Trip>? = null) {
         val owners = plans ?: readIds(bundle.items.map { it.tripId }, tripDao::byIds).sortedWith(compareBy({ it.sortOrder }, { it.id }))
-        val label = bundle.items.firstOrNull()?.title ?: bundle.tasks.firstOrNull()?.title ?: owners.firstOrNull()?.name ?: "Deleted events"
-        val count = bundle.items.size + bundle.tasks.size
+        val label = bundle.items.firstOrNull()?.title ?: bundle.tasks.firstOrNull()?.title ?: bundle.notes.firstOrNull()?.let(Notes::label)
+            ?: owners.firstOrNull()?.name ?: "Deleted events"
+        val count = bundle.items.size + bundle.tasks.size + bundle.notes.size
         val entry = DeletedEntry(id = bundle.token, label = if (count > 1) "$label + ${count - 1}" else label,
-            payload = payloads.store(DeletedCodec.encode(DeletedContents(owners, bundle.items, bundle.attachments, bundle.reminders, bundle.tasks))))
+            payload = payloads.store(DeletedCodec.encode(DeletedContents(owners, bundle.items, bundle.attachments, bundle.reminders, bundle.tasks, bundle.notes))))
         archived += entry
         deletedDao.insert(entry)
     }
@@ -345,6 +393,8 @@ class Repository(
                 restoredTasks += restored.id
             }
             TaskDependencies.validateGraph(taskDao.all())
+            // A note whose id came back meanwhile (a backup restored since) returns as a copy beside it.
+            data.notes.forEach { note -> noteDao.insert(note.copy(id = if (noteDao.byId(note.id) == null) note.id else UUID.randomUUID().toString())) }
             val planIds = tripDao.all().mapTo(hashSetOf()) { it.id }
             data.trips.filter { it.id !in planIds }.forEach { tripDao.upsert(it) }
             val itemIds = itemDao.all().mapTo(hashSetOf()) { it.id }
@@ -430,6 +480,7 @@ class Repository(
             // Imported backups can share attachment files between plans.
             val keep = attachmentDao.allFileNames().toHashSet()
         taskDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
+        noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
             candidates.filter { it.isNotBlank() && it !in keep } to alarms
         }
@@ -877,7 +928,7 @@ class Repository(
     // bundles come with their JSON, wherever it is kept.
     suspend fun snapshot(): DataSnapshot = db.withTransaction {
         DataSnapshot(tripDao.all(), itemDao.all(), reminderDao.all(), attachmentDao.all(), db.templateDao().all(),
-            deletedDao.all().map { it.copy(payload = payloads.read(it.payload)) }, taskDao.all())
+            deletedDao.all().map { it.copy(payload = payloads.read(it.payload)) }, taskDao.all(), noteDao.all())
     }
 
     // Throws away all current data and puts [data] in its place, keeping its ids. The attachment
@@ -886,10 +937,13 @@ class Repository(
         data.tasks.forEach(Tasks::validate)
         TaskDependencies.validateGraph(data.tasks)
         require(data.tasks.map { it.id }.distinct().size == data.tasks.size)
+        data.notes.forEach(Notes::validate)
+        require(data.notes.map { it.id }.distinct().size == data.notes.size)
         val oldTasks = taskDao.all()
+        val oldNotes = noteDao.all()
         val oldReminders = reminderDao.all()
         val oldDeleted = deletedDao.all()
-        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + oldDeleted.flatMap { contents(it).storedAttachments }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
+        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + oldNotes.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + oldDeleted.flatMap { contents(it).storedAttachments }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
         // New files for big bundles; the old ones go once the new data is in.
         val deleted = mutableListOf<DeletedEntry>()
         try {
@@ -897,6 +951,8 @@ class Repository(
             db.withTransaction {
                 taskDao.deleteAll()
                 taskDao.insertAll(data.tasks)
+                noteDao.deleteAll()
+                noteDao.insertAll(data.notes)
                 deletedDao.deleteAll()
                 deletedDao.insertAll(deleted)
                 db.templateDao().deleteAll()

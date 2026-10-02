@@ -21,6 +21,9 @@ class CardMarksTest {
         assertEquals("Event deleted", deletedMessage(1, 0))
         assertEquals("3 events deleted", deletedMessage(3, 0))
         assertEquals("Task deleted", deletedMessage(0, 1))
+        assertEquals("Note deleted", deletedMessage(0, 0, 1))
+        assertEquals("2 notes deleted", deletedMessage(0, 0, 2))
+        assertEquals("2 items deleted", deletedMessage(0, 1, 1))
         assertEquals("2 tasks deleted", deletedMessage(0, 2))
         assertEquals("2 items deleted", deletedMessage(1, 1))
     }

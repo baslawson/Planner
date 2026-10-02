@@ -60,13 +60,15 @@ class DeletedPayloads(private val dir: File) {
 }
 
 data class DeletedContents(val trips: List<Trip>, val items: List<ItineraryItem>,
-    val attachments: List<Attachment>, val reminders: List<Reminder>, val tasks: List<PlannerTask> = emptyList()) {
-    val storedAttachments: List<Attachment> get() = attachments + tasks.flatMap { it.attachments }
+    val attachments: List<Attachment>, val reminders: List<Reminder>, val tasks: List<PlannerTask> = emptyList(),
+    val notes: List<PlannerNote> = emptyList()) {
+    val storedAttachments: List<Attachment> get() = attachments + tasks.flatMap { it.attachments } + notes.flatMap { it.attachments }
 }
 
 object DeletedCodec {
     fun encode(data: DeletedContents): String = JSONObject().apply {
         put("tasks", TaskCodec.encode(data.tasks))
+        put("notes", NoteCodec.encode(data.notes))
         put("trips", JSONArray().apply { data.trips.forEach { t -> put(JSONObject()
             .put("id", t.id).put("name", t.name).put("destination", t.destination)
             .put("startDate", t.startDate.toString()).put("endDate", t.endDate.toString())
@@ -85,7 +87,8 @@ object DeletedCodec {
                 LocalDate.parse(t.getString("endDate")), t.getInt("sortOrder"), t.getInt("colorIndex"),
                 if (t.has("customColor")) t.getInt("customColor") else null)
         } }, List(events.length()) { DraftCodec.item(events.getJSONObject(it)) },
-            DraftCodec.attachments(root.getJSONArray("attachments")), DraftCodec.reminders(root.getJSONArray("reminders")), TaskCodec.decode(if (root.has("tasks")) root.getJSONArray("tasks") else JSONArray()))
+            DraftCodec.attachments(root.getJSONArray("attachments")), DraftCodec.reminders(root.getJSONArray("reminders")), TaskCodec.decode(if (root.has("tasks")) root.getJSONArray("tasks") else JSONArray()),
+            NoteCodec.decode(root.optJSONArray("notes") ?: JSONArray()))
         val ids = data.items.map { it.id }.toSet()
         val plansById = data.trips.map { it.id }.toSet()
         require(ids.size == data.items.size && plansById.size == data.trips.size)

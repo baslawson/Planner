@@ -33,8 +33,9 @@ data class DataSnapshot(
     val templates: List<EventTemplate> = emptyList(),
     val deleted: List<DeletedEntry> = emptyList(),
     val tasks: List<PlannerTask> = emptyList(),
+    val notes: List<PlannerNote> = emptyList(),
 ) {
-    val storedAttachments: List<Attachment> get() = attachments + tasks.flatMap { it.attachments } + deleted.flatMap { DeletedCodec.decode(it.payload).storedAttachments }
+    val storedAttachments: List<Attachment> get() = attachments + tasks.flatMap { it.attachments } + notes.flatMap { it.attachments } + deleted.flatMap { DeletedCodec.decode(it.payload).storedAttachments }
 }
 
 // A backup that has been read and checked but not applied yet. Nothing in the app has changed.
@@ -55,9 +56,10 @@ class StagedBackup internal constructor(
 ) {
     val plans: Int get() = data.trips.size
     val tasks: Int get() = data.tasks.size
+    val notes: Int get() = data.notes.size
     val events: Int get() = data.items.size
     val reminders: Int get() = data.reminders.size
-    val attachments: Int get() = data.attachments.size + data.tasks.sumOf { it.attachments.size }
+    val attachments: Int get() = data.attachments.size + data.tasks.sumOf { it.attachments.size } + data.notes.sumOf { it.attachments.size }
     val templates: Int get() = data.templates.size
     val deletedGroups: Int get() = data.deleted.size
 }
@@ -83,7 +85,8 @@ class BackupManager(
         // A record whose file has gone missing would only be a broken row in the backup. A link has no file.
         val attachments = snapshot.attachments.filter { it.url != null || store.fileFor(it.fileName).exists() }
         val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || store.fileFor(it.fileName).exists() }
-        val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { store.fileFor(it.fileName).exists() })
+        val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { store.fileFor(it.fileName).exists() },
+            notes = filterNoteAttachments(snapshot.notes) { store.fileFor(it.fileName).exists() })
         val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
         try {
             val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
@@ -124,7 +127,8 @@ class BackupManager(
                     it.url != null || zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null
                 }
                 val deleted = filterDeletedAttachments(parsed.data.deleted) { it.url != null || zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null }
-                val saved = parsed.data.copy(attachments = present, deleted = deleted, tasks = filterTaskAttachments(parsed.data.tasks) { zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null })
+                val saved = parsed.data.copy(attachments = present, deleted = deleted, tasks = filterTaskAttachments(parsed.data.tasks) { zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null },
+                    notes = filterNoteAttachments(parsed.data.notes) { zip.getEntry("$ATTACHMENTS_DIR/${it.fileName}") != null })
                 StagedBackup(
                     file = file,
                     data = saved,
@@ -207,11 +211,15 @@ class BackupManager(
 
     private fun filterDeletedAttachments(entries: List<DeletedEntry>, keep: (Attachment) -> Boolean) = entries.map { entry ->
         val data = DeletedCodec.decode(entry.payload)
-        entry.copy(payload = DeletedCodec.encode(data.copy(attachments = data.attachments.filter(keep), tasks = filterTaskAttachments(data.tasks, keep))))
+        entry.copy(payload = DeletedCodec.encode(data.copy(attachments = data.attachments.filter(keep), tasks = filterTaskAttachments(data.tasks, keep),
+            notes = filterNoteAttachments(data.notes, keep))))
     }
 
     private fun filterTaskAttachments(tasks: List<PlannerTask>, keep: (Attachment) -> Boolean) =
         tasks.map { it.copy(attachments = it.attachments.filter(keep)) }
+
+    private fun filterNoteAttachments(notes: List<PlannerNote>, keep: (Attachment) -> Boolean) =
+        notes.map { it.copy(attachments = it.attachments.filter(keep)) }
 
     private fun toJson(data: DataSnapshot, settings: SettingsSnapshot, calendars: List<CalendarChoice>,
                        send: Pair<CalendarChoice, List<SentEvent>>?, taskSend: Pair<CalendarChoice, List<SentTask>>?): String = JSONObject().apply {
@@ -240,6 +248,8 @@ class BackupManager(
                 .put("color", it.color?.let { c -> String.format("#%06X", c and 0xFFFFFF) } ?: JSONObject.NULL)
         })
         put("tasks", TaskCodec.encode(data.tasks))
+        // Since format 17; an older backup has none.
+        put("notes", NoteCodec.encode(data.notes))
         put("format", FORMAT)
         put("formatVersion", FORMAT_VERSION)
         put("recentlyDeleted", data.deleted.toJson { JSONObject().put("id", it.id).put("deletedAt", it.deletedAt)
@@ -517,7 +527,8 @@ class BackupManager(
             }.distinctBy { it.taskId }
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud tasks" }.take(200), null, false) to rows
         }
-        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, tasks), settings, exportedOn, calendars, send, taskSend)
+        val notes = NoteCodec.decode(root.optJSONArray("notes") ?: JSONArray())
+        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, tasks, notes), settings, exportedOn, calendars, send, taskSend)
     }
 
     // "#RRGGBB" to an opaque ARGB int, or null if it isn't that.
@@ -529,7 +540,7 @@ class BackupManager(
         private const val FORMAT = "planner-backup"
         // 2: categories are plain text. 3: attachments can be links. Older files are still read; an older app refuses newer ones.
         // 16: events may carry an endDate (multi-day). An older app refuses the file rather than dropping end dates.
-        const val FORMAT_VERSION = 16
+        const val FORMAT_VERSION = 17
         private const val DATA_ENTRY = "data.json"
         private const val ATTACHMENTS_DIR = "attachments"
         private const val STAGING_FILE = "import-staging.zip"

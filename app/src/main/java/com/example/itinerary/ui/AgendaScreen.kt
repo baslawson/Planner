@@ -78,6 +78,7 @@ fun AgendaScreen(
     vm: TripsViewModel,
     onOpenEvent: (LocalDate) -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenNotes: () -> Unit,
     onOpenCalendar: () -> Unit,
 ) {
     // Wait for the database before showing an empty state.
@@ -204,7 +205,7 @@ fun AgendaScreen(
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
-                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = { showSettings = true })
+                        MoreOptionsButton(planningTools, onThemes = { showThemes = true }, onSettings = { showSettings = true }, onNotes = onOpenNotes)
                     },
                 )
             },

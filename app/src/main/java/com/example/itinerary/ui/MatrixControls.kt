@@ -30,8 +30,8 @@ fun MatrixButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Bo
 
 @Composable
 fun MatrixOutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
-    content: @Composable RowScope.() -> Unit) {
-    OutlinedButton(onClick, modifier, enabled, colors = matrixButtonColors(), border = matrixBorder(enabled), content = content)
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding, content: @Composable RowScope.() -> Unit) {
+    OutlinedButton(onClick, modifier, enabled, colors = matrixButtonColors(), border = matrixBorder(enabled), contentPadding = contentPadding, content = content)
 }
 
 @Composable

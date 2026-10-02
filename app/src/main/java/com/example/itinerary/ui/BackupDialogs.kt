@@ -40,7 +40,7 @@ fun ImportConfirmDialog(staged: StagedBackup, onConfirm: () -> Unit, onCancel: (
     ) {
         Column(Modifier.fillMaxWidth()) {
                 Text(
-                    "$dateText has ${count(staged.events, "event")}, ${count(staged.tasks, "task")}, " +
+                    "$dateText has ${count(staged.events, "event")}, ${count(staged.tasks, "task")}, ${count(staged.notes, "note")}, " +
                         "${count(staged.reminders, "reminder")} and ${count(staged.attachments, "attachment")}, " +
                         "${count(staged.templates, "template")}, plus payment history and your settings.",
                 )

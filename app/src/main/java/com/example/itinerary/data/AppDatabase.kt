@@ -8,8 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class,
-        CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class, SentTask::class],
-    version = 30,
+        CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class, SentTask::class, PlannerNote::class],
+    version = 31,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -24,6 +24,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun outsideDao(): OutsideDao
     abstract fun sentDao(): SentDao
     abstract fun sentTaskDao(): SentTaskDao
+    abstract fun noteDao(): NoteDao
 }
 
 val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -320,7 +321,16 @@ val MIGRATION_29_30 = object : Migration(29, 30) {
     }
 }
 
+// Notes (Quillpad style). Nothing existing changes.
+val MIGRATION_30_31 = object : Migration(30, 31) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(NOTES_TABLE)
+    }
+}
+// Exactly as Room creates it (checked against the generated AppDatabase_Impl), so a migrated database validates.
+private const val NOTES_TABLE = "CREATE TABLE IF NOT EXISTS `notes` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `notebook` TEXT NOT NULL, `color` INTEGER, `pinned` INTEGER NOT NULL, `archived` INTEGER NOT NULL, `created` INTEGER NOT NULL, `modified` INTEGER NOT NULL, `tags` TEXT NOT NULL, `attachments` TEXT NOT NULL, `reminderAt` INTEGER, `snoozedUntil` INTEGER, PRIMARY KEY(`id`))"
+
 // Every upgrade step, oldest first: the app opens its database with these, and the migration tests use the same list.
 val ALL_MIGRATIONS = arrayOf(
-    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30,
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31,
 )

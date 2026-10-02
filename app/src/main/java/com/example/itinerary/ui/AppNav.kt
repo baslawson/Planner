@@ -157,7 +157,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
                 val result = snackbar.showSnackbar(
-                    message = deletedMessage(next.items.size, next.tasks.size),
+                    message = deletedMessage(next.items.size, next.tasks.size, next.notes.size),
                     actionLabel = "Undo",
                     withDismissAction = true,
                     duration = SnackbarDuration.Long,
@@ -247,9 +247,11 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     // Opens the shared calendar on the event date.
                     onOpenEvent = { date -> nav.openCalendar(entry, date) },
                     onOpenSearch = { nav.navigateFrom(entry, "search") },
+                    onOpenNotes = { nav.navigateFrom(entry, "notes") },
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
+            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }) }
             composable("search") { entry ->
                 val vm: SearchViewModel = viewModel(
                     factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings, app.calendarSync.shown) } },
@@ -289,6 +291,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                         onOpenSettings = { settingsOpened = true; showSettings = true },
                         onOpenCalendars = { settingsOpened = true; showCalendars = true },
                         onOpenSearch = { nav.navigateFrom(entry, "search") },
+                        onOpenNotes = { nav.navigateFrom(entry, "notes") },
                         onAgenda = {
                             if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
                                 // Save just Calendar, not a Search screen that may sit underneath it.
@@ -406,9 +409,14 @@ internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDat
     else -> WidgetDateStep.OPEN
 }
 
-// The Undo bar after a deletion: "Event deleted", "3 tasks deleted", "4 items deleted" (events and tasks together).
-internal fun deletedMessage(events: Int, tasks: Int): String {
-    val count = events + tasks
-    val noun = if (tasks == 0) "event" else if (events == 0) "task" else "item"
+// The Undo bar after a deletion: "Event deleted", "3 tasks deleted", "Note deleted", "4 items deleted" (a mix).
+internal fun deletedMessage(events: Int, tasks: Int, notes: Int = 0): String {
+    val count = events + tasks + notes
+    val noun = when {
+        tasks == 0 && notes == 0 -> "event"
+        events == 0 && notes == 0 -> "task"
+        events == 0 && tasks == 0 -> "note"
+        else -> "item"
+    }
     return if (count == 1) "${noun.replaceFirstChar { it.uppercase() }} deleted" else "$count ${noun}s deleted"
 }
