@@ -24,6 +24,33 @@ data class PendingPayment(
     val paymentsAfter: List<BillPayment> = emptyList(),
 )
 
+/**
+ * The payments that can still be undone (Repository): for [UNDO_MS], from the snackbar and from a notification's Undo
+ * alike. A newer payment of the same bill replaces the older one's Undo.
+ */
+class PaymentUndos(private val windowMs: Long = UNDO_MS) {
+    private val entries = linkedMapOf<String, Pair<PendingPayment, Long>>()
+
+    fun record(change: PendingPayment, now: Long) {
+        entries.values.removeAll { it.first.before.id == change.before.id || it.second < now }
+        entries[change.token] = change to now + windowMs
+    }
+
+    /** The payment [token] undoes while its Undo lasts, else null; either way it can't be undone again. */
+    fun take(token: String, now: Long): PendingPayment? = entries.remove(token)?.takeIf { it.second >= now }?.first
+
+    /**
+     * R-4: [queued] without the payments whose Undo ran out or was used. A payment from a notification is queued with no
+     * screen open; left there, its stale bar would show hours later and hold back every later one behind it.
+     */
+    fun live(queued: List<PendingPayment>, now: Long): List<PendingPayment> =
+        queued.filter { p -> entries[p.token]?.let { it.second >= now } == true }
+
+    fun clear() = entries.clear()
+
+    companion object { const val UNDO_MS = 60_000L }
+}
+
 fun billOverdue(date: LocalDate, paid: Boolean, skipped: Boolean, today: LocalDate): Boolean =
     !paid && !skipped && date < today
 

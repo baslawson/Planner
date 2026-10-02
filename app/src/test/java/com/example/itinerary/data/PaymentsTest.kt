@@ -90,4 +90,25 @@ class PaymentsTest {
         assertEquals(listOf("y","x"),Payments.newestFirst(list).map { it.id })
         assertEquals("y",Payments.summary(10,false,list).last!!.id)
     }
+    // R-4: a payment's Undo, and the bar offering it, last UNDO_MS; a stale one is neither shown nor holds back later ones.
+    @Test fun paymentUndoExpiresAndLeavesTheQueue() {
+        val undos=PaymentUndos()
+        val a=PendingPayment(before=bill().copy(id=1),paid=true,remindersBefore=emptyList(),remindersAfter=emptyList())
+        val b=PendingPayment(before=bill().copy(id=2),paid=true,remindersBefore=emptyList(),remindersAfter=emptyList())
+        undos.record(a,0)
+        assertEquals(listOf(a),undos.live(listOf(a),PaymentUndos.UNDO_MS))
+        undos.record(b,PaymentUndos.UNDO_MS+1)
+        // A's bar goes with its Undo, so B's is first.
+        assertEquals(listOf(b),undos.live(listOf(a,b),PaymentUndos.UNDO_MS+1))
+        assertNull(undos.take(a.token,PaymentUndos.UNDO_MS+1))
+        assertEquals(b,undos.take(b.token,PaymentUndos.UNDO_MS+2))
+        // Used once only.
+        assertNull(undos.take(b.token,PaymentUndos.UNDO_MS+3))
+        assertTrue(undos.live(listOf(b),PaymentUndos.UNDO_MS+3).isEmpty())
+        // A newer payment of the same bill replaces the older Undo; one past its time can't be taken.
+        val a2=a.copy(token="a2")
+        undos.record(a,0); undos.record(a2,1)
+        assertNull(undos.take(a.token,2))
+        assertNull(undos.take(a2.token,1+PaymentUndos.UNDO_MS+1))
+    }
 }
