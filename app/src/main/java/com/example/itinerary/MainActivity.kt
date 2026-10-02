@@ -151,6 +151,8 @@ class MainActivity : ComponentActivity() {
 
     // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
     // through one of these two, so leaving for it is not treated like going to the home screen (see AppLockRule).
+    // A plain startActivity on this activity (or on a screen's LocalContext, which wraps it) ends up here as well; one on
+    // the application context does not, so external screens are opened from the screen's context (Q-7).
     override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) =
         AppLockRule.ownTrip({ appLock.ownTripStarting = it }) { super.startActivityForResult(intent, requestCode, options) }
 
