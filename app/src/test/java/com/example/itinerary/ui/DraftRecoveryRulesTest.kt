@@ -15,6 +15,15 @@ class DraftRecoveryRulesTest {
         assertNull(draftToRecover<String>(0) { null })
     }
 
+    // Q-2: after process death, a share restored as a new event reopens its own editor on the draft; AppNav's recovery
+    // editor leaves that draft alone, and still recovers any other.
+    @Test fun noRecoveryOfADraftAnotherEditorIsReopening() {
+        val shared = "share's event"
+        assertNull(draftToRecover(0, ownedElsewhere = { it == shared }) { shared })
+        assertEquals("other draft", draftToRecover(0, ownedElsewhere = { it == shared }) { "other draft" })
+        assertNull(draftToRecover(1, ownedElsewhere = { false }) { "draft" })
+    }
+
     @Test fun sharingNamesAnOpenEventEditor() {
         assertEquals("An event is open in Planner. Close this share, then save or close that event before sharing again.",
             sharedDraftBlock("event", draftExists = true, eventEditorOpen = true))

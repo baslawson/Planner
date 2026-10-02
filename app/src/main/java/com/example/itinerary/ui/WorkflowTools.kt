@@ -109,8 +109,9 @@ internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOp
     else -> null
 }
 
+// Returns the new event its editor is open on, or null, so AppNav leaves that editor's draft to it (Q-2).
 @Composable
-fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
+fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit): ItineraryItem? {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val content = remember(text, subject) { runCatching { SharedText.draft(text, subject) } }
     var destination by rememberSaveable(text, subject) { mutableStateOf("") }
@@ -130,11 +131,12 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit) {
             Text("Choose where to put this text, then review and save.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    content.getOrNull()?.let { shared ->
-        if (destination == "task") PlanningOverlay(onDismiss) {
-            TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss = onDismiss)
-        }
-        if (destination == "event") NewPlanningEventEditor(ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null,
-                title = shared.title, notes = shared.notes), onDismiss = onDismiss)
+    val shared = content.getOrNull() ?: return null
+    if (destination == "task") PlanningOverlay(onDismiss) {
+        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss = onDismiss)
     }
+    if (destination != "event") return null
+    val event = ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null, title = shared.title, notes = shared.notes)
+    NewPlanningEventEditor(event, onDismiss = onDismiss)
+    return event
 }
