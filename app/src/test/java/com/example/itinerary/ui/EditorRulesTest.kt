@@ -116,14 +116,17 @@ class EditorRulesTest {
         assertEquals("This bill was changed elsewhere", EditorRules.changedElsewhereBanner(bill = true))
     }
 
-    // U-N1: a task changed underneath its open editor in what Save would write over; done and snoozes don't count.
+    // U-N1: a task changed underneath its open editor in what Save would write over; done and a snooze alone don't count.
     @Test fun taskChangedElsewhereIsWhatSaveWouldOverwrite() {
         val opened = com.example.itinerary.data.PlannerTask(id = "t", title = "Pay rent", dueDate = oct3, notes = "n")
         assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened))
         assertEquals(false, EditorRules.taskChangedElsewhere(opened, null)) // gone: the deleted banner, not this one
-        assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened.copy(done = true, snoozedUntil = 5, reminderAt = 4)))
+        assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened.copy(done = true, snoozedUntil = 5)))
+        // R-5: a reminder moved underneath (a time-zone change), repeat or checklist changed: Save would write them back.
         listOf(opened.copy(title = "Pay rent today"), opened.copy(notes = "m"), opened.copy(dueDate = oct7),
-            opened.copy(priority = com.example.itinerary.data.TaskPriority.HIGH)).forEach {
+            opened.copy(priority = com.example.itinerary.data.TaskPriority.HIGH), opened.copy(reminderAt = 4),
+            opened.copy(repeat = "DAILY"), opened.copy(repeatDays = 3),
+            opened.copy(checklist = listOf(com.example.itinerary.data.ChecklistEntry(text = "Bank")))).forEach {
             assertEquals(true, EditorRules.taskChangedElsewhere(opened, it))
         }
         assertEquals(false, EditorRules.taskChangedElsewhere(opened, opened.copy(id = "other", title = "x")))
