@@ -81,6 +81,9 @@ class ReviewFindingsUiTest {
         if (recover) {
             ins.runOnMainSync { activity.finish() }
             ins.waitForIdleSync()
+            // Android destroys the finished activity only after the next one is up; until its editor is gone the new
+            // Planner treats the draft as another window's and leaves it alone (b626b20). After real process death none is open.
+            await("Old editor gone") { EditorDraftStore.openEditors.value == 0 }
             launch() // AppNav restores the original baseline and edited fields from the real draft file.
             await("Recovered title") { nodes().any { it.isEditable && it.text?.toString()==changedTitle } }
         }

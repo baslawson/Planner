@@ -175,8 +175,9 @@ class PlanningFiveUiTest {
             saveAndClose() // Close returns to the import review
             await { data().items.any { it.title == "QA imported meeting" } }
             assertEquals(30, data().items.single { it.title == "QA imported meeting" }.durationMinutes)
-            screenshot("import-duplicate-warning")
-            await { find("Already in Planner") != null }
+            screenshot("import-reviewed-row")
+            // A row saved through Edit is "Added" and Add leaves it out (U1, as CalendarFileImportUiTest checks).
+            await { find("Added") != null }
             file.delete()
             var chosen: ItineraryItem? = null
             ins.runOnMainSync { activity.setContent { ItineraryTheme { FreeTimeDialog(emptyList(), {}, { chosen = it }) } } }

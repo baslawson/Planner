@@ -90,9 +90,10 @@ class CodebaseOptimizationDataTest {
         )
         db.itemDao().insertAll(events)
         for (date in listOf(day.minusDays(1),day,day.plusDays(1))) {
-            assertEquals(eventsOnDay(events.filterNot { it.skipped },date),repo.widgetEvents(date))
+            assertEquals(widgetEventsOnDay(events,date),repo.widgetEvents(date))
         }
-        assertEquals(setOf(1L,2L,8L,9L),repo.widgetEvents(day).map { it.id }.toSet())
+        // A paid bill (9) is not listed on the widget (d5b00da).
+        assertEquals(setOf(1L,2L,8L),repo.widgetEvents(day).map { it.id }.toSet())
     }
 
     @Test fun convertingExistingEventToSeriesCopiesChildrenAndKeepsUnrelatedEvents() = fixture { db,repo,_,_ ->

@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.example.itinerary.data.*
 import com.example.itinerary.ui.fullLabel
 import kotlinx.coroutines.runBlocking
@@ -169,6 +171,11 @@ class QuickReviewUiTest {
         assertEquals("2",draft.getJSONObject("state").getString("count"))
         assertEquals("MONTHLY",draft.getJSONObject("state").getString("repeat"))
         assertEquals(60L,DraftCodec.reminders(draft.optJSONArray("addedReminders")).single().offsetMinutes)
+        // Stand in for process death: the old Planner and its editor must be gone first, or the new one treats the draft
+        // as another window's and leaves it alone (b626b20). CLEAR_TASK destroys the old activity only after the new one is up.
+        ActivityLifecycleMonitorRegistry.getInstance().let { monitor -> ins.runOnMainSync {
+            listOf(Stage.RESUMED,Stage.PAUSED,Stage.STOPPED).flatMap { monitor.getActivitiesInStage(it) }.forEach { it.finish() } } }
+        await { EditorDraftStore.openEditors.value==0 }
         open();reveal { find("Close")!=null }
         // Save keeps the editor open on the saved event; Close then leaves at once.
         click("Save");await { data().items.count { it.title=="QA repeat editor" }==2 };click("Close")
