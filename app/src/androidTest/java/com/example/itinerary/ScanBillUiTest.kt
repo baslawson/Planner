@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.example.itinerary.data.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -94,6 +96,15 @@ class ScanBillUiTest {
     private fun launch(): android.app.Activity {
         app.settings.lastViewCalendar = false
         return ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    }
+
+    // Stand in for process death: the old Planner and its editor must be gone first, or the new one treats the draft
+    // as another window's and leaves it alone (b626b20). CLEAR_TASK destroys the old activity only after the new one is up.
+    private fun relaunch(): android.app.Activity {
+        ActivityLifecycleMonitorRegistry.getInstance().let { monitor -> ins.runOnMainSync {
+            listOf(Stage.RESUMED,Stage.PAUSED,Stage.STOPPED).flatMap { monitor.getActivitiesInStage(it) }.forEach { it.finish() } } }
+        await { EditorDraftStore.openEditors.value==0 }
+        return launch()
     }
 
     private fun scanFixture(pdf: Boolean, pages: List<List<String>>) {
@@ -196,7 +207,7 @@ class ScanBillUiTest {
         launch();click("Preview scan");click("Attach scan")
         await { find("Read details from this scan?")!=null }
         assertNull(find("Review bill details"));screenshot("read-details-prompt")
-        launch();await { find("Read details from this scan?")!=null }
+        relaunch();await { find("Read details from this scan?")!=null }
         click("Read details")
         await { find("Review bill details")!=null };screenshot("requested-review")
         assertEquals(before,data().items.size)
@@ -205,7 +216,7 @@ class ScanBillUiTest {
         assertEquals(1,files.size);assertEquals("application/pdf",files.single().mimeType)
         assertTrue(files.single().recognizedText.contains("123.45"))
         // A recreated activity recovers the pending review without duplicating the attachment.
-        launch();await { find("Review bill details")!=null }
+        relaunch();await { find("Review bill details")!=null }
         assertEquals(files,DraftCodec.attachments(EditorDraftStore(context).read()!!.optJSONArray("added")))
         click("Use due date");click("Apply selected")
         assertEquals(before,data().items.size)
@@ -231,7 +242,7 @@ class ScanBillUiTest {
         val draft=EditorDraftStore(context).read()!!
         assertEquals("",draft.getJSONObject("item").getString("title"))
         assertEquals(2,DraftCodec.attachments(draft.optJSONArray("added")).size)
-        launch();await { find("Close")!=null };assertNull(find("Review bill details"));closeAndDiscard()
+        relaunch();await { find("Close")!=null };assertNull(find("Review bill details"));closeAndDiscard()
         assertEquals(before,data())
     }
 
@@ -258,7 +269,7 @@ class ScanBillUiTest {
         assertTrue(app.attachmentStore.fileFor(files.single().fileName).isFile)
         assertEquals("",draft.getJSONObject("item").getString("title"))
         assertEquals(before,data())
-        launch();await { find("Close")!=null }
+        relaunch();await { find("Close")!=null }
         assertNull(find("Read details from this scan?"));assertNull(find("Review bill details"))
         assertEquals(files,DraftCodec.attachments(EditorDraftStore(context).read()!!.optJSONArray("added")))
         click("Suggest bill details");await { find("Review bill details")!=null }
