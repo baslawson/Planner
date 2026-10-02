@@ -32,6 +32,8 @@ class CalendarSyncWorker(context: Context, params: WorkerParameters) : Coroutine
         return try {
             // The worker may be given the app or just a context (test tools do); ask it for the app either way.
             (applicationContext.applicationContext as ItineraryApp).calendarSync.backgroundSync()
+            // Notes too, when their sync is on (it does nothing otherwise); its problems show on the Notes page.
+            (applicationContext.applicationContext as ItineraryApp).noteSync.sync()
             Result.success()
         } catch (e: CancellationException) {
             throw e

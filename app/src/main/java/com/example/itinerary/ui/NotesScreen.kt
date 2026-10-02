@@ -3,6 +3,7 @@ import com.example.itinerary.ui.MatrixFilterChip as FilterChip
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -72,6 +73,12 @@ fun NotesScreen(onBack: () -> Unit) {
     }
     val shown = remember(all, filter, query) { Notes.visible(all, filter, query) }
 
+    // Notes sync: a pass on opening the page (when it's on), and its cloud in the top bar opens its settings.
+    val sync = app.noteSync
+    val syncOn by sync.enabled.collectAsStateWithLifecycle()
+    val syncState by sync.state.collectAsStateWithLifecycle()
+    var showSync by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(syncOn) { if (syncOn) sync.request(delayMs = 0) }
     val overlayMenu = remember { OverlayMenuState() }
     // The editor opens over the page.
     Box(Modifier.fillMaxSize()) {
@@ -81,6 +88,22 @@ fun NotesScreen(onBack: () -> Unit) {
                 TopAppBar(
                     title = { HeadingText("Notes", style = MaterialTheme.typography.titleLarge) },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                    actions = {
+                        val label = when {
+                            !syncOn -> "Notes sync: off"
+                            syncState.running -> "Notes sync: syncing"
+                            syncState.error != null -> "Notes sync: problem"
+                            else -> "Notes sync: up to date"
+                        }
+                        IconButton(onClick = { showSync = true }) {
+                            when {
+                                !syncOn -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
+                                syncState.running -> SyncCloud(CloudLook.RAINING, MaterialTheme.colorScheme.primary, label)
+                                syncState.error != null -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.error, label)
+                                else -> SyncCloud(CloudLook.SYNCED, MaterialTheme.colorScheme.primary, label)
+                            }
+                        }
+                    },
                 )
             },
             floatingActionButton = {
@@ -132,6 +155,7 @@ fun NotesScreen(onBack: () -> Unit) {
             }
         }
     }
+    if (showSync) NoteSyncDialog { showSync = false }
     editingId?.let { id ->
         val existing = all.firstOrNull { it.id == id }
         // A new note starts in the notebook being looked at.
@@ -213,4 +237,49 @@ private fun NoteActionsMenu(note: PlannerNote, label: String, tint: Color) {
         DropdownMenuItem(text = { Text("Delete note", color = MaterialTheme.colorScheme.error) }, onClick = {
             close(); act("Couldn't delete this note. Please try again.") { app.repository.deleteNote(note.id) } })
     })
+}
+
+/** Notes sync: on or off, its state, and Sync now. Uses the Nextcloud login from Settings → Nextcloud. */
+@Composable
+private fun NoteSyncDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as ItineraryApp
+    val sync = app.noteSync
+    val on by sync.enabled.collectAsStateWithLifecycle()
+    val state by sync.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    // Read off the main thread: whether there is a Nextcloud login to sync with.
+    val signedIn by produceState<Boolean?>(null) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.example.itinerary.data.NextcloudAccountStore(context).load() != null }.getOrDefault(false) }
+    }
+    PlannerDialog("Sync notes with Nextcloud", onDismiss,
+        primary = if (on) DialogAction(if (state.running) "Syncing…" else "Sync now", enabled = !state.running && signedIn == true) {
+            scope.launch { sync.sync() } } else null,
+        dismiss = DialogAction("Close", onClick = onDismiss)) {
+        Text("Your notes stay in step with the Notes app on your Nextcloud, and with Quillpad or any app that uses it. " +
+            "Notebooks are its categories and pinned notes its favourites; colours, tags, reminders, attachments and the archive stay on this phone.",
+            style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(12.dp))
+        if (signedIn == false) Text("Sign in to Nextcloud first, in Settings → Nextcloud.", color = MaterialTheme.colorScheme.error)
+        Row(Modifier.fillMaxWidth().toggleable(value = on, enabled = signedIn == true || on, role = androidx.compose.ui.semantics.Role.Switch,
+            onValueChange = { want -> scope.launch { sync.setEnabled(want) } }).padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Sync notes", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Switch(checked = on, onCheckedChange = null, enabled = signedIn == true || on)
+        }
+        if (on) {
+            val format = LocalTimeFormat.current
+            val message = when {
+                state.running -> "Syncing…"
+                state.error != null -> state.error!!
+                state.lastSynced != null -> "Synced " + java.time.Instant.ofEpochMilli(state.lastSynced!!).atZone(java.time.ZoneId.systemDefault())
+                    .let { "${it.toLocalDate().shortLabel()}, ${it.toLocalTime().label(format, context)}" } +
+                    if (state.conflicts > 0) " · ${state.conflicts} conflict cop${if (state.conflicts == 1) "y" else "ies"} made (changed in both places)" else ""
+                else -> "Not synced yet."
+            }
+            Text(message, style = MaterialTheme.typography.bodyMedium,
+                color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }

@@ -4,6 +4,7 @@ import android.app.Application
 import kotlinx.coroutines.launch
 import androidx.room.Room
 import com.example.itinerary.data.AppDatabase
+import com.example.itinerary.data.asNoteStore
 import com.example.itinerary.data.AttachmentStore
 import com.example.itinerary.data.BackupManager
 import com.example.itinerary.data.CalendarSync
@@ -40,8 +41,8 @@ class ItineraryApp : Application() {
 
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
-            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend(); taskSync.requestSend() },
-            onDeletionFinished = { calendarSync.requestSend(); taskSync.requestSend() })
+            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend(); taskSync.requestSend(); noteSync.request() },
+            onDeletionFinished = { calendarSync.requestSend(); taskSync.requestSend(); noteSync.request() })
     }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
@@ -64,6 +65,13 @@ class ItineraryApp : Application() {
             store = repository.asTaskStore(), scope = appScope,
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.tasks }.mapTo(HashSet()) { it.id } },
             onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) })
+    }
+
+    // Two-way sync of notes with the Nextcloud Notes app, on the same login; off until switched on in Notes.
+    val noteSync: com.example.itinerary.data.NoteSync by lazy {
+        com.example.itinerary.data.NoteSync(database, NextcloudAccountStore(this), com.example.itinerary.data.NotesApi(okhttp3.OkHttpClient()),
+            repository.asNoteStore(), com.example.itinerary.data.NoteSync.prefs(this),
+            pendingDeleted = { repository.pendingDeletions.value.flatMap { it.notes }.mapTo(HashSet()) { it.id } }, scope = appScope)
     }
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }

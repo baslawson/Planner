@@ -134,7 +134,7 @@ class NotesDataTest {
         }
     }
 
-    @Test fun version30UpgradesWithAnEmptyNotesTable() = runBlocking {
+    @Test fun version30UpgradesWithEmptyNotesTables() = runBlocking {
         val name = "notes-upgrade.db"
         context.deleteDatabase(name)
         try {
@@ -145,10 +145,11 @@ class NotesDataTest {
             db.close()
             // Back to version 30: no notes table.
             val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
-            raw.execSQL("DROP TABLE notes"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 30; raw.close()
+            raw.execSQL("DROP TABLE notes"); raw.execSQL("DROP TABLE sent_notes"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 30; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             assertEquals(task, db.taskDao().all().single())
             assertTrue(db.noteDao().all().isEmpty())
+            assertTrue(db.sentNoteDao().all().isEmpty()) // added in 32
             val note = PlannerNote(title = "First note")
             db.noteDao().insert(note); db.close()
             // Reopened as an ordinary version 31 database (Room checks the table matches what it expects).

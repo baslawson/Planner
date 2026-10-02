@@ -283,6 +283,36 @@ class Repository(
         }
     }
 
+    suspend fun allNotes(): List<PlannerNote> = noteDao.all()
+
+    // Note sync: [note] put in place exactly as given (Nextcloud's time and all), only if the note is still [expected]
+    // (null: not there yet), so an edit made meanwhile is never overwritten. True when it was.
+    suspend fun putSyncedNote(note: PlannerNote, expected: PlannerNote?): Boolean = changes.withLock {
+        withContext(NonCancellable) {
+            val clean = Notes.clean(note)
+            Notes.validate(clean)
+            val current = noteDao.byId(clean.id)
+            if (current != expected) return@withContext false
+            if (current == null) noteDao.insert(clean) else noteDao.update(clean)
+            afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && current.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
+            true
+        }
+    }
+
+    // Note sync: deleted on Nextcloud, so to Recently deleted (restorable there) without the Undo bar, if still [expected].
+    suspend fun archiveSyncedNote(id: String, expected: PlannerNote): Boolean = changes.withLock {
+        withContext(NonCancellable) {
+            val moved = archiving { archived ->
+                val note = noteDao.byId(id)?.takeIf { it == expected } ?: return@archiving false
+                archive(PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), notes = listOf(note)), archived, emptyList())
+                noteDao.delete(id)
+                true
+            }
+            if (moved) afterCommit(noteIds = listOf(id))
+            moved
+        }
+    }
+
     // To Recently deleted, with the Undo bar, as a task goes.
     suspend fun deleteNote(id: String) = changes.withLock {
         withContext(NonCancellable) {
@@ -1011,6 +1041,8 @@ class Repository(
                 // The same for tasks (T5): a send before TaskSync.restore/forget would otherwise delete the files of tasks
                 // the backup doesn't have; the list is read again before anything new is sent to it.
                 db.sentTaskDao().deleteAll()
+                // And for notes: the next notes sync links Nextcloud's notes to the restored ones by their words.
+                db.sentNoteDao().deleteAll()
                 db.outsideDao().sources().filter { it.tasksHere }.forEach { db.outsideDao().updateSource(it.copy(taskCtag = null)) }
             }
         } catch (e: Throwable) {

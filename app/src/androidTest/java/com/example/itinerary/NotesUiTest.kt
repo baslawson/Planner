@@ -175,6 +175,49 @@ class NotesUiTest {
         screenshot("card-reminder")
     }
 
+    @Test fun syncSwitchAndCloud() {
+        val store = com.example.itinerary.data.NextcloudAccountStore(context)
+        // Without a Nextcloud login: the dialog says where to sign in, and the switch waits.
+        store.clear()
+        openNotes()
+        click("Notes sync: off")
+        await { find("Sync notes with Nextcloud") != null && find("Sign in to Nextcloud first, in Settings → Nextcloud.") != null }
+        screenshot("sync-signed-out")
+        click("Close")
+
+        val certificate = okhttp3.tls.HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val server = okhttp3.mockwebserver.MockWebServer()
+        val fake = FakeNotes("qa", "qa-test-password")
+        fake.add("From Nextcloud", "From Nextcloud\nWritten on the web", category = "Web")
+        server.dispatcher = fake
+        server.useHttps(okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+        server.start()
+        val trusted = okhttp3.tls.HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val original = app.noteSync.api
+        try {
+            app.noteSync.api = com.example.itinerary.data.NotesApi(okhttp3.OkHttpClient.Builder()
+                .sslSocketFactory(trusted.sslSocketFactory(), trusted.trustManager).build())
+            store.save(com.example.itinerary.data.NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password"))
+            runBlocking { app.repository.saveNote(PlannerNote(title = "From the phone", content = "Typed here"), create = true) }
+            openNotes()
+            click("Notes sync: off"); await { find("Sync notes") != null && find("Sign in to Nextcloud first, in Settings → Nextcloud.") == null }
+            click("Sync notes")
+            await { nodes().any { it.text?.toString()?.startsWith("Synced ") == true } }
+            screenshot("sync-on")
+            click("Close")
+            // The page's cloud (under the dialog until now) says so too.
+            await { find("Notes sync: up to date") != null }
+            // Both ways: Nextcloud's note here (in its notebook), the phone's note there.
+            await { find("From Nextcloud") != null && find("Web") != null }
+            assertTrue(fake.notes.values.any { it.title == "From the phone" && it.content == "Typed here" })
+            screenshot("synced-grid")
+        } finally {
+            runBlocking { app.noteSync.setEnabled(false) }
+            app.noteSync.api = original
+            store.clear(); server.shutdown()
+        }
+    }
+
     @Test fun gridLooksInTheDarkTheme() {
         runBlocking {
             listOf(
