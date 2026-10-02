@@ -31,7 +31,7 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
             onApply(title.trim().takeIf { useTitle }, parsedDate.takeIf { useDate }, Bills.parse(amount).takeIf { useAmount }, currency)
         },
         dismiss = DialogAction("Cancel", onClick = onDismiss)) {
-            Text("From ${attachment.name}. Check against the document, then tick the fields to apply. Nothing is saved until you save the event.")
+            Text("From ${attachment.name}. Check against the document, then tick the fields to apply. Nothing is saved until you save the bill.")
             if (attachment.recognizedText.isBlank()) Text("No readable text was found. You can enter the details here, or cancel and scan again.")
             else if (attachment.textStatus == "PARTIAL") ScanUncertainty("Only part of this document was read. Verify every suggested field.")
             SuggestionCheck("Use title", useTitle) { useTitle = it }
