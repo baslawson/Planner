@@ -57,10 +57,19 @@ object SavedSearchCodec {
 
 data class SharedDraft(val title: String, val notes: String)
 object SharedText {
+    private const val MAX_LENGTH = 20_000
+    private const val MAX_TITLE = 500
     fun draft(text: String, subject: String? = null): SharedDraft {
         val body = text.trim()
-        require(body.isNotBlank() && body.length <= 20_000) { "Share between 1 and 20,000 characters." }
+        require(body.isNotBlank() && body.length <= MAX_LENGTH) { "Share between 1 and 20,000 characters." }
         val title = subject?.trim()?.takeIf { it.isNotBlank() } ?: body.lineSequence().first()
-        return SharedDraft(title.replace('\n', ' ').take(500), body)
+        return SharedDraft(title.replace('\n', ' ').take(MAX_TITLE), body)
     }
+
+    // What Planner keeps of a share while it's up, saved state included (Q-5: a share of a few hundred thousand
+    // characters made the saved state too large and crashed Planner on leaving it). Only what [draft] can use: a text
+    // too long to use keeps a stand-in one character too long (ending in its last non-space character, so trimming can't
+    // bring it under), which [draft] refuses the same way.
+    fun kept(text: String): String = text.trim().let { if (it.length <= MAX_LENGTH) it else it.take(MAX_LENGTH) + it.last() }
+    fun keptSubject(subject: String?): String? = subject?.trim()?.take(MAX_TITLE)
 }

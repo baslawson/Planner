@@ -49,6 +49,13 @@ internal fun actsOnLaunchIntent(flags: Int, savedStateNull: Boolean): Boolean =
     savedStateNull && (flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
 
 /**
+ * Whether a calendar file opened from another app (ACTION_VIEW) is read: content: URIs only (Q-6). Planner has no
+ * storage permission, so a file: path it can read is in practice one of its own private files (the event draft, say),
+ * which another app must not be able to make it open.
+ */
+internal fun opensCalendarFile(scheme: String?): Boolean = scheme == "content"
+
+/**
  * What an intent asks Planner to open: shared text (with its subject), a widget task, a calendar file, an entry
  * shortcut, a widget day. Null: not asked. [U] is android.net.Uri (generic so the rules run in a plain JVM test).
  */
@@ -84,13 +91,14 @@ class MainActivity : ComponentActivity() {
     private var widgetDate by mutableStateOf<java.time.LocalDate?>(null)
     private fun launchFields() = LaunchFields(sharedText, sharedSubject, widgetTaskId, calendarUri, entryAction, widgetDate)
     private fun launchFieldsOf(intent: Intent?): LaunchFields<android.net.Uri> {
+        // Q-5: only as much as Planner can use is kept, since it goes into the saved state.
         val sharedText = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: "" else null
+            com.example.itinerary.data.SharedText.kept(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: "") else null
         return LaunchFields(
             sharedText = sharedText,
-            sharedSubject = if (sharedText != null) intent?.getStringExtra(Intent.EXTRA_SUBJECT) else null,
+            sharedSubject = if (sharedText != null) com.example.itinerary.data.SharedText.keptSubject(intent?.getStringExtra(Intent.EXTRA_SUBJECT)) else null,
             widgetTaskId = if (intent?.action == com.example.itinerary.widget.TodayWidget.OPEN_TASK) intent.getStringExtra("task_id") else null,
-            calendarUri = if (intent?.action == Intent.ACTION_VIEW && intent.data?.scheme in listOf("content", "file")) intent.data else null,
+            calendarUri = if (intent?.action == Intent.ACTION_VIEW && opensCalendarFile(intent.data?.scheme)) intent.data else null,
             entryAction = intent?.action?.takeIf(EntryShortcuts::accepts),
             widgetDate = when (intent?.action) {
                 com.example.itinerary.widget.TodayWidget.OPEN_TODAY -> java.time.LocalDate.now()
@@ -143,6 +151,8 @@ class MainActivity : ComponentActivity() {
 
     // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
     // through one of these two, so leaving for it is not treated like going to the home screen (see AppLockRule).
+    // A plain startActivity on this activity (or on a screen's LocalContext, which wraps it) ends up here as well; one on
+    // the application context does not, so external screens are opened from the screen's context (Q-7).
     override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) =
         AppLockRule.ownTrip({ appLock.ownTripStarting = it }) { super.startActivityForResult(intent, requestCode, options) }
 

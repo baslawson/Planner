@@ -222,6 +222,21 @@ fun FreeTimeDialog(events: List<ItineraryItem>, onDismiss: () -> Unit, onChoose:
 // them all to Recently deleted. A single event can instead be reviewed in the event editor first.
 @Composable
 fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
+    // Q-4: another file opened from another app while this one is up waits until it is closed, then opens afresh. Read
+    // into this one, it was lost behind an import summary (whose Undo then undid this file) or marked the wrong rows.
+    var shown by remember { mutableStateOf(initialUri) }
+    val wanted by rememberUpdatedState(initialUri)
+    key(shown) {
+        CalendarImportContent(initialUri = shown, waiting = calendarFileAfterClose(shown, initialUri) != null,
+            onDismiss = { calendarFileAfterClose(shown, wanted)?.let { shown = it } ?: onDismiss() })
+    }
+}
+
+// The calendar file to open when the one [shown] is closed: the one [wanted] now, if another; null when done.
+internal fun <U> calendarFileAfterClose(shown: U?, wanted: U?): U? = wanted?.takeIf { it != shown }
+
+@Composable
+private fun CalendarImportContent(onDismiss: () -> Unit, initialUri: Uri?, waiting: Boolean) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
     val existingItems by repo.allItems.collectAsStateWithLifecycle(emptyList())
@@ -295,6 +310,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
             Text("Undo import moves them all to Recently deleted.", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            WaitingFileNote(waiting)
         }
         return
     }
@@ -306,6 +322,7 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
                 "You pick which events to add; nothing is added until you do.")
             if (busy) CircularProgressIndicator()
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            WaitingFileNote(waiting)
         }
         return
     }
@@ -372,7 +389,15 @@ fun CalendarImportDialog(onDismiss: () -> Unit, initialUri: Uri? = null) {
         Text("Times are in your phone's time zone. Reminders, attendees and attachments aren't imported.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        WaitingFileNote(waiting)
     }
+}
+
+// Q-4: says plainly that the calendar file just opened from another app hasn't been dropped.
+@Composable
+private fun WaitingFileNote(waiting: Boolean) {
+    if (waiting) Text("Another calendar file is waiting. It opens when you close this one.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
 }
 
 // One event in the import list: tick box, title, first date and time, how it repeats, and why it starts unticked.

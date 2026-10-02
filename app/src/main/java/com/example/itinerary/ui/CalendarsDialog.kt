@@ -170,7 +170,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
             Text("Calendars already on this phone: Google, Samsung, Outlook, DAVx⁵ and others. Read-only: Planner asks to read them; it can't change them.")
             if (phoneRefused) {
                 Text("Planner wasn't allowed to read calendars. Allow Calendars in Planner's app settings.", color = MaterialTheme.colorScheme.error)
-                StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(app) }
+                // From the screen, not the app: only a start from MainActivity counts as Planner's own trip for App lock (Q-7).
+                StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(context) }
             } else StackedButton("Show phone calendars") { askPhone.launch(Manifest.permission.READ_CALENDAR) }
         } else {
             phoneSources.forEach { source ->

@@ -72,7 +72,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
-    if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) }
+    val sharedEvent = if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) } else null
     // The task open from the widget. A second widget task (a new [widgetTaskId]) waits until this one's editor has
     // closed the usual way, "Save changes?" included; Keep editing there drops it (E4: the editor used to be reused).
     var widgetTaskOpen by remember { mutableStateOf<String?>(null) }
@@ -118,7 +118,11 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }
     }
     var recovered by remember { mutableStateOf(runCatching {
-        draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value) { com.example.itinerary.data.EditorDraftStore(app).read() }
+        // Q-2: a share restored as a new event (after process death) reopens its own editor on its draft: not here too.
+        draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value,
+            ownedElsewhere = { sharedEvent != null && runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")) == sharedEvent }.getOrDefault(false) }) {
+            com.example.itinerary.data.EditorDraftStore(app).read()
+        }
     }.getOrNull()) }
 
     var shortcutItem by remember { mutableStateOf<com.example.itinerary.data.ItineraryItem?>(null) }
@@ -400,7 +404,9 @@ internal enum class WidgetDateStep { NOTHING, WAIT, OPEN }
 
 // U3: the event draft on disk is recovered only while no event editor is open in this process. One open in another
 // Planner window (a share, an .ics file or a shortcut can open a second one) is still writing that draft.
-internal fun <T> draftToRecover(openEditors: Int, read: () -> T?): T? = if (openEditors > 0) null else read()
+// Nor one that [ownedElsewhere] says another editor composed alongside is reopening (Q-2: a restored share's event).
+internal fun <T> draftToRecover(openEditors: Int, ownedElsewhere: (T) -> Boolean = { false }, read: () -> T?): T? =
+    if (openEditors > 0) null else read()?.takeUnless(ownedElsewhere)
 
 // What a widget tap does now: nothing to open, wait for the open editor(s) to be closed, or open the day.
 internal fun widgetDateStep(widgetDate: LocalDate?, openEditors: Int): WidgetDateStep = when {

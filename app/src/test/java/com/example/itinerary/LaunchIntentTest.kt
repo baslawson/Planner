@@ -15,4 +15,11 @@ class LaunchIntentTest {
         assertFalse(actsOnLaunchIntent(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY, savedStateNull = true))
         assertFalse(actsOnLaunchIntent(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY, savedStateNull = true))
     }
+    // Q-6: a calendar file is read from a content: URI only, never a file: path (which could be Planner's own files).
+    @Test fun calendarFilesComeAsContentOnly() {
+        assertTrue(opensCalendarFile("content"))
+        assertFalse(opensCalendarFile("file"))
+        assertFalse(opensCalendarFile("https"))
+        assertFalse(opensCalendarFile(null))
+    }
 }
