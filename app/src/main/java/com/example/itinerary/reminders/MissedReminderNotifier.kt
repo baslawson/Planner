@@ -74,9 +74,11 @@ internal suspend fun handleMissedReminders(repository: Repository, ledger: Alarm
  */
 suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
     val app = context.applicationContext as ItineraryApp
+    if (!afterBoot) kotlinx.coroutines.delay(MissedReminders.SETTLE_MS)
     val now = System.currentTimeMillis()
     try {
-        handleMissedReminders(app.repository, app.reminderScheduler.ledger, now, if (afterBoot) 0L else MissedReminders.GRACE_MS,
+        handleMissedReminders(app.repository, app.reminderScheduler.ledger, now,
+            if (afterBoot) 0L else MissedReminders.openGraceMs(app.reminderScheduler.canScheduleExact()),
             app.reminderScheduler::disarm) { postMissedReminders(app, it, now, afterBoot) }
     } catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't show missed reminders", e) }
 }
