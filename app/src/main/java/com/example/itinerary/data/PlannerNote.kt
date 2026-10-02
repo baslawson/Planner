@@ -104,6 +104,9 @@ object Notes {
         require(note.title.length <= MAX_TITLE && note.content.length <= MAX_CONTENT) { "This note is too long" }
         require(note.notebook.length <= MAX_NOTEBOOK && '\n' !in note.notebook) { "Invalid notebook name" }
         require(note.tags.size <= MAX_TAGS && note.tags.all { it.isNotBlank() && it.length <= MAX_TAG }) { "Invalid tags" }
+        // As a task's: stored files only, with plain names (a backup can't point outside the attachment store).
+        require(note.attachments.size <= 100 && note.attachments.map { it.fileName }.distinct().size == note.attachments.size) { "Invalid attachments" }
+        require(note.attachments.all { it.url == null && Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.fileName) && it.name.isNotBlank() }) { "Invalid attachments" }
         require(note.title.isNotBlank() || note.content.isNotBlank() || note.attachments.isNotEmpty()) { "An empty note can't be saved" }
     }
 }

@@ -65,8 +65,11 @@ fun NotesScreen(onBack: () -> Unit) {
     var editingNew by rememberSaveable { mutableStateOf(false) }
     val all = notes.orEmpty()
     val notebooks = remember(all) { Notes.notebooks(all) }
-    // A notebook that has emptied (its last note moved or deleted) falls back to all notes.
-    val filter = filterOf(filterKey).let { if (it is NoteFilter.Notebook && it.name !in notebooks) NoteFilter.All else it }
+    val tags = remember(all) { Notes.tags(all) }
+    // A notebook or tag that has emptied (its last note moved or deleted) falls back to all notes.
+    val filter = filterOf(filterKey).let {
+        if (it is NoteFilter.Notebook && it.name !in notebooks || it is NoteFilter.Tag && it.name !in tags) NoteFilter.All else it
+    }
     val shown = remember(all, filter, query) { Notes.visible(all, filter, query) }
 
     val overlayMenu = remember { OverlayMenuState() }
@@ -100,6 +103,9 @@ fun NotesScreen(onBack: () -> Unit) {
                     notebooks.forEach { name ->
                         FilterChip(selected = filter == NoteFilter.Notebook(name), onClick = { filterKey = NoteFilter.Notebook(name).key() }, label = { Text(name) })
                     }
+                    tags.forEach { name ->
+                        FilterChip(selected = filter == NoteFilter.Tag(name), onClick = { filterKey = NoteFilter.Tag(name).key() }, label = { Text("#$name") })
+                    }
                     FilterChip(selected = filter == NoteFilter.Archive, onClick = { filterKey = "archive" }, label = { Text("Archive") })
                 }
                 when {
@@ -129,9 +135,10 @@ fun NotesScreen(onBack: () -> Unit) {
     editingId?.let { id ->
         val existing = all.firstOrNull { it.id == id }
         // A new note starts in the notebook being looked at.
-        val start = existing ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty()) else null
+        val start = existing ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
+            tags = listOfNotNull((filter as? NoteFilter.Tag)?.name)) else null
         if (start != null) key(id) {
-            NoteEditor(start, creating = editingNew && existing == null, notebooks = notebooks) { editingId = null; editingNew = false }
+            NoteEditor(start, creating = editingNew && existing == null, notebooks = notebooks, allTags = tags) { editingId = null; editingNew = false }
         } else if (notes != null) LaunchedEffect(id) { editingId = null }
     }
     }
@@ -167,6 +174,10 @@ private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
                 if (total > 0) Text("☑ $done of $total done", style = MaterialTheme.typography.labelMedium, color = text)
                 if (note.notebook.isNotBlank()) Text(note.notebook, style = MaterialTheme.typography.labelMedium, color = soft,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (note.tags.isNotEmpty()) Text(note.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium,
+                    color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (note.attachments.isNotEmpty()) Text("📎 ${note.attachments.size}", style = MaterialTheme.typography.labelMedium, color = soft,
+                    modifier = Modifier.semantics { contentDescription = "${note.attachments.size} attachment${if (note.attachments.size == 1) "" else "s"}" })
             }
         }
     }

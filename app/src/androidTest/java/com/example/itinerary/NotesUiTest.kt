@@ -35,12 +35,23 @@ class NotesUiTest {
         while (SystemClock.uptimeMillis() < end) { if (condition()) return; Thread.sleep(150) }
         screenshot("failure"); fail("Timed out: " + nodes().filter { it.isVisibleToUser }.mapNotNull { it.text ?: it.contentDescription }.joinToString(" | "))
     }
-    private fun click(text: String) {
+    // The page itself (the tallest scrolling thing), not a text box that scrolls inside it.
+    private fun page() = nodes().filter { it.isScrollable && it.isVisibleToUser && !it.isEditable }
+        .maxByOrNull { android.graphics.Rect().also(it::getBoundsInScreen).height() }
+    // Scrolls down the page until [text] shows, then back up from the top if it ran out.
+    private fun reveal(text: String) {
+        var forward = true
         await {
-            var n = find(text); while (n != null && !n.isClickable) n = n.parent
-            n?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true ||
-                run { if (find(text) == null) nodes().firstOrNull { it.isScrollable && it.isVisibleToUser }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); false }
+            find(text) != null || run {
+                val p = page()
+                if (p != null && !p.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) forward = !forward
+                Thread.sleep(250); false
+            }
         }
+    }
+    private fun click(text: String) {
+        reveal(text)
+        await { var n = find(text); while (n != null && !n.isClickable) n = n.parent; n?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true }
         Thread.sleep(400)
     }
     // The [index]th text field on screen (editor: 0 Title, 1 Note in Edit, then Notebook).
@@ -112,6 +123,41 @@ class NotesUiTest {
         await { notes().isEmpty() && find("Note deleted") != null }
         click("Undo")
         await { notes().singleOrNull()?.title == "QA groceries" && find("QA groceries") != null }
+    }
+
+    @Test fun tagsFilterAndAttachmentsList() {
+        val store = app.attachmentStore
+        store.fileFor("qa-note-receipt.txt").apply { parentFile?.mkdirs(); writeText("receipt") }
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = "QA with file", attachments = listOf(
+                Attachment(itemId = 0, name = "Receipt.txt", fileName = "qa-note-receipt.txt", mimeType = "text/plain"))), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA other"), create = true)
+        }
+        openNotes()
+        await { find("QA with file") != null && find("1 attachment") != null }
+        // A tag typed in the editor: Title 0, Note 1, Notebook 2, Add a tag 3.
+        click("New note"); await { find("Add a tag") != null }
+        type(0, "QA errands")
+        type(3, "#errands")
+        click("Add tag")
+        await { find("#errands") != null && find("Remove tag errands") != null }
+        click("Save"); await { notes().any { it.title == "QA errands" && it.tags == listOf("errands") } }
+        screenshot("editor-tags")
+        click("Close")
+        // Its chip filters the page to it.
+        await { nodes().count { it.text?.toString() == "#errands" } >= 2 }
+        click("#errands")
+        await { find("QA errands") != null && find("QA other") == null && find("QA with file") == null }
+        screenshot("tag-filter")
+        click("All notes")
+        // The attachment is listed in the note and can be taken off.
+        click("QA with file"); reveal("Receipt.txt")
+        screenshot("editor-attachment")
+        click("Remove"); await { find("Receipt.txt") == null }
+        click("Save"); await { notes().single { it.title == "QA with file" }.attachments.isEmpty() }
+        click("Close"); await { find("QA with file") != null && find("1 attachment") == null }
+        // Nothing uses the file now, so it has gone.
+        await { !store.fileFor("qa-note-receipt.txt").exists() }
     }
 
     @Test fun gridLooksInTheDarkTheme() {

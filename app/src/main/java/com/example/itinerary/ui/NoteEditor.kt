@@ -11,7 +11,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +33,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
+import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.Markdown
 import com.example.itinerary.data.Notes
 import com.example.itinerary.data.PlannerNote
@@ -44,8 +47,9 @@ internal val NOTE_COLOR_NAMES = listOf("Green", "Teal", "Blue", "Purple", "Pink"
  * checklist ticked) in Preview — with the editors' Delete · Close · Save bar. A new note opens in Edit, a saved one in
  * Preview. Save keeps the editor open ("Saved"); Close with changes asks first.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, onDismiss: () -> Unit) {
+fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(), onDismiss: () -> Unit) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
     val scope = rememberCoroutineScope()
@@ -55,19 +59,58 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var notebook by rememberSaveable { mutableStateOf(initial.notebook) }
     var color by rememberSaveable { mutableStateOf(initial.color) }
     var pinned by rememberSaveable { mutableStateOf(initial.pinned) }
+    var tags by rememberSaveable { mutableStateOf(initial.tags) }
+    var newTag by rememberSaveable { mutableStateOf("") }
+    // Kept as JSON across rotation; the files themselves are already in the store.
+    var attachmentsJson by rememberSaveable { mutableStateOf(com.example.itinerary.data.DraftCodec.attachments(initial.attachments).toString()) }
+    val attachments = remember(attachmentsJson) { com.example.itinerary.data.DraftCodec.attachments(org.json.JSONArray(attachmentsJson)) }
+    fun setAttachments(list: List<Attachment>) { attachmentsJson = com.example.itinerary.data.DraftCodec.attachments(list).toString() }
+    var pendingPhoto by rememberSaveable { mutableStateOf<String?>(null) }
     var preview by rememberSaveable { mutableStateOf(!creating && initial.content.isNotBlank()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var askingToSave by rememberSaveable { mutableStateOf(false) }
     var justSaved by remember { mutableStateOf(false) }
-    val current = (saved ?: initial).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned)
+    val current = (saved ?: initial).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned,
+        tags = tags, attachments = attachments)
     val base = saved ?: initial.takeIf { !creating }
-    val unsaved = base == null && (title.isNotBlank() || content.text.isNotBlank()) ||
+    val unsaved = base == null && (title.isNotBlank() || content.text.isNotBlank() || attachments.isNotEmpty()) ||
         base != null && Notes.clean(current) != Notes.clean(base)
     // Deleted elsewhere (another device, once notes sync): Save can't bring it back, so it says so.
     val stored by remember(initial.id) { repo.observeNote(initial.id) }.collectAsStateWithLifecycle(initialValue = initial)
     val deletedElsewhere = saved != null && stored == null
-    val canSave = !busy && !deletedElsewhere && (title.isNotBlank() || content.text.isNotBlank())
+    val canSave = !busy && !deletedElsewhere && (title.isNotBlank() || content.text.isNotBlank() || attachments.isNotEmpty())
+    val attachmentStore = (context.applicationContext as ItineraryApp).attachmentStore
+    // Files this editor has held: once it saves, discards or deletes, those nothing uses any more are removed (one still
+    // in a saved note, Recently deleted or elsewhere stays).
+    fun releaseFiles() {
+        val files = (initial.attachments + attachments + saved?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
+        (context.applicationContext as ItineraryApp).appScope.launch { runCatching { repo.releaseTaskFiles(files) } }
+    }
+    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            busy = true
+            scope.launch {
+                try {
+                    val imported = attachmentStore.import(uri)
+                    if (imported != null) setAttachments(attachments + imported) else error = "Couldn't attach this file. Please try again."
+                } finally { busy = false }
+            }
+        }
+    }
+    val takePhoto = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { success ->
+        val name = pendingPhoto
+        if (name != null) {
+            if (success) setAttachments(attachments + Attachment(itemId = 0, name = "Note photo.jpg", fileName = name, mimeType = "image/jpeg"))
+            else attachmentStore.delete(name)
+        }
+        pendingPhoto = null
+    }
+    fun addTag() {
+        val tag = Notes.cleanTag(newTag)
+        if (tag.isNotEmpty() && tag !in tags && tags.size < Notes.MAX_TAGS) tags = tags + tag
+        newTag = ""
+    }
     LaunchedEffect(unsaved) { if (unsaved) justSaved = false }
 
     fun save(then: () -> Unit = {}) {
@@ -77,18 +120,20 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             try {
                 saved = repo.saveNote(current, create = saved == null)
                 justSaved = true
+                releaseFiles()
                 then()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = if (e is IllegalStateException && e.message == "This note was deleted") "This note was deleted." else "Couldn't save this note. Please try again." }
             finally { busy = false }
         }
     }
-    fun close() { if (unsaved) askingToSave = true else onDismiss() }
+    fun discard() { releaseFiles(); onDismiss() }
+    fun close() { if (unsaved) askingToSave = true else discard() }
     fun delete() {
-        val id = saved?.id ?: return onDismiss()
+        val id = saved?.id ?: return discard()
         busy = true
         scope.launch {
-            try { repo.deleteNote(id); onDismiss() }
+            try { repo.deleteNote(id); releaseFiles(); onDismiss() }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { error = "Couldn't delete this note. Please try again." }
             finally { busy = false }
@@ -135,10 +180,44 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     if (others.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         others.forEach { name -> FilterChip(selected = false, onClick = { notebook = name }, label = { Text(name) }) }
                     }
+                    Text("Tags", style = MaterialTheme.typography.titleSmall)
+                    if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        tags.forEach { tag ->
+                            FilterChip(selected = true, onClick = { tags = tags - tag }, label = { Text("#$tag") },
+                                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove tag $tag", Modifier.size(16.dp)) })
+                        }
+                    }
+                    OutlinedTextField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, Modifier.fillMaxWidth(),
+                        label = { Text("Add a tag") }, singleLine = true,
+                        enabled = tags.size < Notes.MAX_TAGS,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
+                        trailingIcon = { if (newTag.isNotBlank()) IconButton(onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
+                    val suggestions = allTags.filter { it !in tags && (newTag.isBlank() || it.contains(Notes.cleanTag(newTag), ignoreCase = true)) }.take(12)
+                    if (suggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        suggestions.forEach { tag -> FilterChip(selected = false, onClick = { if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, label = { Text("#$tag") }) }
+                    }
                     Text("Colour", style = MaterialTheme.typography.titleSmall)
                     ColorChoices(color) { color = it }
                     FilterChip(selected = pinned, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
                         leadingIcon = if (pinned) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)) }) else null)
+                    HorizontalDivider()
+                    HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
+                    attachments.forEach { attachment ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MatrixTextButton(enabled = !busy, modifier = Modifier.weight(1f), onClick = { openAttachment(context, attachmentStore, attachment) }) { Text(attachment.name) }
+                            MatrixTextButton(enabled = !busy, onClick = { setAttachments(attachments.filterNot { it.fileName == attachment.fileName }) }) { Text("Remove") }
+                        }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
+                        OutlinedButton(enabled = !busy && attachments.size < 100, onClick = {
+                            val file = attachmentStore.newPhotoFile()
+                            pendingPhoto = file.name
+                            try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
+                            catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
+                        }) { Text("Take photo") }
+                    }
                     if (deletedElsewhere) Text("This note was deleted elsewhere. Copy anything you need before closing.", color = MaterialTheme.colorScheme.error)
                 }
             }
@@ -154,7 +233,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
         primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(onDismiss) },
         dismiss = DialogAction("Keep editing") { askingToSave = false },
-        extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; onDismiss() })) {
+        extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
         Text("Your changes to this note haven't been saved.")
     }
 }

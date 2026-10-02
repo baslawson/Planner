@@ -85,4 +85,15 @@ class NotesTest {
         assertThrows(IllegalArgumentException::class.java) { Notes.validate(PlannerNote()) }
         assertEquals(Notes.MAX_CONTENT, Notes.clean(PlannerNote(content = "x".repeat(Notes.MAX_CONTENT + 10))).content.length)
     }
+
+    @Test fun attachmentsAreStoredFilesWithPlainNames() {
+        fun note(vararg files: String) = PlannerNote(title = "x", attachments = files.map { Attachment(itemId = 0, name = "File", fileName = it, mimeType = "text/plain") })
+        Notes.validate(note("a1.txt", "photo_2.jpg"))
+        listOf("../escape", "/abs", ".hidden", "a b").forEach { bad ->
+            assertThrows(bad, IllegalArgumentException::class.java) { Notes.validate(note(bad)) }
+        }
+        assertThrows(IllegalArgumentException::class.java) { Notes.validate(note("same.txt", "same.txt")) }
+        // Attachments alone make a note worth keeping.
+        Notes.validate(note("only.txt").copy(title = ""))
+    }
 }

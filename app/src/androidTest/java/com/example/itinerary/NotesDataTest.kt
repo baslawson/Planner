@@ -90,6 +90,50 @@ class NotesDataTest {
         }
     }
 
+    @Test fun attachedFilesFollowTheNote() = runBlocking {
+        val base = context
+        val dir = File(base.cacheDir, "notes-files").apply { deleteRecursively(); mkdirs() }
+        val isolated = object : ContextWrapper(base) {
+            override fun getFilesDir() = File(dir, "files").apply { mkdirs() }
+            override fun getCacheDir() = File(dir, "cache").apply { mkdirs() }
+            override fun getSharedPreferences(name: String, mode: Int) = base.getSharedPreferences("notes_files_$name", mode)
+        }
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        try {
+            val store = AttachmentStore(isolated)
+            val repo = Repository(db, store, alarms)
+            fun file(name: String, text: String) = store.fileFor(name).apply { parentFile?.mkdirs(); writeText(text) }
+            file("kept.txt", "receipt"); file("dropped.txt", "draft only")
+            val receipt = Attachment(itemId = 0, name = "Receipt", fileName = "kept.txt", mimeType = "text/plain")
+            val note = repo.saveNote(PlannerNote(title = "Tagged", tags = listOf("money", "#home"), attachments = listOf(receipt)), create = true)
+            assertEquals(listOf("money", "home"), note.tags)
+            // A file the editor let go of that no note uses is removed; the saved note's file stays.
+            repo.releaseTaskFiles(listOf("kept.txt", "dropped.txt"))
+            assertTrue(store.fileFor("kept.txt").exists()); assertFalse(store.fileFor("dropped.txt").exists())
+
+            // In Recently deleted the file stays; deleted forever, it goes.
+            repo.deleteNote(note.id); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+            assertTrue(store.fileFor("kept.txt").exists())
+            repo.restoreDeleted(repo.snapshot().deleted.single().id)
+            assertEquals(listOf(receipt), repo.note(note.id)!!.attachments)
+
+            // A backup carries the file; restored, the note opens it again.
+            val backup = BackupManager(isolated, repo, store, SettingsRepository(isolated))
+            val zip = File(dir, "backup.zip")
+            backup.export(Uri.fromFile(zip), trackStatus = false)
+            repo.deleteNote(note.id); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+            repo.permanentlyDelete(repo.snapshot().deleted.single().id)
+            assertFalse(store.fileFor("kept.txt").exists())
+            val staged = backup.stage(Uri.fromFile(zip))
+            assertEquals(1, staged.notes); assertEquals(1, staged.attachments)
+            backup.restore(staged)
+            assertEquals("receipt", store.fileFor(repo.snapshot().notes.single().attachments.single().fileName).readText())
+        } finally {
+            db.close(); dir.deleteRecursively()
+            base.deleteSharedPreferences("notes_files_settings"); base.deleteSharedPreferences("notes_files_backup_status")
+        }
+    }
+
     @Test fun version30UpgradesWithAnEmptyNotesTable() = runBlocking {
         val name = "notes-upgrade.db"
         context.deleteDatabase(name)
