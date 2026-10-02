@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -67,6 +68,7 @@ class AlarmService : Service() {
         }
         ringing = extras
         currentReminderId = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
+        ringingSince = SystemClock.elapsedRealtime()
 
         val content = reminderContent(this, extras)
         val notification = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
@@ -78,6 +80,9 @@ class AlarmService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
             .setContentIntent(openAndStop())
+            // Android 14+ lets the user swipe even this ongoing notification away (not on the lock screen). Swiping it is
+            // the only thing left to do, so it counts as Stop: otherwise it would ring on with nothing to stop it.
+            .setDeleteIntent(serviceAction(ACTION_STOP))
             .apply {
                 val id = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID) ?: 0L
                 if (id > 0) {
@@ -224,8 +229,20 @@ class AlarmService : Service() {
 
     companion object {
         @Volatile private var currentReminderId: Long? = null
+        @Volatile private var ringingSince = 0L
         fun stopIfRinging(context: Context, id: Long) {
             if (currentReminderId == id) context.stopService(Intent(context, AlarmService::class.java))
+        }
+
+        // Planner opened while an alarm rings without its notification (swiped away on Android 14+ and the delete intent
+        // didn't get through): nothing else could stop it, so opening the app does. The first seconds are left alone,
+        // while Android may not list the just-posted notification yet.
+        fun stopIfUnseen(context: Context) {
+            if (currentReminderId == null || SystemClock.elapsedRealtime() - ringingSince < 3_000L) return
+            val shown = runCatching {
+                context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == NOTIFICATION_ID }
+            }.getOrDefault(true)
+            if (!shown) context.stopService(Intent(context, AlarmService::class.java))
         }
         const val ACTION_STOP = "com.example.itinerary.alarm.STOP"
         const val ACTION_SNOOZE = "com.example.itinerary.alarm.SNOOZE"
