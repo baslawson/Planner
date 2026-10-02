@@ -46,4 +46,22 @@ class WorkflowToolsTest {
         assertThrows(IllegalArgumentException::class.java) { SharedText.draft("a".repeat(20001)) }
         assertEquals(500, SharedText.draft("a".repeat(600)).title.length)
     }
+    // Q-5: what is kept of a share (it goes into the saved state) is small, and gives the same draft or the same refusal.
+    @Test fun keptShareIsCappedButReadsTheSame() {
+        val text = "  Read article\nhttps://example.test/a  \n"
+        assertEquals(SharedText.draft(text, "From browser"), SharedText.draft(SharedText.kept(text), SharedText.keptSubject("From browser")))
+        val fits = "b".repeat(20_000)
+        assertEquals(fits, SharedText.kept(" $fits "))
+        val huge = "x".repeat(500_000) + "   \n" + "y".repeat(200) + " "
+        val kept = SharedText.kept(huge)
+        assertEquals(20_001, kept.length)
+        assertEquals(kept, SharedText.kept(kept)) // the saved state round trip doesn't change it
+        assertThrows(IllegalArgumentException::class.java) { SharedText.draft(kept) }
+        // A long run of spaces at the cut can't trim the stand-in under the limit.
+        val spaced = "x" + " ".repeat(30_000) + "z"
+        assertThrows(IllegalArgumentException::class.java) { SharedText.draft(SharedText.kept(spaced)) }
+        assertEquals(500, SharedText.keptSubject("s".repeat(100_000))!!.length)
+        assertEquals("s".repeat(500), SharedText.draft("body", SharedText.keptSubject("s".repeat(100_000))).title)
+        assertNull(SharedText.keptSubject(null))
+    }
 }
