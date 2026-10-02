@@ -26,6 +26,7 @@ class AttachmentStore(private val context: Context) {
         // Do not recycle evicted bitmaps: a visible Compose row may still own one.
     }
     fun taskDraftFiles(): Set<String> = TaskDraftStore(context).files()
+    fun noteDraftFiles(): Set<String> = NoteDraftStore(context).files()
     // Big Recently deleted bundles (see DeletedPayloads).
     fun deletedPayloads() = DeletedPayloads(File(context.filesDir, "recently-deleted"))
     fun clearThumbnails() = thumbnails.evictAll()

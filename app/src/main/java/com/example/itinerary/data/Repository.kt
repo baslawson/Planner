@@ -165,6 +165,7 @@ class Repository(
         taskDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
+        keep.addAll(store.noteDraftFiles())
         deletedDao.all().flatMap { contents(it).storedAttachments }.forEach { keep.add(it.fileName) }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         candidates.filter { it.isNotBlank() && it !in keep }.distinct().forEach(store::delete)
@@ -253,11 +254,15 @@ class Repository(
     fun observeNote(id: String): Flow<PlannerNote?> = noteDao.observe(id).distinctUntilChanged()
 
     // A new note ([create]) or the one being edited, stamped with the time it changed (unless nothing did). Returns it as saved.
-    suspend fun saveNote(note: PlannerNote, create: Boolean): PlannerNote = changes.withLock {
+    // [expected]: the version the editor started from (null: don't check). A note changed since (by sync, or a
+    // reminder's Done) isn't overwritten: NoteChangedException carries the newer version for the editor to merge.
+    suspend fun saveNote(note: PlannerNote, create: Boolean, expected: PlannerNote? = null): PlannerNote = changes.withLock {
         val old = noteDao.byId(note.id)
+        if (!create && expected != null && old != null && old != expected) throw NoteChangedException(old)
         // A changed reminder time ends its snooze, as a task's does.
         val withSnooze = note.copy(snoozedUntil = if (note.reminderAt != null && note.reminderAt == old?.reminderAt) old.snoozedUntil else null)
         val clean = Notes.clean(withSnooze).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
+        require(Notes.hasContent(clean)) { "An empty note can't be saved" }
         Notes.validate(clean)
         withContext(NonCancellable) {
             if (create) noteDao.insert(clean)
@@ -444,7 +449,8 @@ class Repository(
         runCatching { entries.forEach { if (deletedDao.byId(it.id)?.payload != it.payload) payloads.delete(it.payload) } }
     }
 
-    suspend fun restoreDeleted(id: String) = changes.withLock { restoreDeletedLocked(id) }
+    // Once started, a restore finishes (its reminders set, its stored bundle removed) even if the screen goes.
+    suspend fun restoreDeleted(id: String) = withContext(NonCancellable) { changes.withLock { restoreDeletedLocked(id) } }
 
     private suspend fun restoreDeletedLocked(id: String) {
         val restoredTasks = mutableListOf<String>()
@@ -484,12 +490,13 @@ class Repository(
 
     // Recently deleted's selection: each entry on its own, as one Restore / Delete forever would; one that fails doesn't
     // stop the rest. Returns how many failed.
-    suspend fun restoreDeleted(ids: Collection<String>): Int = ids.count { id ->
-        try { restoreDeleted(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { true }
+    // Returns how many failed; [failedIds] gets which.
+    suspend fun restoreDeleted(ids: Collection<String>, failedIds: MutableCollection<String> = mutableListOf()): Int = ids.count { id ->
+        try { restoreDeleted(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { failedIds += id; true }
     }
 
-    suspend fun permanentlyDelete(ids: Collection<String>): Int = ids.count { id ->
-        try { permanentlyDelete(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { true }
+    suspend fun permanentlyDelete(ids: Collection<String>, failedIds: MutableCollection<String> = mutableListOf()): Int = ids.count { id ->
+        try { permanentlyDelete(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { failedIds += id; true }
     }
 
     suspend fun permanentlyDelete(id: String) = changes.withLock {
@@ -553,6 +560,7 @@ class Repository(
         taskDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
+        keep.addAll(store.noteDraftFiles())
             candidates.filter { it.isNotBlank() && it !in keep } to alarms
         }
         afterCommit(files, reminders.map { it.id })
@@ -824,9 +832,9 @@ class Repository(
         }
     }
 
-    suspend fun undoDeletion(token: String) = changes.withLock {
+    suspend fun undoDeletion(token: String) = withContext(NonCancellable) { changes.withLock {
         restoreDeletedLocked(token)
-    }
+    } }
 
     suspend fun finishDeletion(token: String) = changes.withLock {
         val bundle = _pendingDeletions.value.find { it.token == token } ?: return@withLock

@@ -116,14 +116,26 @@ object NoteMapping {
     // Planner's title, or (none set) the note's first line: Nextcloud names its file after it.
     fun remoteTitle(note: PlannerNote) = note.title.trim().ifBlank { firstLine(note.content) }.take(Notes.MAX_TITLE)
 
-    // Nextcloud's title is kept unless it's just the first line again (the card would show it twice).
-    fun localTitle(remote: RemoteNote) = if (remote.title.trim() == firstLine(remote.content)) "" else remote.title.trim()
+    // Nextcloud's title is kept unless it's just the first line again (the card would show it twice), or it's Planner's
+    // own title as Nextcloud tidied it (no / \\ : * ? " < > |, cut at 100, " (2)" added): Planner's stays then.
+    fun localTitle(remote: RemoteNote, mine: String = "") = when {
+        mine.isNotBlank() && sameTitle(mine, remote.title) -> mine
+        remote.title.trim() == firstLine(remote.content) -> ""
+        else -> remote.title.trim()
+    }
+
+    private fun titleKey(title: String) = title.trim().replace(Regex("\\s\\(\\d+\\)$"), "").take(100).lowercase()
+        .filter { it.isLetterOrDigit() }
+    fun sameTitle(a: String, b: String) = titleKey(a) == titleKey(b)
+
+    // The same words, whatever the line ends and trailing space.
+    fun sameText(a: String, b: String) = a.replace("\r\n", "\n").trimEnd() == b.replace("\r\n", "\n").trimEnd()
 
     fun fields(note: PlannerNote) = listOf(note.title, note.content, note.notebook, note.pinned.toString())
     fun fields(row: SentNote) = listOf(row.title, row.content, row.notebook, row.pinned.toString())
 
     /** [base] (a new note, or the linked one) changed to what Nextcloud has. */
-    fun apply(base: PlannerNote, remote: RemoteNote) = Notes.clean(base.copy(title = localTitle(remote), content = remote.content,
+    fun apply(base: PlannerNote, remote: RemoteNote) = Notes.clean(base.copy(title = localTitle(remote, base.title), content = remote.content,
         notebook = Notes.cleanNotebook(remote.category), pinned = remote.favorite,
         modified = if (remote.modified > 0) remote.modified * 1000 else base.modified))
 
@@ -168,7 +180,9 @@ class NoteSync(
     private val pendingDeleted: () -> Set<String> = { emptySet() },
     private val scope: CoroutineScope? = null,
 ) {
-    data class State(val running: Boolean = false, val error: String? = null, val lastSynced: Long? = null, val conflicts: Int = 0)
+    // [skipped]: notes the last pass left alone (too long for Planner, or refused by Nextcloud).
+    data class State(val running: Boolean = false, val error: String? = null, val lastSynced: Long? = null, val conflicts: Int = 0,
+                     val skipped: Int = 0)
 
     private val rows = db.sentNoteDao()
     private val lock = Mutex()
@@ -176,7 +190,12 @@ class NoteSync(
     val enabled = _enabled.asStateFlow()
     private val _state = MutableStateFlow(State(lastSynced = prefs.getLong(KEY_LAST, 0L).takeIf { it > 0 }))
     val state = _state.asStateFlow()
-    private var job: Job? = null
+    // A request waiting out its delay (cancelled by a newer one); a pass itself is never cancelled by a request.
+    private var waiting: Job? = null
+    // Asked for while a pass ran: one more follow if anything is left to sync.
+    @Volatile private var again = false
+    // What was still out of step after the last follow-up pass, so a note that can't sync doesn't start a loop.
+    private var stuck: Set<String> = emptySet()
 
     // Turning it on syncs at once; off leaves the notes as they are on both sides, and forgets the links.
     suspend fun setEnabled(on: Boolean) {
@@ -188,41 +207,64 @@ class NoteSync(
     // After a backup is restored (its notes have new history) or the login changes: the next pass links by content.
     suspend fun forget() = lock.withLock { rows.deleteAll() }
 
-    // A pass a few seconds from now, once changes have settled (after an edit), or at once.
+    // A pass a few seconds from now, once changes have settled (after an edit), or at once. A pass already running
+    // carries on (a pass's own writes come back here through the repository); one more follows it if needed.
     fun request(delayMs: Long = SEND_DELAY_MS) {
         val scope = scope ?: return
         if (!_enabled.value) return
         synchronized(this) {
-            job?.cancel()
-            job = scope.launch { delay(delayMs); runCatching { sync() } }
+            if (lock.isLocked) { again = true; return }
+            waiting?.cancel()
+            waiting = scope.launch {
+                delay(delayMs)
+                synchronized(this@NoteSync) { waiting = null }
+                runCatching { sync() }
+                if (again) {
+                    again = false
+                    val left = runCatching { outOfStep() }.getOrDefault(emptySet())
+                    if (left.isNotEmpty() && left != stuck) { stuck = left; request() } else stuck = emptySet()
+                }
+            }
         }
+    }
+
+    // Planner's notes not as last synced: new, changed, or deleted with the Undo gone.
+    private suspend fun outOfStep(): Set<String> {
+        val links = rows.all().associateBy { it.noteId }
+        val pending = pendingDeleted()
+        val local = store.all()
+        return local.filter { it.id !in pending && links[it.id]?.let { row -> NoteMapping.fields(it) != NoteMapping.fields(row) } ?: true }
+            .mapTo(HashSet()) { it.id } + (links.keys - local.mapTo(HashSet()) { it.id } - pending)
     }
 
     suspend fun sync(): Boolean = lock.withLock {
         if (!_enabled.value) return@withLock true
         _state.value = _state.value.copy(running = true, error = null)
-        try {
-            val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() }
-                ?: throw NotesApiException("Sign in to Nextcloud first, in Settings → Nextcloud.")
-            val conflicts = withContext(Dispatchers.IO) { pass(account) }
-            val now = System.currentTimeMillis()
-            prefs.edit().putLong(KEY_LAST, now).apply()
-            _state.value = State(lastSynced = now, conflicts = conflicts)
-            true
-        } catch (e: CancellationException) { _state.value = _state.value.copy(running = false); throw e }
-        catch (e: Exception) {
-            _state.value = _state.value.copy(running = false, error = (e as? NotesApiException)?.message
-                ?: if (e is java.io.IOException) "Couldn't reach Nextcloud. Check the connection and try again." else "Notes sync failed. Try again later.")
-            false
+        // Not cut off half way: a write to Nextcloud and the record of it go together.
+        withContext(NonCancellable) {
+            try {
+                val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() }
+                    ?: throw NotesApiException("Sign in to Nextcloud first, in Settings → Nextcloud.")
+                val (conflicts, skipped) = withContext(Dispatchers.IO) { pass(account) }
+                val now = System.currentTimeMillis()
+                prefs.edit().putLong(KEY_LAST, now).apply()
+                _state.value = State(lastSynced = now, conflicts = conflicts, skipped = skipped)
+                true
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(running = false, error = (e as? NotesApiException)?.message
+                    ?: if (e is java.io.IOException) "Couldn't reach Nextcloud. Check the connection and try again." else "Notes sync failed. Try again later.")
+                false
+            }
         }
     }
 
-    // One pass; returns how many conflict copies it made.
-    private suspend fun pass(account: NextcloudAccount): Int {
+    // One pass; returns how many conflict copies it made and how many notes it left alone.
+    private suspend fun pass(account: NextcloudAccount): Pair<Int, Int> {
         val key = CalendarSync.accountKey(account)
         val remote = api.list(account).associateBy { it.id }
         val pending = pendingDeleted()
         var conflicts = 0
+        var skipped = 0
         // Links made for another login don't count here.
         rows.all().filter { it.account != key }.forEach { rows.delete(it.noteId) }
         val linked = rows.all()
@@ -238,19 +280,25 @@ class NoteSync(
                 title = (Notes.label(mine) + " (conflict copy)").take(Notes.MAX_TITLE), reminderAt = null, snoozedUntil = null)
             if (store.put(copy, null)) conflicts++
         }
+        // One note Nextcloud refuses (a shared note it won't let Planner change, say) is left as it is; the rest go on.
+        // A login or connection problem still stops the pass.
+        suspend fun each(block: suspend () -> Unit) {
+            try { block() } catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) skipped++ else throw e }
+        }
 
-        for (row in linked) {
+        for (row in linked) each {
             val mine = local[row.noteId]
             val theirs = remote[row.remoteId]
             when {
                 // Deleted in Planner (its Undo has passed): deleted there too, unless it changed there since.
                 mine == null -> {
-                    if (row.noteId in pending) continue
-                    if (theirs == null) { rows.delete(row.noteId); continue }
-                    if (theirs.etag == row.etag) { api.delete(account, theirs.id); rows.delete(row.noteId) }
+                    if (row.noteId in pending) return@each
+                    if (theirs == null) { rows.delete(row.noteId); return@each }
+                    if (theirs.etag == row.etag && !theirs.readonly) { api.delete(account, theirs.id); rows.delete(row.noteId) }
                     else {
+                        // Changed there, or shared read-only: kept there, and (changed) it comes back below as a new note.
                         rows.delete(row.noteId)
-                        linkedRemote.remove(theirs.id) // comes back below as a new note
+                        if (theirs.etag != row.etag) linkedRemote.remove(theirs.id)
                     }
                 }
                 // Deleted on Nextcloud: to Recently deleted, unless changed here since (then it goes up again).
@@ -258,15 +306,21 @@ class NoteSync(
                     rows.delete(row.noteId)
                     if (NoteMapping.fields(mine) == NoteMapping.fields(row)) store.archive(mine.id, mine) else push(mine)
                 }
-                !NoteMapping.fits(theirs) -> {}
+                !NoteMapping.fits(theirs) -> skipped++
                 else -> {
                     val mineChanged = NoteMapping.fields(mine) != NoteMapping.fields(row)
                     val theirsChanged = theirs.etag != row.etag
+                    // Only filed or pinned differently here: a read-only note keeps that on the phone, nothing to send.
+                    val metaOnly = mine.title == row.title && mine.content == row.content
                     when {
                         !mineChanged && !theirsChanged -> {}
                         !mineChanged -> {
                             val updated = NoteMapping.apply(mine, theirs)
                             if (store.put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                        }
+                        theirs.readonly && metaOnly -> {
+                            val updated = if (theirsChanged) NoteMapping.apply(mine, theirs).copy(notebook = mine.notebook, pinned = mine.pinned) else mine
+                            if (updated == mine || store.put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
                         }
                         !theirsChanged && !theirs.readonly -> when (val result = api.update(account, theirs.id, theirs.etag,
                             NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned)) {
@@ -276,34 +330,40 @@ class NoteSync(
                             NotesApi.Write.Gone -> { rows.delete(row.noteId); push(mine) }
                         }
                         else -> {
-                            // Both changed (or it's read-only there): Nextcloud's version here, Planner's as a copy.
+                            // Both changed (or it's read-only there): Nextcloud's version here, then Planner's as a copy
+                            // (only once the note itself is updated, so a failed update doesn't make a second copy).
                             val updated = NoteMapping.apply(mine, theirs)
-                            if (NoteMapping.fields(updated) != NoteMapping.fields(mine)) conflictCopy(mine)
-                            if (store.put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                            if (store.put(updated, mine)) {
+                                rows.put(NoteMapping.row(updated, key, theirs))
+                                if (NoteMapping.fields(updated) != NoteMapping.fields(mine)) conflictCopy(mine)
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Nextcloud's notes not linked yet: to an identical one here (a restored backup, the same note added twice), or new.
+        // Nextcloud's notes not linked yet: to one here with the same words (a restored backup, the same note added
+        // twice; Nextcloud may have tidied its title), or new.
         local = store.all().associateBy { it.id }
         val links = rows.all().associateBy { it.noteId }
         val free = local.values.filter { it.id !in links && it.id !in pending }.toMutableList()
-        for (theirs in remote.values.filter { it.id !in linkedRemote && NoteMapping.fits(it) }) {
+        for (theirs in remote.values.filter { it.id !in linkedRemote }) each {
+            if (!NoteMapping.fits(theirs)) { skipped++; return@each }
             val incoming = NoteMapping.apply(PlannerNote(), theirs)
-            val twin = free.firstOrNull { it.content.trimEnd() == incoming.content && NoteMapping.remoteTitle(it) == NoteMapping.remoteTitle(incoming) }
+            val sameWords = free.filter { NoteMapping.sameText(it.content, incoming.content) }
+            val twin = sameWords.firstOrNull { NoteMapping.sameTitle(NoteMapping.remoteTitle(it), theirs.title) } ?: sameWords.firstOrNull()
             if (twin != null) {
-                // The same words: linked, with Nextcloud's notebook and favourite (Planner's colour, tags and so on stay).
+                // Linked, with Nextcloud's notebook and favourite (Planner's title, colour, tags and so on stay).
                 free.remove(twin)
-                val linkedNote = NoteMapping.apply(twin, theirs).copy(title = twin.title, content = twin.content, modified = twin.modified)
+                val linkedNote = twin.copy(notebook = incoming.notebook, pinned = incoming.pinned)
                 if (linkedNote == twin || store.put(linkedNote, twin)) rows.put(NoteMapping.row(linkedNote, key, theirs))
             } else if (store.put(incoming, null)) rows.put(NoteMapping.row(incoming, key, theirs))
         }
 
         // Planner's notes not on Nextcloud yet go up.
-        for (mine in free) push(mine)
-        return conflicts
+        for (mine in free) each { push(mine) }
+        return conflicts to skipped
     }
 
     companion object {

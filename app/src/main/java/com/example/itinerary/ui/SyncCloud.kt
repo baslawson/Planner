@@ -9,7 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -43,11 +42,9 @@ private val drops = listOf(7.5f to 0f, 12f to 0.34f, 16.5f to 0.67f)
 
 @Composable
 fun SyncCloud(look: CloudLook, color: Color, contentDescription: String, modifier: Modifier = Modifier) {
-    val fall = if (look == CloudLook.RAINING) {
-        val t by rememberInfiniteTransition(label = "rain").animateFloat(0f, 1f,
-            infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "fall")
-        t
-    } else 0f
+    // Read only while drawing, so the rain redraws each frame without recomposing the icon.
+    val fall: androidx.compose.runtime.State<Float>? = if (look == CloudLook.RAINING) rememberInfiniteTransition(label = "rain").animateFloat(0f, 1f,
+        infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "fall") else null
     // Offscreen, so the tick and the strike's gap clear the cloud, not the top bar behind it.
     Canvas(modifier.size(24.dp)
         .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
@@ -66,7 +63,7 @@ fun SyncCloud(look: CloudLook, color: Color, contentDescription: String, modifie
                     // The cloud at 80 %, lifted to y 1..14, leaves y 14..23 for the rain.
                     translate(left = 2.4f, top = -2.2f) { scale(0.8f, pivot = Offset.Zero) { drawPath(cloud, color) } }
                     drops.forEach { (x, lag) ->
-                        val p = (fall + lag) % 1f
+                        val p = ((fall?.value ?: 0f) + lag) % 1f
                         val y = 15f + p * 6f
                         drawLine(color.copy(alpha = color.alpha * (1f - p * 0.7f)), Offset(x, y), Offset(x - 0.8f, y + 2.5f),
                             strokeWidth = 1.6f, cap = StrokeCap.Round)

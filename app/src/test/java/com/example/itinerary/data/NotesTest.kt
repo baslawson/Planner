@@ -82,7 +82,8 @@ class NotesTest {
         assertEquals("Work", cleaned.notebook)
         assertEquals(listOf("a", "b"), cleaned.tags)
         Notes.validate(cleaned)
-        assertThrows(IllegalArgumentException::class.java) { Notes.validate(PlannerNote()) }
+        // Empty is refused when saving (Repository.saveNote), not when reading a backup (see anEmptyNoteIsReadableButNotSaved).
+        assertFalse(Notes.hasContent(PlannerNote()))
         assertEquals(Notes.MAX_CONTENT, Notes.clean(PlannerNote(content = "x".repeat(Notes.MAX_CONTENT + 10))).content.length)
     }
 
@@ -95,5 +96,73 @@ class NotesTest {
         assertThrows(IllegalArgumentException::class.java) { Notes.validate(note("same.txt", "same.txt")) }
         // Attachments alone make a note worth keeping.
         Notes.validate(note("only.txt").copy(title = ""))
+    }
+
+    // Bug hunt 2 Oct (N-2..N-6, U-5, N-1, U-1, S-3).
+    @Test fun toolbarSelectionsStayInsideTheText() {
+        // N-2: these made the selection end negative, which crashed the editor.
+        val a = Markdown.prefixLines("- [ ] a\n- [ ] b", 0, 8, "- [ ] ")
+        assertEquals("a\nb", a.text); assertTrue(a.start in 0..a.end && a.end <= a.text.length)
+        val h = Markdown.prefixLines("- [ ] a", 0, 2, "# ")
+        assertEquals("# a", h.text); assertTrue(h.start in 0..h.end && h.end <= h.text.length)
+        // Every selection of a few texts, with every mark, stays valid.
+        val texts = listOf("", "x", "- [ ] a\n- [x] b", "# T\n- one\n\n* two", "**b** *i* ~~s~~", "a\n\n\nb")
+        for (t in texts) for (st in 0..t.length) for (en in st..t.length) {
+            for (mark in listOf("# ", "- ", "- [ ] ")) Markdown.prefixLines(t, st, en, mark).let { assertTrue("$t $st $en $mark $it", it.start in 0..it.end && it.end <= it.text.length) }
+            for (mark in listOf("**", "*", "~~", "`")) Markdown.wrap(t, st, en, mark).let { assertTrue("$t $st $en $mark $it", it.start in 0..it.end && it.end <= it.text.length) }
+        }
+    }
+
+    @Test fun bulletAndChecklistMarksSwap() {
+        // N-3: • on checklist lines makes them bullets, not "[ ] milk".
+        assertEquals("- milk\n- eggs", Markdown.prefixLines("- [ ] milk\n- [x] eggs", 0, 21, "- ").text)
+        assertEquals("- [ ] milk", Markdown.prefixLines("- milk", 0, 6, "- [ ] ").text)
+        assertEquals("milk", Markdown.prefixLines("- [ ] milk", 0, 10, "- [ ] ").text)
+    }
+
+    @Test fun headingsKeepAHashInsideAWord() {
+        assertEquals(Markdown.Heading(0, 1, "Learn C#"), Markdown.parse("# Learn C#").single())
+        assertEquals(Markdown.Heading(0, 2, "Closed"), Markdown.parse("## Closed ##").single())
+    }
+
+    @Test fun italicOnBoldAddsItalic() {
+        // N-6: it was unwrapping one star of the bold.
+        assertEquals("a ***b*** c", Markdown.wrap("a **b** c", 4, 5, "*").text)
+        assertEquals("a b c", Markdown.wrap("a *b* c", 3, 4, "*").text)
+        assertEquals("a *b* c", Markdown.wrap("a ***b*** c", 5, 6, "**").text)
+    }
+
+    @Test fun windowsLineEndsReadAsPlainOnes() {
+        val crlf = "Shopping\r\n- [ ] milk\r\n- [x] eggs\r\n"
+        assertEquals(1 to 2, Markdown.checklist(crlf))
+        assertEquals("Shopping\n- [ ] milk\n- [x] eggs", Notes.clean(PlannerNote(content = crlf)).content)
+    }
+
+    @Test fun anEmptyNoteIsReadableButNotSaved() {
+        // N-1: a backup's note whose only file has gone stays readable.
+        Notes.validate(PlannerNote())
+        assertFalse(Notes.hasContent(PlannerNote()))
+        assertTrue(Notes.hasContent(PlannerNote(content = "x")))
+    }
+
+    @Test fun mergeTakesEachSidesChanges() {
+        val base = PlannerNote(id = "n", title = "T", content = "body", notebook = "A", reminderAt = 5)
+        val mine = base.copy(content = "my body")
+        // Theirs changed other things (notebook; the reminder cleared by Done): both kept.
+        val theirs = base.copy(notebook = "B", reminderAt = null, modified = 9)
+        assertEquals(base.copy(content = "my body", notebook = "B", reminderAt = null, modified = 9), mergeNotes(base, mine, theirs))
+        // Both changed the text: the user decides.
+        assertNull(mergeNotes(base, mine, base.copy(content = "their body")))
+        // The same change on both sides is no conflict.
+        assertEquals(mine, mergeNotes(base, mine, mine))
+    }
+
+    @Test fun nextcloudTidiedTitlesStillMatch() {
+        assertTrue(NoteMapping.sameTitle("Plans: 2026/27?", "Plans 202627"))
+        assertTrue(NoteMapping.sameTitle("Groceries", "Groceries (2)"))
+        assertFalse(NoteMapping.sameTitle("Groceries", "Recipes"))
+        val remote = RemoteNote(1, "e", "Plans 202627", "Plans: 2026/27?\nmore", "", false)
+        assertEquals("Plans: 2026/27?", NoteMapping.localTitle(remote, "Plans: 2026/27?"))
+        assertTrue(NoteMapping.sameText("a\r\nb\n", "a\nb"))
     }
 }

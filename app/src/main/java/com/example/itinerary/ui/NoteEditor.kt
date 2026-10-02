@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.Attachment
+import com.example.itinerary.data.NoteDraftStore
 import com.example.itinerary.data.Markdown
 import com.example.itinerary.data.Notes
 import com.example.itinerary.data.PlannerNote
@@ -50,47 +51,74 @@ internal val NOTE_COLOR_NAMES = listOf("Green", "Teal", "Blue", "Purple", "Pink"
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(), onDismiss: () -> Unit) {
+fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(),
+               recovered: NoteDraftStore.Draft? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val repo = (context.applicationContext as ItineraryApp).repository
+    val app = context.applicationContext as ItineraryApp
+    val repo = app.repository
     val scope = rememberCoroutineScope()
-    var saved by remember { mutableStateOf(if (creating) null else initial) }
-    var title by rememberSaveable { mutableStateOf(initial.title) }
-    var content by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(initial.content)) }
-    var notebook by rememberSaveable { mutableStateOf(initial.notebook) }
-    var color by rememberSaveable { mutableStateOf(initial.color) }
-    var pinned by rememberSaveable { mutableStateOf(initial.pinned) }
-    var tags by rememberSaveable { mutableStateOf(initial.tags) }
+    val draftStore = remember { NoteDraftStore(context) }
+    // What the fields start from: a recovered draft (Android closed Planner mid-edit), else the note.
+    val start = recovered?.note ?: initial
+    // The stored version these edits started from (null: a new note not saved yet). Save checks it's still current.
+    var base by remember { mutableStateOf(if (recovered != null) recovered.base else if (creating) null else initial) }
+    var title by rememberSaveable { mutableStateOf(start.title) }
+    var content by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(start.content)) }
+    var notebook by rememberSaveable { mutableStateOf(start.notebook) }
+    var color by rememberSaveable { mutableStateOf(start.color) }
+    var pinned by rememberSaveable { mutableStateOf(start.pinned) }
+    var tags by rememberSaveable { mutableStateOf(start.tags) }
     var newTag by rememberSaveable { mutableStateOf("") }
     // Kept as JSON across rotation; the files themselves are already in the store.
-    var attachmentsJson by rememberSaveable { mutableStateOf(com.example.itinerary.data.DraftCodec.attachments(initial.attachments).toString()) }
+    var attachmentsJson by rememberSaveable { mutableStateOf(com.example.itinerary.data.DraftCodec.attachments(start.attachments).toString()) }
     val attachments = remember(attachmentsJson) { com.example.itinerary.data.DraftCodec.attachments(org.json.JSONArray(attachmentsJson)) }
     fun setAttachments(list: List<Attachment>) { attachmentsJson = com.example.itinerary.data.DraftCodec.attachments(list).toString() }
-    var pendingPhoto by rememberSaveable { mutableStateOf<String?>(null) }
-    var reminderAt by rememberSaveable { mutableStateOf(initial.reminderAt) }
+    var pendingPhoto by rememberSaveable { mutableStateOf(recovered?.pendingPhoto) }
+    var reminderAt by rememberSaveable { mutableStateOf(start.reminderAt) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
     var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
     var choosingReminderTime by rememberSaveable { mutableStateOf(false) }
-    var preview by rememberSaveable { mutableStateOf(!creating && initial.content.isNotBlank()) }
+    var preview by rememberSaveable { mutableStateOf(!creating && recovered == null && initial.content.isNotBlank()) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf(if (recovered != null) "Recovered unsaved changes. Save them, or Close and Discard." else null) }
     var askingToSave by rememberSaveable { mutableStateOf(false) }
     var justSaved by remember { mutableStateOf(false) }
-    val current = (saved ?: initial).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned,
+    // Changed elsewhere in the same place as here: how it is now, while the user chooses.
+    var conflict by remember { mutableStateOf<PlannerNote?>(null) }
+    fun load(note: PlannerNote) {
+        title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook; color = note.color
+        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt
+    }
+    val current = (base ?: start).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned,
         tags = tags, attachments = attachments, reminderAt = reminderAt)
-    val base = saved ?: initial.takeIf { !creating }
-    val unsaved = base == null && (title.isNotBlank() || content.text.isNotBlank() || attachments.isNotEmpty()) ||
-        base != null && Notes.clean(current) != Notes.clean(base)
-    // Deleted elsewhere (another device, once notes sync): Save can't bring it back, so it says so.
-    val stored by remember(initial.id) { repo.observeNote(initial.id) }.collectAsStateWithLifecycle(initialValue = initial)
-    val deletedElsewhere = saved != null && stored == null
-    val canSave = !busy && !deletedElsewhere && (title.isNotBlank() || content.text.isNotBlank() || attachments.isNotEmpty())
-    val attachmentStore = (context.applicationContext as ItineraryApp).attachmentStore
+    val unsaved = base?.let { Notes.clean(current) != Notes.clean(it) } ?: Notes.hasContent(current)
+    // As stored now: a change made elsewhere (sync, a reminder's Done) shows here at once while nothing is edited.
+    val stored by remember(initial.id) { repo.observeNote(initial.id) }.collectAsStateWithLifecycle(initialValue = base)
+    // Once seen in the database: a just-saved new note isn't "deleted" for the moment before its first reading arrives.
+    var seenStored by remember { mutableStateOf(base != null) }
+    LaunchedEffect(stored) {
+        val now = stored
+        if (now != null) {
+            seenStored = true
+            if (base != null && now != base && !unsaved) { load(now); base = now }
+        }
+    }
+    val deletedElsewhere = base != null && seenStored && stored == null
+    val canSave = !busy && Notes.hasContent(current)
+    val attachmentStore = app.attachmentStore
+    // Counted as an open editor (a widget day waits for it), and its state kept on disk shortly after each change.
+    DisposableEffect(Unit) { NoteDraftStore.editorOpened(); onDispose { NoteDraftStore.editorClosed() } }
+    LaunchedEffect(current, base, pendingPhoto, unsaved) {
+        kotlinx.coroutines.delay(400)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { if (unsaved || pendingPhoto != null) draftStore.write(NoteDraftStore.Draft(current, base == null, base, pendingPhoto)) else draftStore.clear() }
+        }
+    }
     // Files this editor has held: once it saves, discards or deletes, those nothing uses any more are removed (one still
     // in a saved note, Recently deleted or elsewhere stays).
     fun releaseFiles() {
-        val files = (initial.attachments + attachments + saved?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
-        (context.applicationContext as ItineraryApp).appScope.launch { runCatching { repo.releaseTaskFiles(files) } }
+        val files = (initial.attachments + start.attachments + attachments + base?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
+        app.appScope.launch { runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { draftStore.clear() }; repo.releaseTaskFiles(files) } }
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -118,6 +146,24 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     }
     LaunchedEffect(unsaved) { if (unsaved) justSaved = false }
 
+    fun saved(note: PlannerNote, then: () -> Unit) {
+        // The fields change only if saving changed them (a merge, trimmed text), so typing isn't disturbed otherwise.
+        val edited = Notes.clean(current)
+        val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color &&
+            note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt
+        base = note; if (!same) load(note); justSaved = true
+        releaseFiles(); then()
+    }
+    // [note] written over how it is now ([latest]): the user chose their version.
+    fun saveOver(note: PlannerNote, latest: PlannerNote, then: () -> Unit = {}) {
+        busy = true; error = null
+        scope.launch {
+            try { saved(repo.saveNote(note.copy(snoozedUntil = latest.snoozedUntil), create = false, expected = latest), then) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error = "Couldn't save this note. Please try again." }
+            finally { busy = false }
+        }
+    }
     fun save(then: () -> Unit = {}) {
         if (busy) return
         // A reminder set or changed here must be ahead; one already saved that has rung can stay as it is.
@@ -127,19 +173,26 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         busy = true; error = null
         scope.launch {
             try {
-                saved = repo.saveNote(current, create = saved == null)
-                justSaved = true
-                releaseFiles()
-                then()
+                // Deleted elsewhere: saved again as it is here (a new note), so nothing typed is lost.
+                saved(repo.saveNote(current, create = base == null || deletedElsewhere, expected = base), then)
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = if (e is IllegalStateException && e.message == "This note was deleted") "This note was deleted." else "Couldn't save this note. Please try again." }
+            catch (e: com.example.itinerary.data.NoteChangedException) {
+                // Changed elsewhere meanwhile: merged when the two touched different things, else the user chooses.
+                val merged = base?.let { com.example.itinerary.data.mergeNotes(it, current, e.latest) }
+                if (merged != null) {
+                    try { saved(repo.saveNote(merged, create = false, expected = e.latest), then); error = "Merged with a change made elsewhere." }
+                    catch (e2: CancellationException) { throw e2 }
+                    catch (_: Exception) { conflict = repo.note(current.id) ?: e.latest }
+                } else conflict = e.latest
+            }
+            catch (_: Exception) { error = "Couldn't save this note. Please try again." }
             finally { busy = false }
         }
     }
     fun discard() { releaseFiles(); onDismiss() }
     fun close() { if (unsaved) askingToSave = true else discard() }
     fun delete() {
-        val id = saved?.id ?: return discard()
+        val id = base?.id ?: return discard()
         busy = true
         scope.launch {
             try { repo.deleteNote(id); releaseFiles(); onDismiss() }
@@ -155,7 +208,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    HeadingText(if (saved == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
+                    HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
                     OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
                         label = { Text("Title") }, singleLine = true,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
@@ -206,7 +259,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     if (suggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         suggestions.forEach { tag -> FilterChip(selected = false, onClick = { if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, label = { Text("#$tag") }) }
                     }
-                    NoteReminderSection(reminderAt, saved?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
+                    NoteReminderSection(reminderAt, base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                         enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                     Text("Colour", style = MaterialTheme.typography.titleSmall)
                     ColorChoices(color) { color = it }
@@ -223,21 +276,24 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
                         OutlinedButton(enabled = !busy && attachments.size < 100, onClick = {
+                            // A second tap while the camera opens would leave the first photo file behind.
+                            if (pendingPhoto != null) return@OutlinedButton
                             val file = attachmentStore.newPhotoFile()
                             pendingPhoto = file.name
                             try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
                             catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
                         }) { Text("Take photo") }
                     }
-                    if (deletedElsewhere) Text("This note was deleted elsewhere. Copy anything you need before closing.", color = MaterialTheme.colorScheme.error)
                 }
             }
             HorizontalDivider()
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Beside Save, where it can't be missed.
+                if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = MaterialTheme.colorScheme.error)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                EditorActions(onDelete = if (saved != null && !deletedElsewhere) ({ delete() }) else null,
+                EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ delete() }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && unsaved) { SaveLabel(busy, saved = justSaved && !unsaved) }
+                    saveEnabled = canSave && (unsaved || deletedElsewhere)) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
         }
     }
@@ -253,6 +309,15 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             reminderAt = com.example.itinerary.data.taskReminderInstant(java.time.LocalDate.parse(reminderDateDraft!!), time)
             choosingReminderTime = false; error = null
         })
+    conflict?.let { latest ->
+        PlannerDialog("Changed elsewhere", onDismissRequest = { conflict = null },
+            primary = DialogAction("Keep my version", enabled = !busy) { conflict = null; saveOver(current, latest) },
+            dismiss = DialogAction("Cancel") { conflict = null },
+            extra = listOf(DialogAction("Use the other version", danger = true) { conflict = null; base = latest; load(latest); error = null })) {
+            Text("This note was changed elsewhere (by Nextcloud sync or a reminder) while you were editing, in the same place as your changes. " +
+                "Keep your version, or use the other one and lose your changes.")
+        }
+    }
     if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
         primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(onDismiss) },
         dismiss = DialogAction("Keep editing") { askingToSave = false },

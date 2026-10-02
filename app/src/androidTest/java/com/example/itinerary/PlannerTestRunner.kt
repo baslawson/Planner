@@ -58,6 +58,7 @@ class CleanStart : RunListener() {
         EditorDraftStore(context).clear()
         QuickDraftStore(context).clear()
         TaskDraftStore(context).clear("new")
+        com.example.itinerary.data.NoteDraftStore(context).clear()
         val app = context.applicationContext as ItineraryApp
         runBlocking {
             app.repository.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))

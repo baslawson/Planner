@@ -67,7 +67,8 @@ class NotesUiTest {
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await { find("AGENDA") != null }
         click("More options"); click("Notes")
-        await { find("Search notes") != null }
+        // The page, or a recovered draft's editor opened straight over it.
+        await { find("Search notes") != null || find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
     }
 
     @Test fun writeTickFileAndManageANote() {
@@ -216,6 +217,56 @@ class NotesUiTest {
             app.noteSync.api = original
             store.clear(); server.shutdown()
         }
+    }
+
+    // Bug hunt 2 Oct: U-1 (Save overwrote a change made elsewhere), U-2 (the editor vanished with its note), Q-1/N-9
+    // (no draft, not counted as an open editor).
+    @Test fun changedElsewhereMergesOrAsks() {
+        val note = runBlocking { app.repository.saveNote(PlannerNote(title = "QA shared", content = "first"), create = true) }
+        openNotes()
+        click("QA shared"); await { find("Edit note") != null }
+        assertEquals(1, com.example.itinerary.data.NoteDraftStore.openEditors.value)
+        click("Edit"); type(1, "mine")
+        // Elsewhere, something else changes: Save keeps both.
+        runBlocking { app.repository.updateNote(note.id) { it.copy(notebook = "Synced") } }
+        click("Save")
+        await { find("Merged with a change made elsewhere.") != null }
+        await { notes().single().let { it.content == "mine" && it.notebook == "Synced" } }
+        // Elsewhere, the same text changes: Save asks.
+        type(1, "mine again")
+        runBlocking { app.repository.updateNote(note.id) { it.copy(content = "theirs") } }
+        click("Save")
+        await { find("Changed elsewhere") != null }
+        screenshot("changed-elsewhere")
+        click("Keep my version")
+        await { notes().single().content == "mine again" }
+        click("Close")
+        await { com.example.itinerary.data.NoteDraftStore.openEditors.value == 0 }
+    }
+
+    @Test fun deletedElsewhereKeepsTheEditor() {
+        val note = runBlocking { app.repository.saveNote(PlannerNote(title = "QA vanishing", content = "keep me"), create = true) }
+        openNotes()
+        click("QA vanishing"); await { find("Edit note") != null }
+        click("Edit"); type(1, "keep me, edited")
+        runBlocking { app.repository.deleteNote(note.id) }
+        await { find("This note was deleted elsewhere. Save keeps your version as a new note.") != null }
+        screenshot("deleted-elsewhere")
+        click("Save")
+        await { notes().singleOrNull()?.content == "keep me, edited" }
+    }
+
+    @Test fun aDraftReopensTheEditor() {
+        val draftNote = PlannerNote(id = "qa-draft-note", title = "QA recovered", content = "typed before Android closed Planner")
+        com.example.itinerary.data.NoteDraftStore(context).write(com.example.itinerary.data.NoteDraftStore.Draft(draftNote, creating = true, base = null, pendingPhoto = null))
+        try {
+            openNotes()
+            await { find("New note") != null && find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
+            screenshot("draft-recovered")
+            click("Save")
+            await { notes().singleOrNull()?.content == "typed before Android closed Planner" }
+            await { com.example.itinerary.data.NoteDraftStore(context).read() == null }
+        } finally { com.example.itinerary.data.NoteDraftStore(context).clear() }
     }
 
     @Test fun gridLooksInTheDarkTheme() {

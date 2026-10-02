@@ -40,6 +40,11 @@ class NotesDataTest {
             assertEquals(saved, repo.saveNote(saved, create = false))
             assertThrows(IllegalArgumentException::class.java) { runBlocking { repo.saveNote(PlannerNote(), create = true) } }
             assertThrows(IllegalStateException::class.java) { runBlocking { repo.saveNote(PlannerNote(title = "Gone"), create = false) } }
+            // Saved over a version changed since the editor read it: refused, with the newer one to merge (U-1).
+            val changedMeanwhile = repo.updateNote(saved.id) { it.copy(notebook = "Elsewhere") }!!
+            val refused = assertThrows(NoteChangedException::class.java) { runBlocking { repo.saveNote(saved.copy(content = "mine"), create = false, expected = saved) } }
+            assertEquals(changedMeanwhile, refused.latest)
+            repo.updateNote(saved.id) { it.copy(notebook = saved.notebook) }
 
             // Pin and archive don't count as a change to the note; ticking a line does.
             val pinned = repo.updateNote(saved.id) { it.copy(pinned = true) }!!
@@ -128,6 +133,15 @@ class NotesDataTest {
             assertEquals(1, staged.notes); assertEquals(1, staged.attachments)
             backup.restore(staged)
             assertEquals("receipt", store.fileFor(repo.snapshot().notes.single().attachments.single().fileName).readText())
+
+            // N-1: a note whose only content was a file that has gone doesn't make the backup unreadable.
+            repo.saveNote(PlannerNote(title = "", attachments = listOf(Attachment(itemId = 0, name = "Lost", fileName = "lost.txt", mimeType = "text/plain"))), create = true)
+            val lostZip = File(dir, "lost.zip")
+            backup.export(Uri.fromFile(lostZip), trackStatus = false)
+            val lostStaged = backup.stage(Uri.fromFile(lostZip))
+            backup.restore(lostStaged)
+            assertEquals(2, repo.snapshot().notes.size)
+            assertTrue(repo.snapshot().notes.any { it.attachments.isEmpty() && it.title.isEmpty() })
         } finally {
             db.close(); dir.deleteRecursively()
             base.deleteSharedPreferences("notes_files_settings"); base.deleteSharedPreferences("notes_files_backup_status")

@@ -23,8 +23,10 @@ import java.time.ZoneId
 @Composable
 fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
     val entries by repo.recentlyDeleted.collectAsStateWithLifecycle(emptyList())
-    val today = rememberCurrentDate()
-    val shown = remember(entries, today) { entries.filter { it.deletedAt + TRASH_RETENTION_MS > System.currentTimeMillis() } }
+    // Rechecked every minute, so an entry that expires while this is open drops out of the list (and the selection).
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60_000); now = System.currentTimeMillis() } }
+    val shown = remember(entries, now) { entries.filter { it.deletedAt + TRASH_RETENTION_MS > now } }
     var picked by rememberSaveable { mutableStateOf(setOf<String>()) }
     // Only what is still listed counts: an entry restored, deleted or expired meanwhile drops out of the selection.
     val chosen = remember(shown, picked) { shown.filter { it.id in picked }.map { it.id } }
@@ -32,13 +34,15 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    fun run(verb: String, block: suspend (List<String>) -> Int) {
+    fun run(verb: String, block: suspend (List<String>, MutableList<String>) -> Int) {
         val ids = chosen
         busy = true; error = null
         scope.launch {
             try {
-                val failed = block(ids)
-                picked = emptySet()
+                val failedIds = mutableListOf<String>()
+                val failed = block(ids, failedIds)
+                // The ones that failed stay picked, ready to try again.
+                picked = failedIds.toSet()
                 if (failed > 0) error = "Couldn't $verb ${count(failed)}. Please try again."
             } catch (_: Exception) { error = "Couldn't complete that action. Please try again." }
             finally { busy = false }
@@ -46,13 +50,13 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
     }
     PlannerDialog("Recently deleted", { if (!busy) onDismiss() },
         primary = if (shown.isEmpty()) null else DialogAction(if (busy) "Working…" else "Restore" + countSuffix(chosen.size),
-            enabled = !busy && chosen.isNotEmpty()) { run("restore") { repo.restoreDeleted(it) } },
+            enabled = !busy && chosen.isNotEmpty()) { run("restore") { ids, failed -> repo.restoreDeleted(ids, failed) } },
         dismiss = DialogAction("Close", enabled = !busy, onClick = onDismiss),
         // Deleting for good is the bigger step, so it is the quieter (red text) button beside Close.
         extra = if (shown.isEmpty()) emptyList() else listOf(DialogAction("Delete forever" + countSuffix(chosen.size),
             enabled = !busy && chosen.isNotEmpty(), danger = true) { confirming = true }),
         scroll = null) {
-            Text("Tasks, events and their attachments are kept for 30 days, then deleted for good.")
+            Text("Events, tasks, notes and their attachments are kept for 30 days, then deleted for good.")
             if (shown.isEmpty()) Text("No recently deleted events or tasks.")
             else {
                 val all = when (chosen.size) { 0 -> ToggleableState.Off; shown.size -> ToggleableState.On; else -> ToggleableState.Indeterminate }
@@ -91,7 +95,7 @@ fun RecentlyDeletedDialog(repo: Repository, onDismiss: () -> Unit) {
     }
     if (confirming) PlannerDialog("Delete ${count(chosen.size)} forever?", { confirming = false },
         primary = DialogAction("Delete forever", danger = true, enabled = chosen.isNotEmpty()) {
-            confirming = false; run("delete") { repo.permanentlyDelete(it) } },
+            confirming = false; run("delete") { ids, failed -> repo.permanentlyDelete(ids, failed) } },
         dismiss = DialogAction("Cancel") { confirming = false }) {
         Text(if (chosen.size == 1) "${shown.firstOrNull { it.id == chosen.single() }?.label ?: "It"} can't be restored afterwards."
             else "They can't be restored afterwards.")

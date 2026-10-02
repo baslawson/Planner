@@ -73,7 +73,7 @@ object Notes {
     const val MAX_TAG = 50
     const val MAX_TAGS = 30
 
-    /** The card colours on offer, beside "no colour": readable with light text on the dark theme and dark text on light. */
+    /** The card colours on offer, beside "no colour"; each card's text is white or black, whichever reads better on it. */
     val colors: List<Int> = listOf(0xFF1B5E20, 0xFF00695C, 0xFF0D47A1, 0xFF4A148C, 0xFF880E4F, 0xFFB71C1C, 0xFFE65100, 0xFF5D4037)
         .map { it.toInt() }
 
@@ -106,24 +106,56 @@ object Notes {
 
     fun clean(note: PlannerNote): PlannerNote = note.copy(
         title = note.title.replace('\n', ' ').trim().take(MAX_TITLE),
-        content = note.content.trimEnd().take(MAX_CONTENT),
+        // Windows (CRLF) and old Mac (CR) line ends become plain ones, so lists and checklists read the same.
+        content = note.content.replace("\r\n", "\n").replace('\r', '\n').trimEnd().take(MAX_CONTENT),
         notebook = cleanNotebook(note.notebook),
         tags = note.tags.map(::cleanTag).filter { it.isNotEmpty() }.distinct().take(MAX_TAGS),
+        // Recognised text beyond a task's limit is cut (marked partly read), as Tasks.capText does.
+        attachments = Tasks.capText(PlannerTask(title = "x", attachments = note.attachments)).attachments,
     )
+
+    // Words, a file or a photo: a note the user saves has something in it.
+    fun hasContent(note: PlannerNote) = note.title.isNotBlank() || note.content.isNotBlank() || note.attachments.isNotEmpty()
 
     fun cleanNotebook(name: String) = name.replace('\n', ' ').trim().trim('/').take(MAX_NOTEBOOK)
     fun cleanTag(name: String) = name.replace('\n', ' ').trim().removePrefix("#").trim().take(MAX_TAG)
 
     fun validate(note: PlannerNote) {
-        require(note.id.isNotBlank()) { "A note needs an id" }
+        require(note.id.isNotBlank() && note.id.length <= 100) { "A note needs an id" }
         require(note.title.length <= MAX_TITLE && note.content.length <= MAX_CONTENT) { "This note is too long" }
         require(note.notebook.length <= MAX_NOTEBOOK && '\n' !in note.notebook) { "Invalid notebook name" }
         require(note.tags.size <= MAX_TAGS && note.tags.all { it.isNotBlank() && it.length <= MAX_TAG }) { "Invalid tags" }
         // As a task's: stored files only, with plain names (a backup can't point outside the attachment store).
         require(note.attachments.size <= 100 && note.attachments.map { it.fileName }.distinct().size == note.attachments.size) { "Invalid attachments" }
-        require(note.attachments.all { it.url == null && Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.fileName) && it.name.isNotBlank() }) { "Invalid attachments" }
-        require(note.title.isNotBlank() || note.content.isNotBlank() || note.attachments.isNotEmpty()) { "An empty note can't be saved" }
+        require(note.attachments.all { it.url == null && Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(it.fileName) && it.name.isNotBlank() &&
+            it.name.length <= 500 && it.mimeType.length <= 200 }) { "Invalid attachments" }
+        // As a task's: recognised text stays well inside a database row's 2 MB window.
+        require(note.attachments.sumOf { it.recognizedText.length } <= Tasks.MAX_TEXT) { "Invalid attachments" }
+        require(note.reminderAt == null || note.reminderAt in 1..253402300799999L) { "Invalid reminder" }
+        require(note.snoozedUntil == null || note.snoozedUntil in 1..253402300799999L) { "Invalid reminder" }
+        // An empty note is only refused where one is written (saveNote): a backup or Recently deleted entry whose only
+        // attachment file has gone stays readable rather than failing as a whole.
     }
+}
+
+/** Saving a note found it changed since the editor read it; [latest] is how it is now. */
+class NoteChangedException(val latest: PlannerNote) : IllegalStateException("This note changed elsewhere")
+
+/**
+ * Three-way merge of a note: [mine] and [theirs] both started from [base]. Each field takes whichever side changed it;
+ * null when both changed the same field differently (the user decides). The snooze follows theirs (it's never edited here).
+ */
+fun mergeNotes(base: PlannerNote, mine: PlannerNote, theirs: PlannerNote): PlannerNote? {
+    fun <T> pick(get: (PlannerNote) -> T): Pair<T, Boolean> {
+        val b = get(base); val m = get(mine); val t = get(theirs)
+        return when { m == b -> t to true; t == b || m == t -> m to true; else -> m to false }
+    }
+    val title = pick { it.title }; val content = pick { it.content }; val notebook = pick { it.notebook }
+    val color = pick { it.color }; val pinned = pick { it.pinned }; val tags = pick { it.tags }
+    val attachments = pick { it.attachments }; val reminder = pick { it.reminderAt }; val archived = pick { it.archived }
+    if (!listOf(title, content, notebook, color, pinned, tags, attachments, reminder, archived).all { it.second }) return null
+    return theirs.copy(title = title.first, content = content.first, notebook = notebook.first, color = color.first,
+        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first, archived = archived.first)
 }
 
 object NoteCodec {
@@ -138,7 +170,11 @@ object NoteCodec {
             .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)) }
     }
 
-    fun decode(array: JSONArray): List<PlannerNote> = List(array.length()) { index ->
+    fun decode(array: JSONArray): List<PlannerNote> = decodeLenient(array).onEach(Notes::validate)
+        .also { notes -> require(notes.map { it.id }.distinct().size == notes.size) }
+
+    // As read, cleaned but not checked: a draft may be empty or half done.
+    fun decodeLenient(array: JSONArray): List<PlannerNote> = List(array.length()) { index ->
         val value = array.getJSONObject(index)
         fun time(name: String): Long? = if (!value.has(name) || value.isNull(name)) null else {
             val number = value.get(name)
@@ -152,6 +188,6 @@ object NoteCodec {
             StringListCodec.decode(value.optJSONArray("tags") ?: JSONArray()),
             DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"))
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
-            .let(Notes::clean).also(Notes::validate)
-    }.also { notes -> require(notes.map { it.id }.distinct().size == notes.size) }
+            .let(Notes::clean)
+    }
 }

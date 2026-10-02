@@ -24,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -72,6 +73,20 @@ fun NotesScreen(onBack: () -> Unit) {
         if (it is NoteFilter.Notebook && it.name !in notebooks || it is NoteFilter.Tag && it.name !in tags) NoteFilter.All else it
     }
     val shown = remember(all, filter, query) { Notes.visible(all, filter, query) }
+    // ...and stays there, rather than jumping back if a note joins that notebook or tag again later.
+    LaunchedEffect(filter, notes) { if (notes != null && filter == NoteFilter.All && filterKey != "all") filterKey = "all" }
+    // A note open in the editor that vanishes (deleted by sync, say) keeps its editor, which then offers to save it anew.
+    val lastSeen = remember { mutableStateMapOf<String, PlannerNote>() }
+    // An editor Android closed mid-edit: its draft reopens it once, here.
+    var recovered by remember { mutableStateOf<com.example.itinerary.data.NoteDraftStore.Draft?>(null) }
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (editingId != null) return@LaunchedEffect
+        val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.example.itinerary.data.NoteDraftStore(context).read() }.getOrNull() } ?: return@LaunchedEffect
+        recovered = draft; editingNew = draft.creating; editingId = draft.note.id
+    }
+    val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 
     // Notes sync: a pass on opening the page (when it's on), and its cloud in the top bar opens its settings.
     val sync = app.noteSync
@@ -112,7 +127,9 @@ fun NotesScreen(onBack: () -> Unit) {
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) }, text = { Text("New note") },
                     containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary,
                     // Named for screen readers: the button's own text isn't announced (seen as an unlabelled button).
-                    modifier = Modifier.navigationBarsPadding().semantics(mergeDescendants = true) { contentDescription = "New note" },
+                    // Above the Undo bar while one shows, rather than under it.
+                    modifier = Modifier.navigationBarsPadding().padding(bottom = if (pendingUndo.isNotEmpty()) 64.dp else 0.dp)
+                        .semantics(mergeDescendants = true) { contentDescription = "New note" },
                 )
             },
         ) { inner ->
@@ -158,11 +175,14 @@ fun NotesScreen(onBack: () -> Unit) {
     if (showSync) NoteSyncDialog { showSync = false }
     editingId?.let { id ->
         val existing = all.firstOrNull { it.id == id }
+        if (existing != null) lastSeen[id] = existing
+        val draft = recovered?.takeIf { it.note.id == id }
         // A new note starts in the notebook being looked at.
-        val start = existing ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
+        val start = existing ?: lastSeen[id] ?: draft?.note ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
             tags = listOfNotNull((filter as? NoteFilter.Tag)?.name)) else null
         if (start != null) key(id) {
-            NoteEditor(start, creating = editingNew && existing == null, notebooks = notebooks, allTags = tags) { editingId = null; editingNew = false }
+            NoteEditor(start, creating = editingNew && existing == null && lastSeen[id] == null, notebooks = notebooks, allTags = tags,
+                recovered = draft) { editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
         } else if (notes != null) LaunchedEffect(id) { editingId = null }
     }
     }
@@ -172,9 +192,10 @@ fun NotesScreen(onBack: () -> Unit) {
 @Composable
 private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
     val tint = note.color?.let { Color(it) }
-    val text = if (tint != null) Color.White else MaterialTheme.colorScheme.onSurface
-    val soft = if (tint != null) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-    val label = Notes.label(note)
+    // White or black, whichever reads better on the card's colour (4.5:1 or more on all of them).
+    val text = tint?.let { if (contrast(Color.White, it) >= contrast(Color.Black, it)) Color.White else Color.Black } ?: MaterialTheme.colorScheme.onSurface
+    val soft = if (tint != null) text.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val label = remember(note.title, note.content) { Notes.label(note) }
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = tint ?: MaterialTheme.colorScheme.surfaceContainer,
@@ -255,7 +276,8 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
     }
     PlannerDialog("Sync notes with Nextcloud", onDismiss,
         primary = if (on) DialogAction(if (state.running) "Syncing…" else "Sync now", enabled = !state.running && signedIn == true) {
-            scope.launch { sync.sync() } } else null,
+            // The app's scope: closing the dialog doesn't stop a sync half way.
+            app.appScope.launch { sync.sync() } } else null,
         dismiss = DialogAction("Close", onClick = onDismiss)) {
         Text("Your notes stay in step with the Notes app on your Nextcloud, and with Quillpad or any app that uses it. " +
             "Notebooks are its categories and pinned notes its favourites; colours, tags, reminders, attachments and the archive stay on this phone.",
@@ -263,7 +285,7 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         if (signedIn == false) Text("Sign in to Nextcloud first, in Settings → Nextcloud.", color = MaterialTheme.colorScheme.error)
         Row(Modifier.fillMaxWidth().toggleable(value = on, enabled = signedIn == true || on, role = androidx.compose.ui.semantics.Role.Switch,
-            onValueChange = { want -> scope.launch { sync.setEnabled(want) } }).padding(vertical = 8.dp),
+            onValueChange = { want -> app.appScope.launch { sync.setEnabled(want) } }).padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("Sync notes", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Switch(checked = on, onCheckedChange = null, enabled = signedIn == true || on)
@@ -275,11 +297,18 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
                 state.error != null -> state.error!!
                 state.lastSynced != null -> "Synced " + java.time.Instant.ofEpochMilli(state.lastSynced!!).atZone(java.time.ZoneId.systemDefault())
                     .let { "${it.toLocalDate().shortLabel()}, ${it.toLocalTime().label(format, context)}" } +
-                    if (state.conflicts > 0) " · ${state.conflicts} conflict cop${if (state.conflicts == 1) "y" else "ies"} made (changed in both places)" else ""
+                    if (state.conflicts > 0) " · ${state.conflicts} conflict cop${if (state.conflicts == 1) "y" else "ies"} made (changed in both places)" else "" +
+                    if (state.skipped > 0) " · ${state.skipped} note${if (state.skipped == 1) "" else "s"} left as they are (too long for Planner, or Nextcloud wouldn't take the change)" else ""
                 else -> "Not synced yet."
             }
             Text(message, style = MaterialTheme.typography.bodyMedium,
                 color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+// WCAG contrast ratio of two colours.
+private fun contrast(a: Color, b: Color): Float {
+    val la = a.luminance() + 0.05f; val lb = b.luminance() + 0.05f
+    return maxOf(la, lb) / minOf(la, lb)
 }

@@ -201,4 +201,71 @@ class NoteSyncTest {
             base.deleteSharedPreferences("note_sync_test")
         }
     }
+
+    // Bug hunt 2 Oct: S-1 (a pass cancelled itself through its own writes), S-5 (a refused delete stopped every pass),
+    // S-6 (pinning a read-only note made a conflict copy), S-9 (too-long notes skipped silently).
+    @Test fun requestedPassesFinishAndStop() = runBlocking {
+        val base = context
+        val dir = File(base.cacheDir, "note-sync-2").apply { deleteRecursively(); mkdirs() }
+        val isolated = object : ContextWrapper(base) {
+            override fun getFilesDir() = File(dir, "files").apply { mkdirs() }
+            override fun getNoBackupFilesDir() = File(dir, "nobackup").apply { mkdirs() }
+            override fun getCacheDir() = File(dir, "cache").apply { mkdirs() }
+        }
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val server = MockWebServer()
+        val fake = FakeNotes("qa", "qa-test-password")
+        server.dispatcher = fake
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+        server.start()
+        val trusted = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val http = OkHttpClient.Builder().sslSocketFactory(trusted.sslSocketFactory(), trusted.trustManager).build()
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        val prefs = base.getSharedPreferences("note_sync_test2", 0).apply { edit().clear().commit() }
+        val accounts = NextcloudAccountStore(isolated, "planner.nextcloud.note-sync-test2")
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        try {
+            lateinit var sync: NoteSync
+            // As in the app: every change in the repository asks for a pass.
+            val repo = Repository(db, AttachmentStore(isolated), alarms, onChanged = { sync.request(delayMs = 200) })
+            accounts.save(NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password"))
+            sync = NoteSync(db, accounts, NotesApi(http), repo.asNoteStore(), prefs, scope = scope)
+            repeat(5) { fake.add("Remote $it", "Remote $it\nbody") }
+            repo.saveNote(PlannerNote(title = "Mine", content = "typed"), create = true)
+            sync.setEnabled(true)
+            sync.request(delayMs = 0)
+            // All five come in and Planner's goes up in one requested pass (it used to cancel itself after the first write).
+            val end = android.os.SystemClock.uptimeMillis() + 20_000
+            while ((repo.allNotes().size < 6 || db.sentNoteDao().all().size < 6) && android.os.SystemClock.uptimeMillis() < end) Thread.sleep(100)
+            assertEquals(6, repo.allNotes().size); assertEquals(6, db.sentNoteDao().all().size); assertEquals(6, fake.notes.size)
+            // ...and then it stops: no pass every few seconds.
+            Thread.sleep(1_500)
+            val lists = fake.requests.count { it == "GET /index.php/apps/notes/api/v1/notes" }
+            Thread.sleep(3_000)
+            assertEquals(lists, fake.requests.count { it == "GET /index.php/apps/notes/api/v1/notes" })
+
+            // A read-only shared note: pinned here stays pinned here, no conflict copy; deleted here, left there.
+            val sharedId = fake.add("Shared", "Shared\nfrom a colleague", readonly = true)
+            assertTrue(sync.sync())
+            val shared = repo.allNotes().single { Notes.label(it) == "Shared" }
+            repo.updateNote(shared.id) { it.copy(pinned = true) }
+            assertTrue(sync.sync())
+            assertEquals(0, sync.state.value.conflicts)
+            assertTrue(repo.allNotes().single { Notes.label(it) == "Shared" }.pinned)
+            assertEquals(7, repo.allNotes().size)
+            repo.deleteNote(shared.id); repo.finishDeletion(repo.pendingDeletions.value.single().token)
+            assertTrue(sync.sync())
+            assertNotNull(fake.notes[sharedId])
+            assertTrue(fake.requests.none { it == "DELETE /index.php/apps/notes/api/v1/notes/$sharedId" })
+
+            // Too long for Planner: counted, and said.
+            fake.add("Huge", "x".repeat(Notes.MAX_CONTENT + 1))
+            assertTrue(sync.sync())
+            assertEquals(1, sync.state.value.skipped)
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            db.close(); server.shutdown(); accounts.clear(); dir.deleteRecursively()
+            base.deleteSharedPreferences("note_sync_test2")
+        }
+    }
 }

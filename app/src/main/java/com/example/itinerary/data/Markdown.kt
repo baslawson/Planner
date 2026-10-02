@@ -16,7 +16,8 @@ object Markdown {
     data class Code(override val line: Int, val text: String) : Block
     data class Rule(override val line: Int) : Block
 
-    private val heading = Regex("^(#{1,6})\\s+(.*?)\\s*#*\\s*$")
+    // A closing run of #s counts only after a space: "# Learn C#" keeps its #.
+    private val heading = Regex("^(#{1,6})\\s+(.*?)(?:\\s+#+)?\\s*$")
     private val check = Regex("^(\\s*)[-*+]\\s+\\[([ xX])]\\s?(.*)$")
     private val bullet = Regex("^(\\s*)[-*+]\\s+(.*)$")
     private val numbered = Regex("^(\\s*)(\\d{1,9})[.)]\\s+(.*)$")
@@ -25,7 +26,8 @@ object Markdown {
     private val fence = Regex("^\\s*```.*$")
 
     fun parse(content: String): List<Block> {
-        val lines = content.split('\n')
+        // Windows (CRLF) and old Mac (CR) line ends read as plain ones.
+        val lines = content.replace("\r\n", "\n").replace('\r', '\n').split('\n')
         val blocks = mutableListOf<Block>()
         var i = 0
         while (i < lines.size) {
@@ -148,14 +150,24 @@ object Markdown {
     /** An edit from the toolbar: the new text and where the selection goes. */
     data class Edit(val text: String, val start: Int, val end: Int)
 
-    /** Wraps the selection in [mark] (or puts a pair to type into, with nothing selected); unwraps it if already wrapped. */
+    /**
+     * Wraps the selection in [mark] (or puts a pair to type into, with nothing selected); unwraps it if already wrapped.
+     * A single mark inside a double one is part of it: Italic on **bold** gives ***bold***, not *bold*.
+     */
     fun wrap(text: String, start: Int, end: Int, mark: String): Edit {
         val s = minOf(start, end).coerceIn(0, text.length); val e = maxOf(start, end).coerceIn(0, text.length)
         val m = mark.length
-        if (s >= m && e + m <= text.length && text.substring(s - m, s) == mark && text.substring(e, e + m) == mark)
-            return Edit(text.removeRange(e, e + m).removeRange(s - m, s), s - m, e - m)
+        val c = mark[0]
+        // How many of the mark's character run up to the selection, and on from its end.
+        val before = (s - 1 downTo 0).takeWhile { text[it] == c }.count()
+        val after = (e until text.length).takeWhile { text[it] == c }.count()
+        val wrapped = if (m == 1) before % 2 == 1 && after % 2 == 1 else before >= m && after >= m && (before != 1 && after != 1)
+        if (wrapped) return Edit(text.removeRange(e, e + m).removeRange(s - m, s), s - m, e - m)
         return Edit(text.substring(0, s) + mark + text.substring(s, e) + mark + text.substring(e), s + m, e + m)
     }
+
+    // The mark a line starts with: a checklist box, a bullet, or a heading.
+    private val lineMark = Regex("^(- \\[[ xX]] |[-*+] |#{1,6} )")
 
     /** Starts every line of the selection with [prefix] ("# ", "- ", "- [ ] "), or takes it off if they all have it. */
     fun prefixLines(text: String, start: Int, end: Int, prefix: String): Edit {
@@ -163,13 +175,17 @@ object Markdown {
         val first = text.lastIndexOf('\n', s - 1) + 1
         val last = text.indexOf('\n', e).let { if (it < 0) text.length else it }
         val lines = text.substring(first, last).split('\n')
-        val remove = lines.all { it.startsWith(prefix) }
-        // A line keeps one list mark: making a bullet a checklist line replaces "- " rather than adding to it.
-        val listMark = Regex("^(- \\[[ xX]] |[-*+] |#{1,6} )")
-        val changed = lines.map { if (remove) it.removePrefix(prefix) else prefix + it.replaceFirst(listMark, "") }
+        fun markOf(line: String) = lineMark.find(line)?.value.orEmpty()
+        // Off only when every line has exactly this mark ("- " on a checklist line is a different mark, not this one).
+        val remove = lines.all { markOf(it) == prefix }
+        // A line keeps one mark: a bullet made a checklist line has its "- " replaced, not added to.
+        val changed = lines.map { if (remove) it.removePrefix(prefix) else prefix + it.removePrefix(markOf(it)) }
         val block = changed.joinToString("\n")
-        val shift = block.length - (last - first)
-        val caret = if (s == e) (if (remove) s - prefix.length else s + (changed.first().length - lines.first().length)).coerceAtLeast(first) else s
-        return Edit(text.substring(0, first) + block + text.substring(last), caret, if (s == e) caret else e + shift)
+        val result = text.substring(0, first) + block + text.substring(last)
+        // The selection keeps to the same text: the first line's start moves by its own change, the end by the total.
+        val firstShift = changed.first().length - lines.first().length
+        val newStart = (s + firstShift).coerceIn(first, first + changed.first().length)
+        val newEnd = if (s == e) newStart else (e + block.length - (last - first)).coerceIn(newStart, result.length)
+        return Edit(result, newStart, newEnd)
     }
 }

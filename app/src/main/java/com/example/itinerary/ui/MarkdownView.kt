@@ -33,16 +33,28 @@ import com.example.itinerary.data.Markdown
 fun MarkdownView(content: String, modifier: Modifier = Modifier, onToggle: ((Int) -> Unit)? = null) {
     val blocks = remember(content) { Markdown.parse(content) }
     val colors = MaterialTheme.colorScheme
+    // Each block's styled text, worked out once per change of the note rather than on every redraw.
+    val linkColor = colors.primary
+    val styledText = remember(blocks, linkColor) {
+        blocks.associateWith { block ->
+            when (block) {
+                is Markdown.Heading -> styled(block.text, linkColor); is Markdown.Paragraph -> styled(block.text, linkColor)
+                is Markdown.Bullet -> styled(block.text, linkColor); is Markdown.Numbered -> styled(block.text, linkColor)
+                is Markdown.Check -> styled(block.text, linkColor); is Markdown.Quote -> styled(block.text, linkColor)
+                else -> null
+            }
+        }
+    }
     val type = MaterialTheme.typography
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { block ->
             when (block) {
-                is Markdown.Heading -> Text(styled(block.text, colors.primary), color = headingTextColor(), style = when (block.level) {
+                is Markdown.Heading -> Text(styledText.getValue(block)!!, color = headingTextColor(), style = when (block.level) {
                     1 -> type.headlineSmall; 2 -> type.titleLarge; 3 -> type.titleMedium; else -> type.titleSmall
                 })
-                is Markdown.Paragraph -> Text(styled(block.text, colors.primary), style = type.bodyLarge)
-                is Markdown.Bullet -> ListRow(block.indent, "•") { Text(styled(block.text, colors.primary), style = type.bodyLarge) }
-                is Markdown.Numbered -> ListRow(block.indent, "${block.number}.") { Text(styled(block.text, colors.primary), style = type.bodyLarge) }
+                is Markdown.Paragraph -> Text(styledText.getValue(block)!!, style = type.bodyLarge)
+                is Markdown.Bullet -> ListRow(block.indent, "•") { Text(styledText.getValue(block)!!, style = type.bodyLarge) }
+                is Markdown.Numbered -> ListRow(block.indent, "${block.number}.") { Text(styledText.getValue(block)!!, style = type.bodyLarge) }
                 is Markdown.Check -> Row(
                     Modifier.fillMaxWidth().padding(start = (block.indent * 20).dp)
                         .then(if (onToggle != null) Modifier.toggleable(block.done, role = Role.Checkbox) { onToggle(block.line) } else Modifier),
@@ -50,14 +62,14 @@ fun MarkdownView(content: String, modifier: Modifier = Modifier, onToggle: ((Int
                 ) {
                     Checkbox(checked = block.done, onCheckedChange = null, enabled = onToggle != null || block.done)
                     Spacer(Modifier.width(8.dp))
-                    Text(styled(block.text, colors.primary), style = type.bodyLarge.copy(
+                    Text(styledText.getValue(block)!!, style = type.bodyLarge.copy(
                         textDecoration = if (block.done) TextDecoration.LineThrough else null,
                         color = if (block.done) colors.onSurfaceVariant else Color.Unspecified))
                 }
                 is Markdown.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(colors.primary))
                     Spacer(Modifier.width(10.dp))
-                    Text(styled(block.text, colors.primary), style = type.bodyLarge.copy(fontStyle = FontStyle.Italic), color = colors.onSurfaceVariant)
+                    Text(styledText.getValue(block)!!, style = type.bodyLarge.copy(fontStyle = FontStyle.Italic), color = colors.onSurfaceVariant)
                 }
                 is Markdown.Code -> Text(block.text, Modifier.fillMaxWidth()
                     .background(colors.surfaceContainerHigh, RoundedCornerShape(8.dp)).padding(10.dp),

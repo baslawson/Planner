@@ -42,6 +42,11 @@ class NoteReminderReceiver : BroadcastReceiver() {
                             .setCategory(NotificationCompat.CATEGORY_REMINDER)
                             .setPriority(NotificationCompat.PRIORITY_HIGH)
                             .setContentIntent(open).setAutoCancel(true)
+                            // On the lock screen just "Note reminder": a note's text can be private (task reminders show
+                            // only their title).
+                            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                            .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
+                                .setContentTitle("Note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
                             .addAction(0, "Done", NoteActionReceiver.done(context, id, trigger))
                             .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
                         try { NotificationManagerCompat.from(context).notify("note:$id", 0, notification) }
