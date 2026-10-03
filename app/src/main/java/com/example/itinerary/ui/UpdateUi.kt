@@ -104,6 +104,14 @@ fun UpdateDialog() {
     ) {
         Text("You have ${updates.installedVersion}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (release.notes.isNotBlank()) MarkdownView(release.notes, Modifier.fillMaxWidth().padding(top = 8.dp))
+        // Where a new version is offered, the support ask (3 Oct: not after a fresh install; again after updating).
+        androidx.compose.material3.HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 8.dp))
+        Text("Planner is free and open source: no ads, no tracking. If it helps you, you can support it on Ko-fi.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        MatrixTextButton(onClick = {
+            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(KOFI_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            catch (_: android.content.ActivityNotFoundException) { Toast.makeText(context, "No app found to open this link", Toast.LENGTH_SHORT).show() }
+        }) { Text("Support on Ko-fi") }
     }
 }
 

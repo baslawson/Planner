@@ -60,6 +60,13 @@ class UpdateUiTest {
             await { find("Faster") != null || nodes().any { it.text?.toString()?.contains("Faster") == true } }
             assertNotNull(find("You have ${updates.installedVersion}."))
             assertNotNull(find("Skip this version")); screenshot("offered")
+            // The support ask sits with the new version's notes, and opens the Ko-fi page.
+            assertTrue(nodes().any { it.text?.toString()?.startsWith("Planner is free and open source") == true })
+            val filter = android.content.IntentFilter(Intent.ACTION_VIEW).apply { addCategory(Intent.CATEGORY_DEFAULT); addDataScheme("https"); addDataAuthority("ko-fi.com", null) }
+            val monitor = android.app.Instrumentation.ActivityMonitor(filter, android.app.Instrumentation.ActivityResult(0, null), true)
+            ins.addMonitor(monitor)
+            try { click("Support on Ko-fi"); await(10000) { monitor.hits == 1 } } finally { ins.removeMonitor(monitor) }
+            assertNotNull(find("Planner 0.0.15 is available")) // the pop-up stays
             click("Later"); await { find("Planner 0.0.15 is available") == null }
 
             // Settings → Updates → Check now offers it again.
