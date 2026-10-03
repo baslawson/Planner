@@ -55,7 +55,7 @@ fun reminderContent(context: Context, extras: Bundle?): ReminderContent? {
         ?.takeIf { it.isNotEmpty() }
         ?.let(LocalTime::parse)
 
-    val timeFormat = (context.applicationContext as ItineraryApp).settings.timeFormat.value
+    val timeFormat = reminderTimeFormat(context)
     val dayText = date.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
     val whenText = if (extras.getBoolean(ReminderScheduler.EXTRA_BILL, false))
         "Due $dayText${time?.let { ", ${it.label(timeFormat, context)}" }.orEmpty()}"
@@ -114,7 +114,7 @@ fun postReminderNotification(
         .setContentIntent(open)
         .apply {
             if (reminderId != null && reminderId > 0) {
-                if (billToken != null) addAction(0, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))
+                if (billToken != null) addDataAction(context, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))
                 if (snoozeToken != null) addAction(0, "Snooze", SnoozeActivity.action(context, reminderId, snoozeToken))
             }
             if (couldNotRing) {

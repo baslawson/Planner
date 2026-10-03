@@ -109,10 +109,34 @@ class ItineraryApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        createReminderChannel(this)
+        // RB-3: started by a reminder or the boot before the phone is first unlocked, the app's own storage (settings,
+        // database) can't be read yet, so the rest waits for the unlock.
+        if (com.example.itinerary.reminders.DirectBoot.isUnlocked(this)) startUnlocked()
+        else {
+            val unlocked = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                    runCatching { unregisterReceiver(this) }
+                    startUnlocked()
+                }
+            }
+            androidx.core.content.ContextCompat.registerReceiver(this, unlocked,
+                android.content.IntentFilter(android.content.Intent.ACTION_USER_UNLOCKED), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+            // Unlocked in the meantime: the broadcast may have gone before the receiver was there.
+            if (com.example.itinerary.reminders.DirectBoot.isUnlocked(this)) { runCatching { unregisterReceiver(unlocked) }; startUnlocked() }
+        }
+    }
+
+    private val started = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun startUnlocked() {
+        if (!started.compareAndSet(false, true)) return
         // A Gemini or OpenAI key saved by an earlier version is deleted, not left behind.
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.example.itinerary.data.RemovedAiData.remove(this@ItineraryApp) } }
-        createReminderChannel(this)
         // Calendar sync in the background follows the setting (and a restored backup's).
-        appScope.launch { settings.calendarBackgroundHours.collect { CalendarBackground.schedule(this@ItineraryApp, it) } }
+        // Logged, not thrown: started at the unlock, WorkManager may not be ready yet (it starts with the app's providers).
+        appScope.launch { settings.calendarBackgroundHours.collect { hours ->
+            runCatching { CalendarBackground.schedule(this@ItineraryApp, hours) }.onFailure { android.util.Log.w("ItineraryApp", "Couldn't schedule calendar sync", it) }
+        } }
     }
 }

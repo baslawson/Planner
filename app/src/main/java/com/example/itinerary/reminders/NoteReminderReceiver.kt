@@ -12,6 +12,7 @@ import com.example.itinerary.MainActivity
 import com.example.itinerary.R
 import com.example.itinerary.data.Markdown
 import com.example.itinerary.data.Notes
+import com.example.itinerary.data.PlannerNote
 import kotlinx.coroutines.*
 
 /** A note's reminder rings: its name and first lines, with Done (clears the reminder) and Snooze — as a task's does. */
@@ -19,40 +20,20 @@ class NoteReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.data?.lastPathSegment ?: return
         val trigger = intent.getLongExtra("trigger", 0L)
+        // RB-3: before the first unlock after a reboot the database can't be read. This alarm was set from the locked
+        // snapshot (BootReceiver), which keeps no word of the note: it says "Note reminder" until the phone is unlocked,
+        // and is then shown again with the note's words (DirectBoot.replayFired).
+        if (!DirectBoot.isUnlocked(context)) {
+            DirectBoot.fired(context, MissedReminders.noteKey(id), trigger)
+            postNoteReminder(context, id, trigger, null)
+            return
+        }
         val app = context.applicationContext as ItineraryApp
         app.reminderScheduler.ledger.fired(MissedReminders.noteKey(id), System.currentTimeMillis())
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                app.repository.deliverNoteReminder(id, trigger) { note ->
-                    if (notificationsEnabled(context)) {
-                        val open = PendingIntent.getActivity(context, 0,
-                            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                        val label = Notes.label(note)
-                        // The text after the name, as the note's card shows it.
-                        val lines = Markdown.plain(note.content).lines().filter { it.isNotBlank() }
-                        val body = (if (note.title.isBlank()) lines.drop(1) else lines).take(6).joinToString("\n")
-                        val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
-                            .setSmallIcon(R.drawable.ic_notification)
-                            .setContentTitle(label)
-                            .setContentText(body.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: "Note reminder")
-                            .apply { if (body.isNotBlank()) setStyle(NotificationCompat.BigTextStyle().bigText(body)) }
-                            .setSubText("Note reminder")
-                            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .setContentIntent(open).setAutoCancel(true)
-                            // On the lock screen just "Note reminder": a note's text can be private (task reminders show
-                            // only their title).
-                            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                            .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
-                                .setContentTitle("Note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
-                            .addAction(0, "Done", NoteActionReceiver.done(context, id, trigger))
-                            .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
-                        try { NotificationManagerCompat.from(context).notify("note:$id", 0, notification) }
-                        catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
-                    }
-                }
+                app.repository.deliverNoteReminder(id, trigger) { note -> postNoteReminder(context, id, trigger, note) }
                 // One alarm fewer: a reminder waiting for one gets it (AlarmWindow).
                 withContext(Dispatchers.IO) { app.repository.refillReminders() }
             } catch (e: Exception) {
@@ -62,9 +43,52 @@ class NoteReminderReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        // U-13: tapping the notification opens this note's editor (MainActivity, AppNav, then the Notes page).
+        const val OPEN_NOTE = "com.example.itinerary.OPEN_NOTE"
+        const val EXTRA_NOTE_ID = "note_id"
+
         fun intent(context: Context, id: String): Intent = Intent(context, NoteReminderReceiver::class.java)
             .setData(Uri.Builder().scheme("planner").authority("note-reminder").appendPath(id).build())
+
+        /** Planner opened on this note. Each note has its own data, so each notification keeps its own note. */
+        fun openIntent(context: Context, id: String): Intent = Intent(context, MainActivity::class.java).setAction(OPEN_NOTE)
+            .setData(Uri.Builder().scheme("planner").authority("note").appendPath(id).build())
+            .putExtra(EXTRA_NOTE_ID, id).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
+}
+
+/**
+ * A note reminder's notification: [note]'s name and first lines, or with no note (before the first unlock, see
+ * NoteReminderReceiver) just "Note reminder". On the lock screen it is "Note reminder" either way (R-2). [quiet]: shown
+ * again after the unlock with the note's words, without sounding a second time.
+ */
+internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false) {
+    if (!notificationsEnabled(context)) return
+    val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    val label = note?.let(Notes::label) ?: "Note reminder"
+    // The text after the name, as the note's card shows it.
+    val lines = note?.let { n -> Markdown.plain(n.content).lines().filter { it.isNotBlank() } }.orEmpty()
+    val body = (if (note == null || note.title.isBlank()) lines.drop(1) else lines).take(6).joinToString("\n")
+    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(label)
+        .setContentText(body.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: "Note reminder")
+        .apply { if (body.isNotBlank()) setStyle(NotificationCompat.BigTextStyle().bigText(body)) }
+        .setSubText("Note reminder")
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setContentIntent(open).setAutoCancel(true)
+        // On the lock screen just "Note reminder": a note's text can be private (task reminders show
+        // only their title).
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
+        .setOnlyAlertOnce(quiet)
+        .addDataAction(context, "Done", NoteActionReceiver.done(context, id, trigger))
+        .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
+    try { NotificationManagerCompat.from(context).notify("note:$id", 0, notification) }
+    catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
 }
 
 /** Done on a note reminder: the reminder is cleared (the note itself stays as it is). */

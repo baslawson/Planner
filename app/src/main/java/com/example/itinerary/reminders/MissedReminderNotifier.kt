@@ -75,6 +75,9 @@ internal suspend fun handleMissedReminders(repository: Repository, ledger: Alarm
 suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
     val app = context.applicationContext as ItineraryApp
     if (!afterBoot) kotlinx.coroutines.delay(MissedReminders.SETTLE_MS)
+    // RB-3: the alarms that rang before the first unlock aren't missed.
+    try { DirectBoot.replayFired(app, app.repository, app.reminderScheduler.ledger) { note, trigger -> postNoteReminder(app, note.id, trigger, note, quiet = true) } }
+    catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't record the reminders rung while locked", e) }
     val now = System.currentTimeMillis()
     try {
         handleMissedReminders(app.repository, app.reminderScheduler.ledger, now,
@@ -127,6 +130,9 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
                     .addAction(0, "Done", TaskActionReceiver.done(context, m.task.id, m.due)).build())
                 is MissedReminders.Note -> manager.notify("note:${m.note.id}", 0, builder(com.example.itinerary.data.Notes.label(m.note), dueText(m.due), 0)
                     .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
+                    // U-13: opens the note, as the reminder itself does.
+                    .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                     .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build())
             }
         }

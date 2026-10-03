@@ -82,14 +82,19 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true"
             android:taskAffinity="" />
 
+        <!-- RB-3: the three reminder receivers, the ringing service and BootReceiver are directBootAware, so a reminder
+             rings after a reboot before the phone is first unlocked (from the snapshot in device-protected storage, see
+             LockedAlarm). The button receivers (Done, Mark paid) are not: they change the database, which can't be read
+             until then, and their buttons ask for the unlock first (addDataAction). -->
         <receiver
             android:name=".reminders.ReminderReceiver"
+            android:directBootAware="true"
             android:exported="false" />
 
         <receiver android:name=".reminders.TaskActionReceiver" android:exported="false" />
 
-        <receiver android:name=".reminders.TaskReminderReceiver" android:exported="false" />
-        <receiver android:name=".reminders.NoteReminderReceiver" android:exported="false" />
+        <receiver android:name=".reminders.TaskReminderReceiver" android:directBootAware="true" android:exported="false" />
+        <receiver android:name=".reminders.NoteReminderReceiver" android:directBootAware="true" android:exported="false" />
         <receiver android:name=".reminders.NoteActionReceiver" android:exported="false" />
 
         <receiver android:name=".reminders.BillPaymentReceiver" android:exported="false" />
@@ -98,13 +103,16 @@
         <!-- Plays the looping alarm sound; a media-playback foreground service keeps it alive while it rings. -->
         <service
             android:name=".reminders.AlarmService"
+            android:directBootAware="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
         <receiver
             android:name=".reminders.BootReceiver"
+            android:directBootAware="true"
             android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

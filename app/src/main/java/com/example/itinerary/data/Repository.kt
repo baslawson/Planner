@@ -107,6 +107,8 @@ class Repository(
             try { action(); followUp.remove(key) }
             catch (e: Exception) { Log.w("Repository", "Saved data; follow-up failed: $key", e) }
         }
+        // RB-3: the alarms as they now are, for a reboot that stays locked.
+        try { scheduler.saveLockedAlarms() } catch (e: Exception) { Log.w("Repository", "Couldn't save the locked-boot alarms", e) }
         _maintenanceIssues.value = followUp.keys.mapTo(linkedSetOf()) { it.substringBefore(':') }
     }
 

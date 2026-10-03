@@ -87,7 +87,7 @@ class AlarmService : Service() {
                 val id = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID) ?: 0L
                 if (id > 0) {
                     val billToken = extras?.getString(ReminderScheduler.EXTRA_BILL_TOKEN)
-                    if (billToken != null) addAction(0, "Mark paid", BillPaymentReceiver.action(this@AlarmService, id, billToken))
+                    if (billToken != null) addDataAction(this@AlarmService, "Mark paid", BillPaymentReceiver.action(this@AlarmService, id, billToken))
                     // One chooser leaves room for both Mark paid and Stop on bill alarms.
                     extras?.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN)?.let { token ->
                         addAction(0, "Snooze", SnoozeActivity.action(this@AlarmService, id, token))
