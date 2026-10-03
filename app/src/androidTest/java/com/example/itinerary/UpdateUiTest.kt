@@ -89,7 +89,7 @@ class UpdateUiTest {
             screenshot("allow-page")
             shell("input keyevent KEYCODE_BACK"); await { context.packageName in resumed() }
         } finally {
-            updates.supported = false; updates.api = original
+            updates.supported = false; updates.later() // no offer left over for the next test; updates.api = original
             Updates.prefs(context).edit().clear().commit()
             File(context.cacheDir, "updates").deleteRecursively()
             fake.server.shutdown()
@@ -117,7 +117,7 @@ class UpdateUiTest {
             click("Cancel")
             await { find("Update this app?") == null }
         } finally {
-            updates.supported = false
+            updates.supported = false; updates.later() // no offer left over for the next test
             Updates.prefs(context).edit().clear().commit()
             File(context.cacheDir, "updates").deleteRecursively()
             fake.server.shutdown()

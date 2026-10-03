@@ -75,7 +75,8 @@ fun UpdateDialog() {
         is Updates.State.Failed -> s.release
         else -> null
     }
-    if (dismissed || release == null) return
+    // A build that can't update itself never offers one (a state left from before it was switched off included).
+    if (dismissed || release == null || !updates.supported) return
     val s = state
     PlannerDialog(
         title = "Planner ${release.version} is available",
