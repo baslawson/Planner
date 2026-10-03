@@ -217,8 +217,10 @@ object QuickEntry {
         "|\\b(?:from\\s+)?((?:next\\s+|this\\s+)?(?:$weekdays))(?:\\s*[-–—]\\s*|\\s+(?:to|until|till|through|thru)\\s+)($weekdays)\\b")
     // "3 nights from Friday", "for 5 nights": a stay, ending the morning after the last night. "A night" or "one night" only
     // with "for": "Book a night out", "One night in Bangkok" are titles. The count is group 1 (with for) or 2. Not the end
-    // of a numeric date: "Gig 12/10 night" is a night on 12/10.
-    private val nights = rx("\\b(?:for\\s+($relativeCount)|(?<![/.-])(?!(?:a|an|one)\\b)($relativeCount))\\s+nights?(?:\\s+from)?\\b")
+    // of a numeric date: "Gig 12/10 night" is a night on 12/10. "2-3 nights" is a stay of the longer count;
+    // only with "nights": "Party 12-10 night" is a night on 12-10.
+    private const val nightCount = "(?:\\d{1,2}\\s*[-–—]\\s*\\d{1,2}(?=\\s+nights\\b)|$relativeCount)"
+    private val nights = rx("\\b(?:for\\s+($nightCount)|(?<![/.-])(?!(?:a|an|one)\\b)($nightCount))\\s+nights?(?:\\s+from)?\\b")
     private val spanDays = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?)\\b")
     private val repeatPeriods = rx("\\bfor\\s+($relativeCount)\\s+(days?|weeks?|wks?|fortnights?|months?|years?)\\b")
     private const val reminderSpan = "$span|(?:$amount|half(?:\\s+an?)?)\\s*(?:days?|weeks?)|the\\s+(?:day|week)"
@@ -803,7 +805,8 @@ object QuickEntry {
         if (repeat == RepeatRule.NONE) nights.findAll(remaining).toList().let { found ->
             if (found.size + (if (spanLength != null) 1 else 0) > 1) return error("Use one length.")
             found.firstOrNull()?.let { match ->
-                val count = readAmount(match.groupValues[1].ifEmpty { match.groupValues[2] }.lowercase(Locale.ROOT))
+                val said = match.groupValues[1].ifEmpty { match.groupValues[2] }.lowercase(Locale.ROOT)
+                val count = re("\\d+").findAll(said).map { it.value.toDouble() }.toList().takeIf { it.size == 2 }?.max() ?: readAmount(said)
                 if (!count.isFinite() || count % 1 != 0.0 || count < 1 || count + 1 > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS - 1} nights.")
                 if (rangeStart != null) return error("Use a date range or a length, not both.")
