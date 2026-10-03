@@ -37,16 +37,28 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.LocalDate
 
+// How many unfinished prerequisites each task in [tasks] waits on (TaskDependencies.blockers), for the tasks with any.
+// Worked out once per list by the screen, so each TaskCard doesn't query and map the whole tasks table itself (UI-1).
+fun taskBlockerCounts(tasks: List<PlannerTask>): Map<String, Int> {
+    val byId = tasks.associateBy { it.id }
+    val counts = HashMap<String, Int>()
+    tasks.forEach { task ->
+        if (task.prerequisiteIds.isNotEmpty()) {
+            val n = task.prerequisiteIds.count { byId[it]?.done != true }
+            if (n > 0) counts[task.id] = n
+        }
+    }
+    return counts
+}
+
 // [selection]: a long press selects the task with the events and bills around it; while anything is selected a tap
-// selects or deselects it, and its done box waits.
+// selects or deselects it, and its done box waits. [blockers]: its unfinished prerequisites (taskBlockerCounts).
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, selection: EventSelection? = null, onEdit: () -> Unit) {
+fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolean = true, selection: EventSelection? = null, onEdit: () -> Unit) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
     val scope = rememberCoroutineScope()
-    val allTasks by repo.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
-    val blockers = TaskDependencies.blockers(task, allTasks)
     var busy by remember(task.id) { mutableStateOf(false) }
     val selecting = selection?.active == true
     val selected = selection != null && task.id in selection.taskIds
@@ -60,7 +72,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, selec
             .semantics { if (selecting) this.selected = selected }
             .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = task.done, enabled = enabled && !busy && !selecting && (task.done || blockers.isEmpty()),
+            Checkbox(checked = task.done, enabled = enabled && !busy && !selecting && (task.done || blockers == 0),
                 modifier = Modifier.semantics { contentDescription = "Mark ${task.title} ${if (task.done) "incomplete" else "done"}" },
                 onCheckedChange = { done ->
                     busy = true
@@ -75,7 +87,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, enabled: Boolean = true, selec
                 Text(task.title, style = MaterialTheme.typography.titleMedium,
                     textDecoration = if (task.done) TextDecoration.LineThrough else null)
                 Text(if (task.done) "Task · Completed" else "Task", style = MaterialTheme.typography.labelSmall)
-                if (!task.done && blockers.isNotEmpty()) Text("Waiting on ${blockers.size} prerequisite(s) · Open task to review", style = MaterialTheme.typography.bodySmall)
+                if (!task.done && blockers > 0) Text("Waiting on $blockers prerequisite(s) · Open task to review", style = MaterialTheme.typography.bodySmall)
                 if (task.priority != TaskPriority.NORMAL) {
                     Surface(color = if (task.priority == TaskPriority.HIGH) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
                         shape = MaterialTheme.shapes.small) {

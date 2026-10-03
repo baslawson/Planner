@@ -102,6 +102,7 @@ fun SearchScreen(
 ) {
     val index by vm.index.collectAsStateWithLifecycle()
     val tasks by vm.tasks.collectAsStateWithLifecycle()
+    val blockerCounts = remember(tasks) { taskBlockerCounts(tasks) }
     var editingBillId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var showCompleted by rememberSaveable { mutableStateOf(false) }
@@ -219,7 +220,7 @@ fun SearchScreen(
                                 "Try words like tomorrow, next friday or 12 june, or pick a category above.",
                         ) }
                         visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> item(key = "hint") { Hint("Nothing found. Try fewer words or check the spelling.") }
-                        else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
+                        else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, blockerCounts, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
                     }
                 } }
             }
@@ -251,7 +252,7 @@ private fun groupResults(outcome: SearchOutcome) = GroupedResults(
 )
 
 private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResults, selection: EventSelection, onOpenResult: (LocalDate) -> Unit,
-    taskHits: List<com.example.itinerary.data.PlannerTask>, today: LocalDate, onBill: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
+    taskHits: List<com.example.itinerary.data.PlannerTask>, blockerCounts: Map<String, Int>, today: LocalDate, onBill: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
     val dayGroups = grouped.dayGroups
     val billHits = grouped.billHits
     val count = outcome.hits.size + taskHits.size
@@ -268,7 +269,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
         billHits.forEach { hit -> item(key = "bill-${hit.item.id}") {
             BillTaskCard(hit.item.billTaskSummary(), today, selection, hit.documentName) { onBill(hit.item.id) }
         } }
-        taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, selection = selection) { onTask(task) } } }
+        taskHits.forEach { task -> item(key = "task-${task.id}") { TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection) { onTask(task) } } }
     }
     dayGroups.forEach { (date, hits) ->
         item(key = "day-$date") {
