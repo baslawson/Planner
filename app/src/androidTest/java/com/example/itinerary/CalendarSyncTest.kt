@@ -210,6 +210,29 @@ class CalendarSyncTest {
         assertEquals(after, fixture.requests.size)
     }
 
+    // AutoSync's check: no 15-minute wait, and a calendar is only downloaded again once it changed on the server.
+    @Test fun autoSyncCheckReadsChangesAtOnce() = runBlocking {
+        sync.check() // nothing ticked yet: no request at all
+        assertTrue(fixture.requests.isEmpty())
+        sync.sync()
+        sync.setEnabled(source("Personal").id, true)
+        sync.check()
+        assertEquals(1, reports().size)
+        val listed = fixture.requests.count { it.method == "PROPFIND" }
+        sync.check() // unchanged: the calendar list is read, nothing downloaded
+        assertEquals(1, reports().size); assertEquals(listed + 1, fixture.requests.count { it.method == "PROPFIND" })
+        fixture.ctags["personal"] = "p2"
+        fixture.events["personal"] = listOf(event("Moved", "20261006T020000Z", "20261006T030000Z"))
+        sync.check() // changed a moment later, no clock moved on: read at once
+        assertEquals(2, reports().size)
+        assertEquals(listOf("Moved"), shown().values.map { it.event.title })
+        assertFalse(sync.state.value.running); assertEquals("Calendars are up to date.", sync.state.value.message)
+        accounts.clear()
+        val before = fixture.requests.size
+        sync.check() // no login: nothing
+        assertEquals(before, fixture.requests.size)
+    }
+
     @Test fun onlyTheCalendarHomeIsRead() {
         assertThrows(IllegalArgumentException::class.java) {
             client.calendarEvents(account, "/remote.php/dav/files/bas/Planner/", Instant.EPOCH, Instant.EPOCH.plusSeconds(60))

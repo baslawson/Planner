@@ -156,6 +156,14 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _savedSearches.value = values
     }
 
+    // Device-local: "Sync changes automatically" (Settings → Calendars, see AutoSync); not in backups.
+    private val _autoSync = MutableStateFlow(prefs.getBoolean("auto_sync", true))
+    val autoSync: StateFlow<Boolean> = _autoSync.asStateFlow()
+    fun setAutoSync(on: Boolean) {
+        prefs.edit { putBoolean("auto_sync", on) }
+        _autoSync.value = on
+    }
+
     // Device-local: Enter in a note's list item starts the next item ("Continue lists on Enter"); not in backups.
     private val _continueLists = MutableStateFlow(prefs.getBoolean("continue_lists", true))
     val continueLists: StateFlow<Boolean> = _continueLists.asStateFlow()

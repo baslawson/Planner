@@ -100,10 +100,11 @@ class CalendarSync(
         if (hasAccount()) { sync(); send(); tasks?.send() }
     }
 
-    suspend fun syncIfDue() {
+    // [nextcloud] false: only the phone's calendars and links (Nextcloud is then AutoSync's, or waits for Sync now).
+    suspend fun syncIfDue(nextcloud: Boolean = true) {
         refreshPhone()
         if (now() - lastLinkAttempt >= LINK_INTERVAL_MS && dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
-        if (now() - lastAttempt < MIN_INTERVAL_MS) return
+        if (!nextcloud || now() - lastAttempt < MIN_INTERVAL_MS) return
         if (dao.sources().any { (it.enabled || it.tasksHere) && it.kind == OutsideCalendars.KIND_NEXTCLOUD } && hasAccount()) sync()
         send(); tasks?.send()
     }
@@ -115,6 +116,14 @@ class CalendarSync(
         refreshPhone()
         if (dao.sources().any { it.enabled && it.kind == OutsideCalendars.KIND_LINK }) refreshLinks()
         if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) } && hasAccount()) sync()
+        send(); tasks?.send()
+    }
+
+    // A check of AutoSync's: Nextcloud's changes (a calendar or task list is only downloaded when it changed there) and
+    // whatever of Planner's is still to send, with no 15-minute wait. Quiet: no syncing cloud for a check that finds nothing.
+    suspend fun check() {
+        if (!hasAccount()) return
+        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) }) sync(quiet = true)
         send(); tasks?.send()
     }
 
@@ -789,11 +798,11 @@ class CalendarSync(
     // Lists the calendars on the server (new ones start unticked) and downloads each ticked calendar that changed since
     // its last download. Returns false when another sync was already running; with [wait], waits for it and then syncs
     // (a choice just made must be read, not left to the next sync).
-    suspend fun sync(wait: Boolean = false): Boolean {
+    suspend fun sync(wait: Boolean = false, quiet: Boolean = false): Boolean {
         if (wait) lock.lock() else if (!lock.tryLock()) return false
         try {
             lastAttempt = now()
-            _state.value = State(running = true, message = "Syncing calendars…")
+            if (!quiet) _state.value = State(running = true, message = "Syncing calendars…")
             _state.value = try {
                 State(message = withContext(Dispatchers.IO) { syncLocked() })
             } catch (e: CancellationException) {

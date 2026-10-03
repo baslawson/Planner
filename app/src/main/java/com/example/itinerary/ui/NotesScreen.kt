@@ -121,7 +121,9 @@ fun NotesScreen(onBack: () -> Unit) {
     val syncOn by sync.enabled.collectAsStateWithLifecycle()
     val syncState by sync.state.collectAsStateWithLifecycle()
     var showSync by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(syncOn) { if (syncOn) sync.request(delayMs = 0) }
+    // Opening the page syncs, unless "Sync changes automatically" is off (then the cloud's Sync now does).
+    val autoSync by app.settings.autoSync.collectAsStateWithLifecycle()
+    LaunchedEffect(syncOn) { if (syncOn && autoSync) sync.request(delayMs = 0) }
     val overlayMenu = remember { OverlayMenuState() }
     // The editor opens over the page.
     Box(Modifier.fillMaxSize()) {

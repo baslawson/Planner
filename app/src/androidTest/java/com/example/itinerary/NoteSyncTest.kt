@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import com.example.itinerary.reminders.ReminderAlarms
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
@@ -30,6 +31,8 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
     val requests = CopyOnWriteArrayList<String>()
     @Volatile var missing = false
     @Volatile var beforePut: ((Long) -> Unit)? = null
+    // GETs of the list answered 304 (not changed).
+    @Volatile var conditional = 0
     private var nextId = 100L
     private var version = 0
     @Synchronized fun add(title: String, content: String, category: String = "", favorite: Boolean = false, readonly: Boolean = false): Long {
@@ -48,7 +51,13 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
         val body = request.body.readUtf8()
         return synchronized(this) {
             when {
-                request.method == "GET" && id == null -> MockResponse().setBody(JSONArray().apply { notes.toSortedMap().forEach { (k, v) -> put(json(k, v)) } }.toString())
+                request.method == "GET" && id == null -> {
+                    // The list's ETag, as the Notes app sends it; If-None-Match with it answers 304 with no notes.
+                    val list = JSONArray().apply { notes.toSortedMap().forEach { (k, v) -> put(json(k, v)) } }.toString()
+                    val tag = "\"L${list.hashCode()}\""
+                    if (request.getHeader("If-None-Match") == tag) { conditional++; MockResponse().setResponseCode(304) }
+                    else MockResponse().setBody(list).setHeader("ETag", tag)
+                }
                 request.method == "POST" && id == null -> {
                     val o = JSONObject(body)
                     val made = add(o.getString("title").ifBlank { o.getString("content").lineSequence().first() }, o.getString("content"), o.optString("category"), o.optBoolean("favorite"))
@@ -266,6 +275,73 @@ class NoteSyncTest {
             scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
             db.close(); server.shutdown(); accounts.clear(); dir.deleteRecursively()
             base.deleteSharedPreferences("note_sync_test2")
+        }
+    }
+
+    // "Sync changes automatically": check() passes only when something changed, and asks Nextcloud with the list's ETag
+    // (304, no notes) otherwise; AutoSync's loop checks on its own and stops when cancelled.
+    @Test fun autoSyncChecksCheaplyAndStops() = runBlocking {
+        val base = context
+        val dir = File(base.cacheDir, "note-sync-3").apply { deleteRecursively(); mkdirs() }
+        val isolated = object : ContextWrapper(base) {
+            override fun getFilesDir() = File(dir, "files").apply { mkdirs() }
+            override fun getNoBackupFilesDir() = File(dir, "nobackup").apply { mkdirs() }
+            override fun getCacheDir() = File(dir, "cache").apply { mkdirs() }
+        }
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val server = MockWebServer()
+        val fake = FakeNotes("qa", "qa-test-password")
+        server.dispatcher = fake
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+        server.start()
+        val trusted = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val http = OkHttpClient.Builder().sslSocketFactory(trusted.sslSocketFactory(), trusted.trustManager).build()
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        val prefs = base.getSharedPreferences("note_sync_test3", 0).apply { edit().clear().commit() }
+        val accounts = NextcloudAccountStore(isolated, "planner.nextcloud.note-sync-test3")
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        try {
+            val repo = Repository(db, AttachmentStore(isolated), alarms)
+            accounts.save(NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password"))
+            val sync = NoteSync(db, accounts, NotesApi(http), repo.asNoteStore(), prefs,
+                pendingDeleted = { repo.pendingDeletions.value.flatMap { it.notes }.mapTo(HashSet()) { it.id } })
+            fun content(t: String) = runBlocking { repo.allNotes() }.singleOrNull { Notes.label(it) == t }?.content
+            fun others() = fake.requests.filterNot { it == "GET /index.php/apps/notes/api/v1/notes" }
+
+            sync.check(); assertTrue("off: nothing", fake.requests.isEmpty())
+            sync.setEnabled(true)
+            val id = fake.add("Shopping", "Shopping\nbread")
+            sync.check() // never synced: a full pass
+            assertEquals("Shopping\nbread", content("Shopping"))
+            val after = fake.requests.size
+            sync.check() // nothing changed anywhere: one request, answered 304
+            assertEquals(after + 1, fake.requests.size); assertEquals(1, fake.conditional)
+            fake.edit(id) { it.copy(content = "Shopping\nbread\nmilk") }
+            sync.check() // changed there: pulled
+            assertEquals("Shopping\nbread\nmilk", content("Shopping"))
+            repo.saveNote(runBlocking { repo.allNotes() }.single().copy(content = "Shopping\nbread\nmilk\neggs"), create = false)
+            sync.check() // changed here: sent, without waiting for the list
+            assertEquals("Shopping\nbread\nmilk\neggs", fake.notes[id]!!.content)
+            assertTrue(others().any { it == "PUT /index.php/apps/notes/api/v1/notes/$id" })
+
+            // The loop (every second here, every minute in Planner) brings a change in by itself...
+            val calendars = CalendarSync(db, accounts)
+            val auto = com.example.itinerary.AutoSync(calendars, sync, scope)
+            val watching = scope.launch { auto.watch(base, intervalMs = 1_000) }
+            fake.edit(id) { it.copy(content = "Shopping\ncheese") }
+            val end = android.os.SystemClock.uptimeMillis() + 10_000
+            while (content("Shopping") != "Shopping\ncheese" && android.os.SystemClock.uptimeMillis() < end) Thread.sleep(100)
+            assertEquals("Shopping\ncheese", content("Shopping"))
+            // ...and stops when Planner leaves the screen.
+            watching.cancel(); watching.join(); Thread.sleep(300)
+            val stopped = fake.requests.size
+            fake.edit(id) { it.copy(content = "Shopping\nlater") }
+            Thread.sleep(3_000)
+            assertEquals(stopped, fake.requests.size); assertEquals("Shopping\ncheese", content("Shopping"))
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            db.close(); server.shutdown(); accounts.clear(); dir.deleteRecursively()
+            base.deleteSharedPreferences("note_sync_test3")
         }
     }
 }

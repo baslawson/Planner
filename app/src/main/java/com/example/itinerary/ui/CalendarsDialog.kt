@@ -474,6 +474,16 @@ internal fun syncResult(sources: List<CalendarSource>, conflicts: Int, stateErro
 private fun BackgroundChoice() {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val hours by app.settings.calendarBackgroundHours.collectAsStateWithLifecycle()
+    val auto by app.settings.autoSync.collectAsStateWithLifecycle()
+    SettingsHeading("Sync automatically")
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = auto, role = Role.Switch, onValueChange = app.settings::setAutoSync),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("Sync changes automatically", Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = auto, onCheckedChange = null)
+    }
+    Text(if (auto) "Checks Nextcloud for changes every minute while Planner is open, and sends your changes a few seconds after you make them."
+        else "Changes wait for Sync now, or for the background sync below.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     SettingsHeading("Sync in the background")
     Column(Modifier.selectableGroup()) {
         com.example.itinerary.data.BackgroundSync.CHOICES.forEach { option ->

@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.graphics.Color as ComposeColor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import com.example.itinerary.data.ThemeMode
 import com.example.itinerary.data.TimeFormat
@@ -175,6 +176,7 @@ class MainActivity : ComponentActivity() {
         appLock.onStopped(isChangingConfigurations)
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
+        autoSync?.cancel(); autoSync = null
         super.onStop()
     }
 
@@ -190,9 +192,14 @@ class MainActivity : ComponentActivity() {
             com.example.itinerary.reminders.showMissedReminders(applicationContext, afterBoot = false)
             (application as ItineraryApp).repository.rescheduleAllReminders()
         }
-        // The phone's ticked calendars, and ticked Nextcloud calendars at most every 15 minutes (nothing without a login).
-        (application as ItineraryApp).let { app -> app.appScope.launch { app.calendarSync.syncIfDue() } }
+        // The phone's ticked calendars and links; Nextcloud is checked by AutoSync while Planner is on screen, if it's on.
+        (application as ItineraryApp).let { app ->
+            app.appScope.launch { app.calendarSync.syncIfDue(nextcloud = false) }
+            autoSync = lifecycleScope.launch { app.settings.autoSync.collectLatest { on -> if (on) app.autoSync.watch(applicationContext) } }
+        }
     }
+
+    private var autoSync: kotlinx.coroutines.Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

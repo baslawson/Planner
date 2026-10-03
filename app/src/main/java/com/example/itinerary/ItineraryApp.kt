@@ -41,9 +41,17 @@ class ItineraryApp : Application() {
 
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
-            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); calendarSync.requestSend(); taskSync.requestSend(); noteSync.request() },
-            onDeletionFinished = { calendarSync.requestSend(); taskSync.requestSend(); noteSync.request() })
+            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); sendChanges() },
+            onDeletionFinished = { sendChanges() })
     }
+
+    // Planner's changes go to Nextcloud a few seconds later, while "Sync changes automatically" is on (see AutoSync).
+    private fun sendChanges() {
+        if (!settings.autoSync.value) return
+        calendarSync.requestSend(); taskSync.requestSend(); noteSync.request()
+    }
+
+    val autoSync: AutoSync by lazy { AutoSync(calendarSync, noteSync, appScope) }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)

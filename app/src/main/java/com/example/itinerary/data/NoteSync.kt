@@ -50,11 +50,12 @@ class NotesApi(private val http: OkHttpClient) {
     private fun notes(account: NextcloudAccount, id: Long? = null): HttpUrl = account.server.newBuilder()
         .addPathSegments("index.php/apps/notes/api/v1/notes").apply { if (id != null) addPathSegment(id.toString()) }.build()
 
+    private fun authorised(account: NextcloudAccount, request: Request.Builder): Request =
+        request.header("Authorization", Credentials.basic(account.username, account.password, Charsets.UTF_8))
+            .header("Accept", "application/json").header("OCS-APIRequest", "true").build()
+
     private fun call(account: NextcloudAccount, request: Request.Builder): Pair<Int, String> =
-        http.newCall(request.header("Authorization", Credentials.basic(account.username, account.password, Charsets.UTF_8))
-            .header("Accept", "application/json").header("OCS-APIRequest", "true").build()).execute().use { response ->
-            response.code to (response.body?.string().orEmpty())
-        }
+        http.newCall(authorised(account, request)).execute().use { response -> response.code to (response.body?.string().orEmpty()) }
 
     private fun fail(code: Int): Nothing = throw NotesApiException(when (code) {
         401, 403 -> "Nextcloud didn't accept the login. Check it in Settings → Nextcloud."
@@ -63,12 +64,22 @@ class NotesApi(private val http: OkHttpClient) {
         else -> "Nextcloud refused the request ($code)."
     }, code)
 
-    fun list(account: NextcloudAccount): List<RemoteNote> {
-        val (code, body) = call(account, Request.Builder().url(notes(account)).get())
+    fun list(account: NextcloudAccount): List<RemoteNote> = listTagged(account).first
+
+    // The notes and the list's ETag (null if the server sends none), for [unchanged].
+    fun listTagged(account: NextcloudAccount): Pair<List<RemoteNote>, String?> {
+        val (code, body, tag) = http.newCall(authorised(account, Request.Builder().url(notes(account)).get())).execute().use { response ->
+            Triple(response.code, response.body?.string().orEmpty(), response.header("ETag"))
+        }
         if (code != 200) fail(code)
         val array = runCatching { JSONArray(body) }.getOrElse { throw NotesApiException("Nextcloud's reply wasn't a list of notes. Is the Notes app enabled?") }
-        return List(array.length()) { parse(array.getJSONObject(it)) }
+        return List(array.length()) { parse(array.getJSONObject(it)) } to tag
     }
+
+    // Whether the list is still the one with ETag [tag]: one request and, when nothing changed, no notes in the reply (304).
+    // Anything else (changed, or an error a full pass will report) is false.
+    fun unchanged(account: NextcloudAccount, tag: String): Boolean =
+        http.newCall(authorised(account, Request.Builder().url(notes(account)).get().header("If-None-Match", tag))).execute().use { it.code == 304 }
 
     sealed interface Write {
         data class Done(val note: RemoteNote) : Write
@@ -228,6 +239,19 @@ class NoteSync(
         }
     }
 
+    // The list's ETag as the last pass read it, with the login it was read with: lets check() ask "changed?" cheaply.
+    @Volatile private var listTag: Pair<String, String>? = null
+
+    // A check of AutoSync's: a pass only when a note changed here, or Nextcloud's list is no longer the one last read.
+    suspend fun check() {
+        if (!_enabled.value || lock.isLocked) return
+        val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return
+        val tag = listTag
+        if (tag != null && tag.first == CalendarSync.accountKey(account) && outOfStep().isEmpty() &&
+            withContext(Dispatchers.IO) { runCatching { api.unchanged(account, tag.second) }.getOrDefault(false) }) return
+        sync()
+    }
+
     // Planner's notes not as last synced: new, changed, or deleted with the Undo gone.
     private suspend fun outOfStep(): Set<String> {
         val links = rows.all().associateBy { it.noteId }
@@ -261,7 +285,10 @@ class NoteSync(
     // One pass; returns how many conflict copies it made and how many notes it left alone.
     private suspend fun pass(account: NextcloudAccount): Pair<Int, Int> {
         val key = CalendarSync.accountKey(account)
-        val remote = api.list(account).associateBy { it.id }
+        val (list, tag) = api.listTagged(account)
+        // What Nextcloud's list was as this pass read it (a pass that writes changes it, so the next check passes once more).
+        listTag = tag?.let { key to it }
+        val remote = list.associateBy { it.id }
         val pending = pendingDeleted()
         var conflicts = 0
         var skipped = 0
