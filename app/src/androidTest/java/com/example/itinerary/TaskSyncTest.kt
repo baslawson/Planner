@@ -423,4 +423,28 @@ class TaskSyncTest {
         assertTrue(listFiles().values.none { it.second.contains("QA Deleted twice") })
         assertTrue(rows().isEmpty())
     }
+
+    // Optimization 3 Oct: as for events (CalendarTwoWayTest): an idle minute check sends no task and works out no task
+    // fingerprint; a change in Planner is still sent by the next check.
+    @Test fun anIdleCheckSendsNoTaskButAChangeIsStillSent() = runBlocking {
+        add("QA Idle task")
+        start()
+        // Planner's own writes change the ctag, so the first check reads the list once more (and sends a pass that
+        // finds nothing to write).
+        clock += 60_000; sync.check()
+        val prints = ServerTasks.fingerprints.get()
+        val written = writes().size
+        repeat(3) { clock += 60_000; sync.check() }
+        assertEquals("no fingerprints while idle", prints, ServerTasks.fingerprints.get())
+        assertEquals(written, writes().size)
+        repo.saveTask(task("QA Idle task").copy(title = "QA Idle task changed"))
+        tasks.markChanged()
+        clock += 60_000; sync.check()
+        assertTrue(fileOf("QA Idle task changed").value.second.contains("SUMMARY:QA Idle task changed"))
+        assertEquals(written + 1, writes().size)
+        clock += 60_000; sync.check() // reads its own write back, as above
+        val after = ServerTasks.fingerprints.get()
+        clock += 60_000; sync.check()
+        assertEquals("idle again once it went through", after, ServerTasks.fingerprints.get())
+    }
 }

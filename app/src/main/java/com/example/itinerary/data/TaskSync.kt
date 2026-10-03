@@ -83,6 +83,7 @@ class TaskSync(
                 dao.updateSource(chosen.copy(tasksHere = true, taskCtag = null, taskError = null))
             }
             _state.value = CalendarSync.State(); _hidden.value = 0
+            markChanged()
         }
         onChanged()
     }
@@ -102,7 +103,7 @@ class TaskSync(
             rowsDao.deleteAll()
             target()?.let { dao.updateSource(it.copy(taskCtag = null, taskError = null)) }
         }
-        _state.value = CalendarSync.State()
+        _state.value = CalendarSync.State(); markChanged()
     }
 
     // After disconnecting Nextcloud (its calendars go with it) or the test runner's clean start.
@@ -111,8 +112,19 @@ class TaskSync(
         _state.value = CalendarSync.State(); _hidden.value = 0
     }
 
+    // Whether AutoSync's check has anything to send, as CalendarSync.sendDue: a change in Planner since the last clean
+    // send, a send that failed or left a problem, a read that read something, or 15 minutes since the last pass.
+    private val changes = java.util.concurrent.atomic.AtomicLong(1)
+    @Volatile private var sentUpTo = 0L
+    @Volatile private var lastSendPass: Long? = null
+
+    internal fun markChanged() { changes.incrementAndGet() }
+
+    internal fun sendDue(): Boolean = changes.get() != sentUpTo || lastSendPass.let { it == null || now() - it >= CalendarSync.SEND_SAFETY_MS }
+
     // See CalendarSync.requestSend.
     fun requestSend() {
+        markChanged()
         val scope = scope ?: return
         synchronized(debounce) {
             if (!debounce.request()) return
@@ -134,6 +146,9 @@ class TaskSync(
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != CalendarSync.accountKey(account)) return@withLock true
         if (!quiet) _state.value = CalendarSync.State(running = true)
+        // Read before the pass reads the tasks: a change made during it is still to send afterwards.
+        val seen = changes.get()
+        lastSendPass = now()
         _state.value = try {
             withContext(Dispatchers.IO) { sendLocked(account, target) }
         } catch (e: CancellationException) {
@@ -141,6 +156,7 @@ class TaskSync(
         } catch (e: Exception) {
             CalendarSync.State(message = ((e as? BackupException)?.message ?: "Couldn't send tasks to Nextcloud.") + " The rest will be sent later.", error = true)
         }
+        if (!_state.value.error) sentUpTo = seen
         true
     }
 
@@ -253,6 +269,8 @@ class TaskSync(
                 if (!retry && current.taskError != null && failedAt == current.id to list.ctag.orEmpty()) return false
                 target = current; ctag = list.ctag
                 read = pullLocked(account, current, list.ctag)
+                // What it read may leave something to send (new files wait for the first read of a list just chosen).
+                if (read) markChanged()
                 failedAt = null
             }
             // As CalendarSync's: a check backing off keeps what the last send said unless the pull read something.
@@ -439,7 +457,7 @@ class TaskSync(
                 events = false, tasks = true, tasksHere = true))
             rowsDao.insertAll(rows.filter { it.account == target.account && it.list == target.href }.map { it.copy(id = 0) })
         }
-        _state.value = CalendarSync.State()
+        _state.value = CalendarSync.State(); markChanged()
     }
 
     companion object {

@@ -847,4 +847,35 @@ class CalendarTwoWayTest {
         sync.check(fresh = true)
         assertNull(target().lastError)
     }
+
+    // Optimization 3 Oct: AutoSync's minute check with everything in step sends nothing and works out no fingerprint
+    // (it used to go through every event each minute); a change in Planner is still sent by the next check, and a pass
+    // still runs every 15 minutes as a safety net.
+    @Test fun anIdleCheckSendsNothingButAChangeIsStillSent() = runBlocking {
+        save("QA Idle"); save("QA Other", 10)
+        start()
+        // Planner's own writes change the ctag, so the first check reads the calendar once more (and sends a pass that
+        // finds nothing to write).
+        clock += 60_000; sync.check()
+        val prints = CalendarSync.fingerprints.get()
+        val written = writes().size
+        repeat(3) { clock += 60_000; sync.check() }
+        assertEquals("no fingerprints while idle", prints, CalendarSync.fingerprints.get())
+        assertEquals(written, writes().size)
+        // A change in Planner (the app marks every one, see ItineraryApp.sendChanges): sent by the next check.
+        repo.saveItem(item("QA Idle").copy(title = "QA Idle changed"))
+        sync.markChanged()
+        clock += 60_000; sync.check()
+        assertTrue(plannerFile("QA Idle changed").value.second.contains("SUMMARY:QA Idle changed"))
+        assertEquals(written + 1, writes().size)
+        clock += 60_000; sync.check() // reads its own write back, as above
+        val after = CalendarSync.fingerprints.get()
+        clock += 60_000; sync.check()
+        assertEquals("idle again once it went through", after, CalendarSync.fingerprints.get())
+        // The safety net: a full pass after 15 minutes, which finds nothing to write.
+        clock += CalendarSync.SEND_SAFETY_MS; sync.check()
+        assertTrue(CalendarSync.fingerprints.get() > after)
+        assertEquals(written + 1, writes().size)
+        assertFalse(sync.sendState.value.error)
+    }
 }

@@ -63,11 +63,14 @@ object ServerTasks {
     // What Planner syncs for [task], as a short fingerprint: a change in any synced field changes it.
     fun fingerprint(task: PlannerTask): String = fingerprint(fields(task))
     fun fingerprint(fields: Fields): String {
+        fingerprints.incrementAndGet()
         val text = listOf(fields.title.trim(), fields.notes.trim(), fields.dueDate?.toString().orEmpty(), fields.priority.name, fields.done.toString())
             .joinToString("\u0000")
         return PRINT + CalendarExport.shortHash(text)
     }
     private const val PRINT = "t1:"
+    // For tests: how many task fingerprints were worked out (AutoSync's idle check makes none).
+    internal val fingerprints = java.util.concurrent.atomic.AtomicLong()
 
     // Whether [stored] (a row's fingerprint) still describes [task]: unchanged in Planner since the last sync.
     fun inSync(stored: String, task: PlannerTask) = stored == fingerprint(task)

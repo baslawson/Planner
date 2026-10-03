@@ -47,6 +47,8 @@ class ItineraryApp : Application() {
 
     // Planner's changes go to Nextcloud a few seconds later, while "Sync changes automatically" is on (see AutoSync).
     private fun sendChanges() {
+        // Noted with the switch off too, so AutoSync's first check once it's on sends them (CalendarSync.sendDue).
+        calendarSync.markChanged(); taskSync.markChanged()
         if (!settings.autoSync.value) return
         calendarSync.requestSend(); taskSync.requestSend(); noteSync.request()
     }

@@ -16,7 +16,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 // "Sync changes automatically" (Settings → Calendars, on by default). While Planner is on screen, Nextcloud is checked
 // for changes (events, tasks, notes) at once, then every minute and whenever the connection comes back; Planner's own
 // changes are sent a few seconds after they're made (ItineraryApp). Off: only Sync now and the background schedule.
-// A check that finds nothing costs one small request per kind (calendars' ctag, the notes list's ETag). SY-2: work that
+// A check that finds nothing costs one small request per kind (calendars' ctag, the notes list's ETag); Planner's events
+// and tasks are gone through only when something may be waiting to send (CalendarSync.sendDue). SY-2: work that
 // keeps leaving the same thing out of step is repeated less and less often (CalendarSync.check, NoteSync.check).
 class AutoSync(private val calendars: CalendarSync, private val notes: NoteSync, private val scope: CoroutineScope) {
     private val checking = Mutex()

@@ -125,13 +125,14 @@ class CalendarSync(
     // included). SY-2: while a check leaves the same problem (a calendar that won't download, a file Nextcloud refuses),
     // the next ones only ask what changed: retrying the failed download, and the send, wait longer each time (see
     // SyncBackoff). A calendar changed since it failed is still tried; Planner's own changes are sent by requestSend.
-    // [fresh]: the connection is back, so no waiting.
+    // The send only runs when something may be waiting (sendDue). [fresh]: the connection is back, so no waiting.
     suspend fun check(fresh: Boolean = false) {
         if (!hasAccount()) return
         if (fresh) checkBackoff.reset()
         val full = checkBackoff.due(now())
         if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) }) sync(quiet = true, retry = full)
-        if (full) { send(quiet = true); tasks?.send(quiet = true) }
+        // Only when something may be waiting (see sendDue): a pass works out every event's fingerprint.
+        if (full) { if (sendDue()) send(quiet = true); tasks?.let { if (it.sendDue()) it.send(quiet = true) } }
         val left = problems()
         if (full) checkBackoff.after(left, now()) else checkBackoff.light(left)
     }
@@ -149,6 +150,19 @@ class CalendarSync(
     // there since is tried again at once.
     private val checkBackoff = SyncBackoff()
     private val failedAt = java.util.concurrent.ConcurrentHashMap<Long, String>()
+
+    // Whether AutoSync's check has anything to send: a change in Planner since the last send that went through cleanly
+    // (markChanged, requestSend), a send that failed or left a problem, or a pull that read something; and, as a safety
+    // net, a pass at least every 15 minutes. Pending from the start. Sync now, syncIfDue and the background run send as
+    // before, whatever this says.
+    private val changes = java.util.concurrent.atomic.AtomicLong(1)
+    @Volatile private var sentUpTo = 0L
+    @Volatile private var lastSendPass: Long? = null
+
+    // Something in Planner changed (the app calls this for every change, automatic sync on or off; tasks too).
+    internal fun markChanged() { changes.incrementAndGet(); tasks?.markChanged() }
+
+    internal fun sendDue(): Boolean = changes.get() != sentUpTo || lastSendPass.let { it == null || now() - it >= SEND_SAFETY_MS }
 
     fun phonePermitted(): Boolean = phone?.permitted() == true
 
@@ -285,13 +299,14 @@ class CalendarSync(
             db.sentDao().deleteAll()
             dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }?.let { takeUp(it) }
         }
-        _sendState.value = State()
+        _sendState.value = State(); changes.incrementAndGet()
     }
 
     // Sends a few seconds after a change in Planner, so a burst of edits is one pass. A send already under way is never
     // cancelled (a write that reached Nextcloud would go unrecorded and come back as a conflict with itself): it
     // finishes, and another pass follows it a few seconds later.
     fun requestSend() {
+        markChanged()
         val scope = scope ?: return
         checkBackoff.reset()
         synchronized(debounce) {
@@ -315,6 +330,9 @@ class CalendarSync(
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != accountKey(account)) return@withLock true
         if (!quiet) _sendState.value = State(running = true)
+        // Read before the pass reads the events: a change made during it is still to send afterwards.
+        val seen = changes.get()
+        lastSendPass = now()
         _sendState.value = try {
             withContext(Dispatchers.IO) { sendLocked(account, target) }
         } catch (e: CancellationException) {
@@ -323,6 +341,7 @@ class CalendarSync(
         } catch (e: Exception) {
             State(message = ((e as? BackupException)?.message ?: "Couldn't send events to Nextcloud.") + " The rest will be sent later.", error = true)
         }
+        if (!_sendState.value.error) sentUpTo = seen
         true
     }
 
@@ -702,7 +721,7 @@ class CalendarSync(
                 enabled = true, sendHere = true))
             db.sentDao().insertAll(rows.filter { it.account == target.account && it.calendar == target.href }.map { it.copy(id = 0) })
         }
-        _sendState.value = State()
+        _sendState.value = State(); changes.incrementAndGet()
     }
 
     // ---- Calendars subscribed to by link (step 4) ----
@@ -909,6 +928,8 @@ class CalendarSync(
                 if (!retry && current.lastError != null && failedAt[current.id] == calendar.ctag.orEmpty()) { failed++; return@withLock }
                 target = current; targetCtag = calendar.ctag
                 read = pullLocked(account, current, calendar.ctag)
+                // What it read may leave something to send (new files wait for the first read of a calendar just chosen).
+                if (read) changes.incrementAndGet()
                 failedAt.remove(current.id)
             }
             // A check that sends nothing (backing off) keeps what the last send said (a file refused, say) unless the pull
@@ -1015,6 +1036,8 @@ class CalendarSync(
         const val LINK_ACCOUNT = "link"
         const val LINK_INTERVAL_MS = 60 * 60 * 1000L
         const val SEND_DELAY_MS = 5_000L
+        // AutoSync's check sends at least this often even with nothing known to be waiting (see sendDue).
+        const val SEND_SAFETY_MS = 15 * 60 * 1000L
         private val ORDER = compareBy<OutsideEvent>({ it.date }, { it.startTime }, { it.title }, { it.endDate }, { it.durationMinutes }, { it.location }, { it.notes })
         private fun phoneHref(id: Long) = "calendar/$id"
         private fun calendarId(href: String) = href.removePrefix("calendar/").toLongOrNull()
@@ -1025,9 +1048,12 @@ class CalendarSync(
         // apart: see inSync.
         internal fun fingerprint(item: ItineraryItem): String = PRINT + zonedFingerprint(item, java.time.ZoneOffset.UTC)
         private const val PRINT = "u1:"
+        // For tests: how many event fingerprints were worked out (AutoSync's idle check makes none).
+        internal val fingerprints = java.util.concurrent.atomic.AtomicLong()
 
         // The hash alone, as fingerprints were until 0.0.9 (in the phone's zone until 0.0.8, in UTC in 0.0.9).
         internal fun zonedFingerprint(item: ItineraryItem, zone: ZoneId): String {
+            fingerprints.incrementAndGet()
             val text = CalendarExport.encode(item, "planner", zone, java.time.Instant.EPOCH)
             return CalendarExport.shortHash(text)
         }
