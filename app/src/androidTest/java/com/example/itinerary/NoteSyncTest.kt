@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import com.example.itinerary.reminders.ReminderAlarms
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials
@@ -24,13 +25,17 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** A small Nextcloud Notes app (API v1): notes with ETags, GET list, POST, PUT honouring If-Match (412), DELETE. [missing]
- *  answers 404 as a server without the Notes app does; [beforePut] runs first (a change there while a sync runs). */
+ *  answers 404 as a server without the Notes app does; [beforePut] and [beforePost] run first (a change there while a sync
+ *  runs, or a pass held there); a PUT to a note in [refused] answers 403; [noTag]: the list comes without an ETag. */
 class FakeNotes(private val user: String, private val password: String) : Dispatcher() {
     data class N(val title: String, val content: String, val category: String, val favorite: Boolean, val etag: String, val readonly: Boolean = false)
     val notes = ConcurrentHashMap<Long, N>()
     val requests = CopyOnWriteArrayList<String>()
     @Volatile var missing = false
     @Volatile var beforePut: ((Long) -> Unit)? = null
+    @Volatile var beforePost: (() -> Unit)? = null
+    @Volatile var refused: Set<Long> = emptySet()
+    @Volatile var noTag = false
     // GETs of the list answered 304 (not changed).
     @Volatile var conditional = 0
     private var nextId = 100L
@@ -49,6 +54,8 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
         if (missing || !path.startsWith(base)) return MockResponse().setResponseCode(404)
         val id = path.removePrefix(base).trim('/').toLongOrNull()
         val body = request.body.readUtf8()
+        // Outside the lock, so a held request doesn't hold the others up.
+        if (request.method == "POST") beforePost?.invoke()
         return synchronized(this) {
             when {
                 request.method == "GET" && id == null -> {
@@ -56,7 +63,7 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                     val list = JSONArray().apply { notes.toSortedMap().forEach { (k, v) -> put(json(k, v)) } }.toString()
                     val tag = "\"L${list.hashCode()}\""
                     if (request.getHeader("If-None-Match") == tag) { conditional++; MockResponse().setResponseCode(304) }
-                    else MockResponse().setBody(list).setHeader("ETag", tag)
+                    else MockResponse().setBody(list).apply { if (!noTag) setHeader("ETag", tag) }
                 }
                 request.method == "POST" && id == null -> {
                     val o = JSONObject(body)
@@ -65,6 +72,7 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                 }
                 request.method == "PUT" && id != null -> {
                     beforePut?.invoke(id)
+                    if (id in refused) return@synchronized MockResponse().setResponseCode(403)
                     val current = notes[id] ?: return@synchronized MockResponse().setResponseCode(404)
                     if (request.getHeader("If-Match") != null && request.getHeader("If-Match") != "\"${current.etag}\"") return@synchronized MockResponse().setResponseCode(412)
                     val o = JSONObject(body)
@@ -343,5 +351,148 @@ class NoteSyncTest {
             db.close(); server.shutdown(); accounts.clear(); dir.deleteRecursively()
             base.deleteSharedPreferences("note_sync_test3")
         }
+    }
+
+    // One isolated Planner and Notes app per test below. [wired]: changes in the repository ask for a pass, as in the app.
+    private class Rig(val fake: FakeNotes, val db: AppDatabase, val repo: Repository, val sync: NoteSync, val isolated: android.content.Context,
+                      val dir: File, val scope: kotlinx.coroutines.CoroutineScope) {
+        @Volatile var wired = false
+        fun note(label: String) = runBlocking { repo.allNotes() }.single { Notes.label(it) == label }
+        fun remote(title: String) = fake.notes.entries.single { it.value.title == title }
+    }
+
+    private fun rig(name: String, test: suspend (Rig) -> Unit) = runBlocking {
+        val base = context
+        val dir = File(base.cacheDir, name).apply { deleteRecursively(); mkdirs() }
+        val isolated = object : ContextWrapper(base) {
+            override fun getFilesDir() = File(dir, "files").apply { mkdirs() }
+            override fun getNoBackupFilesDir() = File(dir, "nobackup").apply { mkdirs() }
+            override fun getCacheDir() = File(dir, "cache").apply { mkdirs() }
+            // A restore applies the backup's settings: never to the app's own.
+            override fun getSharedPreferences(n: String, mode: Int) = base.getSharedPreferences("${name}_$n", mode)
+        }
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val server = MockWebServer()
+        val fake = FakeNotes("qa", "qa-test-password")
+        server.dispatcher = fake
+        server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
+        server.start()
+        val trusted = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        val http = OkHttpClient.Builder().sslSocketFactory(trusted.sslSocketFactory(), trusted.trustManager).build()
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        val prefs = base.getSharedPreferences("${name}_note_sync", 0).apply { edit().clear().commit() }
+        val accounts = NextcloudAccountStore(isolated, "planner.nextcloud.$name")
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        try {
+            lateinit var rig: Rig
+            val repo = Repository(db, AttachmentStore(isolated), alarms, onChanged = { if (rig.wired) rig.sync.request(delayMs = 200) })
+            accounts.save(NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password"))
+            val sync = NoteSync(db, accounts, NotesApi(http), repo.asNoteStore(), prefs,
+                pendingDeleted = { repo.pendingDeletions.value.flatMap { it.notes }.mapTo(HashSet()) { it.id } }, scope = scope)
+            rig = Rig(fake, db, repo, sync, isolated, dir, scope)
+            sync.setEnabled(true)
+            test(rig)
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            db.close(); server.shutdown(); accounts.clear(); dir.deleteRecursively()
+            listOf("note_sync", "settings", "backup_status").forEach { base.deleteSharedPreferences("${name}_$it") }
+        }
+    }
+
+    private fun waitFor(what: String, condition: () -> Boolean) {
+        val end = android.os.SystemClock.uptimeMillis() + 15_000
+        while (!condition() && android.os.SystemClock.uptimeMillis() < end) Thread.sleep(100)
+        assertTrue(what, condition())
+    }
+
+    // Bug hunt 3 Oct, SY-1: a restore confirmed while a notes pass runs waits for it. Before, the pass carried on across
+    // the restore and put back a link for a note the backup doesn't have, so the next pass deleted it on Nextcloud too.
+    @Test fun aRestoreWaitsForANotesPassUnderWay() = rig("note-sync-restore") { r ->
+        r.fake.add("Kept", "Kept\nfrom before")
+        assertTrue(r.sync.sync())
+        val backup = BackupManager(r.isolated, r.repo, AttachmentStore(r.isolated), SettingsRepository(r.isolated), notes = r.sync)
+        val zip = File(r.dir, "backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        val staged = backup.stage(android.net.Uri.fromFile(zip))
+        // A note the backup doesn't have, on its way up when the restore is confirmed.
+        r.repo.saveNote(PlannerNote(title = "Not in the backup", content = "typed after the backup"), create = true)
+        val reached = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        r.fake.beforePost = { r.fake.beforePost = null; reached.countDown(); release.await(20, java.util.concurrent.TimeUnit.SECONDS) }
+        val pass = r.scope.async { r.sync.sync() }
+        assertTrue(reached.await(20, java.util.concurrent.TimeUnit.SECONDS))
+        val restoring = r.scope.async { backup.restore(staged) }
+        Thread.sleep(1_000)
+        assertFalse("The restore waits for the pass", restoring.isCompleted)
+        release.countDown()
+        assertTrue(pass.await()); restoring.await()
+        // No links (the next pass links by content), so nothing is deleted on Nextcloud: the note comes back from there.
+        assertTrue(r.db.sentNoteDao().all().isEmpty())
+        assertTrue(r.sync.sync())
+        assertTrue(r.fake.requests.toString(), r.fake.requests.none { it.startsWith("DELETE") })
+        assertEquals(setOf("Kept", "Not in the backup"), r.fake.notes.values.map { it.title }.toSet())
+        assertEquals(listOf("Kept", "Not in the backup"), r.repo.allNotes().map { Notes.label(it) }.sorted())
+        assertEquals("typed after the backup", r.note("Not in the backup").content)
+    }
+
+    // SY-3: an edit saved while a pass that a check (not a request) started is under way is sent straight after it, not
+    // at the next check.
+    @Test fun anEditSavedDuringACheckIsSentAfterIt() = rig("note-sync-follow") { r ->
+        r.repo.saveNote(PlannerNote(title = "A", content = "a1"), create = true)
+        r.repo.saveNote(PlannerNote(title = "B", content = "b1"), create = true)
+        assertTrue(r.sync.sync())
+        r.repo.saveNote(r.note("A").copy(content = "a2"), create = false)
+        val reached = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        r.fake.beforePut = { r.fake.beforePut = null; reached.countDown(); release.await(20, java.util.concurrent.TimeUnit.SECONDS) }
+        val checking = r.scope.async { r.sync.check() }
+        assertTrue(reached.await(20, java.util.concurrent.TimeUnit.SECONDS))
+        r.wired = true
+        r.repo.saveNote(r.note("B").copy(content = "b2"), create = false)
+        release.countDown()
+        checking.await()
+        assertEquals("a2", r.remote("A").value.content)
+        waitFor("B is sent after the check's pass") { r.remote("B").value.content == "b2" }
+    }
+
+    // SY-2: a note Nextcloud refuses isn't written again every minute; after the second try the checks only ask whether
+    // the list changed (304), until the connection comes back or something changes.
+    @Test fun aCheckBacksOffFromANoteNextcloudRefuses() = rig("note-sync-refused") { r ->
+        val id = r.fake.add("Shared", "Shared\nfrom a colleague")
+        assertTrue(r.sync.sync())
+        r.repo.saveNote(r.note("Shared").copy(content = "Shared\nmine"), create = false)
+        r.fake.refused = setOf(id)
+        fun puts() = r.fake.requests.count { it == "PUT /index.php/apps/notes/api/v1/notes/$id" }
+        r.sync.check(); r.sync.check()
+        assertEquals(2, puts())
+        val asked = r.fake.requests.size
+        r.sync.check(); r.sync.check()
+        assertEquals(2, puts())
+        assertEquals(asked + 2, r.fake.requests.size)
+        r.sync.check(fresh = true)
+        assertEquals(3, puts())
+        // A change there still comes in at the next check.
+        r.fake.add("Other", "Other\nnew there")
+        r.sync.check()
+        assertEquals("Other\nnew there", r.note("Other").content)
+        // Accepted at last: sent, and the checks are cheap again.
+        r.fake.refused = emptySet()
+        r.sync.check(fresh = true)
+        assertEquals("Shared\nmine", r.fake.notes[id]!!.content)
+    }
+
+    // SY-2: a server that sends no ETag for the list can't be asked cheaply; full passes still back off.
+    @Test fun aCheckBacksOffWithoutAListETag() = rig("note-sync-notag") { r ->
+        r.fake.noTag = true
+        r.fake.add("Plain", "Plain\nbody")
+        r.sync.check(); r.sync.check(); r.sync.check()
+        assertEquals("Plain\nbody", r.note("Plain").content)
+        val asked = r.fake.requests.size
+        r.sync.check(); r.sync.check()
+        assertEquals(asked, r.fake.requests.size)
+        // A change here still goes at once.
+        r.repo.saveNote(PlannerNote(title = "Mine", content = "typed"), create = true)
+        r.sync.check()
+        assertEquals("typed", r.remote("Mine").value.content)
     }
 }

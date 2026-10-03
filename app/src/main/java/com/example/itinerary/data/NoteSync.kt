@@ -77,9 +77,11 @@ class NotesApi(private val http: OkHttpClient) {
     }
 
     // Whether the list is still the one with ETag [tag]: one request and, when nothing changed, no notes in the reply (304).
-    // Anything else (changed, or an error a full pass will report) is false.
-    fun unchanged(account: NextcloudAccount, tag: String): Boolean =
-        http.newCall(authorised(account, Request.Builder().url(notes(account)).get().header("If-None-Match", tag))).execute().use { it.code == 304 }
+    // True: unchanged; false: changed (200); null: no answer (an error a full pass will report).
+    fun unchanged(account: NextcloudAccount, tag: String): Boolean? =
+        http.newCall(authorised(account, Request.Builder().url(notes(account)).get().header("If-None-Match", tag))).execute().use {
+            when (it.code) { 304 -> true; 200 -> false; else -> null }
+        }
 
     sealed interface Write {
         data class Done(val note: RemoteNote) : Write
@@ -206,7 +208,11 @@ class NoteSync(
     // Asked for while a pass ran: one more follow if anything is left to sync.
     @Volatile private var again = false
     // What was still out of step after the last follow-up pass, so a note that can't sync doesn't start a loop.
-    private var stuck: Set<String> = emptySet()
+    @Volatile private var stuck: Set<String> = emptySet()
+    // SY-2: a check's full pass that leaves the same notes out of step (refused, too long), fails the same way, or can't
+    // be asked about cheaply (no list ETag) waits longer each time. [checked]: what was out of step after the last one.
+    private val backoff = SyncBackoff()
+    @Volatile private var checked: Set<String>? = null
 
     // Turning it on syncs at once; off leaves the notes as they are on both sides, and forgets the links.
     suspend fun setEnabled(on: Boolean) {
@@ -216,7 +222,19 @@ class NoteSync(
     }
 
     // After a backup is restored (its notes have new history) or the login changes: the next pass links by content.
-    suspend fun forget() = lock.withLock { rows.deleteAll() }
+    suspend fun forget() = lock.withLock { forgetLocked() }
+
+    // SY-1 (as TaskSync.paused): runs [block] with no pass under way, and none starting until it's done. A pass works from
+    // the notes and links it read at its start and writes links back by note id: one running across a restore would put
+    // links naming the old notes over the restored ones (the next pass then overwrites Nextcloud's newer copy, or deletes
+    // a note there that the restore didn't bring back). Inside, use forgetLocked only (the lock isn't reentrant).
+    suspend fun <T> paused(block: suspend () -> T): T = lock.withLock { block() }
+
+    // forget, inside paused: no links, and nothing remembered about the last list or passes.
+    suspend fun forgetLocked() {
+        rows.deleteAll()
+        listTag = null; stuck = emptySet(); checked = null; backoff.reset()
+    }
 
     // A pass a few seconds from now, once changes have settled (after an edit), or at once. A pass already running
     // carries on (a pass's own writes come back here through the repository); one more follows it if needed.
@@ -230,26 +248,44 @@ class NoteSync(
                 delay(delayMs)
                 synchronized(this@NoteSync) { waiting = null }
                 runCatching { sync() }
-                if (again) {
-                    again = false
-                    val left = runCatching { outOfStep() }.getOrDefault(emptySet())
-                    if (left.isNotEmpty() && left != stuck) { stuck = left; request() } else stuck = emptySet()
-                }
             }
         }
+    }
+
+    // SY-3: asked for while a pass ran (whoever started it): one more follows, if something is still out of step and it
+    // isn't what was left after the last follow-up (a note that can't sync doesn't start a loop).
+    private suspend fun followUp() {
+        if (!again) return
+        again = false
+        val left = runCatching { outOfStep() }.getOrDefault(emptySet())
+        if (left.isNotEmpty() && left != stuck) { stuck = left; request() } else stuck = emptySet()
     }
 
     // The list's ETag as the last pass read it, with the login it was read with: lets check() ask "changed?" cheaply.
     @Volatile private var listTag: Pair<String, String>? = null
 
     // A check of AutoSync's: a pass only when a note changed here, or Nextcloud's list is no longer the one last read.
-    suspend fun check() {
+    // SY-2: a pass only for what the last check's pass already left (the same notes out of step, a failure, no ETag to
+    // ask with) waits, longer each time (see SyncBackoff); a change on either side passes at once. [fresh]: the
+    // connection is back, so no waiting.
+    suspend fun check(fresh: Boolean = false) {
         if (!_enabled.value || lock.isLocked) return
+        if (fresh) backoff.reset()
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return
-        val tag = listTag
-        if (tag != null && tag.first == CalendarSync.accountKey(account) && outOfStep().isEmpty() &&
-            withContext(Dispatchers.IO) { runCatching { api.unchanged(account, tag.second) }.getOrDefault(false) }) return
-        sync()
+        val tag = listTag?.takeIf { it.first == CalendarSync.accountKey(account) }
+        val left = outOfStep()
+        // Only what the last check's pass left, and not due yet: a pass only if the list changed there.
+        val waiting = left == checked && !backoff.due(System.currentTimeMillis())
+        if (left.isEmpty() || waiting) {
+            val unchanged = tag?.let { withContext(Dispatchers.IO) { runCatching { api.unchanged(account, it.second) }.getOrNull() } }
+            if (unchanged == true && left.isEmpty() || unchanged != false && waiting) return
+        }
+        val (ok, wrote) = passAndFollow()
+        val after = runCatching { outOfStep() }.getOrNull()
+        checked = after
+        // Settled, or the pass changed something (the next check asks again at once).
+        backoff.after(if (wrote || ok && after.isNullOrEmpty() && listTag != null) null
+            else listOf(_state.value.error, after, listTag == null), System.currentTimeMillis())
     }
 
     // Planner's notes not as last synced: new, changed, or deleted with the Undo gone.
@@ -261,29 +297,39 @@ class NoteSync(
             .mapTo(HashSet()) { it.id } + (links.keys - local.mapTo(HashSet()) { it.id } - pending)
     }
 
-    suspend fun sync(): Boolean = lock.withLock {
-        if (!_enabled.value) return@withLock true
-        _state.value = _state.value.copy(running = true, error = null)
-        // Not cut off half way: a write to Nextcloud and the record of it go together.
-        withContext(NonCancellable) {
-            try {
-                val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() }
-                    ?: throw NotesApiException("Sign in to Nextcloud first, in Settings → Nextcloud.")
-                val (conflicts, skipped) = withContext(Dispatchers.IO) { pass(account) }
-                val now = System.currentTimeMillis()
-                prefs.edit().putLong(KEY_LAST, now).apply()
-                _state.value = State(lastSynced = now, conflicts = conflicts, skipped = skipped)
-                true
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(running = false, error = (e as? NotesApiException)?.message
-                    ?: if (e is java.io.IOException) "Couldn't reach Nextcloud. Check the connection and try again." else "Notes sync failed. Try again later.")
-                false
+    // A pass asked for (an edit, Sync now, the background run): AutoSync's checks start again from no wait.
+    suspend fun sync(): Boolean { backoff.reset(); return passAndFollow().first }
+
+    // One pass, then the follow-up if one was asked for meanwhile. Also whether it wrote anything on either side.
+    private suspend fun passAndFollow(): Pair<Boolean, Boolean> {
+        val result = lock.withLock {
+            if (!_enabled.value) return@withLock true to false
+            _state.value = _state.value.copy(running = true, error = null)
+            // Not cut off half way: a write to Nextcloud and the record of it go together.
+            withContext(NonCancellable) {
+                val wrote = booleanArrayOf(false)
+                try {
+                    val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() }
+                        ?: throw NotesApiException("Sign in to Nextcloud first, in Settings → Nextcloud.")
+                    val (conflicts, skipped) = withContext(Dispatchers.IO) { pass(account, wrote) }
+                    val now = System.currentTimeMillis()
+                    prefs.edit().putLong(KEY_LAST, now).apply()
+                    _state.value = State(lastSynced = now, conflicts = conflicts, skipped = skipped)
+                    true to wrote[0]
+                } catch (e: Exception) {
+                    _state.value = _state.value.copy(running = false, error = (e as? NotesApiException)?.message
+                        ?: if (e is java.io.IOException) "Couldn't reach Nextcloud. Check the connection and try again." else "Notes sync failed. Try again later.")
+                    false to wrote[0]
+                }
             }
         }
+        followUp()
+        return result
     }
 
-    // One pass; returns how many conflict copies it made and how many notes it left alone.
-    private suspend fun pass(account: NextcloudAccount): Pair<Int, Int> {
+    // One pass; returns how many conflict copies it made and how many notes it left alone. [wrote][0]: set once it has
+    // changed anything on either side.
+    private suspend fun pass(account: NextcloudAccount, wrote: BooleanArray): Pair<Int, Int> {
         val key = CalendarSync.accountKey(account)
         val (list, tag) = api.listTagged(account)
         // What Nextcloud's list was as this pass read it (a pass that writes changes it, so the next check passes once more).
@@ -298,14 +344,17 @@ class NoteSync(
         var local = store.all().associateBy { it.id }
         val linkedRemote = linked.mapTo(HashSet()) { it.remoteId }
 
+        suspend fun put(note: PlannerNote, expected: PlannerNote?) = store.put(note, expected).also { if (it) wrote[0] = true }
+        suspend fun archive(id: String, expected: PlannerNote) = store.archive(id, expected).also { if (it) wrote[0] = true }
         suspend fun push(note: PlannerNote) {
             val made = api.create(account, NoteMapping.remoteTitle(note), note.content, note.notebook, note.pinned)
+            wrote[0] = true
             rows.put(NoteMapping.row(note, key, made))
         }
         suspend fun conflictCopy(mine: PlannerNote) {
             val copy = mine.copy(id = java.util.UUID.randomUUID().toString(),
                 title = (Notes.label(mine) + " (conflict copy)").take(Notes.MAX_TITLE), reminderAt = null, snoozedUntil = null)
-            if (store.put(copy, null)) conflicts++
+            if (put(copy, null)) conflicts++
         }
         // One note Nextcloud refuses (a shared note it won't let Planner change, say) is left as it is; the rest go on.
         // A login or connection problem still stops the pass.
@@ -321,7 +370,7 @@ class NoteSync(
                 mine == null -> {
                     if (row.noteId in pending) return@each
                     if (theirs == null) { rows.delete(row.noteId); return@each }
-                    if (theirs.etag == row.etag && !theirs.readonly) { api.delete(account, theirs.id); rows.delete(row.noteId) }
+                    if (theirs.etag == row.etag && !theirs.readonly) { api.delete(account, theirs.id); wrote[0] = true; rows.delete(row.noteId) }
                     else {
                         // Changed there, or shared read-only: kept there, and (changed) it comes back below as a new note.
                         rows.delete(row.noteId)
@@ -331,7 +380,7 @@ class NoteSync(
                 // Deleted on Nextcloud: to Recently deleted, unless changed here since (then it goes up again).
                 theirs == null -> {
                     rows.delete(row.noteId)
-                    if (NoteMapping.fields(mine) == NoteMapping.fields(row)) store.archive(mine.id, mine) else push(mine)
+                    if (NoteMapping.fields(mine) == NoteMapping.fields(row)) archive(mine.id, mine) else push(mine)
                 }
                 !NoteMapping.fits(theirs) -> skipped++
                 else -> {
@@ -343,15 +392,15 @@ class NoteSync(
                         !mineChanged && !theirsChanged -> {}
                         !mineChanged -> {
                             val updated = NoteMapping.apply(mine, theirs)
-                            if (store.put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                            if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
                         }
                         theirs.readonly && metaOnly -> {
                             val updated = if (theirsChanged) NoteMapping.apply(mine, theirs).copy(notebook = mine.notebook, pinned = mine.pinned) else mine
-                            if (updated == mine || store.put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                            if (updated == mine || put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
                         }
                         !theirsChanged && !theirs.readonly -> when (val result = api.update(account, theirs.id, theirs.etag,
                             NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned)) {
-                            is NotesApi.Write.Done -> rows.put(NoteMapping.row(mine, key, result.note))
+                            is NotesApi.Write.Done -> { wrote[0] = true; rows.put(NoteMapping.row(mine, key, result.note)) }
                             // Changed there meanwhile: settled on the next pass, with its new version.
                             NotesApi.Write.Changed -> {}
                             NotesApi.Write.Gone -> { rows.delete(row.noteId); push(mine) }
@@ -360,7 +409,7 @@ class NoteSync(
                             // Both changed (or it's read-only there): Nextcloud's version here, then Planner's as a copy
                             // (only once the note itself is updated, so a failed update doesn't make a second copy).
                             val updated = NoteMapping.apply(mine, theirs)
-                            if (store.put(updated, mine)) {
+                            if (put(updated, mine)) {
                                 rows.put(NoteMapping.row(updated, key, theirs))
                                 if (NoteMapping.fields(updated) != NoteMapping.fields(mine)) conflictCopy(mine)
                             }
@@ -384,8 +433,8 @@ class NoteSync(
                 // Linked, with Nextcloud's notebook and favourite (Planner's title, colour, tags and so on stay).
                 free.remove(twin)
                 val linkedNote = twin.copy(notebook = incoming.notebook, pinned = incoming.pinned)
-                if (linkedNote == twin || store.put(linkedNote, twin)) rows.put(NoteMapping.row(linkedNote, key, theirs))
-            } else if (store.put(incoming, null)) rows.put(NoteMapping.row(incoming, key, theirs))
+                if (linkedNote == twin || put(linkedNote, twin)) rows.put(NoteMapping.row(linkedNote, key, theirs))
+            } else if (put(incoming, null)) rows.put(NoteMapping.row(incoming, key, theirs))
         }
 
         // Planner's notes not on Nextcloud yet go up.

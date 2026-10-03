@@ -96,6 +96,7 @@ class CalendarSync(
     // login or a ticked calendar, and at most once every 15 minutes.
     // "Sync now" (Settings → Calendars, or a tap on the sync icon): phone calendars and links, then two-way Nextcloud both ways.
     suspend fun syncNow() {
+        checkBackoff.reset()
         refreshPhone(); refreshLinks()
         if (hasAccount()) { sync(); send(); tasks?.send() }
     }
@@ -120,12 +121,34 @@ class CalendarSync(
     }
 
     // A check of AutoSync's: Nextcloud's changes (a calendar or task list is only downloaded when it changed there) and
-    // whatever of Planner's is still to send, with no 15-minute wait. Quiet: no syncing cloud for a check that finds nothing.
-    suspend fun check() {
+    // whatever of Planner's is still to send, with no 15-minute wait. Quiet: no syncing cloud for a check (SY-4: its send
+    // included). SY-2: while a check leaves the same problem (a calendar that won't download, a file Nextcloud refuses),
+    // the next ones only ask what changed: retrying the failed download, and the send, wait longer each time (see
+    // SyncBackoff). A calendar changed since it failed is still tried; Planner's own changes are sent by requestSend.
+    // [fresh]: the connection is back, so no waiting.
+    suspend fun check(fresh: Boolean = false) {
         if (!hasAccount()) return
-        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) }) sync(quiet = true)
-        send(); tasks?.send()
+        if (fresh) checkBackoff.reset()
+        val full = checkBackoff.due(now())
+        if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) }) sync(quiet = true, retry = full)
+        if (full) { send(quiet = true); tasks?.send(quiet = true) }
+        val left = problems()
+        if (full) checkBackoff.after(left, now()) else checkBackoff.light(left)
     }
+
+    // What is still wrong after a check (null: nothing): calendars or the task list that failed, and the last sync's or
+    // send's error.
+    private suspend fun problems(): Any? {
+        val failing = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.lastError != null || it.taskError != null) }
+            .map { Triple(it.id, it.lastError, it.taskError) }
+        val errors = listOf(_state.value, _sendState.value, tasks?.state?.value).map { it?.takeIf { s -> s.error }?.message }
+        return if (failing.isEmpty() && errors.all { it == null }) null else failing to errors
+    }
+
+    // SY-2: AutoSync's checks backing off (see check); and each failed calendar's ctag when it failed, so one that changed
+    // there since is tried again at once.
+    private val checkBackoff = SyncBackoff()
+    private val failedAt = java.util.concurrent.ConcurrentHashMap<Long, String>()
 
     fun phonePermitted(): Boolean = phone?.permitted() == true
 
@@ -270,6 +293,7 @@ class CalendarSync(
     // finishes, and another pass follows it a few seconds later.
     fun requestSend() {
         val scope = scope ?: return
+        checkBackoff.reset()
         synchronized(debounce) {
             if (!debounce.request()) return
             sendJob?.cancel()
@@ -285,11 +309,12 @@ class CalendarSync(
     // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
     // deletes what Planner no longer has (not while its Undo is on offer). A write that finds the server copy changed or
     // gone leaves it and marks it for the next pull. Offline, the rest waits for the next pass.
-    suspend fun send(): Boolean = sendLock.withLock {
+    // [quiet]: AutoSync's check; no syncing cloud (SY-4: it used to rain every minute, with nothing to send).
+    suspend fun send(quiet: Boolean = false): Boolean = sendLock.withLock {
         val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return@withLock true
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != accountKey(account)) return@withLock true
-        _sendState.value = State(running = true)
+        if (!quiet) _sendState.value = State(running = true)
         _sendState.value = try {
             withContext(Dispatchers.IO) { sendLocked(account, target) }
         } catch (e: CancellationException) {
@@ -462,15 +487,15 @@ class CalendarSync(
     // The file of [row]: its own name for events that came from Nextcloud, "<uid>.ics" for ones Planner created.
     private fun hrefOf(target: CalendarSource, row: SentEvent): String = row.href ?: "${target.href}${row.uid}.ics"
 
-    // One pass Nextcloud → Planner for the synced calendar: nothing when its change marker says nothing changed.
-    private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?) {
-        val store = planner ?: return
+    // One pass Nextcloud → Planner for the synced calendar: nothing when its change marker says nothing changed (false).
+    private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?): Boolean {
+        val store = planner ?: return false
         val sentDao = db.sentDao()
         val (from, until, key) = linkWindow()
         val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }
         val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
         // After a failed pull (lastError) the next one always reads, so the error clears only once one works.
-        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled && target.lastError == null) return
+        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled && target.lastError == null) return false
         // E-9: a calendar with too many files to list at once is still synced, all but noticing deletions there of events
         // nothing is waiting on (see gone); the window is read in parts when it's too large in one.
         val listing = try { client.eventEtags(account, target.href) } catch (_: ReplyTooLargeException) { null }
@@ -584,6 +609,7 @@ class CalendarSync(
             dao.source(target.id)?.let { dao.updateSource(it.copy(ctag = ctag, fetchedFor = key, lastSynced = now(), lastError = null)) }
         }
         onChanged()
+        return true
     }
 
     // Settles a conflict: keep Planner's version (written to Nextcloud, or Nextcloud's copy deleted if it was deleted in
@@ -795,14 +821,15 @@ class CalendarSync(
 
     // Lists the calendars on the server (new ones start unticked) and downloads each ticked calendar that changed since
     // its last download. Returns false when another sync was already running; with [wait], waits for it and then syncs
-    // (a choice just made must be read, not left to the next sync).
-    suspend fun sync(wait: Boolean = false, quiet: Boolean = false): Boolean {
+    // (a choice just made must be read, not left to the next sync). [retry] false (a check backing off): a calendar
+    // whose download failed is tried again only if it changed there since.
+    suspend fun sync(wait: Boolean = false, quiet: Boolean = false, retry: Boolean = true): Boolean {
         if (wait) lock.lock() else if (!lock.tryLock()) return false
         try {
             lastAttempt = now()
             if (!quiet) _state.value = State(running = true, message = "Syncing calendars…")
             _state.value = try {
-                State(message = withContext(Dispatchers.IO) { syncLocked() })
+                State(message = withContext(Dispatchers.IO) { syncLocked(retry) })
             } catch (e: CancellationException) {
                 _state.value = State()
                 throw e
@@ -815,7 +842,7 @@ class CalendarSync(
         }
     }
 
-    private suspend fun syncLocked(): String {
+    private suspend fun syncLocked(retry: Boolean = true): String {
         val account = accounts.load() ?: throw BackupException("Connect to Nextcloud first.")
         val key = accountKey(account)
         val remote = client.calendars(account).associateBy { it.href }
@@ -845,6 +872,7 @@ class CalendarSync(
         for (source in dao.sources().filter { it.enabled && it.events && it.kind == OutsideCalendars.KIND_NEXTCLOUD && !it.sendHere }) {
             val calendar = remote[source.href] ?: continue
             if (calendar.ctag != null && calendar.ctag == source.ctag && source.fetchedFor == window && source.lastError == null) continue
+            if (!retry && source.lastError != null && failedAt[source.id] == calendar.ctag.orEmpty()) { failed++; continue }
             try {
                 val data = client.calendarEvents(account, source.href, from.atStartOfDay(zone()).toInstant(), until.atStartOfDay(zone()).toInstant())
                 // Planner's own events (sent from this phone, step 5) are already shown as Planner events.
@@ -859,10 +887,12 @@ class CalendarSync(
                     dao.insertEvents(read.events.map { it.copy(id = 0, sourceId = source.id) })
                     dao.updateSource(current.copy(ctag = calendar.ctag, fetchedFor = window, lastSynced = now(), lastError = null))
                 }
+                failedAt.remove(source.id)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 failed++
+                failedAt[source.id] = calendar.ctag.orEmpty()
                 val message = (e as? BackupException)?.message ?: "Couldn't download this calendar."
                 db.withTransaction { dao.source(source.id)?.let { dao.updateSource(it.copy(lastError = message)) } }
             }
@@ -870,24 +900,31 @@ class CalendarSync(
         // The calendar kept in sync both ways (step 6). E-5: which one is read inside the lock, so a restore or a new choice
         // made while waiting for it is what's pulled, never the calendar from before.
         var target: CalendarSource? = null
+        var targetCtag: String? = null
+        var read = false
         try {
             sendLock.withLock {
                 val current = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.account == key }
                 val calendar = current?.let { remote[it.href] } ?: return@withLock
-                target = current
-                pullLocked(account, current, calendar.ctag)
+                if (!retry && current.lastError != null && failedAt[current.id] == calendar.ctag.orEmpty()) { failed++; return@withLock }
+                target = current; targetCtag = calendar.ctag
+                read = pullLocked(account, current, calendar.ctag)
+                failedAt.remove(current.id)
             }
-            target?.let { _sendState.value = summary(it) }
+            // A check that sends nothing (backing off) keeps what the last send said (a file refused, say) unless the pull
+            // read something.
+            target?.let { if (retry || read) _sendState.value = summary(it) }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             // Kept on the calendar (a send right after doesn't clear it, as it did the send state): the sync icon
             // and Sync now show it until a pull works again (on a calendar just chosen, nothing new is sent until then).
             failed++
             val message = (e as? BackupException)?.message ?: "Couldn't download this calendar. Planner tries again at the next sync."
-            target?.let { pulled -> db.withTransaction { dao.source(pulled.id)?.let { dao.updateSource(it.copy(lastError = message)) } } }
+            target?.let { pulled -> failedAt[pulled.id] = targetCtag.orEmpty()
+                db.withTransaction { dao.source(pulled.id)?.let { dao.updateSource(it.copy(lastError = message)) } } }
         }
         // The task list kept in sync (its own state says how it went).
-        val tasksFailed = tasks?.pull(account, remote) == false
+        val tasksFailed = tasks?.pull(account, remote, retry) == false
         onChanged()
         val ticked = dao.sources().count { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
         return buildString {

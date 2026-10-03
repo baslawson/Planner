@@ -75,6 +75,8 @@ class BackupManager(
     private val calendars: CalendarSync? = null,
     // The Nextcloud task list Planner's tasks are kept in sync with, and what was synced.
     private val tasks: TaskSync? = null,
+    // Notes sync with the Nextcloud Notes app: paused while a restore replaces the notes (see restore).
+    private val notes: NoteSync? = null,
 ) {
     val status = BackupStatusStore(context)
     suspend fun export(uri: Uri, trackStatus: Boolean = true) {
@@ -172,13 +174,15 @@ class BackupManager(
                 else "Couldn't copy the attachments out of the backup. Nothing was changed.")
         }
         var failure: Exception? = null
-        // No calendar or task send or pull runs from before the events and tasks are replaced until the record of what was
-        // sent is (see CalendarSync.paused, TaskSync.paused): one would put rows for the old ones back over the restored
-        // record, delete a restored one's file, or bring the files in as new ones beside the restored ones. Calendars'
-        // lock first, then the task list's (a pull takes them one after the other, never the other way round).
+        // No calendar or task send or pull, and no notes pass, runs from before the events, tasks and notes are replaced
+        // until the record of what was sent is (see CalendarSync.paused, TaskSync.paused, NoteSync.paused): one would put
+        // rows for the old ones back over the restored record, delete a restored one's file (or a note on Nextcloud), or
+        // bring the files in as new ones beside the restored ones. Calendars' lock first, then the task list's (a pull
+        // takes them one after the other, never the other way round), then notes' (a notes pass takes neither).
         suspend fun paused(block: suspend () -> Unit) {
-            val sync = calendars; val taskSync = tasks
-            val inner: suspend () -> Unit = { if (taskSync != null) taskSync.paused(block) else block() }
+            val sync = calendars; val taskSync = tasks; val noteSync = notes
+            val innermost: suspend () -> Unit = { if (noteSync != null) noteSync.paused(block) else block() }
+            val inner: suspend () -> Unit = { if (taskSync != null) taskSync.paused(innermost) else innermost() }
             if (sync != null) sync.paused(inner) else inner()
         }
         paused {
@@ -198,6 +202,8 @@ class BackupManager(
                 step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
                 // After the calendars, whose restore rebuilds the list rows.
                 step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
+                // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
+                step { notes?.forgetLocked() }
             }
         }
         failure?.let { throw it }

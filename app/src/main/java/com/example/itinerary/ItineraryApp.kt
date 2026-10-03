@@ -92,7 +92,7 @@ class ItineraryApp : Application() {
 
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }
 
-    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync) }
+    val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync, noteSync) }
 
     val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup) }
 

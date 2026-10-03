@@ -64,6 +64,8 @@ class TaskSync(
     val conflicts: Flow<List<SentTask>> = rows.map { rows -> rows.filter { it.problem == SentEvent.CONFLICT } }
     private var sendJob: Job? = null
     private val debounce = SendDebounce()
+    // SY-2: the list and its ctag when its read last failed (see pull).
+    @Volatile private var failedAt: Pair<Long, String>? = null
 
     private suspend fun target(): CalendarSource? = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.tasksHere }
 
@@ -126,11 +128,12 @@ class TaskSync(
     // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
     // deletes what Planner no longer has (not while its Undo is on offer). A write that finds the server copy changed or
     // gone leaves it and marks it for the next pull. Offline, the rest waits for the next pass.
-    suspend fun send(): Boolean = lock.withLock {
+    // [quiet]: AutoSync's check, as CalendarSync.send (SY-4).
+    suspend fun send(quiet: Boolean = false): Boolean = lock.withLock {
         val target = target() ?: return@withLock true
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != CalendarSync.accountKey(account)) return@withLock true
-        _state.value = CalendarSync.State(running = true)
+        if (!quiet) _state.value = CalendarSync.State(running = true)
         _state.value = try {
             withContext(Dispatchers.IO) { sendLocked(account, target) }
         } catch (e: CancellationException) {
@@ -237,32 +240,39 @@ class TaskSync(
     }
 
     // Called by CalendarSync.sync with the lists the server has (it has just brought the calendar rows up to date). False
-    // when reading the list failed; the reason stays on the list (taskError) until a read works.
-    internal suspend fun pull(account: NextcloudAccount, remote: Map<String, RemoteCalendar>): Boolean {
+    // when reading the list failed; the reason stays on the list (taskError) until a read works. [retry] false (SY-2, a
+    // check backing off): a list that failed is read again only if it changed there since.
+    internal suspend fun pull(account: NextcloudAccount, remote: Map<String, RemoteCalendar>, retry: Boolean = true): Boolean {
         // E-5: the list is read inside the lock, so a restore or a new choice made while waiting is what's pulled.
         var target: CalendarSource? = null
+        var ctag: String? = null
+        var read = false
         return try {
             lock.withLock {
                 val current = target()?.takeIf { it.account == CalendarSync.accountKey(account) }
                 val list = current?.let { remote[it.href] } ?: return@withLock
-                target = current
-                pullLocked(account, current, list.ctag)
+                if (!retry && current.taskError != null && failedAt == current.id to list.ctag.orEmpty()) return false
+                target = current; ctag = list.ctag
+                read = pullLocked(account, current, list.ctag)
+                failedAt = null
             }
-            target?.let { _state.value = summary(it) }
+            // As CalendarSync's: a check backing off keeps what the last send said unless the pull read something.
+            target?.let { if (retry || read) _state.value = summary(it) }
             true
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             val message = (e as? BackupException)?.message ?: "Couldn't download the task list. Planner tries again at the next sync."
-            target?.let { pulled -> db.withTransaction { dao.source(pulled.id)?.let { dao.updateSource(it.copy(taskError = message)) } } }
+            target?.let { pulled -> failedAt = pulled.id to ctag.orEmpty()
+                db.withTransaction { dao.source(pulled.id)?.let { dao.updateSource(it.copy(taskError = message)) } } }
             false
         }
     }
 
     // One pass Nextcloud → Planner: nothing when the list's change marker says nothing changed.
-    private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?) {
+    private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?): Boolean {
         val rows = rowsDao.all().filter { it.account == target.account && it.list == target.href }
         val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
-        if (ctag != null && ctag == target.taskCtag && !unsettled && target.taskError == null) return
+        if (ctag != null && ctag == target.taskCtag && !unsettled && target.taskError == null) return false
         // T4: what is gone is judged from the full listing (as for events): the task query leaves out any file it returns
         // without its content.
         val listing = client().eventEtags(account, target.href)
@@ -342,6 +352,7 @@ class TaskSync(
         db.withTransaction { dao.source(target.id)?.let { dao.updateSource(it.copy(taskCtag = ctag ?: "", taskError = null)) } }
         _hidden.value = hidden
         onChanged()
+        return true
     }
 
     enum class Resolution { PLANNER, NEXTCLOUD, BOTH }

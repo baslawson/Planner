@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -774,5 +775,76 @@ class CalendarTwoWayTest {
         assertEquals(1, repo.snapshot().deleted.size)
         assertTrue(dav.files.values.none { it.second.contains("QA Deleted twice") })
         assertTrue(rows().isEmpty())
+    }
+
+    // Bug hunt 3 Oct, SY-4: AutoSync's minute check doesn't make the sync icon rain (sendState.running) for its send; a
+    // send of Sync now's still does.
+    @Test fun aQuietCheckDoesntShowSyncing() = runBlocking {
+        save("QA Quiet")
+        start()
+        val running = java.util.concurrent.atomic.AtomicInteger()
+        val watching = launch(Dispatchers.Unconfined) { sync.sendState.collect { if (it.running) running.incrementAndGet() } }
+        sync.check(); sync.check()
+        assertEquals(0, running.get())
+        sync.send()
+        assertTrue("the watch sees a send that shows it", running.get() > 0)
+        watching.cancel()
+    }
+
+    // SY-2: a file Nextcloud refuses isn't sent again by every minute's check: after the second try the checks wait longer
+    // each time (still showing the problem); the connection back, or Sync now, tries at once.
+    @Test fun aCheckBacksOffFromARefusedFile() = runBlocking {
+        save("QA Refused")
+        dav.refuse = { body -> if (body.contains("QA Refused")) 413 else null }
+        start()
+        fun puts() = dav.requests.count { it.first == "PUT" }
+        val first = puts()
+        sync.check(); sync.check()
+        assertEquals(first + 2, puts())
+        sync.check(); sync.check()
+        assertEquals("not at every check", first + 2, puts())
+        assertTrue(sync.sendState.value.error)
+        clock += 60_000
+        sync.check()
+        assertEquals("a minute later", first + 3, puts())
+        sync.check()
+        assertEquals(first + 3, puts())
+        sync.check(fresh = true)
+        assertEquals(first + 4, puts())
+        dav.refuse = null
+        sync.syncNow()
+        assertTrue(plannerFile("QA Refused").value.second.contains("SUMMARY:QA Refused"))
+        assertFalse(sync.sendState.value.error)
+    }
+
+    // SY-2: a synced calendar whose download keeps failing isn't listed and queried again by every check; one that changed
+    // there since it failed still is.
+    @Test fun aCheckBacksOffFromAFailingDownloadButReadsAChangeThere() = runBlocking {
+        save("QA Waits")
+        start()
+        val failed = java.util.concurrent.atomic.AtomicInteger()
+        val failing = java.util.concurrent.atomic.AtomicBoolean(true)
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse =
+                if (failing.get() && request.method == "REPORT" && request.body.clone().readUtf8().contains("calendar-query")) {
+                    failed.incrementAndGet(); okhttp3.mockwebserver.MockResponse().setResponseCode(500)
+                } else dav.dispatch(request)
+        }
+        fun target() = runBlocking { database.outsideDao().sources() }.single { it.sendHere }
+        dav.bump()
+        sync.check(); sync.check()
+        assertEquals(2, failed.get())
+        assertNotNull(target().lastError)
+        sync.check(); sync.check()
+        assertEquals("not at every check", 2, failed.get())
+        assertNotNull(target().lastError)
+        dav.bump()
+        sync.check()
+        assertEquals("changed there since", 3, failed.get())
+        sync.check()
+        assertEquals(3, failed.get())
+        failing.set(false)
+        sync.check(fresh = true)
+        assertNull(target().lastError)
     }
 }
