@@ -272,7 +272,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
     // The event's own colour: the bar as it is, the title in a shade that reads well on the current theme.
     val accent = item.accentColor()
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
-        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = selection.isSelected(item.id).takeIf { selection.active }, arrow = false, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
                 item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
@@ -337,7 +337,7 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
         val format = LocalTimeFormat.current
         // An outside event has nothing to select, and only actions that leave its calendar as it is.
         if (outside != null) { if (!selection.active) OutsideActionsMenu(outside, onCopy) }
-        else if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
+        else if (selection.active) androidx.compose.material3.Checkbox(checked = selection.isSelected(item.id), onCheckedChange = null)
         else EventActionsMenu(item.id, item.title, item.date, today, onMove,
             billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
             repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped, repeating = item.seriesId != null,

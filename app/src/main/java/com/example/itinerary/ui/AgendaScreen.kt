@@ -436,7 +436,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
     val accent = event.accentColor()
     val outside = LocalOutsideEvents.current[event.id]
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(event.id) }),
-        selected = (event.id in selection.ids).takeIf { selection.active }, arrow = false, tint = outside?.let { Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = selection.isSelected(event.id).takeIf { selection.active }, arrow = false, tint = outside?.let { Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         LimitTextScale { // the time column has a fixed width
             Text(
                 event.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
@@ -476,7 +476,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         val format = LocalTimeFormat.current
         // An outside event has nothing to select, and only actions that leave its calendar as it is.
         if (outside != null) { if (!selection.active) OutsideActionsMenu(outside) { onCopy(outside) } }
-        else if (selection.active) androidx.compose.material3.Checkbox(checked = event.id in selection.ids, onCheckedChange = null)
+        else if (selection.active) androidx.compose.material3.Checkbox(checked = selection.isSelected(event.id), onCheckedChange = null)
         else EventActionsMenu(event.id, event.title, event.date, today, onMove,
             billId = event.id.takeIf { event.category == "Bills" }, paid = event.paid,
             repeatId = event.id.takeIf { event.seriesId != null || event.skipped }, skipped = event.skipped, repeating = event.seriesId != null,

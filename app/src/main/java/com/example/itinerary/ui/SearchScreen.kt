@@ -297,7 +297,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
     val accent = item.accentColor()
     val outside = LocalOutsideEvents.current[item.id]
     TappableRow(onClick = onClick, onLongClick = if (outside != null) null else ({ selection.toggle(item.id) }),
-        selected = (item.id in selection.ids).takeIf { selection.active }, arrow = false, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        selected = selection.isSelected(item.id).takeIf { selection.active }, arrow = false, tint = outside?.let { androidx.compose.ui.graphics.Color(it.color) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
             item.startTime?.label(LocalTimeFormat.current, LocalContext.current) ?: "All day",
             style = MaterialTheme.typography.labelLarge,
@@ -345,7 +345,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
         val context = LocalContext.current
         val format = LocalTimeFormat.current
         if (outside != null) { if (!selection.active) OutsideActionsMenu(outside, onCopy = null) }
-        else if (selection.active) androidx.compose.material3.Checkbox(checked = item.id in selection.ids, onCheckedChange = null)
+        else if (selection.active) androidx.compose.material3.Checkbox(checked = selection.isSelected(item.id), onCheckedChange = null)
         else {
             val repo = (context.applicationContext as com.example.itinerary.ItineraryApp).repository
             EventActionsMenu(item.id, item.title, item.date, today, onMove = { repo.moveToTomorrow(item.id) },

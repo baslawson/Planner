@@ -61,7 +61,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
     val scope = rememberCoroutineScope()
     var busy by remember(task.id) { mutableStateOf(false) }
     val selecting = selection?.active == true
-    val selected = selection != null && task.id in selection.taskIds
+    val selected = selection != null && selection.isTaskSelected(task.id)
     OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         colors = if (selected) CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.outlinedCardColors()) {
         Row(Modifier.fillMaxWidth()

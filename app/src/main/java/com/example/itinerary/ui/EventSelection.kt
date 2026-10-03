@@ -27,13 +27,19 @@ class EventSelection {
     var ids by mutableStateOf(emptyList<Long>())
     var taskIds by mutableStateOf(emptyList<String>())
     var busy by mutableStateOf(false)
+    // The lists keep the order things were ticked in; every card asks by set, so after Select all a toggle doesn't
+    // cost each visible card a walk through the whole list (UI-12).
+    private val idSet by derivedStateOf { ids.toHashSet() }
+    private val taskIdSet by derivedStateOf { taskIds.toHashSet() }
+    fun isSelected(id: Long) = id in idSet
+    fun isTaskSelected(id: String) = id in taskIdSet
     val active get() = ids.isNotEmpty() || taskIds.isNotEmpty()
     val size get() = ids.size + taskIds.size
     fun toggle(id: Long) {
-        if (!busy) ids = if (id in ids) ids - id else ids + id
+        if (!busy) ids = if (isSelected(id)) ids - id else ids + id
     }
     fun toggleTask(id: String) {
-        if (!busy) taskIds = if (id in taskIds) taskIds - id else taskIds + id
+        if (!busy) taskIds = if (isTaskSelected(id)) taskIds - id else taskIds + id
     }
     fun clear() { if (!busy) { ids = emptyList(); taskIds = emptyList() } }
     fun selectAll(events: List<SelectableEvent>, tasks: List<SelectableTask>) {

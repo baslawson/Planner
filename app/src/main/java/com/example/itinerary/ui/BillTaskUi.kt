@@ -35,7 +35,7 @@ fun BillTaskCard(bill: PlanEvent, today: LocalDate, selection: EventSelection,
     var busy by remember(bill.id) { mutableStateOf(false) }
     TappableRow(onClick = { if (selection.active) selection.toggle(bill.id) else if (!busy) onEdit() },
         onLongClick = { selection.toggle(bill.id) },
-        selected = (bill.id in selection.ids).takeIf { selection.active }, arrow = false,
+        selected = selection.isSelected(bill.id).takeIf { selection.active }, arrow = false,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(bill.title, style = MaterialTheme.typography.titleMedium)
@@ -61,7 +61,7 @@ fun BillTaskCard(bill: PlanEvent, today: LocalDate, selection: EventSelection,
                     }) { Text("Mark paid") }
             }
         }
-        if (selection.active) Checkbox(checked = bill.id in selection.ids, onCheckedChange = null)
+        if (selection.active) Checkbox(checked = selection.isSelected(bill.id), onCheckedChange = null)
         else EventActionsMenu(bill.id, bill.title, bill.date, today, onMove = { repo.moveToTomorrow(bill.id) },
             onShare = { shareEvent(context, bill.title, bill.date, bill.startTime, null, bill.location, format) },
             billId = bill.id, paid = bill.paid, repeatId = bill.id.takeIf { bill.seriesId != null || bill.skipped }, skipped = bill.skipped, repeating = bill.seriesId != null)
