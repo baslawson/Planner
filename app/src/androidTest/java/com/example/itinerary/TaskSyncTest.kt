@@ -437,7 +437,7 @@ class TaskSyncTest {
         repeat(3) { clock += 60_000; sync.check() }
         assertEquals("no fingerprints while idle", prints, ServerTasks.fingerprints.get())
         assertEquals(written, writes().size)
-        repo.saveTask(task("QA Idle task").copy(title = "QA Idle task changed"))
+        repo.saveTask(task("QA Idle task").copy(title = "QA Idle task changed"), create = false)
         tasks.markChanged()
         clock += 60_000; sync.check()
         assertTrue(fileOf("QA Idle task changed").value.second.contains("SUMMARY:QA Idle task changed"))
