@@ -17,4 +17,9 @@ class ExactAlarmHintTest {
         assertEquals(LATE_REMINDER_HINT, exactAlarmHint(false, listOf(plain)))
         assertTrue(exactAlarmHint(false, listOf(plain, plain.copy(id = 2, ringUntilDismissed = true)))!!.contains("Ring until I stop it"))
     }
+
+    // DU-5: the note and quick-entry editors show this constant now instead of their own copy of the text.
+    @Test fun lateReminderHintText() {
+        assertEquals("Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing.", LATE_REMINDER_HINT)
+    }
 }

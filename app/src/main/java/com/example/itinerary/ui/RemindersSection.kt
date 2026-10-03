@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,8 +60,7 @@ fun RemindersSection(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val scheduler = (context.applicationContext as com.example.itinerary.ItineraryApp).reminderScheduler
-    var exactAllowed by remember { mutableStateOf(scheduler.canScheduleExact()) }
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { exactAllowed = scheduler.canScheduleExact() }
+    val exactAllowed by rememberExactAlarmsAllowed(scheduler)
 
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
     ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
@@ -91,6 +91,15 @@ fun RemindersSection(
             onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
         )
     }
+}
+
+// Whether Android lets Planner set exact alarms. Checked again on resume, because the user grants this in system settings,
+// outside the app.
+@Composable
+internal fun rememberExactAlarmsAllowed(scheduler: com.example.itinerary.reminders.ReminderScheduler): State<Boolean> {
+    val allowed = remember { mutableStateOf(scheduler.canScheduleExact()) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { allowed.value = scheduler.canScheduleExact() }
+    return allowed
 }
 
 const val LATE_REMINDER_HINT = "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing."

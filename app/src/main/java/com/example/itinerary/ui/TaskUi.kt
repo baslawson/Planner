@@ -228,8 +228,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
     val notifications = rememberNotificationState()
-    var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactAllowed = app.reminderScheduler.canScheduleExact() }
+    val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
     var reminderAt by rememberSaveable(initial.id) { mutableStateOf(if (draft != null && !draft.isNull("reminderAt")) draft.getLong("reminderAt") else if (draft != null) null else initial.reminderAt) }
     var reminderSuggestion by rememberSaveable(initial.id) { mutableStateOf<String?>(null) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }

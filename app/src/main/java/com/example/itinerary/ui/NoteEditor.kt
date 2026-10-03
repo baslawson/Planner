@@ -396,13 +396,12 @@ private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled:
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val notifications = rememberNotificationState()
-    var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { exactAllowed = app.reminderScheduler.canScheduleExact() }
+    val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
     var stale by remember { mutableIntStateOf(0) }
     val presets = remember(reminderAt, stale) { com.example.itinerary.data.taskReminderPresets(null) }
     val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
     ReminderSectionFrame(notifications.enabled, notifications.enable,
-        hints = listOfNotNull(if (reminderAt != null && !exactAllowed) "Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing." else null),
+        hints = listOfNotNull(if (reminderAt != null && !exactAllowed) LATE_REMINDER_HINT else null),
         chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
             (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
                 // Timed from the tap; a choice that has passed since goes.

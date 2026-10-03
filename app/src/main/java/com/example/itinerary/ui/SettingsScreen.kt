@@ -43,9 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.AppFont
 import com.example.itinerary.data.DateFormatChoice
@@ -94,8 +92,7 @@ fun SettingsScreen(
     val showBillsSummary by settings.showBillsSummary.collectAsStateWithLifecycle()
     val scheduler = remember { (context.applicationContext as ItineraryApp).reminderScheduler }
     // Re-checked on resume because the user grants this in system settings, outside the app.
-    var exactAllowed by remember { mutableStateOf(scheduler.canScheduleExact()) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { exactAllowed = scheduler.canScheduleExact() }
+    val exactAllowed by rememberExactAlarmsAllowed(scheduler)
     val notifications = rememberNotificationState()
 
     val scrollState = rememberScrollState()

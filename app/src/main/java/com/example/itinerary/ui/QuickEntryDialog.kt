@@ -219,9 +219,9 @@ fun QuickEntryEditor(
     val notifications = rememberNotificationState()
     val app = context.applicationContext as com.example.itinerary.ItineraryApp
     var now by remember { mutableStateOf(ZonedDateTime.now()) }
-    var exactAllowed by remember { mutableStateOf(app.reminderScheduler.canScheduleExact()) }
+    val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
     LaunchedEffect(Unit) { while (true) { now = ZonedDateTime.now(); delay(30_000) } }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { now = ZonedDateTime.now(); exactAllowed = app.reminderScheduler.canScheduleExact() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { now = ZonedDateTime.now() }
     val suggestion = remember(currentInput, now) { currentInput.suggestion(now) }
     val reminder = suggestion.reminderMinutes?.let { reminderTrigger(suggestion.date, if (task) null else suggestion.time, it.toLong(), now.zone) }
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
@@ -421,7 +421,7 @@ fun QuickEntryEditor(
                             Text("${reminder.toLocalDate().fullLabel()} · ${reminder.toLocalTime().label(LocalTimeFormat.current, context)} · ${now.zone.id}", style = MaterialTheme.typography.bodySmall)
                             if (task || suggestion.time == null) Text("Counts back from ${LocalTime.of(9, 0).label(LocalTimeFormat.current, context)} on ${if (task) "the due date" else "an all-day event"}.", style = MaterialTheme.typography.bodySmall)
                             TextButton(enabled = !busy, onClick = { removeReminder = true }) { Text("Remove reminder") }
-                            if (!exactAllowed) Text("Android may deliver this reminder late. Enable Alarms & reminders in app settings for precise timing.", style = MaterialTheme.typography.bodySmall)
+                            if (!exactAllowed) Text(LATE_REMINDER_HINT, style = MaterialTheme.typography.bodySmall)
                         }
                         if (parsed.phrases.isNotEmpty()) {
                             TextButton(enabled = !busy, onClick = { showPhrases = !showPhrases }) { Text(if (showPhrases) "Hide recognised phrases" else "Adjust recognised text") }
