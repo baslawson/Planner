@@ -114,7 +114,13 @@ class TaskSync(
     @Volatile private var sentUpTo = 0L
     @Volatile private var lastSendPass: Long? = null
 
-    internal fun markChanged() { changes.incrementAndGet() }
+    // S5-2, as CalendarSync's: Planner's own changes apart from the rest, sent by the next check even while it backs off.
+    private val local = java.util.concurrent.atomic.AtomicLong(0)
+    @Volatile private var localSent = 0L
+
+    internal fun markChanged() { changes.incrementAndGet(); local.incrementAndGet() }
+
+    internal fun unsentChange(): Boolean = local.get() != localSent
 
     internal fun sendDue(): Boolean = changes.get() != sentUpTo || lastSendPass.let { it == null || now() - it >= CalendarSync.SEND_SAFETY_MS }
 
@@ -130,6 +136,7 @@ class TaskSync(
     // gone leaves it and marks it for the next pull. Offline, the rest waits for the next pass.
     // [quiet]: AutoSync's check, as CalendarSync.send (SY-4).
     suspend fun send(quiet: Boolean = false): Boolean = lock.withLock {
+        localSent = local.get()
         val target = target() ?: return@withLock true
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != CalendarSync.accountKey(account)) return@withLock true
@@ -244,8 +251,9 @@ class TaskSync(
                 if (!retry && current.taskError != null && failedAt == current.id to list.ctag.orEmpty()) return false
                 target = current; ctag = list.ctag
                 read = pullLocked(account, current, list.ctag)
-                // What it read may leave something to send (new files wait for the first read of a list just chosen).
-                if (read) markChanged()
+                // What it read may leave something to send (new files wait for the first read of a list just chosen);
+                // not a change in Planner, so it waits for a check backing off (S5-2).
+                if (read) changes.incrementAndGet()
                 failedAt = null
             }
             // As CalendarSync's: a check backing off keeps what the last send said unless the pull read something.

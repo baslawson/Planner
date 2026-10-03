@@ -130,7 +130,8 @@ class CalendarSync(
     // whatever of Planner's is still to send, with no 15-minute wait. Quiet: no syncing cloud for a check (SY-4: its send
     // included). SY-2: while a check leaves the same problem (a calendar that won't download, a file Nextcloud refuses),
     // the next ones only ask what changed: retrying the failed download, and the send, wait longer each time (see
-    // SyncBackoff). A calendar changed since it failed is still tried; Planner's own changes are sent by requestSend.
+    // SyncBackoff). A calendar changed since it failed is still tried; Planner's own changes are sent by requestSend, and
+    // by the next check whatever the backoff (S5-2: made with the switch off, or while Planner was away).
     // The send only runs when something may be waiting (sendDue). [fresh]: the connection is back, so no waiting.
     suspend fun check(fresh: Boolean = false) {
         if (!hasAccount()) return
@@ -138,7 +139,10 @@ class CalendarSync(
         val full = checkBackoff.due(now())
         if (dao.sources().any { it.kind == OutsideCalendars.KIND_NEXTCLOUD && (it.enabled || it.sendHere || it.tasksHere) }) sync(quiet = true, retry = full)
         // Only when something may be waiting (see sendDue): a pass works out every event's fingerprint.
-        if (full) { if (sendDue()) send(quiet = true); tasks?.let { if (it.sendDue()) it.send(quiet = true) } }
+        // S5-2: a change made in Planner since the last send is sent whatever the backoff (made with the switch off, or
+        // while Planner was away); the backoff only holds back repeating what was already tried.
+        if ((full || unsentChange()) && sendDue()) send(quiet = true)
+        tasks?.let { if ((full || it.unsentChange()) && it.sendDue()) it.send(quiet = true) }
         val left = problems()
         if (full) checkBackoff.after(left, now()) else checkBackoff.light(left)
     }
@@ -165,8 +169,15 @@ class CalendarSync(
     @Volatile private var sentUpTo = 0L
     @Volatile private var lastSendPass: Long? = null
 
+    // S5-2: Planner's own changes (markChanged) apart from the rest: one made since the last send started is sent by
+    // the next check even while it backs off.
+    private val local = java.util.concurrent.atomic.AtomicLong(0)
+    @Volatile private var localSent = 0L
+
     // Something in Planner changed (the app calls this for every change, automatic sync on or off; tasks too).
-    internal fun markChanged() { changes.incrementAndGet(); tasks?.markChanged() }
+    internal fun markChanged() { changes.incrementAndGet(); local.incrementAndGet(); tasks?.markChanged() }
+
+    internal fun unsentChange(): Boolean = local.get() != localSent
 
     internal fun sendDue(): Boolean = changes.get() != sentUpTo || lastSendPass.let { it == null || now() - it >= SEND_SAFETY_MS }
 
@@ -323,6 +334,9 @@ class CalendarSync(
     // gone leaves it and marks it for the next pull. Offline, the rest waits for the next pass.
     // [quiet]: AutoSync's check; no syncing cloud (SY-4: it used to rain every minute, with nothing to send).
     suspend fun send(quiet: Boolean = false): Boolean = sendLock.withLock {
+        // Planner's changes up to here are this pass's (sent, or tried: a failure waits for the backoff); with nowhere to
+        // send them, there is nothing to send.
+        localSent = local.get()
         val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return@withLock true
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withLock true
         if (target.account != accountKey(account)) return@withLock true

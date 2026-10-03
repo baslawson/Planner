@@ -464,4 +464,24 @@ class TaskSyncTest {
         clock += 60_000; sync.check()
         assertTrue("deleted on Nextcloud by the next check", listFiles().values.none { it.second.contains("QA Forever task") })
     }
+
+    // Bug hunt 3 Oct (b), S5-2: a check backing off from a refused task still sends a task changed in Planner since the
+    // last send; it then backs off again.
+    @Test fun aTaskChangeIsSentByTheNextCheckEvenWhileItBacksOff() = runBlocking {
+        add("QA Refused task"); add("QA Fine task")
+        dav.refuse = { body -> if (body.contains("QA Refused")) 415 else null }
+        start()
+        fun puts() = dav.requests.count { it.first == "PUT" }
+        sync.check(); sync.check()
+        val before = puts()
+        sync.check()
+        assertEquals("backing off", before, puts())
+        repo.saveTask(task("QA Fine task").copy(notes = "Fine note"), create = false); tasks.markChanged()
+        sync.check()
+        assertTrue("sent by the very next check", fileOf("QA Fine task").value.second.contains("DESCRIPTION:Fine note"))
+        val after = puts()
+        sync.check()
+        assertEquals("nothing new: backing off again", after, puts())
+        assertTrue(tasks.state.value.error)
+    }
 }

@@ -896,4 +896,24 @@ class CalendarTwoWayTest {
         clock += 60_000; sync.check()
         assertTrue("deleted on Nextcloud by the next check", dav.files.values.none { it.second.contains("QA Forever") })
     }
+
+    // Bug hunt 3 Oct (b), S5-2: a check backing off from a refused file still sends a change made in Planner since the
+    // last send (made with automatic sync off, or while Planner was away); it then backs off again.
+    @Test fun aChangeIsSentByTheNextCheckEvenWhileItBacksOff() = runBlocking {
+        save("QA Refused"); save("QA Fine", 10)
+        dav.refuse = { body -> if (body.contains("QA Refused")) 413 else null }
+        start()
+        fun puts() = dav.requests.count { it.first == "PUT" }
+        sync.check(); sync.check()
+        val before = puts()
+        sync.check()
+        assertEquals("backing off", before, puts())
+        repo.saveItem(item("QA Fine").copy(title = "QA Fine changed")); sync.markChanged()
+        sync.check()
+        assertTrue("sent by the very next check", plannerFile("QA Fine changed").value.second.contains("SUMMARY:QA Fine changed"))
+        val after = puts()
+        sync.check()
+        assertEquals("nothing new: backing off again", after, puts())
+        assertTrue(sync.sendState.value.error)
+    }
 }
