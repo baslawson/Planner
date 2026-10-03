@@ -229,7 +229,15 @@ class NoteSync(
     // the notes and links it read at its start and writes links back by note id: one running across a restore would put
     // links naming the old notes over the restored ones (the next pass then overwrites Nextcloud's newer copy, or deletes
     // a note there that the restore didn't bring back). Inside, use forgetLocked only (the lock isn't reentrant).
-    suspend fun <T> paused(block: suspend () -> T): T = lock.withLock { block() }
+    // R5-4: a pass asked for meanwhile (the restore's own notes, while automatic sync is on) only noted it (again), and no
+    // pass was running to follow it up: it is asked for once the lock is free, and nothing is left noted for later.
+    suspend fun <T> paused(block: suspend () -> T): T {
+        try { return lock.withLock { block() } }
+        finally {
+            val asked = synchronized(this) { again.also { again = false } }
+            if (asked) request()
+        }
+    }
 
     // forget, inside paused: no links, and nothing remembered about the last list or passes.
     suspend fun forgetLocked() {

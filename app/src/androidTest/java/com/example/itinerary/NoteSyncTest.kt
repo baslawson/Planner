@@ -522,4 +522,18 @@ class NoteSyncTest {
         secondGo.countDown()
         waitFor("a3 is sent after the follow-up pass") { r.remote("A").value.content == "a3" }
     }
+
+    // Bug hunt 3 Oct (b), R5-4: the notes a restore brings back are sent once it is done (automatic sync on). The pass
+    // the restore asked for used to be noted only, with no pass running to follow it up.
+    @Test fun restoredNotesAreSentOnceTheRestoreIsDone() = rig("note-sync-restore-pass") { r ->
+        r.repo.saveNote(PlannerNote(title = "From the backup", content = "restored"), create = true)
+        val backup = BackupManager(r.isolated, r.repo, AttachmentStore(r.isolated), SettingsRepository(r.isolated), notes = r.sync)
+        val zip = File(r.dir, "backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        val staged = backup.stage(android.net.Uri.fromFile(zip))
+        assertTrue("nothing sent yet", r.fake.notes.isEmpty())
+        r.wired = true
+        backup.restore(staged)
+        waitFor("the restored note is sent after the restore") { r.fake.notes.values.any { it.content == "restored" } }
+    }
 }
