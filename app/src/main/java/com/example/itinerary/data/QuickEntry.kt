@@ -302,8 +302,13 @@ object QuickEntry {
         "morning", "afternoon", "arvo", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all",
         "yesterday", "last", "ago") +
         weekdays.split('|') + months.split('|') + tomorrowSpellings + tonightSpellings).toSet()
-    // Words that start a new part of the entry after a part of the day: "tomorrow morning about the flights".
-    private val clauseWords = setOf("about", "re", "regarding", "please", "or", "but", "so", "if", "when", "while", "because")
+    // Words that make a part of the day before them part of a name: "Tonight Show", "Monday Night Football", "Saturday Night
+    // Live", "Friday Night Lights", "2night club". Any other word after it ("Dinner Tonight Sam", "Pay bills tonight
+    // online") leaves the part of the day a when.
+    private val periodNameWords = setOf("show", "shows", "live", "football", "footy", "lights", "fever", "club", "special",
+        "news", "raw", "smackdown", "frights")
+    // "the Tonight Show": an article before a part of the day makes it a name. Not a possessive: "Meet Her Friday Night".
+    private val articleBefore = rx("\\b(?:the|a|an)\\s+(?:+\\s+)*$")
     // A frequency word naming something: "Weekly report", "The Daily Telegraph", "the Every Day Cafe". Group 1 is the
     // adjective form, group 2 the word after it; see parse.
     private val frequencyNames = rx("(?<![\\w-])(?:(daily|weekly|bi-?weekly|fortnightly|monthly|quarterly|yearly|annually)|every\\s+day)(?=\\s+(\\p{L}+))")
@@ -473,15 +478,18 @@ object QuickEntry {
                 phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
                 return error("‘${match.value}’ needs a specific date, time or supported repeat. Edit it, or open More options → Adjust recognised text to keep it in the title.")
             }
-            // "Watch The Tonight Show", "Monday Night Football", "Last Night in Soho": capitalised in the middle, after "the"
-            // or before another name, a part of the day is part of a name. "Bins Friday Night" and "Dinner Tonight With Sam"
-            // are still a when.
+            // "Read tonight's paper", "Plan tomorrow night's dinner": a possessive part of the day is title text.
             val after = remaining.substring(match.range.last + 1)
-            val nameAfter = re("^\\s+(\\p{Lu}\\p{L}*)").find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it !in scheduleVocabulary } == true
+            if (re("^['\u2019]s\\b").containsMatchIn(after)) { mask(match.range, '\uE000'); return@forEach }
+            // "Watch The Tonight Show", "Monday Night Football", "Last Night in Soho": capitalised in the middle, after "the"
+            // or before a word that names a show or club, a part of the day is part of a name. Before any other word, a
+            // name or not, it is still a when: "Bins Friday Night", "Dinner Tonight Sam", "Meet Her Friday Night",
+            // "Drinks Friday Night at Luigi's".
+            val nameAfter = re("^\\s+(\\p{Lu}\\p{L}*)").find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in periodNameWords } == true
             if (remaining.substring(0, match.range.first).any { !it.isWhitespace() } &&
                 match.value.split(re("\\s+")).all { it[0].isUpperCase() } &&
-                (determinerBefore.containsMatchIn(remaining.substring(0, match.range.first)) || nameAfter ||
-                    re("^\\s+(?:in|at|of)\\s+(?:the\\s+)?\\p{Lu}").containsMatchIn(after))) {
+                (articleBefore.containsMatchIn(remaining.substring(0, match.range.first)) || nameAfter ||
+                    value == "last night" && re("^\\s+(?:in|of)\\s+(?:the\\s+)?\\p{Lu}").containsMatchIn(after))) {
                 mask(match.range, '\uE000'); return@forEach
             }
             if (timePrompt != null) return error("Use one time phrase, or choose a specific time.")
@@ -1298,12 +1306,13 @@ object QuickEntry {
         // Phrases may overlap ("Saturday or all day Sunday" spans "all day"), so each run of consumed text becomes one space.
         val gone = BooleanArray(text.length).also { flags -> consumed.forEach { r -> r.forEach { if (it in flags.indices) flags[it] = true } } }
         var title = text.indices.filter { !gone[it] || it == 0 || !gone[it - 1] }.joinToString("") { if (gone[it]) " " else text[it].toString() }
-        // "Book 2night club": a part of the day with more title words straight after it may be part of the title. A task
-        // then asks rather than take it silently as the due day; see quickProblem.
+        // "Book 2night club", "Watch tonight show": a part of the day before a word that names a show or club may be part of
+        // the title. A task then asks rather than take it silently as the due day; see quickProblem. Other words after it
+        // ("Pay bills tonight online", "Gym tomorrow morning early") leave it the due day.
         val periodInTitle = periodEnd?.takeIf { end ->
             val next = end + text.substring(end).let { it.length - it.trimStart().length }
-            val word = re("^\\p{L}[\\p{L}'’]*").find(text.substring(next))?.value?.lowercase(Locale.ROOT)
-            next < text.length && !gone[next] && word != null && word !in scheduleVocabulary && word !in clauseWords
+            val word = re("^\\p{L}+(?![\\p{L}'’])").find(text.substring(next))?.value?.lowercase(Locale.ROOT)
+            next < text.length && !gone[next] && word in periodNameWords
         }?.let { periodSaid }
         title = title.replace("\"", "").replace(re("\\(\\s*\\)|\\[\\s*]"), " ")
             // Commas left alone by removed phrases: "Dentist 3 October, 2pm".
