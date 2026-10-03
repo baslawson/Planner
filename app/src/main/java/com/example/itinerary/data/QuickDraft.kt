@@ -14,16 +14,13 @@ class QuickDraftStore(context: Context) {
     private val file = AtomicFile(File(context.filesDir, "quick-entry-draft.json"))
     // Drafts from versions with Paste multiple entries also held a list; only the single entry is kept.
     fun read(): QuickDraft? = synchronized(lock) {
-        if (!file.baseFile.exists()) null
-        else QuickDraft(decode(JSONObject(file.openRead().bufferedReader().use { it.readText() }).getJSONObject("single")))
+        file.readTextOrNull()?.let { QuickDraft(decode(JSONObject(it).getJSONObject("single"))) }
     }
     fun write(draft: QuickDraft) = synchronized(lock) {
         // The list fields stay, empty, so an older app version can still open this draft.
         val j = JSONObject().put("multiple", false).put("text", draft.single.entryText).put("single", encode(draft.single))
             .put("reviewing", false).put("rows", JSONArray())
-        val stream = file.startWrite()
-        try { stream.write(j.toString().toByteArray()); file.finishWrite(stream) }
-        catch (e: Throwable) { file.failWrite(stream); throw e }
+        file.writeText(j.toString())
     }
     fun clear() = synchronized(lock) { file.delete() }
     companion object {

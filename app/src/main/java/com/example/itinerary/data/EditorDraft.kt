@@ -2,10 +2,7 @@ package com.example.itinerary.data
 
 import android.content.Context
 import android.util.AtomicFile
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -18,7 +15,7 @@ class EditorDraftStore(context: Context) {
     private val file = AtomicFile(File(context.filesDir, "editor-draft.json"))
     // A draft still waiting for the writer (B1) is the current one; a copy, so a reader can't change what is written.
     fun read(): JSONObject? = (writer.pending(KEY) as JSONObject?)?.let { JSONObject(it.toString()) } ?: synchronized(lock) {
-        if (!file.baseFile.exists()) null else JSONObject(file.openRead().bufferedReader().use { it.readText() })
+        file.readTextOrNull()?.let(::JSONObject)
     }
     /** Written now, on this thread. */
     fun write(json: JSONObject) = writer.now(KEY) { writeFile(json) }
@@ -28,11 +25,7 @@ class EditorDraftStore(context: Context) {
     fun flush() = writer.flush()
     /** Also drops a draft still waiting to be written, so none lands after this. */
     fun clear() { writer.now(KEY) { synchronized(lock) { file.delete() } } }
-    private fun writeFile(json: JSONObject) = synchronized(lock) {
-        val stream = file.startWrite()
-        try { stream.write(json.toString().toByteArray()); file.finishWrite(stream) }
-        catch (e: Throwable) { file.failWrite(stream); throw e }
-    }
+    private fun writeFile(json: JSONObject) = synchronized(lock) { file.writeText(json.toString()) }
 
     companion object {
         private const val KEY = "event"
@@ -42,10 +35,10 @@ class EditorDraftStore(context: Context) {
 
         // How many event editors are on screen now (D10), saved or not. A widget tap waits while one is open, because moving to
         // another screen would drop the editor without saving or discarding it.
-        private val open = MutableStateFlow(0)
-        val openEditors: StateFlow<Int> = open.asStateFlow()
-        fun editorOpened() = open.update { it + 1 }
-        fun editorClosed() = open.update { (it - 1).coerceAtLeast(0) }
+        private val open = EditorCounter()
+        val openEditors: StateFlow<Int> = open.open
+        fun editorOpened() = open.opened()
+        fun editorClosed() = open.closed()
 
         // U2: the saved event whose draft AppNav's recovery editor has reopened (after process death), while it is up.
         // A bill editor its screen restored for the same event (Agenda and Search keep which bill was open) closes

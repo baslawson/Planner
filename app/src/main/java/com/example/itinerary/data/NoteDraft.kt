@@ -2,10 +2,7 @@ package com.example.itinerary.data
 
 import android.content.Context
 import android.util.AtomicFile
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.io.File
 
@@ -20,9 +17,8 @@ class NoteDraftStore(context: Context) {
     private val file = AtomicFile(File(context.filesDir, "note-draft.json"))
 
     fun read(): Draft? = synchronized(lock) {
-        if (!file.baseFile.exists()) return null
         runCatching {
-            val json = JSONObject(file.openRead().bufferedReader().use { it.readText() })
+            val json = JSONObject(file.readTextOrNull() ?: return null)
             fun note(name: String) = json.optJSONArray(name)?.let { NoteCodec.decodeLenient(it).firstOrNull() }
             Draft(note("note") ?: return null, json.optBoolean("creating"), note("base"),
                 json.optString("pendingPhoto").takeIf { it.isNotBlank() })
@@ -32,9 +28,7 @@ class NoteDraftStore(context: Context) {
     fun write(draft: Draft) = synchronized(lock) {
         val json = JSONObject().put("note", NoteCodec.encode(listOf(draft.note))).put("creating", draft.creating)
             .put("base", draft.base?.let { NoteCodec.encode(listOf(it)) } ?: JSONObject.NULL).put("pendingPhoto", draft.pendingPhoto.orEmpty())
-        val stream = file.startWrite()
-        try { stream.write(json.toString().toByteArray()); file.finishWrite(stream) }
-        catch (e: Throwable) { file.failWrite(stream); throw e }
+        file.writeText(json.toString())
     }
 
     fun clear() = synchronized(lock) { file.delete() }
@@ -45,9 +39,9 @@ class NoteDraftStore(context: Context) {
     companion object {
         private val lock = Any()
         // How many note editors are on screen: a widget day tap waits for them, as for event and task editors.
-        private val open = MutableStateFlow(0)
-        val openEditors: StateFlow<Int> = open.asStateFlow()
-        fun editorOpened() = open.update { it + 1 }
-        fun editorClosed() = open.update { (it - 1).coerceAtLeast(0) }
+        private val open = EditorCounter()
+        val openEditors: StateFlow<Int> = open.open
+        fun editorOpened() = open.opened()
+        fun editorClosed() = open.closed()
     }
 }

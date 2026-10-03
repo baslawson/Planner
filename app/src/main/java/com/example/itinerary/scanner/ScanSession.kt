@@ -1,13 +1,15 @@
 package com.example.itinerary.scanner
 
 import android.util.AtomicFile
+import com.example.itinerary.data.readTextOrNull
+import com.example.itinerary.data.writeText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 class ScanSession(val directory: File) {
     private val state get() = AtomicFile(File(directory, "session.json"))
-    fun read(): JSONObject? = if (state.baseFile.exists()) JSONObject(state.openRead().bufferedReader().use { it.readText() }) else null
+    fun read(): JSONObject? = state.readTextOrNull()?.let(::JSONObject)
     fun pages(json: JSONObject?): List<ScanImages.Page> {
         val pages = json?.optJSONArray("pages") ?: return emptyList()
         return List(pages.length()) { i ->
@@ -25,9 +27,6 @@ class ScanSession(val directory: File) {
                 .put("turns", p.turns).put("auto", p.autoDetected).put("corners", JSONArray().apply {
                     p.corners.forEach { put(JSONArray().put(it.x.toDouble()).put(it.y.toDouble())) }
                 })) } })
-        val file = state
-        val stream = file.startWrite()
-        try { stream.write(json.toString().toByteArray()); file.finishWrite(stream) }
-        catch (e: Throwable) { file.failWrite(stream); throw e }
+        state.writeText(json.toString())
     }
 }
