@@ -12,11 +12,12 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 - Agenda and calendar views for events, tasks and bills.
 - Offline natural-language Quick entry with editable previews.
-- Reminders, recurring entries, calendar file import (.ics, including repeating events) and free-time search.
-- Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways.
+- Reminders (including ones that ring until stopped, and after a restart before the phone is unlocked), recurring entries, calendar file import (.ics, including repeating events) and free-time search.
+- Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
 - Notes in Markdown with checklists, notebooks, tags, colours, attachments and reminders; optional two-way sync with the Nextcloud Notes app (and so with Quillpad).
 - Document and bill scanning with cropping and on-device text recognition.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
+- Checks GitHub for new versions once a day (optional) and asks before downloading or installing.
 
 ## Screenshots
 
@@ -36,7 +37,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Release tags match the app's version (tag `v0.0.14` is version 0.0.14), so Obtainium can tell when an update is available.
+Release tags match the app's version (tag `v0.0.15` is version 0.0.15), so Obtainium can tell when an update is available.
 
 From 0.0.2 the app ID is `io.github.baslawson.planner` and releases are signed with a dedicated release key. Earlier builds (`com.example.itinerary`) are a separate app: export a backup from the old app, restore it in the new one, then uninstall the old one.
 
@@ -79,6 +80,7 @@ Local JVM tests live in `app/src/test`. Device tests live in `app/src/androidTes
 - `app/src/test`: parser, scheduling and other JVM tests.
 - `app/src/androidTest`: device and UI tests.
 - `docs`: feature guides.
+- `baselineprofile`: makes the start-up profile (`app/src/main/baseline-prof.txt`), run by hand on an emulator.
 - `tools`: local development helpers.
 - `gradle`: pinned dependency versions and build wrapper.
 
