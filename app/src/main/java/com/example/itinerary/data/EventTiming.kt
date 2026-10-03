@@ -16,14 +16,38 @@ fun overlaps(start: LocalDateTime, minutes: Int?, otherStart: LocalDateTime, oth
 
 fun overlappingEvents(events: List<ItineraryItem>, dates: List<LocalDate>, time: LocalTime?, minutes: Int?, excluded: Set<Long>, before: Int = 0, after: Int = 0): List<ItineraryItem> {
     if (time == null) return emptyList()
+    // UI-6: a series of a year against thousands of events was every date against every event. Each event is now tried
+    // only against the planned dates that could reach it (below); the test itself is unchanged, so the result is too.
+    val planned = java.util.TreeSet(dates)
+    val buffered = bufferedDuration(minutes, before, after)
     return events.filter { other ->
-        other.category != "Bills" && !other.skipped && other.id !in excluded && other.startTime != null && dates.any { date ->
+        other.category != "Bills" && !other.skipped && other.id !in excluded && other.startTime != null &&
+            reachableDates(planned, time, minutes, before, buffered, other).any { date ->
             overlaps(date.atTime(time), minutes, other.date.atTime(other.startTime), other.durationMinutes) ||
-            overlaps(date.atTime(time).minusMinutes(before.toLong()), bufferedDuration(minutes, before, after),
+            overlaps(date.atTime(time).minusMinutes(before.toLong()), buffered,
                 other.date.atTime(other.startTime).minusMinutes(other.bufferBeforeMinutes.toLong()),
                 bufferedDuration(other.durationMinutes, other.bufferBeforeMinutes, other.bufferAfterMinutes))
         }
     }
+}
+
+// The planned dates whose start (P) could overlap [other] (start O). overlaps(s1, d1, s2, d2) can only hold when
+// s1 - s2 lies in [-d1, d2] (a missing duration counting as 0), whichever durations are missing. So the plain test
+// needs P - O in [-minutes, other's minutes], and the buffered one, with s1 = P - before and s2 = O - other's before,
+// needs P - O in [before - otherBefore - buffered, before - otherBefore + other's buffered]. Any date whose P falls
+// outside both ranges fails both tests; the dates inside still get the exact test.
+private fun reachableDates(planned: java.util.TreeSet<LocalDate>, time: LocalTime, minutes: Int?, before: Int, buffered: Int?,
+                           other: ItineraryItem): Set<LocalDate> {
+    val start = other.date.atTime(other.startTime ?: return emptySet())
+    val otherBuffered = bufferedDuration(other.durationMinutes, other.bufferBeforeMinutes, other.bufferAfterMinutes)
+    val shift = before.toLong() - other.bufferBeforeMinutes
+    val low = minOf(-(minutes ?: 0).toLong(), shift - (buffered ?: 0))
+    val high = maxOf((other.durationMinutes ?: 0).toLong(), shift + (otherBuffered ?: 0))
+    if (low > high || planned.isEmpty()) return emptySet()
+    // P = date + time, so P in [start + low, start + high] puts the date between these two (the first rounded down).
+    val first = start.plusMinutes(low).minusNanos(time.toNanoOfDay()).toLocalDate()
+    val last = start.plusMinutes(high).minusNanos(time.toNanoOfDay()).toLocalDate()
+    return if (first > last) emptySet() else planned.subSet(first, true, last, true)
 }
 
 // Include overnight events that extend into this day, but not ones ending exactly at midnight, and every day of a
