@@ -269,7 +269,7 @@ class CalendarSync(
         // Its read-only events show like a ticked calendar's; its other events become Planner events.
         dao.updateSource(target.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null, lastError = null))
         sentDao.deleteOtherCalendars(target.account, target.href)
-        val known = sentDao.all().mapTo(HashSet()) { it.itemId }
+        val known = sentDao.itemIds().toHashSet()
         val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
         db.itemDao().all().filter { sendable(it) && it.id !in known && it.lastDay < today }.forEach {
             sentDao.put(SentEvent(itemId = it.id, account = target.account, calendar = target.href, uid = null, fingerprint = fingerprint(it)))
@@ -330,7 +330,7 @@ class CalendarSync(
         val sentDao = db.sentDao()
         val items = db.itemDao().all().filter { it.id > 0 }
         val present = items.mapTo(HashSet()) { it.id }
-        val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }.associateByTo(HashMap()) { it.itemId }
+        val rows = sentDao.forCalendar(target.account, target.href).associateByTo(HashMap()) { it.itemId }
         val waiting = pendingDeleted()
         // Two-way, new files wait until the calendar has been read since it was chosen: a reconnect first links the
         // files already there to their Planner events (pullLocked) instead of sending every event a second time.
@@ -419,9 +419,8 @@ class CalendarSync(
     }
 
     private suspend fun summary(target: CalendarSource): State {
-        val rows = db.sentDao().all().filter { it.calendar == target.href }
-        val conflicts = rows.count { it.problem == SentEvent.CONFLICT }
-        val waiting = rows.count { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
+        val conflicts = db.sentDao().countWith(target.href, listOf(SentEvent.CONFLICT))
+        val waiting = db.sentDao().countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
         return when {
             conflicts > 0 -> State(message = "$conflicts event${if (conflicts == 1) " was" else "s were"} changed in both places. " +
                 "Choose which version to keep.", error = true)
@@ -492,10 +491,11 @@ class CalendarSync(
         val store = planner ?: return false
         val sentDao = db.sentDao()
         val (from, until, key) = linkWindow()
-        val rows = sentDao.all().filter { it.account == target.account && it.calendar == target.href }
-        val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
-        // After a failed pull (lastError) the next one always reads, so the error clears only once one works.
-        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && !unsettled && target.lastError == null) return false
+        // After a failed pull (lastError) the next one always reads, so the error clears only once one works. Asked before
+        // any row is read: an unchanged calendar (most checks) reads none.
+        if (ctag != null && ctag == target.ctag && target.fetchedFor == key && target.lastError == null &&
+            !sentDao.unsettled(target.account, target.href)) return false
+        val rows = sentDao.forCalendar(target.account, target.href)
         // E-9: a calendar with too many files to list at once is still synced, all but noticing deletions there of events
         // nothing is waiting on (see gone); the window is read in parts when it's too large in one.
         val listing = try { client.eventEtags(account, target.href) } catch (_: ReplyTooLargeException) { null }
@@ -621,7 +621,7 @@ class CalendarSync(
                 val store = planner ?: return@withContext
                 val sentDao = db.sentDao()
                 val account = accounts.load() ?: throw BackupException("Connect to Nextcloud first.")
-                val row = sentDao.all().firstOrNull { it.id == rowId && it.problem == SentEvent.CONFLICT } ?: return@withContext
+                val row = sentDao.byId(rowId)?.takeIf { it.problem == SentEvent.CONFLICT } ?: return@withContext
                 val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere && it.href == row.calendar }
                     ?: throw BackupException("Choose the calendar to keep in sync with first.")
                 val href = hrefOf(target, row)
@@ -685,7 +685,7 @@ class CalendarSync(
     suspend fun sendSnapshot(): Pair<CalendarChoice, List<SentEvent>>? {
         val target = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere } ?: return null
         return CalendarChoice(target.account, target.href, target.name, target.color, target.enabled) to
-            db.sentDao().all().filter { it.account == target.account && it.calendar == target.href }
+            db.sentDao().forCalendar(target.account, target.href)
     }
 
     suspend fun restoreSend(target: CalendarChoice?, rows: List<SentEvent>) = paused { restoreSendLocked(target, rows) }
@@ -876,7 +876,7 @@ class CalendarSync(
             try {
                 val data = client.calendarEvents(account, source.href, from.atStartOfDay(zone()).toInstant(), until.atStartOfDay(zone()).toInstant())
                 // Planner's own events (sent from this phone, step 5) are already shown as Planner events.
-                val own = db.sentDao().all().filter { it.account == key }.mapNotNullTo(HashSet()) { it.uid }
+                val own = db.sentDao().uidsOf(key).toHashSet()
                 val read = OutsideEventReader.read(data, zone(), skipUids = own)
                 skipped += read.skipped
                 db.withTransaction {

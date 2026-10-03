@@ -150,7 +150,7 @@ class TaskSync(
     private suspend fun sendLocked(account: NextcloudAccount, target: CalendarSource): CalendarSync.State {
         val tasks = db.taskDao().all()
         val present = tasks.mapTo(HashSet()) { it.id }
-        val rows = rowsDao.all().filter { it.account == target.account && it.list == target.href }.associateByTo(HashMap()) { it.taskId }
+        val rows = rowsDao.forList(target.account, target.href).associateByTo(HashMap()) { it.taskId }
         val waiting = pendingDeleted()
         // New files wait until the list has been read since it was chosen (see setTarget).
         val checked = target.taskCtag != null
@@ -227,9 +227,8 @@ class TaskSync(
     }
 
     private suspend fun summary(target: CalendarSource): CalendarSync.State {
-        val rows = rowsDao.all().filter { it.list == target.href }
-        val conflicts = rows.count { it.problem == SentEvent.CONFLICT }
-        val waiting = rows.count { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
+        val conflicts = rowsDao.countWith(target.href, listOf(SentEvent.CONFLICT))
+        val waiting = rowsDao.countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
         return when {
             conflicts > 0 -> CalendarSync.State(message = "$conflicts task${if (conflicts == 1) " was" else "s were"} changed in both places. " +
                 "Choose which version to keep.", error = true)
@@ -270,9 +269,9 @@ class TaskSync(
 
     // One pass Nextcloud → Planner: nothing when the list's change marker says nothing changed.
     private suspend fun pullLocked(account: NextcloudAccount, target: CalendarSource, ctag: String?): Boolean {
-        val rows = rowsDao.all().filter { it.account == target.account && it.list == target.href }
-        val unsettled = rows.any { it.problem == SentEvent.CHANGED || it.problem == SentEvent.DELETED }
-        if (ctag != null && ctag == target.taskCtag && !unsettled && target.taskError == null) return false
+        // Asked before any row is read: an unchanged list (most checks) reads none.
+        if (ctag != null && ctag == target.taskCtag && target.taskError == null && !rowsDao.unsettled(target.account, target.href)) return false
+        val rows = rowsDao.forList(target.account, target.href)
         // T4: what is gone is judged from the full listing (as for events): the task query leaves out any file it returns
         // without its content.
         val listing = client().eventEtags(account, target.href)
@@ -364,7 +363,7 @@ class TaskSync(
         lock.withLock {
             withContext(Dispatchers.IO) {
                 val account = accounts.load() ?: throw BackupException("Connect to Nextcloud first.")
-                val row = rowsDao.all().firstOrNull { it.id == rowId && it.problem == SentEvent.CONFLICT } ?: return@withContext
+                val row = rowsDao.byId(rowId)?.takeIf { it.problem == SentEvent.CONFLICT } ?: return@withContext
                 val target = target()?.takeIf { it.href == row.list } ?: throw BackupException("Choose the task list to keep in sync with first.")
                 val href = hrefOf(target, row)
                 val task = db.taskDao().byId(row.taskId)
@@ -422,7 +421,7 @@ class TaskSync(
     suspend fun snapshot(): Pair<CalendarChoice, List<SentTask>>? {
         val target = target() ?: return null
         return CalendarChoice(target.account, target.href, target.name, target.color, false) to
-            rowsDao.all().filter { it.account == target.account && it.list == target.href }
+            rowsDao.forList(target.account, target.href)
     }
 
     suspend fun restore(target: CalendarChoice?, rows: List<SentTask>) = paused { restoreLocked(target, rows) }

@@ -84,6 +84,21 @@ interface SentTaskDao {
     @Query("SELECT * FROM sent_tasks ORDER BY taskId")
     fun observe(): Flow<List<SentTask>>
 
+    // The rows of one list (what sync works from), without reading the others' stored files.
+    @Query("SELECT * FROM sent_tasks WHERE account = :account AND list = :list ORDER BY taskId")
+    suspend fun forList(account: String, list: String): List<SentTask>
+
+    @Query("SELECT * FROM sent_tasks WHERE id = :id")
+    suspend fun byId(id: Long): SentTask?
+
+    // For the summary of a pass: how many rows of [list] (any login) have one of [problems].
+    @Query("SELECT COUNT(*) FROM sent_tasks WHERE list = :list AND problem IN (:problems)")
+    suspend fun countWith(list: String, problems: List<String>): Int
+
+    // Whether a row of the list waits on a check (a write found its file changed or gone): a pull then reads.
+    @Query("SELECT EXISTS(SELECT 1 FROM sent_tasks WHERE account = :account AND list = :list AND problem IN ('CHANGED', 'DELETED'))")
+    suspend fun unsettled(account: String, list: String): Boolean
+
     @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun put(row: SentTask): Long
 
@@ -180,6 +195,28 @@ interface SentDao {
 
     @Query("SELECT * FROM sent_events ORDER BY itemId")
     fun observe(): Flow<List<SentEvent>>
+
+    // The rows of one calendar (what sync works from), without reading the others' stored files.
+    @Query("SELECT * FROM sent_events WHERE account = :account AND calendar = :calendar ORDER BY itemId")
+    suspend fun forCalendar(account: String, calendar: String): List<SentEvent>
+
+    @Query("SELECT * FROM sent_events WHERE id = :id")
+    suspend fun byId(id: Long): SentEvent?
+
+    @Query("SELECT itemId FROM sent_events")
+    suspend fun itemIds(): List<Long>
+
+    // The uids of Planner's own files on login [account] (none for a row that only notes a past event).
+    @Query("SELECT uid FROM sent_events WHERE account = :account AND uid IS NOT NULL")
+    suspend fun uidsOf(account: String): List<String>
+
+    // For the summary of a pass: how many rows of [calendar] (any login) have one of [problems].
+    @Query("SELECT COUNT(*) FROM sent_events WHERE calendar = :calendar AND problem IN (:problems)")
+    suspend fun countWith(calendar: String, problems: List<String>): Int
+
+    // Whether a row of the calendar waits on a check (a write found its file changed or gone): a pull then reads.
+    @Query("SELECT EXISTS(SELECT 1 FROM sent_events WHERE account = :account AND calendar = :calendar AND problem IN ('CHANGED', 'DELETED'))")
+    suspend fun unsettled(account: String, calendar: String): Boolean
 
     // Only what the event cards show (not the stored calendar files): see CalendarSync.syncMarks.
     @Query("SELECT itemId, uid, problem, account, calendar FROM sent_events")
