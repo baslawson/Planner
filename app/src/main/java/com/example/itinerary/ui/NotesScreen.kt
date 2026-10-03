@@ -137,16 +137,24 @@ fun NotesScreen(onBack: () -> Unit) {
                 OutlinedTextField(query, { query = it.replace('\n', ' ') }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     label = { Text("Search notes") }, singleLine = true,
                     trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, contentDescription = "Clear search") } })
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = filter == NoteFilter.All, onClick = { filterKey = "all" }, label = { Text("All notes") })
-                    notebooks.forEach { name ->
-                        FilterChip(selected = filter == NoteFilter.Notebook(name), onClick = { filterKey = NoteFilter.Notebook(name).key() }, label = { Text(name) })
+                // One filter at a time, chosen from a list that grows downwards: all notes, each notebook, each #tag, the archive.
+                val choices = remember(notebooks, tags) {
+                    listOf<NoteFilter>(NoteFilter.All) + notebooks.map { NoteFilter.Notebook(it) } + tags.map { NoteFilter.Tag(it) } + NoteFilter.Archive
+                }
+                fun name(choice: NoteFilter) = when (choice) {
+                    NoteFilter.All -> "All notes"
+                    is NoteFilter.Notebook -> choice.name
+                    is NoteFilter.Tag -> "#${choice.name}"
+                    NoteFilter.Archive -> "Archive"
+                }
+                Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    SettingsDropdown("Show", name(filter), choices, onSelect = { filterKey = it.key() }) { choice ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(name(choice), Modifier.weight(1f))
+                            Text(Notes.visible(all, choice, "").size.toString(), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    tags.forEach { name ->
-                        FilterChip(selected = filter == NoteFilter.Tag(name), onClick = { filterKey = NoteFilter.Tag(name).key() }, label = { Text("#$name") })
-                    }
-                    FilterChip(selected = filter == NoteFilter.Archive, onClick = { filterKey = "archive" }, label = { Text("Archive") })
                 }
                 when {
                     notes == null -> {}

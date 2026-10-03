@@ -120,6 +120,21 @@ object Notes {
     fun cleanNotebook(name: String) = name.replace('\n', ' ').trim().trim('/').take(MAX_NOTEBOOK)
     fun cleanTag(name: String) = name.replace('\n', ' ').trim().removePrefix("#").trim().take(MAX_TAG)
 
+    /**
+     * Existing [names] for what is being typed, capitals ignored: those starting with it first, then those containing it,
+     * leaving out [taken]. With nothing typed, all of them.
+     */
+    fun suggest(names: List<String>, typed: String, taken: Collection<String> = emptyList()): List<String> {
+        val t = typed.trim()
+        val free = names.filter { name -> taken.none { it.equals(name, ignoreCase = true) } }
+        if (t.isEmpty()) return free
+        return free.filter { it.startsWith(t, ignoreCase = true) } +
+            free.filter { !it.startsWith(t, ignoreCase = true) && it.contains(t, ignoreCase = true) }
+    }
+
+    /** [typed] spelt as an existing name when only capitals differ ("home" → "Home"), so no near-duplicate is made. */
+    fun existingSpelling(names: List<String>, typed: String): String = names.firstOrNull { it.equals(typed, ignoreCase = true) } ?: typed
+
     fun validate(note: PlannerNote) {
         require(note.id.isNotBlank() && note.id.length <= 100) { "A note needs an id" }
         require(note.title.length <= MAX_TITLE && note.content.length <= MAX_CONTENT) { "This note is too long" }

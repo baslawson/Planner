@@ -80,6 +80,19 @@ class NotesTest {
         assertNull(Markdown.continueList("- milk", "- milks", 7))
     }
 
+    @Test fun notebooksAndTagsAreSuggestedAsYouType() {
+        val names = listOf("Errands", "Home", "Homework", "Work", "Old home")
+        assertEquals(names, Notes.suggest(names, ""))
+        // Starting with it first, then containing it; capitals ignored.
+        assertEquals(listOf("Home", "Homework", "Old home"), Notes.suggest(names, "hom"))
+        assertEquals(listOf("Work", "Homework"), Notes.suggest(names, " WOR "))
+        assertEquals(listOf("Homework", "Old home"), Notes.suggest(names, "hom", taken = listOf("home")))
+        assertEquals(emptyList<String>(), Notes.suggest(names, "xyz"))
+        // A name typed in other capitals is the existing one; a new name stays as typed.
+        assertEquals("Home", Notes.existingSpelling(names, "home"))
+        assertEquals("Garden", Notes.existingSpelling(names, "Garden"))
+    }
+
     @Test fun toolbarWrapsAndPrefixes() {
         assertEquals(Markdown.Edit("a **bc** d", 4, 6), Markdown.wrap("a bc d", 2, 4, "**"))
         assertEquals(Markdown.Edit("a bc d", 2, 4), Markdown.wrap("a **bc** d", 4, 6, "**"))

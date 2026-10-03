@@ -90,7 +90,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook; color = note.color
         pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt
     }
-    val current = (base ?: start).copy(title = title, content = content.text, notebook = notebook, color = color, pinned = pinned,
+    // A notebook typed in other capitals goes into the existing one ("home" → "Home").
+    val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,
         tags = tags, attachments = attachments, reminderAt = reminderAt)
     val unsaved = base?.let { Notes.clean(current) != Notes.clean(it) } ?: Notes.hasContent(current)
     // As stored now: a change made elsewhere (sync, a reminder's Done) shows here at once while nothing is edited.
@@ -142,8 +143,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         pendingPhoto = null
     }
     fun addTag() {
-        val tag = Notes.cleanTag(newTag)
-        if (tag.isNotEmpty() && tag !in tags && tags.size < Notes.MAX_TAGS) tags = tags + tag
+        // A tag that exists in other capitals is that tag ("Errands" adds #errands).
+        val tag = Notes.existingSpelling(allTags, Notes.cleanTag(newTag))
+        if (tag.isNotEmpty() && tags.none { it.equals(tag, ignoreCase = true) } && tags.size < Notes.MAX_TAGS) tags = tags + tag
         newTag = ""
     }
     LaunchedEffect(unsaved) { if (unsaved) justSaved = false }
@@ -249,12 +251,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         }
                     }
                     HorizontalDivider()
-                    OutlinedTextField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, Modifier.fillMaxWidth(),
-                        label = { Text("Notebook (optional)") }, singleLine = true)
-                    val others = notebooks.filter { it != notebook.trim() }
-                    if (others.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        others.forEach { name -> FilterChip(selected = false, onClick = { notebook = name }, label = { Text(name) }) }
-                    }
+                    // Existing notebooks open under the box and narrow as you type; a new name is typed as before.
+                    SuggestField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, "Notebook (optional)",
+                        suggestions = Notes.suggest(notebooks, notebook).filter { it != notebook.trim() }, onPick = { notebook = it })
                     Text("Tags", style = MaterialTheme.typography.titleSmall)
                     if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         tags.forEach { tag ->
@@ -262,16 +261,13 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                                 trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove tag $tag", Modifier.size(16.dp)) })
                         }
                     }
-                    OutlinedTextField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, Modifier.fillMaxWidth(),
-                        label = { Text("Add a tag") }, singleLine = true,
+                    SuggestField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, "Add a tag",
+                        suggestions = Notes.suggest(allTags, Notes.cleanTag(newTag), taken = tags),
+                        onPick = { tag -> if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, shown = { "#$it" },
                         enabled = tags.size < Notes.MAX_TAGS,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
                         trailingIcon = { if (newTag.isNotBlank()) IconButton(onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
-                    val suggestions = allTags.filter { it !in tags && (newTag.isBlank() || it.contains(Notes.cleanTag(newTag), ignoreCase = true)) }.take(12)
-                    if (suggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        suggestions.forEach { tag -> FilterChip(selected = false, onClick = { if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, label = { Text("#$tag") }) }
-                    }
                     NoteReminderSection(reminderAt, base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                         enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                     Text("Colour", style = MaterialTheme.typography.titleSmall)

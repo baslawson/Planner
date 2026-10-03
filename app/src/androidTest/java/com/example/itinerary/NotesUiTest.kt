@@ -54,6 +54,51 @@ class NotesUiTest {
         await { var n = find(text); while (n != null && !n.isClickable) n = n.parent; n?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true }
         Thread.sleep(400)
     }
+    // The nodes of the popup windows (the Show list, the suggestion lists), for [block]. Seeing every window is switched
+    // on only while [block] runs: left on, it changes which window the other helpers read.
+    private fun <T> inPopups(block: (List<AccessibilityNodeInfo>) -> T): T {
+        val info = ins.uiAutomation.serviceInfo
+        val before = info.flags
+        info.flags = before or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        ins.uiAutomation.serviceInfo = info
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 34) ins.uiAutomation.clearCache()
+            val result = mutableListOf<AccessibilityNodeInfo>()
+            fun visit(n: AccessibilityNodeInfo) { result += n; for (i in 0 until n.childCount) n.getChild(i)?.let(::visit) }
+            // The popups: every app window but the largest, which is the screen itself.
+            fun area(w: android.view.accessibility.AccessibilityWindowInfo) = android.graphics.Rect().also(w::getBoundsInScreen).let { it.width() * it.height() }
+            val apps = ins.uiAutomation.windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+            apps.sortedByDescending(::area).drop(1).forEach { w -> w.root?.let(::visit) }
+            return block(result)
+        } finally { info.flags = before; ins.uiAutomation.serviceInfo = info }
+    }
+    private fun listShows(text: String) = inPopups { all -> all.any { it.isVisibleToUser && it.text?.toString() == text } }
+    // Taps [text] in an open popup list, once (the list closes as it is tapped, so the tap may report failure), then
+    // waits for the list to close.
+    private fun pick(text: String) {
+        await { listShows(text) }
+        inPopups { all ->
+            var n = all.first { it.isVisibleToUser && it.text?.toString() == text }
+            while (!n.isClickable) n = n.parent
+            n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+        await { !listShows(text) }
+        Thread.sleep(300)
+    }
+    // Chooses [choice] in the Notes page's Show list.
+    private fun show(choice: String) { click("Show"); pick(choice) }
+    // The editor's box labelled [label], focused, with [value] typed into it.
+    private fun typeInto(label: String, value: String): AccessibilityNodeInfo {
+        reveal(label)
+        // Found once: when its list opens, the list becomes the active window and the box is no longer in nodes().
+        val box = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == label } }
+        box.performAction(AccessibilityNodeInfo.ACTION_FOCUS); box.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(300)
+        assertTrue(box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
+        Thread.sleep(400)
+        return box
+    }
+
     // The [index]th text field on screen (editor: 0 Title, 1 Note in Edit, then Notebook).
     private fun type(index: Int, value: String) {
         await { nodes().filter { it.isVisibleToUser && it.isEditable }.size > index }
@@ -98,7 +143,7 @@ class NotesUiTest {
         click("Close")
 
         // The card: title, checklist progress, notebook; the notebook gets its own chip.
-        await { find("QA groceries") != null && find("☑ 1 of 2 done") != null && nodes().count { it.text?.toString() == "Home" } >= 2 }
+        await { find("QA groceries") != null && find("☑ 1 of 2 done") != null && find("Home") != null }
         screenshot("notes-grid")
 
         // ⋮ Pin, Archive (out of All, into Archive), Unarchive.
@@ -106,10 +151,10 @@ class NotesUiTest {
         await { notes().single().pinned && find("Pinned") != null }
         click("Actions for QA groceries"); click("Archive")
         await { notes().single().archived && find("QA groceries") == null }
-        click("Archive"); await { find("QA groceries") != null }
+        show("Archive"); await { find("QA groceries") != null }
         click("Actions for QA groceries"); click("Unarchive")
         await { !notes().single().archived && find("No archived notes.") != null }
-        click("All notes"); await { find("QA groceries") != null }
+        show("All notes"); await { find("QA groceries") != null }
 
         // Close with a change asks; Discard leaves the note as it was.
         click("QA groceries"); await { find("Edit note") != null }
@@ -149,12 +194,12 @@ class NotesUiTest {
         click("Save"); await { notes().any { it.title == "QA errands" && it.tags == listOf("errands") } }
         screenshot("editor-tags")
         click("Close")
-        // Its chip filters the page to it.
-        await { nodes().count { it.text?.toString() == "#errands" } >= 2 }
-        click("#errands")
+        // The Show list filters the page to it.
+        await { find("#errands") != null }
+        show("#errands")
         await { find("QA errands") != null && find("QA other") == null && find("QA with file") == null }
         screenshot("tag-filter")
-        click("All notes")
+        show("All notes")
         // The attachment is listed in the note and can be taken off.
         click("QA with file"); reveal("Receipt.txt")
         screenshot("editor-attachment")
@@ -341,5 +386,43 @@ class NotesUiTest {
             shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] a\n")
             click("Continue lists on Enter"); await { app.settings.continueLists.value }
         } finally { app.settings.setContinueLists(true) }
+    }
+
+    // Notebooks and tags: the page's Show list (with counts), and suggestions under the editor's boxes as you type.
+    @Test fun showListAndSuggestionsAsYouType() {
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = "QA one", notebook = "Home", tags = listOf("errands")), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA two", notebook = "Work", tags = listOf("ideas")), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA old", archived = true), create = true)
+        }
+        openNotes()
+        await { find("QA one") != null && find("QA two") != null }
+        click("Show")
+        await { listOf("All notes", "Home", "Work", "#errands", "#ideas", "Archive").all(::listShows) }
+        screenshot("show-list")
+        pick("Work"); await { find("QA two") != null && find("QA one") == null }
+        show("#errands"); await { find("QA one") != null && find("QA two") == null }
+        show("Archive"); await { find("QA old") != null && find("QA one") == null }
+        show("All notes"); await { find("QA one") != null && find("QA two") != null && find("QA old") == null }
+
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(0, "QA three")
+        // Typing part of a notebook offers it; tapping fills the box.
+        typeInto("Notebook (optional)", "wo")
+        await { listShows("Work") }; Thread.sleep(800); screenshot("notebook-suggestions")
+        pick("Work"); await { nodes().any { it.isEditable && it.text?.toString() == "Work" } }
+        // A tag: part of it in other capitals offers it; a whole one typed in other capitals is the existing one.
+        val tagBox = typeInto("Add a tag", "ER")
+        // A real key press while the list is open still reaches the box: the list doesn't take the keyboard.
+        shell("input text R")
+        await { tagBox.refresh() && tagBox.text?.toString() == "ERR" && listShows("#errands") }
+        screenshot("tag-suggestions")
+        pick("#errands"); await { find("Remove tag errands") != null }
+        typeInto("Add a tag", "Ideas"); click("Add tag"); await { find("Remove tag ideas") != null }
+        // A notebook typed in other capitals saves into the existing one.
+        typeInto("Notebook (optional)", "home")
+        click("Save")
+        await { notes().any { it.title == "QA three" && it.notebook == "Home" && it.tags == listOf("errands", "ideas") } }
+        assertEquals(listOf("Home", "Work"), Notes.notebooks(notes()))
     }
 }
