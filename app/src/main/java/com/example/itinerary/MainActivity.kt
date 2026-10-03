@@ -186,11 +186,14 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
         AlarmService.stopIfUnseen(this)
-        // Cheap and idempotent; picks up exact-alarm permission the user just granted in system settings.
+        // Once per process, and again when the exact-alarm permission (just granted in system settings, say) or the
+        // time zone changed: see RescheduleOnOpen.
         lifecycleScope.launch(Dispatchers.IO) {
             // First the reminders whose alarms Android dropped (a force stop), before they are set again.
             com.example.itinerary.reminders.showMissedReminders(applicationContext, afterBoot = false)
-            (application as ItineraryApp).repository.rescheduleAllReminders()
+            val app = application as ItineraryApp
+            val state = com.example.itinerary.data.RescheduleOnOpen.state(app.reminderScheduler.canScheduleExact(), java.time.ZoneId.systemDefault())
+            if (com.example.itinerary.data.RescheduleOnOpen.due(state)) app.repository.rescheduleAllReminders()
         }
         // The phone's ticked calendars and links; Nextcloud is checked by AutoSync while Planner is on screen, if it's on.
         (application as ItineraryApp).let { app ->
