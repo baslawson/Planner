@@ -30,7 +30,14 @@ data class PlannerNote(
     // Its place on the Notes page, set by dragging (lowest first, pinned notes above the rest); stays on the phone.
     // 0 = not placed yet: the repository puts a new note at the top.
     @ColumnInfo(defaultValue = "0") val position: Long = 0,
+    // How important it is (Low / Normal / High, as a task's priority); the page can sort by it. Stays on the phone.
+    @ColumnInfo(defaultValue = "'NORMAL'") val priority: TaskPriority = TaskPriority.NORMAL,
 )
+
+/** How the Notes page orders its cards; pinned notes stay on top in every one. */
+enum class NoteSort(val label: String) {
+    MY_ORDER("My order"), IMPORTANCE("Importance"), CHANGED("Recently changed"), CREATED("Newest first"), TITLE("Title A–Z"), COLOUR("Colour"),
+}
 
 /** When the note's reminder is due now: the snooze if there is one, else [PlannerNote.reminderAt]. */
 val PlannerNote.activeReminderAt: Long? get() = reminderAt?.let { snoozedUntil ?: it }
@@ -99,7 +106,32 @@ object Notes {
         return newOrder.mapIndexedNotNull { index, id -> byId[id]?.takeIf { it.position != distinct[index] }?.let { id to distinct[index] } }.toMap()
     }
 
-    fun visible(notes: List<PlannerNote>, filter: NoteFilter, query: String): List<PlannerNote> {
+    /** [order] for [sort]: pinned first, then the sort's own key, then the dragged order. */
+    fun order(sort: NoteSort): Comparator<PlannerNote> {
+        val pinnedFirst = compareByDescending<PlannerNote> { it.pinned }
+        val key: Comparator<PlannerNote>? = when (sort) {
+            NoteSort.MY_ORDER -> null
+            NoteSort.IMPORTANCE -> compareByDescending { it.priority.rank }
+            NoteSort.CHANGED -> compareByDescending { it.modified }
+            NoteSort.CREATED -> compareByDescending { it.created }
+            NoteSort.TITLE -> compareBy { Search.normalize(label(it)) }
+            // The card colours in their order, then custom colours by hue, then plain cards.
+            NoteSort.COLOUR -> compareBy { note -> note.color?.let { c -> colors.indexOf(c).takeIf { it >= 0 }?.toFloat() ?: (100f + hue(c)) }
+                ?: Float.MAX_VALUE }
+        }
+        return (key?.let { pinnedFirst.then(it) } ?: pinnedFirst).then(order)
+    }
+
+    // An ARGB colour's hue, 0–360 (0 for greys).
+    private fun hue(argb: Int): Float {
+        val r = (argb shr 16 and 0xFF) / 255f; val g = (argb shr 8 and 0xFF) / 255f; val b = (argb and 0xFF) / 255f
+        val max = maxOf(r, g, b); val min = minOf(r, g, b); val d = max - min
+        if (d == 0f) return 0f
+        val h = when (max) { r -> ((g - b) / d) % 6f; g -> (b - r) / d + 2f; else -> (r - g) / d + 4f } * 60f
+        return if (h < 0) h + 360f else h
+    }
+
+    fun visible(notes: List<PlannerNote>, filter: NoteFilter, query: String, sort: NoteSort = NoteSort.MY_ORDER): List<PlannerNote> {
         val needle = Search.normalize(query.trim())
         return notes.filter { note ->
             when (filter) {
@@ -109,7 +141,7 @@ object Notes {
                 NoteFilter.Archive -> note.archived
             } && (needle.isEmpty() || listOf(note.title, note.content, note.notebook).any { Search.normalize(it).contains(needle) } ||
                 note.tags.any { Search.normalize(it).contains(needle) })
-        }.sortedWith(order)
+        }.sortedWith(order(sort))
     }
 
     fun notebooks(notes: List<PlannerNote>): List<String> =
@@ -202,7 +234,7 @@ object NoteCodec {
             .put("attachments", DraftCodec.attachments(note.attachments))
             .put("reminderAt", note.reminderAt ?: JSONObject.NULL)
             .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)
-            .put("position", note.position)) }
+            .put("position", note.position).put("priority", note.priority.name)) }
     }
 
     fun decode(array: JSONArray): List<PlannerNote> = decodeLenient(array).onEach(Notes::validate)
@@ -223,7 +255,8 @@ object NoteCodec {
             StringListCodec.decode(value.optJSONArray("tags") ?: JSONArray()),
             DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"),
             // Older files have no place: most recently changed first, as the page sorted them then.
-            time("position") ?: -(time("modified") ?: created))
+            time("position") ?: -(time("modified") ?: created),
+            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL))
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
             .let(Notes::clean)
     }

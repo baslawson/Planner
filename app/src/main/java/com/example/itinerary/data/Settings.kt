@@ -164,6 +164,18 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _continueLists.value = on
     }
 
+    // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
+    private val _noteSort = MutableStateFlow(runCatching { NoteSort.valueOf(prefs.getString("note_sort", null) ?: "") }.getOrDefault(NoteSort.MY_ORDER))
+    val noteSort: StateFlow<NoteSort> = _noteSort.asStateFlow()
+    fun setNoteSort(sort: NoteSort) { prefs.edit { putString("note_sort", sort.name) }; _noteSort.value = sort }
+    private val _notesAsList = MutableStateFlow(prefs.getBoolean("notes_as_list", false))
+    val notesAsList: StateFlow<Boolean> = _notesAsList.asStateFlow()
+    fun setNotesAsList(list: Boolean) { prefs.edit { putBoolean("notes_as_list", list) }; _notesAsList.value = list }
+    // The Notes page's last Show choice, as its key ("all", "archive", "nb:<notebook>", "tag:<tag>").
+    var noteFilter: String
+        get() = prefs.getString("note_filter", null) ?: "all"
+        set(value) { prefs.edit { putString("note_filter", value) } }
+
     // Device-local navigation state; independent of exported planner data.
     var lastViewCalendar: Boolean
         get() = prefs.getBoolean("last_view_calendar", false)

@@ -64,7 +64,9 @@ fun NotesScreen(onBack: () -> Unit) {
     val repo = app.repository
     val notes by repo.notes.collectAsStateWithLifecycle(initialValue = null)
     var query by rememberSaveable { mutableStateOf("") }
-    var filterKey by rememberSaveable { mutableStateOf("all") }
+    // Opens on the last Show choice; one whose notebook or tag has gone falls back to all notes (below).
+    var filterKey by rememberSaveable { mutableStateOf(app.settings.noteFilter) }
+    LaunchedEffect(filterKey) { app.settings.noteFilter = filterKey }
     // The note open in the editor: its id, and whether it is a new one not saved yet.
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingNew by rememberSaveable { mutableStateOf(false) }
@@ -75,7 +77,9 @@ fun NotesScreen(onBack: () -> Unit) {
     val filter = filterOf(filterKey).let {
         if (it is NoteFilter.Notebook && it.name !in notebooks || it is NoteFilter.Tag && it.name !in tags) NoteFilter.All else it
     }
-    val shown = remember(all, filter, query) { Notes.visible(all, filter, query) }
+    val sort by app.settings.noteSort.collectAsStateWithLifecycle()
+    val asList by app.settings.notesAsList.collectAsStateWithLifecycle()
+    val shown = remember(all, filter, query, sort) { Notes.visible(all, filter, query, sort) }
 
     // Long press, held still: notes ticked for Pin, Archive, Move to notebook or Delete together. Kept across rotation;
     // cleared when the filter or the search changes, and a note that leaves the page leaves the selection.
@@ -134,6 +138,11 @@ fun NotesScreen(onBack: () -> Unit) {
                             syncState.error != null -> "Notes sync: problem"
                             else -> "Notes sync: up to date"
                         }
+                        // Grid or list: the button shows the layout it switches to.
+                        IconButton(onClick = { app.settings.setNotesAsList(!asList) }) {
+                            Text(if (asList) "▦" else "☰", style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.semantics { contentDescription = if (asList) "Show as grid" else "Show as list" })
+                        }
                         IconButton(onClick = { showSync = true }) {
                             when {
                                 !syncOn -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
@@ -174,13 +183,19 @@ fun NotesScreen(onBack: () -> Unit) {
                     is NoteFilter.Tag -> "#${choice.name}"
                     NoteFilter.Archive -> "Archive"
                 }
-                Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    SettingsDropdown("Show", name(filter), choices, onSelect = { filterKey = it.key() }) { choice ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(name(choice), Modifier.weight(1f))
-                            Text(Notes.visible(all, choice, "").size.toString(), style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // What shows, and in which order, side by side.
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        SettingsDropdown("Show", name(filter), choices, onSelect = { filterKey = it.key() }) { choice ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(name(choice), Modifier.weight(1f))
+                                Text(Notes.visible(all, choice, "").size.toString(), style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        SettingsDropdown("Sort", sort.label, com.example.itinerary.data.NoteSort.entries, onSelect = app.settings::setNoteSort) { Text(it.label) }
                     }
                 }
                 when {
@@ -200,7 +215,7 @@ fun NotesScreen(onBack: () -> Unit) {
                     val slop = androidx.compose.ui.platform.LocalViewConfiguration.current.touchSlop
                     val edge = with(density) { 64.dp.toPx() }
                     LazyVerticalStaggeredGrid(
-                        columns = StaggeredGridCells.Adaptive(160.dp),
+                        columns = if (asList) StaggeredGridCells.Fixed(1) else StaggeredGridCells.Adaptive(160.dp),
                         state = grid,
                         modifier = Modifier.fillMaxSize(),
                         // Room under the last cards for the New note button.
@@ -215,6 +230,9 @@ fun NotesScreen(onBack: () -> Unit) {
                                     onSelect = { toggle(note.id) },
                                     onDrop = { order ->
                                         val places = Notes.reorder(currentShown, order)
+                                        // Dropped where it shows: in another sort that is now the user's own order.
+                                        if (app.settings.noteSort.value != com.example.itinerary.data.NoteSort.MY_ORDER)
+                                            app.settings.setNoteSort(com.example.itinerary.data.NoteSort.MY_ORDER)
                                         app.appScope.launch {
                                             try { repo.placeNotes(places) }
                                             catch (e: CancellationException) { throw e }
@@ -285,6 +303,11 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
                 // The first line is the name when there is no title; the preview goes on from the next.
                 val preview = (if (note.title.isBlank()) body.drop(1) else body).joinToString("\n")
                 if (preview.isNotBlank()) Text(preview, style = MaterialTheme.typography.bodyMedium, color = soft, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                if (note.priority != com.example.itinerary.data.TaskPriority.NORMAL) Surface(
+                    color = if (note.priority == com.example.itinerary.data.TaskPriority.HIGH) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(6.dp)) {
+                    Text("${note.priority.label} importance", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelMedium)
+                }
                 val (done, total) = remember(note.content) { Markdown.checklist(note.content) }
                 if (total > 0) Text("☑ $done of $total done", style = MaterialTheme.typography.labelMedium, color = text)
                 if (note.notebook.isNotBlank()) Text(note.notebook, style = MaterialTheme.typography.labelMedium, color = soft,

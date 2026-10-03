@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -67,6 +68,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var content by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(start.content)) }
     var notebook by rememberSaveable { mutableStateOf(start.notebook) }
     var color by rememberSaveable { mutableStateOf(start.color) }
+    var pickingColor by rememberSaveable { mutableStateOf(false) }
+    var priority by rememberSaveable { mutableStateOf(start.priority) }
     var pinned by rememberSaveable { mutableStateOf(start.pinned) }
     var tags by rememberSaveable { mutableStateOf(start.tags) }
     var newTag by rememberSaveable { mutableStateOf("") }
@@ -88,11 +91,11 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var conflict by remember { mutableStateOf<PlannerNote?>(null) }
     fun load(note: PlannerNote) {
         title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook; color = note.color
-        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt
+        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
     val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,
-        tags = tags, attachments = attachments, reminderAt = reminderAt)
+        tags = tags, attachments = attachments, reminderAt = reminderAt, priority = priority)
     val unsaved = base?.let { Notes.clean(current) != Notes.clean(it) } ?: Notes.hasContent(current)
     // As stored now: a change made elsewhere (sync, a reminder's Done) shows here at once while nothing is edited.
     val continueLists by app.settings.continueLists.collectAsStateWithLifecycle()
@@ -153,7 +156,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     fun saved(note: PlannerNote, then: () -> Unit) {
         // The fields change only if saving changed them (a merge, trimmed text), so typing isn't disturbed otherwise.
         val edited = Notes.clean(current)
-        val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color &&
+        val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color && note.priority == edited.priority &&
             note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt
         base = note; if (!same) load(note); justSaved = true
         releaseFiles(); then()
@@ -270,8 +273,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         trailingIcon = { if (newTag.isNotBlank()) IconButton(onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
                     NoteReminderSection(reminderAt, base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                         enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
+                    Text("Importance", style = MaterialTheme.typography.titleSmall)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.example.itinerary.data.TaskPriority.entries.forEach { option ->
+                            FilterChip(selected = priority == option, onClick = { priority = option }, label = { Text(option.label) })
+                        }
+                    }
                     Text("Colour", style = MaterialTheme.typography.titleSmall)
-                    ColorChoices(color) { color = it }
+                    ColorChoices(color, onCustom = { pickingColor = true }) { color = it }
                     FilterChip(selected = pinned, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
                         leadingIcon = if (pinned) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)) }) else null)
                     HorizontalDivider()
@@ -306,6 +315,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             }
         }
     }
+    if (pickingColor) CustomColorDialog(
+        // Starts from the note's colour, or the card's blue.
+        initial = Color(color ?: Notes.colors[2]),
+        onDismiss = { pickingColor = false },
+        onConfirm = { c -> color = c.toArgb(); pickingColor = false },
+    )
     if (choosingReminderDate) SingleDateDialog(
         reminderAt?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() } ?: java.time.LocalDate.now(),
         onDismiss = { choosingReminderDate = false },
@@ -395,22 +410,35 @@ private fun MarkdownToolbar(apply: ((TextFieldValue) -> TextFieldValue) -> Unit)
     }
 }
 
-// No colour, then the card colours, as round swatches; the chosen one is ringed.
+// No colour, the card colours, the note's own custom colour, then Custom (the colour picker), as round swatches; the
+// chosen one is ringed.
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ColorChoices(selected: Int?, onSelect: (Int?) -> Unit) {
+internal fun ColorChoices(selected: Int?, onCustom: () -> Unit, onSelect: (Int?) -> Unit) {
     val ring = MaterialTheme.colorScheme.primary
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    @Composable
+    fun Swatch(name: String, chosen: Boolean, fill: Modifier, tick: Color, onClick: () -> Unit, content: @Composable () -> Unit = {}) {
+        Box(Modifier.size(40.dp).clip(CircleShape).then(fill)
+            .border(if (chosen) 3.dp else 1.dp, if (chosen) ring else MaterialTheme.colorScheme.outline, CircleShape)
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = name; this.selected = chosen },
+            contentAlignment = Alignment.Center) {
+            if (chosen) Icon(Icons.Filled.Check, contentDescription = null, tint = tick, modifier = Modifier.size(20.dp)) else content()
+        }
+    }
+    // Wraps onto a second line rather than scrolling sideways.
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         (listOf<Int?>(null) + Notes.colors).forEachIndexed { index, argb ->
-            val name = if (argb == null) "No colour" else NOTE_COLOR_NAMES[index - 1]
-            val chosen = argb == selected
-            Box(Modifier.size(40.dp).clip(CircleShape)
-                .background(argb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainerHigh)
-                .border(if (chosen) 3.dp else 1.dp, if (chosen) ring else MaterialTheme.colorScheme.outline, CircleShape)
-                .clickable(role = Role.RadioButton) { onSelect(argb) }
-                .semantics { contentDescription = name; this.selected = chosen },
-                contentAlignment = Alignment.Center) {
-                if (chosen) Icon(Icons.Filled.Check, contentDescription = null, tint = if (argb == null) ring else Color.White, modifier = Modifier.size(20.dp))
-            }
+            Swatch(if (argb == null) "No colour" else NOTE_COLOR_NAMES[index - 1], argb == selected,
+                Modifier.background(argb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainerHigh),
+                if (argb == null) ring else Color.White, onClick = { onSelect(argb) })
+        }
+        // A colour of the note's own, chosen with Custom: a swatch of its own, picked like the others.
+        if (selected != null && selected !in Notes.colors)
+            Swatch("Custom colour (chosen)", true, Modifier.background(Color(selected)), Color.White, onClick = onCustom)
+        Swatch("Custom colour", false, Modifier.background(androidx.compose.ui.graphics.Brush.sweepGradient(
+            listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))), Color.White, onClick = onCustom) {
+            Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
         }
     }
 }

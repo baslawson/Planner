@@ -337,14 +337,18 @@ val MIGRATION_31_32 = object : Migration(31, 32) {
         db.execSQL(SENT_NOTES_TABLE)
     }
 }
-// Notes get a place of their own for dragging; existing ones start in the order the page showed (newest change first).
+// Notes get a place of their own for dragging (existing ones start in the order the page showed: newest change first)
+// and an importance (Normal).
 val MIGRATION_32_33 = object : Migration(32, 33) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // Safe to run again, as the earlier steps are: a database already holding the column keeps it, and its places.
-        val has = db.query("PRAGMA table_info(`notes`)").use { c -> generateSequence { if (c.moveToNext()) c.getString(c.getColumnIndexOrThrow("name")) else null }.any { it == "position" } }
-        if (has) return
-        db.execSQL("ALTER TABLE `notes` ADD COLUMN `position` INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("UPDATE `notes` SET `position` = -`modified`")
+        // Safe to run again, as the earlier steps are: a column already there is kept, with what it holds.
+        val columns = db.query("PRAGMA table_info(`notes`)").use { c ->
+            generateSequence { if (c.moveToNext()) c.getString(c.getColumnIndexOrThrow("name")) else null }.toSet() }
+        if ("position" !in columns) {
+            db.execSQL("ALTER TABLE `notes` ADD COLUMN `position` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE `notes` SET `position` = -`modified`")
+        }
+        if ("priority" !in columns) db.execSQL("ALTER TABLE `notes` ADD COLUMN `priority` TEXT NOT NULL DEFAULT 'NORMAL'")
     }
 }
 // As Room creates it (checked against the generated AppDatabase_Impl).

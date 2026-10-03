@@ -182,11 +182,13 @@ class NotesDataTest {
             db.noteDao().insertAll(listOf(older, newer)); db.close()
             // Back to version 32: no place column.
             val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
-            raw.execSQL("ALTER TABLE notes DROP COLUMN position"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 32; raw.close()
+            raw.execSQL("ALTER TABLE notes DROP COLUMN position"); raw.execSQL("ALTER TABLE notes DROP COLUMN priority")
+            raw.execSQL("DELETE FROM room_master_table"); raw.version = 32; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             val upgraded = db.noteDao().all()
             assertEquals(listOf(-1_000L, -2_000L), upgraded.sortedBy { it.id == "newer" }.map { it.position })
             assertEquals(listOf("Newer", "Older"), upgraded.sortedWith(Notes.order).map { it.title })
+            assertTrue(upgraded.all { it.priority == TaskPriority.NORMAL })
             db.close()
             // Reopened as an ordinary version 33 database (Room checks the table matches what it expects).
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).build()
@@ -195,10 +197,12 @@ class NotesDataTest {
     }
 
     @Test fun aNotesPlaceIsBackedUpAndOlderFilesKeepTheOldOrder() {
-        val note = PlannerNote(id = "n", title = "Placed", position = -42, modified = 100)
-        assertEquals(-42L, NoteCodec.decode(NoteCodec.encode(listOf(note))).single().position)
+        val note = PlannerNote(id = "n", title = "Placed", position = -42, modified = 100, priority = TaskPriority.HIGH)
+        assertEquals(note.copy(created = note.created), NoteCodec.decode(NoteCodec.encode(listOf(note))).single())
         // A file from before notes had places: newest change first, as the page showed them then.
         val old = NoteCodec.encode(listOf(note)).apply { getJSONObject(0).remove("position") }
         assertEquals(-100L, NoteCodec.decode(old).single().position)
+        val noImportance = NoteCodec.encode(listOf(note)).apply { getJSONObject(0).remove("priority") }
+        assertEquals(TaskPriority.NORMAL, NoteCodec.decode(noImportance).single().priority)
     }
 }

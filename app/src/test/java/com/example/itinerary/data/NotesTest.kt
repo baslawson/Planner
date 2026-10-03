@@ -114,6 +114,23 @@ class NotesTest {
         assertEquals(mapOf("x" to 1L), Notes.reorder(listOf(x, y), listOf("y", "x")))
     }
 
+    @Test fun theSortOrdersAndPinnedStayOnTop() {
+        val blue = Notes.colors[2]; val green = Notes.colors[0]
+        val a = PlannerNote(id = "a", title = "Banana", position = -1, created = 10, modified = 40, priority = TaskPriority.LOW, color = blue)
+        val b = PlannerNote(id = "b", title = "apple", position = -2, created = 30, modified = 20, priority = TaskPriority.HIGH)
+        val c = PlannerNote(id = "c", title = "Cherry", position = -3, created = 20, modified = 30, color = green)
+        val d = PlannerNote(id = "d", title = "Custom", position = -4, created = 5, modified = 5, color = 0xFFFF8800.toInt())
+        val p = PlannerNote(id = "p", title = "Zebra", position = 9, pinned = true, created = 1, modified = 1)
+        fun sorted(sort: NoteSort) = listOf(a, b, c, d, p).sortedWith(Notes.order(sort)).map { it.id }
+        assertEquals(listOf("p", "d", "c", "b", "a"), sorted(NoteSort.MY_ORDER))
+        assertEquals(listOf("p", "b", "d", "c", "a"), sorted(NoteSort.IMPORTANCE)) // High, Normal (by place), Low
+        assertEquals(listOf("p", "a", "c", "b", "d"), sorted(NoteSort.CHANGED))
+        assertEquals(listOf("p", "b", "c", "a", "d"), sorted(NoteSort.CREATED))
+        assertEquals(listOf("p", "b", "a", "c", "d"), sorted(NoteSort.TITLE)) // capitals ignored
+        assertEquals(listOf("p", "c", "a", "d", "b"), sorted(NoteSort.COLOUR)) // card colours in order, custom, then plain
+        assertEquals(listOf("p", "b", "d", "c", "a"), Notes.visible(listOf(a, b, c, d, p), NoteFilter.All, "", NoteSort.IMPORTANCE).map { it.id })
+    }
+
     @Test fun toolbarWrapsAndPrefixes() {
         assertEquals(Markdown.Edit("a **bc** d", 4, 6), Markdown.wrap("a bc d", 2, 4, "**"))
         assertEquals(Markdown.Edit("a bc d", 2, 4), Markdown.wrap("a **bc** d", 4, 6, "**"))

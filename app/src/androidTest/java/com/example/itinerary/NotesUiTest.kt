@@ -107,7 +107,9 @@ class NotesUiTest {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
         Thread.sleep(300)
     }
-    private fun openNotes() {
+    // [fresh]: the page's remembered choices (Show, Sort, grid or list) back to how a new install has them.
+    private fun openNotes(fresh: Boolean = true) {
+        if (fresh) { app.settings.noteFilter = "all"; app.settings.setNoteSort(NoteSort.MY_ORDER); app.settings.setNotesAsList(false) }
         app.settings.lastViewCalendar = false
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await { find("AGENDA") != null }
@@ -508,5 +510,66 @@ class NotesUiTest {
         touch(centre("QA two"), 900, centre("QA one"))
         Thread.sleep(800)
         assertEquals(listOf("QA one", "QA three", "QA two"), pageOrder())
+    }
+
+    // Grid or list, the Sort list (a drag in another sort makes it My order), a note's importance and a custom colour.
+    @Test fun listViewSortImportanceAndCustomColour() {
+        try {
+            runBlocking { listOf("QA b", "QA c", "QA a").forEach { app.repository.saveNote(PlannerNote(title = it), create = true); Thread.sleep(5) } }
+            openNotes()
+            await { find("QA a") != null && find("QA c") != null }
+            fun left(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.left
+            fun top(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.top
+            assertNotEquals(left("QA a"), left("QA c")) // a grid: two columns
+            click("Show as list"); await { app.settings.notesAsList.value && find("Show as grid") != null }
+            await { left("QA a") == left("QA c") && left("QA c") == left("QA b") } // one column
+            screenshot("notes-list")
+            // Sort by title.
+            click("Sort"); pick("Title A–Z")
+            await { app.settings.noteSort.value == NoteSort.TITLE && top("QA a") < top("QA b") && top("QA b") < top("QA c") }
+            // Importance and a custom colour, from the editor.
+            click("QA c"); await { find("Edit note") != null }
+            reveal("High"); click("High")
+            reveal("Custom colour"); click("Custom colour"); await { find("Use this colour") != null }
+            val hex = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Hex colour" } }
+            hex.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "123456") })
+            Thread.sleep(400)
+            click("Use this colour"); await { find("Custom colour (chosen)") != null }
+            screenshot("editor-importance-colour")
+            click("Save"); await { notes().single { it.title == "QA c" }.let { it.priority == TaskPriority.HIGH && it.color == 0xFF123456.toInt() } }
+            click("Close")
+            await { find("High importance") != null }
+            // Sort by importance: the High note first.
+            click("Sort"); pick("Importance")
+            await { top("QA c") < top("QA a") && top("QA c") < top("QA b") }
+            screenshot("notes-importance")
+            // A drag in another sort keeps the order it shows, as My order.
+            touch(centre("QA b"), 900, centre("QA c"))
+            await { app.settings.noteSort.value == NoteSort.MY_ORDER }
+            await { pageOrder().first() == "QA b" }
+            // Back to a grid; the choice is kept.
+            click("Show as grid"); await { !app.settings.notesAsList.value }
+        } finally { app.settings.setNotesAsList(false); app.settings.setNoteSort(NoteSort.MY_ORDER) }
+    }
+
+    // Notes opens on the last Show choice, list view and sort; one whose notebook has gone falls back to all notes.
+    @Test fun notesOpensAsLastLeft() {
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = "QA work note", notebook = "Work"), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA home note", notebook = "Home"), create = true)
+        }
+        openNotes()
+        show("Work"); await { find("QA work note") != null && find("QA home note") == null }
+        click("Show as list"); await { app.settings.notesAsList.value }
+        click("Sort"); pick("Title A–Z")
+        openNotes(fresh = false) // a fresh start of the app's screen
+        await { find("QA work note") != null && find("QA home note") == null && find("Show as grid") != null }
+        assertEquals(NoteSort.TITLE, app.settings.noteSort.value)
+        // The Work notebook empties: back to all notes.
+        runBlocking { app.repository.deleteNotes(notes().filter { it.notebook == "Work" }.map { it.id }) }
+        await { find("QA home note") != null }
+        openNotes(fresh = false)
+        await { find("QA home note") != null && app.settings.noteFilter == "all" }
+        openNotes() // defaults back for the other tests
     }
 }
