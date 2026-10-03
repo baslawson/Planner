@@ -146,7 +146,19 @@ object Notes {
         return if (h < 0) h + 360f else h
     }
 
-    fun visible(notes: List<PlannerNote>, filter: NoteFilter, query: String, sort: NoteSort = NoteSort.MY_ORDER): List<PlannerNote> {
+    /** A note's searched fields, normalised (Search.normalize). Each is matched on its own, so a match never spans two. */
+    class SearchFields(val title: String, val content: String, val notebook: String, val tags: List<String>) {
+        fun contain(needle: String) = title.contains(needle) || content.contains(needle) || notebook.contains(needle) ||
+            tags.any { it.contains(needle) }
+    }
+    fun searchFields(note: PlannerNote) = SearchFields(Search.normalize(note.title), Search.normalize(note.content),
+        Search.normalize(note.notebook), note.tags.map(Search::normalize))
+    /** [searchFields] for each of [notes] by id, worked out once per list rather than per letter typed (UI-3). */
+    fun searchFields(notes: List<PlannerNote>): Map<String, SearchFields> = notes.associate { it.id to searchFields(it) }
+
+    // [fields]: the notes' searchFields made beforehand; any note missing there is normalised here.
+    fun visible(notes: List<PlannerNote>, filter: NoteFilter, query: String, sort: NoteSort = NoteSort.MY_ORDER,
+                fields: Map<String, SearchFields> = emptyMap()): List<PlannerNote> {
         val needle = Search.normalize(query.trim())
         return notes.filter { note ->
             when (filter) {
@@ -154,8 +166,7 @@ object Notes {
                 is NoteFilter.Notebook -> !note.archived && note.notebook == filter.name
                 is NoteFilter.Tag -> !note.archived && filter.name in note.tags
                 NoteFilter.Archive -> note.archived
-            } && (needle.isEmpty() || listOf(note.title, note.content, note.notebook).any { Search.normalize(it).contains(needle) } ||
-                note.tags.any { Search.normalize(it).contains(needle) })
+            } && (needle.isEmpty() || (fields[note.id] ?: searchFields(note)).contain(needle))
         }.sortedWith(order(sort))
     }
 
@@ -166,8 +177,10 @@ object Notes {
         notes.flatMap { it.tags }.distinct().sortedBy { Search.normalize(it) }
 
     /** The name a note goes by: its title, else its first line of text, else "Untitled note". */
-    fun label(note: PlannerNote): String = note.title.trim().ifBlank {
-        Markdown.plain(note.content).lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: ""
+    fun label(note: PlannerNote): String = label(note) { Markdown.plain(note.content) }
+    // [plain]: the note's Markdown.plain text, asked for only when it has no title (a card has it already, UI-4).
+    fun label(note: PlannerNote, plain: () -> String): String = note.title.trim().ifBlank {
+        plain().lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: ""
     }.ifBlank { "Untitled note" }
 
     fun clean(note: PlannerNote): PlannerNote = note.copy(

@@ -78,17 +78,22 @@ fun NotesScreen(onBack: () -> Unit) {
     }
     val sort by app.settings.noteSort.collectAsStateWithLifecycle()
     val asList by app.settings.notesAsList.collectAsStateWithLifecycle()
-    val shown = remember(all, filter, query, sort) { Notes.visible(all, filter, query, sort) }
+    // Each note's text normalised once per change to the notes, not on every letter typed in the search (UI-3).
+    val searchFields = remember(all) { Notes.searchFields(all) }
+    val shown = remember(all, filter, query, sort, searchFields) { Notes.visible(all, filter, query, sort, searchFields) }
 
     // Long press, held still: notes ticked for Pin, Archive, Move to notebook or Delete together. Kept across rotation;
     // cleared when the filter or the search changes, and a note that leaves the page leaves the selection.
     var selectedIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    // Looked up by set, not by list, so Select all on many notes stays quick (UI-9); the list keeps the order ticked.
+    val selectedSet = remember(selectedIds) { selectedIds.toHashSet() }
     var selectionFor by rememberSaveable { mutableStateOf("$filterKey|$query") }
     LaunchedEffect(filterKey, query) { if (selectionFor != "$filterKey|$query") { selectionFor = "$filterKey|$query"; selectedIds = emptyList() } }
-    LaunchedEffect(shown, notes) { if (notes != null) selectedIds.filter { id -> shown.any { it.id == id } }.let { if (it != selectedIds) selectedIds = it } }
+    LaunchedEffect(shown, notes) { if (notes != null) shown.mapTo(HashSet()) { it.id }.let { ids -> selectedIds.filter { it in ids } }
+        .let { if (it != selectedIds) selectedIds = it } }
     val selecting = selectedIds.isNotEmpty()
     androidx.activity.compose.BackHandler(selecting) { selectedIds = emptyList() }
-    fun toggle(id: String) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
+    fun toggle(id: String) { selectedIds = if (id in selectedSet) selectedIds - id else selectedIds + id }
 
     // Long press, held and moved: the card is dragged to a new place. While it moves (and until the saved order comes
     // back) the page shows the dragged order; not while searching (only matches show) or selecting.
@@ -182,7 +187,7 @@ fun NotesScreen(onBack: () -> Unit) {
                 )
             },
             bottomBar = {
-                if (selecting) NoteSelectionBar(displayed.filter { it.id in selectedIds }, displayed, notebooks) { selectedIds = it }
+                if (selecting) NoteSelectionBar(displayed.filter { it.id in selectedSet }, displayed, notebooks) { selectedIds = it }
             },
             floatingActionButton = {
                 if (filter != NoteFilter.Archive && !selecting) ExtendedFloatingActionButton(
@@ -204,6 +209,8 @@ fun NotesScreen(onBack: () -> Unit) {
                 val choices = remember(notebooks, tags) {
                     listOf<NoteFilter>(NoteFilter.All) + notebooks.map { NoteFilter.Notebook(it) } + tags.map { NoteFilter.Tag(it) } + NoteFilter.Archive
                 }
+                // How many notes each choice shows, counted in one pass per change to the notes (UI-8).
+                val counts = remember(all) { noteFilterCounts(all) }
                 fun name(choice: NoteFilter) = when (choice) {
                     NoteFilter.All -> "All notes"
                     is NoteFilter.Notebook -> choice.name
@@ -216,7 +223,7 @@ fun NotesScreen(onBack: () -> Unit) {
                         SettingsDropdown("Show", name(filter), choices, onSelect = { filterKey = it.key() }) { choice ->
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(name(choice), Modifier.weight(1f))
-                                Text(Notes.visible(all, choice, "").size.toString(), style = MaterialTheme.typography.bodySmall,
+                                Text((counts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -260,7 +267,7 @@ fun NotesScreen(onBack: () -> Unit) {
                                     Notes.moved(currentDisplayed, note.id, -1)?.let(::place) != null }.takeIf { canMove(index, -1) },
                                 androidx.compose.ui.semantics.CustomAccessibilityAction("Move later") {
                                     Notes.moved(currentDisplayed, note.id, 1)?.let(::place) != null }.takeIf { canMove(index, 1) })
-                            NoteCard(note, selecting = selecting, selected = note.id in selectedIds, moves = moves,
+                            NoteCard(note, selecting = selecting, selected = note.id in selectedSet, moves = moves,
                                 // The dragged card follows the finger, not the grid's slide animation.
                                 modifier = (if (drag.id == note.id) Modifier else Modifier.animateItem()).noteLongPress(note, drag, grid, { currentDisplayed }, { currentCanDrag }, slop, edge,
                                     onSelect = { toggle(note.id) }, onDrop = ::place,
@@ -299,6 +306,34 @@ fun NotesScreen(onBack: () -> Unit) {
     }
 }
 
+// What a note card shows from its text, from one Markdown parse per change to it (UI-4). The preview is kept whole:
+// the card shows 8 lines, but TalkBack reads all of it.
+internal class NoteCardText(val label: String, val preview: String, val done: Int, val total: Int)
+internal fun noteCardText(note: PlannerNote): NoteCardText {
+    val blocks = Markdown.parse(note.content)
+    val plain = Markdown.plain(blocks)
+    val body = plain.lines().filter { it.isNotBlank() }
+    val (done, total) = Markdown.checklist(blocks)
+    // The first line is the name when there is no title; the preview goes on from the next.
+    return NoteCardText(Notes.label(note) { plain }, (if (note.title.isBlank()) body.drop(1) else body).joinToString("\n"), done, total)
+}
+
+// How many notes each Show choice lists (Notes.visible with no search): archived notes count only under Archive.
+internal fun noteFilterCounts(notes: List<PlannerNote>): Map<NoteFilter, Int> {
+    val counts = HashMap<NoteFilter, Int>()
+    fun add(filter: NoteFilter) { counts[filter] = (counts[filter] ?: 0) + 1 }
+    notes.forEach { note ->
+        if (note.archived) add(NoteFilter.Archive)
+        else {
+            add(NoteFilter.All)
+            add(NoteFilter.Notebook(note.notebook))
+            // A tag given twice still counts the note once.
+            note.tags.distinct().forEach { add(NoteFilter.Tag(it)) }
+        }
+    }
+    return counts
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, modifier: Modifier, onOpen: () -> Unit, onSelect: () -> Unit,
@@ -306,7 +341,8 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
     val tint = note.color?.let { Color(it) }
     val text = tint?.let(::onColour) ?: MaterialTheme.colorScheme.onSurface
     val soft = if (tint != null) text.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
-    val label = remember(note.title, note.content) { Notes.label(note) }
+    val card = remember(note.title, note.content) { noteCardText(note) }
+    val label = card.label
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = tint ?: MaterialTheme.colorScheme.surfaceContainer,
@@ -328,17 +364,14 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
                 else NoteActionsMenu(note, label, text)
             }
             Column(Modifier.padding(end = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val body = remember(note.content) { Markdown.plain(note.content).lines().filter { it.isNotBlank() } }
-                // The first line is the name when there is no title; the preview goes on from the next.
-                val preview = (if (note.title.isBlank()) body.drop(1) else body).joinToString("\n")
+                val preview = card.preview
                 if (preview.isNotBlank()) Text(preview, style = MaterialTheme.typography.bodyMedium, color = soft, maxLines = 8, overflow = TextOverflow.Ellipsis)
                 if (note.priority != com.example.itinerary.data.TaskPriority.NORMAL) Surface(
                     color = if (note.priority == com.example.itinerary.data.TaskPriority.HIGH) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
                     shape = RoundedCornerShape(6.dp)) {
                     Text("${note.priority.label} importance", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelMedium)
                 }
-                val (done, total) = remember(note.content) { Markdown.checklist(note.content) }
-                if (total > 0) Text("☑ $done of $total done", style = MaterialTheme.typography.labelMedium, color = text)
+                if (card.total > 0) Text("☑ ${card.done} of ${card.total} done", style = MaterialTheme.typography.labelMedium, color = text)
                 if (note.notebook.isNotBlank()) Text(note.notebook, style = MaterialTheme.typography.labelMedium, color = soft,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (note.tags.isNotEmpty()) Text(note.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium,

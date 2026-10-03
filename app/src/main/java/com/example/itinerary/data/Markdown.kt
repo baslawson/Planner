@@ -118,7 +118,9 @@ object Markdown {
     }
 
     /** The text without its Markdown marks: for a card's preview and a note's name. */
-    fun plain(content: String): String = parse(content).joinToString("\n") { block ->
+    fun plain(content: String): String = plain(parse(content))
+    // From blocks already parsed, so a card that also counts its checklist parses once (UI-4).
+    fun plain(blocks: List<Block>): String = blocks.joinToString("\n") { block ->
         when (block) {
             is Heading -> runsText(block.text)
             is Paragraph -> runsText(block.text)
@@ -133,8 +135,9 @@ object Markdown {
     private fun runsText(text: String) = inline(text).joinToString("") { it.text }
 
     /** Ticked and total checklist lines. */
-    fun checklist(content: String): Pair<Int, Int> {
-        val checks = parse(content).filterIsInstance<Check>()
+    fun checklist(content: String): Pair<Int, Int> = checklist(parse(content))
+    fun checklist(blocks: List<Block>): Pair<Int, Int> {
+        val checks = blocks.filterIsInstance<Check>()
         return checks.count { it.done } to checks.size
     }
 
