@@ -52,12 +52,17 @@ class AlarmService : Service() {
                 }
                 stopRinging()
             }
-            else -> startRinging(intent?.extras)
+            else -> {
+                startRinging(intent?.extras, redelivered = flags and START_FLAG_REDELIVERY != 0)
+                // Android ending the process (low memory, seen right after an unlock) must not end the alarm without anyone
+                // stopping it: the start is delivered again and it rings on (Stop and Snooze end it for good).
+                return START_REDELIVER_INTENT
+            }
         }
         return START_NOT_STICKY
     }
 
-    private fun startRinging(extras: Bundle?) {
+    private fun startRinging(extras: Bundle?, redelivered: Boolean = false) {
         // A second alarm can arrive while one is ringing; keep the first one as a normal notification.
         val previous = ringing
         if (previous != null && extras != null) {
@@ -111,10 +116,14 @@ class AlarmService : Service() {
             return
         }
 
+        // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
+        // alarm long past that is left as missed.
+        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis())
+        if (ringFor == null) { onGiveUp(); return }
         startSound()
         startVibration()
         handler.removeCallbacks(giveUp)
-        handler.postDelayed(giveUp, MAX_RING_MINUTES * 60_000L)
+        handler.postDelayed(giveUp, ringFor)
     }
 
     private fun startSound() {
@@ -308,6 +317,20 @@ class AlarmService : Service() {
                 .putExtra(ReminderScheduler.EXTRA_RING, true)
             ContextCompat.startForegroundService(context, intent)
             return true
+        }
+    }
+}
+
+// How long an alarm rings: its full time when it starts; after Android restarted the service, what is left counted from
+// the reminder's time (at least a minute), or null (missed) once that is long gone. A trigger of 0 (not known) rings fully.
+internal object AlarmRestart {
+    fun ringFor(redelivered: Boolean, trigger: Long, now: Long): Long? {
+        val full = AlarmService.MAX_RING_MINUTES * 60_000L
+        if (!redelivered || trigger <= 0L) return full
+        val left = trigger + full - now
+        return when {
+            left < -5 * 60_000L -> null
+            else -> left.coerceIn(60_000L, full)
         }
     }
 }

@@ -23,5 +23,21 @@ class LockedRebootStage {
         assertTrue("the reminder is in the before-unlock snapshot", snapshot.isFile && snapshot.readText().contains("qa-locked-reboot"))
     }
 
+    // The same with an event whose reminder rings until stopped (AlarmService), to hear it ring before the unlock (D6-1).
+    @HarnessStage @Test fun setARingingEventReminderAFewMinutesAhead() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val app = context.applicationContext as ItineraryApp
+        val start = java.time.LocalDateTime.now().plusMinutes(MINUTES.toLong() + 1).withSecond(0).withNano(0)
+        val id = app.repository.saveItemId(com.example.itinerary.data.ItineraryItem(tripId = 0, date = start.toLocalDate(),
+            startTime = start.toLocalTime(), title = "QA locked ring"),
+            addedReminders = listOf(com.example.itinerary.data.Reminder(itemId = 0, amount = 0,
+                unit = com.example.itinerary.data.ReminderUnit.MINUTES, ringUntilDismissed = true)))
+        val snapshot = File(File(context.createDeviceProtectedStorageContext().noBackupFilesDir, "locked-alarms"), "snapshot")
+        val end = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < end && !(snapshot.isFile && snapshot.readText().contains("QA locked ring"))) Thread.sleep(200)
+        android.util.Log.i("QA-LOCKED", "event $id at $start in snapshot=${snapshot.isFile && snapshot.readText().contains("QA locked ring")}")
+        assertTrue("the ringing reminder is in the before-unlock snapshot", snapshot.isFile && snapshot.readText().contains("QA locked ring"))
+    }
+
     companion object { const val MINUTES = 4 }
 }
