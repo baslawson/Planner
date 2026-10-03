@@ -337,13 +337,22 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     LaunchedEffect(closeRequested) {
         if (closeRequested) { snapshotFlow { busy }.first { !it }; if (!askingToSave) close() }
     }
+    // E5-3: a file picked or a photo taken is in the draft at once, not after the pause: Planner was in the background
+    // for the picker or camera, and Android may close it before the timer runs.
+    fun writeDraftNow(json: JSONObject) {
+        if (finished) return
+        try { draftStore.write(draftKey, json); lastWritten[0] = json.toString() } catch (_: Exception) { error = draftError }
+    }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             busy = true
             scope.launch {
                 try {
                     val imported = attachmentStore.import(uri)
-                    if (imported != null) attachments = attachments + imported
+                    if (imported != null) {
+                        attachments = attachments + imported
+                        writeDraftNow(JSONObject(snapshot.toString()).put("attachments", DraftCodec.attachments(attachments)))
+                    }
                     else error = "Couldn't attach this file. Please try again."
                 } finally { busy = false }
             }
@@ -356,6 +365,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
             else attachmentStore.delete(name)
         }
         pendingPhoto = null
+        if (name != null && success) writeDraftNow(JSONObject(snapshot.toString()).put("attachments", DraftCodec.attachments(attachments)).put("pendingPhoto", ""))
     }
     BackHandler { if (!busy) close() }
     val taskScroll = rememberScrollState()
