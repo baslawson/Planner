@@ -14,13 +14,15 @@ object ServerEvents {
     fun parse(text: String, zone: ZoneId): Parsed = read(text, zone, limited = true)
 
     // [limited]: text longer than Planner holds makes the event read-only; otherwise it's read in full (patch compares).
+    private val REPEAT = setOf("RRULE", "RDATE", "EXDATE", "RECURRENCE-ID")
+
     private fun read(text: String, zone: ZoneId, limited: Boolean): Parsed = runCatching {
         val events = Ics.events(Ics.lines(text), 50, "Too many events.")
         val uid = events.firstNotNullOfOrNull { props -> props.firstOrNull { it.name == "UID" }?.value?.trim() }
         if (events.size != 1) return Parsed(uid, null)
         val props = events.single()
         fun one(name: String) = props.firstOrNull { it.name == name }
-        if (props.any { it.name in setOf("RRULE", "RDATE", "EXDATE", "RECURRENCE-ID") }) return Parsed(uid, null)
+        if (props.any { it.name in REPEAT }) return Parsed(uid, null)
         if (one("STATUS")?.value?.uppercase() == "CANCELLED") return Parsed(uid, null)
         val start = one("DTSTART") ?: return Parsed(uid, null)
         val end = one("DTEND"); val duration = one("DURATION")

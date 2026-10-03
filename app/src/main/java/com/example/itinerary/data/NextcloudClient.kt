@@ -173,7 +173,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         val url = account.server.newBuilder().encodedPath(calendar).build()
         require(inside(url, home) &&
             url.pathSegments.none { it == "." || it == ".." }) { "Calendar outside the calendar home" }
-        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        val stamp = RANGE_STAMP
         val range = "start=\"${stamp.format(from)}\" end=\"${stamp.format(until)}\""
         val query = """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
             """<d:prop><d:getetag/><c:calendar-data><c:expand $range/></c:calendar-data></d:prop>""" +
@@ -234,7 +234,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
 
     // Step 6: the event files in [calendar] between [from] and [until] as they are (repeats not expanded).
     fun calendarFiles(account: NextcloudAccount, calendar: String, from: Instant, until: Instant): List<ServerFile> {
-        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        val stamp = RANGE_STAMP
         val range = "start=\"${stamp.format(from)}\" end=\"${stamp.format(until)}\""
         return files(account, calendar, """<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
             """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">""" +
@@ -306,7 +306,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     }.getOrNull()
 
     private fun eventUrl(account: NextcloudAccount, calendar: String, uid: String): HttpUrl {
-        require(uid.matches(Regex("[A-Za-z0-9@._-]{1,200}"))) { "Invalid event name" }
+        require(uid.matches(EVENT_NAME)) { "Invalid event name" }
         return calendarUrl(account, calendar).newBuilder().addPathSegment("$uid.ics").build()
     }
 
@@ -454,6 +454,9 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         private const val CALENDARSERVER = "http://calendarserver.org/ns/"
         private const val CALENDAR_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/" xmlns:cs="http://calendarserver.org/ns/"><d:prop><d:resourcetype/><d:displayname/><a:calendar-color/><cs:getctag/><d:sync-token/><c:supported-calendar-component-set/><d:current-user-privilege-set/></d:prop></d:propfind>"""
         private val EMPTY = ByteArray(0).toRequestBody(null)
+        // Compiled once (each sync asks for time ranges and names event files).
+        private val RANGE_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        private val EVENT_NAME = Regex("[A-Za-z0-9@._-]{1,200}")
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
         private const val ETAG_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getetag/></d:prop></d:propfind>"""
 

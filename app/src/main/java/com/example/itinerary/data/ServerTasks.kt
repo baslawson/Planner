@@ -65,7 +65,7 @@ object ServerTasks {
     fun fingerprint(fields: Fields): String {
         val text = listOf(fields.title.trim(), fields.notes.trim(), fields.dueDate?.toString().orEmpty(), fields.priority.name, fields.done.toString())
             .joinToString("\u0000")
-        return PRINT + java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
+        return PRINT + CalendarExport.shortHash(text)
     }
     private const val PRINT = "t1:"
 
@@ -74,7 +74,7 @@ object ServerTasks {
 
     // A new task file for [task].
     fun encode(task: PlannerTask, uid: String, now: Instant): String {
-        require(uid.matches(Regex("[A-Za-z0-9@._-]+")))
+        require(uid.matches(CalendarExport.UID))
         val stamp = CalendarExport.stamp(now)
         val lines = listOf("BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Planner//Tasks//EN", "BEGIN:VTODO", "UID:$uid", "DTSTAMP:$stamp",
             "CREATED:$stamp", "LAST-MODIFIED:$stamp") + MANAGED.flatMap { managed(it, task, now, null, ZoneOffset.UTC) } + listOf("END:VTODO", "END:VCALENDAR")

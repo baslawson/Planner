@@ -1029,7 +1029,7 @@ class CalendarSync(
         // The hash alone, as fingerprints were until 0.0.9 (in the phone's zone until 0.0.8, in UTC in 0.0.9).
         internal fun zonedFingerprint(item: ItineraryItem, zone: ZoneId): String {
             val text = CalendarExport.encode(item, "planner", zone, java.time.Instant.EPOCH)
-            return java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
+            return CalendarExport.shortHash(text)
         }
 
         // Not a bill or a skipped date, and within the years a calendar file can hold.
