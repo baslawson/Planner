@@ -325,7 +325,10 @@ object QuickEntry {
     // "Gig 12/10 night": right after a numeric date, a part of the day is that day's, as after a weekday. Not after 9-5 or
     // 10.30, which may be hours.
     private const val afterNumericDate = "(?<=\\b\\d{1,2}(?:/\\d{1,2}(?:/\\d{2,4})?|[.-]\\d{1,2}[.-]\\d{2,4})\\s{1,3})"
-    private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|$tonightWords|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo|$afterNumericDate(?:morning|afternoon|evening|night))\\b")
+    // "Shift 9-5 night", "Party 8-1 night": after an hour range that can start in the evening, the part of the day settles
+    // am/pm, as in "tonight 10-2", so 9-5 is hours rather than a date. Not "12-10 night" or "3-4 night", which may be dates.
+    private const val afterNightHours = "(?<=\\b(?:[5-9]|1[01])[-–—](?:1[0-2]|[1-9])\\s{1,3})"
+    private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|$tonightWords|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo|$afterNumericDate(?:morning|afternoon|evening|night)|$afterNightHours(?:evening|night))\\b")
     private val vagueTimes = rx("(?:morning|afternoon|arvo|evening|night|$tonightWords|breakfast|lunch|dinner|work|lunch\\s*time|first\\s+thing)$")
     // A part of the day that also settles am/pm for a clock time beside it: tomorrow morning at 7.
     private val dayPeriods = mapOf(
@@ -512,7 +515,8 @@ object QuickEntry {
             // "last night": yesterday, at a time in the night.
             impliedYesterday = value == "last night"
             // "3 in the afternoon", "8 tonight": the number is the hour.
-            if (dayPeriod != null) rx("(?<![\\w.:/£€¥$])(\\d{1,2})\\s+$").find(remaining.substring(0, start))?.let { hour ->
+            // Not the end of an hour range: "Shift 9-5 night".
+            if (dayPeriod != null) rx("(?<![\\w.:/£€¥$\\-–—])(\\d{1,2})\\s+$").find(remaining.substring(0, start))?.let { hour ->
                 // After at/@ the ordinary time rules take it: "Dinner at 7 tonight".
                 val afterAt = rx("(?:\\bat\\s+|@\\s*)$").containsMatchIn(remaining.substring(0, hour.range.first))
                 if (!afterAt && hour.groupValues[1].toInt() in 1..12) { periodHour = hour.groupValues[1].toInt(); start = hour.range.first }
@@ -870,6 +874,9 @@ object QuickEntry {
         // It stays a date beside another clock time ("Gym every Monday 12-10 6pm"), or where it is the very day a weekday
         // given with it names ("Dentist Fri 2-10" is Friday 2 October; "Meeting Friday 9-10" is hours on that Friday).
         fun hoursNotDate(n: MatchResult): Boolean {
+            // "Shift 9-5 night": the part of the day read after it makes it hours (see afterNightHours).
+            if (hourRange.matches(n.value) && phrases.any { it.kind == QuickPhraseKind.TIME && it.start > n.range.last &&
+                    text.substring(n.range.last + 1, it.start).isBlank() && rx("^(?:evening|night)$").matches(text.substring(it.start, it.end)) }) return true
             if (!whenGiven || !hourRange.matches(n.value)) return false
             // A four-digit number without a leading zero or "hrs" is title text here ("Budget 2026 review"); see fourDigits.
             if (times.findAll(remaining).any { (it.range.last < n.range.first || it.range.first > n.range.last) &&
