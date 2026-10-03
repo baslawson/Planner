@@ -402,11 +402,11 @@ private fun DayCell(
     }
 
     // AG-3: the number alone tells TalkBack nothing; it reads the full date, today and the event dot, and the selection.
-    val description = dayCellDescription(date, isToday, hasItems)
+    // Worked out only when the semantics are read (TalkBack, tests), not on every composition of the cell (UI-7).
     Box(
         modifier
             .height(LocalCalendarRowHeight.current)
-            .semantics { contentDescription = description; selected = isSelected }
+            .semantics { contentDescription = dayCellDescription(date, isToday, hasItems); selected = isSelected }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center,
@@ -435,7 +435,7 @@ private fun DayCell(
 
 // What TalkBack reads for a day of the month grid, e.g. "Monday 5 October 2026, today, has events".
 internal fun dayCellDescription(date: LocalDate, isToday: Boolean, hasItems: Boolean, locale: Locale = Locale.getDefault()): String =
-    listOfNotNull(date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", locale)),
+    listOfNotNull(date.format(patternFormatter("EEEE d MMMM yyyy", locale)),
         "today".takeIf { isToday }, "has events".takeIf { hasItems }).joinToString(", ")
 
 // Today's ring fades between full strength and faint so it catches the eye. The alpha is read only while drawing,

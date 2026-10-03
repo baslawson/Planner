@@ -52,10 +52,8 @@ fun spanLabel(start: LocalDate, end: LocalDate, displayedDate: LocalDate = start
 // include the locale in the key so changing the phone language cannot reuse the wrong one.
 private val patternFormatters = ConcurrentHashMap<Pair<String, Locale>, DateTimeFormatter>()
 
-private fun patternFormatter(pattern: String): DateTimeFormatter {
-    val locale = Locale.getDefault()
-    return patternFormatters.getOrPut(pattern to locale) { DateTimeFormatter.ofPattern(pattern, locale) }
-}
+internal fun patternFormatter(pattern: String, locale: Locale = Locale.getDefault()): DateTimeFormatter =
+    patternFormatters.getOrPut(pattern to locale) { DateTimeFormatter.ofPattern(pattern, locale) }
 
 // Provided by MainActivity after resolving the system clock preference; the default only matters in previews.
 val LocalTimeFormat = compositionLocalOf { TimeFormat.SYSTEM }
