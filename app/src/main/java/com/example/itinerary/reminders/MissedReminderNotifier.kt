@@ -130,6 +130,10 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
                     .addAction(0, "Done", TaskActionReceiver.done(context, m.task.id, m.due)).build())
                 is MissedReminders.Note -> manager.notify("note:${m.note.id}", 0, builder(com.example.itinerary.data.Notes.label(m.note), dueText(m.due), 0)
                     .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
+                    // On the lock screen no note words, as the reminder itself (R-2).
+                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                    .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
+                        .setContentTitle("Missed note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
                     // U-13: opens the note, as the reminder itself does.
                     .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
@@ -154,5 +158,6 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
 }
 
 private fun MissedReminders.Missed.title() = when (this) {
-    is MissedReminders.Event -> item.title; is MissedReminders.Task -> task.title; is MissedReminders.Note -> com.example.itinerary.data.Notes.label(note)
+    // The summary is shown on the lock screen: a note is named only by what it is (its own notification has its words).
+    is MissedReminders.Event -> item.title; is MissedReminders.Task -> task.title; is MissedReminders.Note -> "Note reminder"
 }
