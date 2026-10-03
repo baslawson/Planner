@@ -15,6 +15,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -63,7 +67,9 @@ fun UpdateDialog() {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val updates = app.updates
-    val state by updates.state.collectAsStateWithLifecycle()
+    // The download reports every chunk read; the dialog changes only when the whole percent does (UI-13).
+    val state by remember(updates) { updates.state.map(::wholePercent).distinctUntilChanged() }
+        .collectAsStateWithLifecycle(wholePercent(updates.state.value))
     val dismissed by updates.dismissed.collectAsStateWithLifecycle()
     val release = when (val s = state) {
         is Updates.State.Available -> s.release
@@ -88,7 +94,7 @@ fun UpdateDialog() {
         note = when (s) {
             is Updates.State.Downloading -> ({
                 androidx.compose.foundation.layout.Column {
-                    Text(if (s.progress >= 0) "Downloading… ${(s.progress * 100).toInt()} %" else "Downloading…", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (s.progress >= 0) "Downloading… ${(s.progress * 100).roundToInt()} %" else "Downloading…", style = MaterialTheme.typography.bodyMedium)
                     if (s.progress >= 0) LinearProgressIndicator(progress = { s.progress }, Modifier.fillMaxWidth().padding(top = 6.dp))
                     else LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
@@ -103,6 +109,10 @@ fun UpdateDialog() {
         if (release.notes.isNotBlank()) MarkdownView(release.notes, Modifier.fillMaxWidth().padding(top = 8.dp))
     }
 }
+
+// A download's progress cut to its whole percent (what the dialog shows), so chunks within one percent compare equal.
+internal fun wholePercent(state: Updates.State): Updates.State =
+    if (state is Updates.State.Downloading && state.progress >= 0) state.copy(progress = (state.progress * 100).toInt() / 100f) else state
 
 // Settings → Updates: the version, the two switches and Check now.
 @Composable
