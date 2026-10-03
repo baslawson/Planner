@@ -222,7 +222,11 @@ class SixTaskFeaturesUiTest {
         click("Attach file")
         await { nodes().any { it.packageName?.toString()=="com.google.android.documentsui" } }
         screenshot("task-file-picker"); back()
-        click("Take photo")
+        // A second tap while the camera opens makes no second photo file (as in the note editor).
+        val attachmentsDir = java.io.File(app.filesDir, "attachments")
+        val filesBefore = attachmentsDir.list().orEmpty().toSet()
+        await { var n = find("Take photo"); while (n != null && !n.isClickable) n = n.parent
+            n?.let { it.performAction(AccessibilityNodeInfo.ACTION_CLICK); it.performAction(AccessibilityNodeInfo.ACTION_CLICK) } == true }
         fun cameraButton(id: String) = nodes().firstOrNull { it.isVisibleToUser && it.viewIdResourceName?.endsWith(":id/$id")==true }
         await { find("Shutter")!=null || cameraButton("shutter_button")!=null }
         screenshot("task-camera")
@@ -242,6 +246,7 @@ class SixTaskFeaturesUiTest {
         reveal { find("Task photo.jpg")!=null };screenshot("task-photo-attached");saveAndClose()
         await { data().tasks.any { it.title=="QA six attachments" } }
         val file=data().tasks.single { it.title=="QA six attachments" }.attachments.single()
+        assertEquals("one photo file for two taps", 1, (attachmentsDir.list().orEmpty().toSet() - filesBefore).size)
         assertTrue(app.attachmentStore.fileFor(file.fileName).length()>0)
     }
     @HarnessStage @Test fun prepareProcessDeathDraft() = runBlocking {

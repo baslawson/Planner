@@ -477,6 +477,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
                     OutlinedButton(enabled = !busy && attachments.size < 100, onClick = {
+                        // A second tap while the camera opens would leave the first photo file behind (as the note editor).
+                        if (pendingPhoto != null) return@OutlinedButton
                         val file = attachmentStore.newPhotoFile()
                         pendingPhoto = file.name
                         draftStore.write(draftKey, snapshot.put("pendingPhoto", file.name))
