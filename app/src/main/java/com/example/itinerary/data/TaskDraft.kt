@@ -29,10 +29,12 @@ class TaskDraftStore(context: Context) {
     }
     // The files drafts hold, waiting ones included, which the unused-file clean-up must leave alone.
     fun files(): Set<String> {
+        // Waiting ones first (E5-2): one written meanwhile leaves the waiting list only once it is in the folder.
+        val waiting = writer.pendingValues().map { it as String }
         val stored = synchronized(lock) {
             dir.listFiles().orEmpty().filter { it.extension == "json" }.mapNotNull { runCatching { it.readText() }.getOrNull() }
         }
-        return (stored + writer.pendingValues().map { it as String }).flatMap { text ->
+        return (waiting + stored).flatMap { text ->
             runCatching {
                 val json = JSONObject(text)
                 DraftCodec.attachments(json.optJSONArray("attachments")).map { it.fileName } +

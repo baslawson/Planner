@@ -30,6 +30,7 @@ class AttachmentStore(private val context: Context) {
     }
     fun taskDraftFiles(): Set<String> = TaskDraftStore(context).files()
     fun noteDraftFiles(): Set<String> = NoteDraftStore(context).files()
+    fun eventDraftFiles(): Set<String> = EditorDraftStore(context).files()
     // Big Recently deleted bundles (see DeletedPayloads).
     fun deletedPayloads() = DeletedPayloads(File(context.filesDir, "recently-deleted"))
     fun clearThumbnails() = thumbnails.evictAll()

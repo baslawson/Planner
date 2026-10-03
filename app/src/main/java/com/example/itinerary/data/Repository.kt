@@ -179,6 +179,7 @@ class Repository(
         noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
         keep.addAll(store.noteDraftFiles())
+        keep.addAll(store.eventDraftFiles())
         deletedDao.all().flatMap { contents(it).storedAttachments }.forEach { keep.add(it.fileName) }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         candidates.filter { it.isNotBlank() && it !in keep }.distinct().forEach(store::delete)
@@ -621,6 +622,7 @@ class Repository(
         noteDao.all().flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         keep.addAll(store.taskDraftFiles())
         keep.addAll(store.noteDraftFiles())
+        keep.addAll(store.eventDraftFiles())
             candidates.filter { it.isNotBlank() && it !in keep } to alarms
         }
         afterCommit(files, reminders.map { it.id })

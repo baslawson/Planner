@@ -26,6 +26,13 @@ class EditorDraftStore(context: Context) {
     /** Also drops a draft still waiting to be written, so none lands after this. */
     fun clear() { writer.now(KEY) { synchronized(lock) { file.delete() } } }
     private fun writeFile(json: JSONObject) = synchronized(lock) { file.writeText(json.toString()) }
+    /** E5-1: the files the draft holds (a waiting one's included, as [read] sees it first), which the unused-file
+     *  clean-up must leave alone: an editor still open on an event emptied from Recently deleted saves them as new. */
+    fun files(): Set<String> = read()?.let { json ->
+        listOf("existingAttachments", "added", "removed").flatMap { name ->
+            runCatching { DraftCodec.attachments(json.optJSONArray(name)).map { it.fileName } }.getOrDefault(emptyList())
+        } + listOfNotNull(json.optJSONObject("state")?.optString("pendingPhoto")?.takeIf { it.isNotBlank() && it != "null" })
+    }.orEmpty().toSet()
 
     companion object {
         private const val KEY = "event"
