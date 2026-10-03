@@ -522,12 +522,18 @@ object QuickEntry {
                 val afterAt = rx("(?:\\bat\\s+|@\\s*)$").containsMatchIn(remaining.substring(0, hour.range.first))
                 if (!afterAt && hour.groupValues[1].toInt() in 1..12) { periodHour = hour.groupValues[1].toInt(); start = hour.range.first }
             }
-            // "Friday night 8": the hour after the part of the day, when nothing but schedule words follow. "9/10" is a date,
-            // "tonight 4 Sam" a title.
+            // "Friday night 8": the hour after the part of the day, when nothing but schedule words follow. "9/10" is a date.
+            // Before a name ("Friday night 8 Luigi's") too, but only an hour that falls in that part of the day: "2nite 4 Sam"
+            // is text speak for "for Sam", and 4 is no hour of the night (only 4am after it), so it stays in the title (Q5).
+            // Before an ordinary word it is a count: "Friday night 8 people".
             if (dayPeriod != null && periodHour == null) rx("^\\s+(\\d{1,2})(?![\\w:./\\-–—])(?!\\s*(?:[-–—]|to|till?|until)\\b)").find(remaining.substring(match.range.last + 1))?.let { hour ->
                 val rest = remaining.substring(match.range.last + 1 + hour.range.last + 1)
-                val scheduleNext = rest.isBlank() || nextWord.find(rest)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true
-                if (hour.groupValues[1].toInt() in 1..12 && scheduleNext) { periodHour = hour.groupValues[1].toInt(); end = match.range.last + hour.range.last + 1 }
+                val following = nextWord.find(rest)?.groupValues?.get(1)
+                val scheduleNext = rest.isBlank() || following?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true
+                val n = hour.groupValues[1].toInt()
+                val inPeriod = n in 1..12 && listOf(n % 12, n % 12 + 12).count { LocalTime.of(it, 0) in dayPeriods.getValue(dayPeriod!!) } == 1
+                val nameNext = re("^\\s+\\p{Lu}").containsMatchIn(rest)
+                if (n in 1..12 && (scheduleNext || inPeriod && nameNext)) { periodHour = n; end = match.range.last + hour.range.last + 1 }
             }
             consume(start..end, QuickPhraseKind.TIME)
             periodEnd = end + 1
