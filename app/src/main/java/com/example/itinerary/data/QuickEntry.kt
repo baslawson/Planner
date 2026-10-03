@@ -48,6 +48,9 @@ data class QuickEntrySuggestion(
 object QuickEntry {
     /** "In 2 hours" or "now" in a draft based on an earlier day: there is no current time to count from. */
     const val STALE_RELATIVE = "‘In …’ and ‘now’ count from the current time, but this draft is based on an earlier day. Edit the entry to use today, or replace ‘in …’ with a date."
+    /** The longest entry Quick entry reads, title box included; longer text gets [TOO_LONG] without being parsed. */
+    const val MAX_LENGTH = 500
+    const val TOO_LONG = "Use at most $MAX_LENGTH characters per entry."
     /** How to read a numeric date such as 3/4: day first, month first, or null to ask. Follows Settings → Date format. */
     @Volatile var numericDayFirst: Boolean? = null
     // UI-5: a pattern is compiled the first time it is used and then kept, rather than again on every parse (Quick entry
@@ -335,6 +338,8 @@ object QuickEntry {
     /** [now] enables "in 30 minutes"; without it such phrases ask for a time. */
     fun parse(input: String, today: LocalDate, literalRanges: List<IntRange> = emptyList(),
               now: LocalDateTime? = null, dayFirst: Boolean? = numericDayFirst, zone: ZoneId = ZoneId.systemDefault()): QuickEntrySuggestion {
+        // Q5-6: some patterns cost more the longer the text, so a large paste is refused before it is read at all.
+        if (input.length > MAX_LENGTH) return QuickEntrySuggestion(input.trim(), today, null, TOO_LONG)
         // Keep offsets identical to the text field, including repeated spaces/newlines.
         val text = input.replace('“', '"').replace('”', '"').map { if (it.isWhitespace()) ' ' else it }.joinToString("")
         val phrases = mutableListOf<QuickEntryPhrase>()
