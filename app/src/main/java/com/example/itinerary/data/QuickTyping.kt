@@ -3,6 +3,15 @@ package com.example.itinerary.data
 import java.time.LocalDate
 import java.util.Locale
 
+// UI-5: compiled once, not on every keystroke.
+private val spaces = Regex("\\s+")
+// Any repeat tied to a weekday or a day of the month: every Friday, Mon Wed Fri, first Monday of every month, 1st of every month.
+private val anchoredRepeat = Regex("\\b(?:mon|tue|wed|thu|fri|sat|sun)(?!th)|weekday|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE)
+private val remindCompletion = Regex("\\b(?:remind|notify)(?:\\s+me)?\\s*$", RegexOption.IGNORE_CASE)
+private val everyCompletion = Regex("\\bevery\\s*$", RegexOption.IGNORE_CASE)
+private val forCompletion = Regex("\\bfor\\s*$", RegexOption.IGNORE_CASE)
+private val lastWord = Regex("\\b[A-Za-z]{2,}$")
+
 /** Typing in a draft from an earlier day moves it to [today], so new words are read against today. */
 fun QuickInput.rebased(today: LocalDate): QuickInput = if (baseDate == today) this else copy(baseDate = today)
 
@@ -23,12 +32,11 @@ fun QuickInput.edited(value: String): QuickInput {
                 if (spans.none { it.first <= range.last && range.first <= it.last }) spans += range
             }
         }
-        return spans.sortedBy { it.first }.map { source.substring(it).lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").trim() }
+        return spans.sortedBy { it.first }.map { source.substring(it).lowercase(Locale.ROOT).replace(spaces, " ").trim() }
     }
     fun changed(kind: QuickPhraseKind) = signature(kind, true) != signature(kind, false)
     fun anchors(old: Boolean) = signature(QuickPhraseKind.REPEAT, old)
-        // Any repeat tied to a weekday or a day of the month: every Friday, Mon Wed Fri, first Monday of every month, 1st of every month.
-        .filter { Regex("\\b(?:mon|tue|wed|thu|fri|sat|sun)(?!th)|weekday|\\d(?:st|nd|rd|th)\\s", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        .filter { anchoredRepeat.containsMatchIn(it) }
     return copy(text = value, literals = moved,
         dateOverride = dateOverride.takeUnless { changed(QuickPhraseKind.DATE) || anchors(true) != anchors(false) },
         timeOverride = timeOverride.takeUnless { changed(QuickPhraseKind.TIME) },
@@ -51,15 +59,15 @@ fun quickCompletions(text: String, cursor: Int, literals: List<IntRange>, task: 
     val prefix = text.take(cursor)
     val normalized = prefix.replace('“', '"').replace('”', '"')
     if (normalized.count { it == '"' } % 2 != 0) return emptyList()
-    fun options(pattern: String, values: List<Pair<String, String>>): List<QuickCompletion>? {
-        val match = Regex(pattern, RegexOption.IGNORE_CASE).find(prefix) ?: return null
+    fun options(pattern: Regex, values: List<Pair<String, String>>): List<QuickCompletion>? {
+        val match = pattern.find(prefix) ?: return null
         if (literals.any { it.first < cursor && it.last >= match.range.first }) return emptyList()
         return values.map { (label, replacement) -> QuickCompletion(label, match.range.first, cursor, replacement) }
     }
-    options("\\b(?:remind|notify)(?:\\s+me)?\\s*$", listOf("10 minutes before" to "remind me 10 minutes before", "30 minutes before" to "remind me 30 minutes before", "1 day before" to "remind me 1 day before"))?.let { return it }
-    options("\\bevery\\s*$", listOf("Every day" to "every day", "Every week" to "every week", "Every month" to "every month"))?.let { return it }
-    if (!task) options("\\bfor\\s*$", listOf("30 minutes" to "for 30 minutes", "45 minutes" to "for 45 minutes", "1 hour" to "for 1 hour"))?.let { return it }
-    val word = Regex("\\b[A-Za-z]{2,}$").find(prefix) ?: return emptyList()
+    options(remindCompletion, listOf("10 minutes before" to "remind me 10 minutes before", "30 minutes before" to "remind me 30 minutes before", "1 day before" to "remind me 1 day before"))?.let { return it }
+    options(everyCompletion, listOf("Every day" to "every day", "Every week" to "every week", "Every month" to "every month"))?.let { return it }
+    if (!task) options(forCompletion, listOf("30 minutes" to "for 30 minutes", "45 minutes" to "for 45 minutes", "1 hour" to "for 1 hour"))?.let { return it }
+    val word = lastWord.find(prefix) ?: return emptyList()
     if (literals.any { it.first < cursor && it.last >= word.range.first }) return emptyList()
     val candidates = listOf("Today", "Tomorrow", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     if (candidates.any { it.equals(word.value, ignoreCase = true) } || word.value.lowercase(Locale.ROOT) in QuickEntry.tomorrowSpellings) return emptyList()
