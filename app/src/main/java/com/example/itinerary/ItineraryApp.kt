@@ -135,8 +135,18 @@ class ItineraryApp : Application() {
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.example.itinerary.data.RemovedAiData.remove(this@ItineraryApp) } }
         // Calendar sync in the background follows the setting (and a restored backup's).
         // Logged, not thrown: started at the unlock, WorkManager may not be ready yet (it starts with the app's providers).
+        // D6-5: then it is tried once more a little later, with the setting as it is by then.
+        fun schedule(hours: Int) = runCatching { CalendarBackground.schedule(this@ItineraryApp, hours) }
+            .onFailure { android.util.Log.w("ItineraryApp", "Couldn't schedule calendar sync", it) }
         appScope.launch { settings.calendarBackgroundHours.collect { hours ->
-            runCatching { CalendarBackground.schedule(this@ItineraryApp, hours) }.onFailure { android.util.Log.w("ItineraryApp", "Couldn't schedule calendar sync", it) }
+            if (schedule(hours).isFailure) appScope.launch {
+                kotlinx.coroutines.delay(CALENDAR_SCHEDULE_RETRY_MS)
+                schedule(settings.calendarBackgroundHours.value)
+            }
         } }
+    }
+
+    private companion object {
+        const val CALENDAR_SCHEDULE_RETRY_MS = 30_000L
     }
 }
