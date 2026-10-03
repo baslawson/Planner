@@ -3,7 +3,6 @@ package com.example.itinerary.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
@@ -438,12 +437,8 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(12.dp))
         if (signedIn == false) Text("Sign in to Nextcloud first, in Settings → Nextcloud.", color = MaterialTheme.colorScheme.error)
-        Row(Modifier.fillMaxWidth().toggleable(value = on, enabled = signedIn == true || on, role = androidx.compose.ui.semantics.Role.Switch,
-            onValueChange = { want -> app.appScope.launch { sync.setEnabled(want) } }).padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("Sync notes", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Switch(checked = on, onCheckedChange = null, enabled = signedIn == true || on)
-        }
+        SwitchRow("Sync notes", on, { want -> app.appScope.launch { sync.setEnabled(want) } }, enabled = signedIn == true || on,
+            style = MaterialTheme.typography.bodyLarge)
         if (on) {
             val message = when {
                 state.running -> "Syncing…"

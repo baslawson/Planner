@@ -15,16 +15,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -156,17 +153,11 @@ fun AppLockSettingsSection() {
         if (result.resultCode == Activity.RESULT_OK) appLock.setEnabled(!appLock.enabled.value)
     }
     SettingsHeading("App lock")
-    Row(
-        Modifier.fillMaxWidth().toggleable(value = enabled, role = Role.Switch, onValueChange = {
-            if (!enabled && !AppLockRule.canAsk(context))
-                Toast.makeText(context, "Set a screen lock on your phone first", Toast.LENGTH_LONG).show()
-            else confirm.launch(Intent(context, LockActivity::class.java).putExtra(LockActivity.EXTRA_CONFIRM, true))
-        }).padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Lock Planner", Modifier.weight(1f))
-        Switch(checked = enabled, onCheckedChange = null)
-    }
+    SwitchRow("Lock Planner", enabled, onChange = {
+        if (!enabled && !AppLockRule.canAsk(context))
+            Toast.makeText(context, "Set a screen lock on your phone first", Toast.LENGTH_LONG).show()
+        else confirm.launch(Intent(context, LockActivity::class.java).putExtra(LockActivity.EXTRA_CONFIRM, true))
+    })
     // Android 13 and later get a blank card in recent apps (MainActivity); earlier versions have no way to hide it short
     // of blocking screenshots.
     Text("Ask for your fingerprint, face, or the phone's PIN, pattern or password to open Planner. Reminders and the " +

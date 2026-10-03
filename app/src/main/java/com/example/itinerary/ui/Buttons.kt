@@ -21,14 +21,38 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.unit.dp
 
 // Shared Matrix controls style ordinary actions; destructive actions retain red.
+
+/**
+ * A setting that is on or off: the whole row is one switch (tap anywhere on it). [modifier] goes inside the tappable
+ * row (its padding or height), [style] is the label's.
+ */
+@Composable
+fun SwitchRow(
+    label: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier.padding(vertical = 8.dp),
+    enabled: Boolean = true,
+    style: TextStyle = LocalTextStyle.current,
+) {
+    Row(Modifier.fillMaxWidth().toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange).then(modifier),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = style)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
 
 @Composable
 fun DangerButton(

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
@@ -28,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -128,14 +126,7 @@ fun SettingsScreen(
             ScrollHints(scrollState, Modifier.padding(inner).fillMaxSize()) {
                 Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 24.dp)) {
                     SettingsHeading("Agenda")
-                    Row(
-                        Modifier.fillMaxWidth().toggleable(value = showBillsSummary, role = Role.Switch,
-                            onValueChange = settings::setShowBillsSummary).padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Show unpaid bills summary", Modifier.weight(1f))
-                        Switch(checked = showBillsSummary, onCheckedChange = null)
-                    }
+                    SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
                     SettingsSection(
                         title = "Appearance",

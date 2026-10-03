@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -282,12 +281,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                         Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.fillMaxWidth().toggleable(value = continueLists, role = Role.Switch,
-                                onValueChange = app.settings::setContinueLists),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("Continue lists on Enter", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            Switch(checked = continueLists, onCheckedChange = null)
-                        }
+                        SwitchRow("Continue lists on Enter", continueLists, app.settings::setContinueLists, Modifier,
+                            style = MaterialTheme.typography.bodyMedium)
                     }
                     HorizontalDivider()
                     // Existing notebooks open under the box and narrow as you type; a new name is typed as before.

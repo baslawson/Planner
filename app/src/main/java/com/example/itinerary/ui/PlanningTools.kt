@@ -349,14 +349,11 @@ private fun CalendarImportContent(onDismiss: () -> Unit, initialUri: Uri?, waiti
             val repeating = entries.count { it.repeating }
             Text("${entries.size} event${if (entries.size == 1) "" else "s"} in this file" +
                 if (repeating > 0) " ($repeating repeating)" else "", style = MaterialTheme.typography.bodyMedium)
-            if (pastIds.isNotEmpty()) Row(Modifier.fillMaxWidth().toggleable(value = includePast, enabled = !busy, role = Role.Switch) { on ->
+            // The header sits in the pop-up's title area, so plain text needs its own style there.
+            if (pastIds.isNotEmpty()) SwitchRow("Include past events (${pastIds.size})", includePast, { on ->
                 includePast = on
                 ticked = if (on) ticked + (pastIds - duplicates - reviewed) else ticked - pastIds
-            }, verticalAlignment = Alignment.CenterVertically) {
-                // The header sits in the pop-up's title area, so plain text needs its own style there.
-                Text("Include past events (${pastIds.size})", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                Switch(checked = includePast, onCheckedChange = null, enabled = !busy)
-            }
+            }, Modifier, enabled = !busy, style = MaterialTheme.typography.bodyLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(enabled = !busy, onClick = {
                     ticked = CalendarFileImport.selectAll(entries, today, includePast, duplicates + reviewed)

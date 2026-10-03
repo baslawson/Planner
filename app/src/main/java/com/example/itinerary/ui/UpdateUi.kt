@@ -8,10 +8,8 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,7 +20,6 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -129,14 +126,6 @@ fun UpdatesSettingsSection() {
         Text("Updates aren't available in this build: only the Planner app from GitHub updates itself.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
-    }
-    @Composable
-    fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-        Row(Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onChange).padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(label, Modifier.weight(1f))
-            Switch(checked = checked, onCheckedChange = null)
-        }
     }
     SwitchRow("Check for updates when Planner starts", onStart, updates::setCheckOnStart)
     SwitchRow("Download updates automatically", auto, updates::setAutoDownload)
