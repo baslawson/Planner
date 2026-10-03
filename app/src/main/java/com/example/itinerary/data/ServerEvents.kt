@@ -72,28 +72,21 @@ object ServerEvents {
             if (same(before.notes, item.notes, MAX_NOTES)) add("DESCRIPTION")
         }
         val replaced = CalendarExport.MANAGED - kept
-        // Logical lines, each with the physical lines it came from.
-        val physical = original.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        val logical = mutableListOf<MutableList<String>>()
-        for (line in physical) {
-            if ((line.startsWith(" ") || line.startsWith("\t")) && logical.isNotEmpty()) logical.last() += line
-            else if (line.isNotEmpty()) logical += mutableListOf(line)
-        }
-        fun name(block: List<String>) = block.first().substringBefore(':').substringBefore(';').uppercase()
+        val logical = Ics.logicalBlocks(original)
         val out = mutableListOf<String>()
         val stack = ArrayDeque<String>()
         var done = false
         var sequence = 0
         for (block in logical) {
             val text = block.joinToString("\r\n")
-            val n = name(block)
+            val n = Ics.blockName(block)
             val inEvent = !done && stack.lastOrNull() == "VEVENT"
             when {
                 n == "BEGIN" -> { stack.addLast(block.first().substringAfter(':').trim().uppercase()); out += text }
                 n == "END" -> {
                     val component = block.first().substringAfter(':').trim().uppercase()
                     if (component == "VEVENT" && !done) {
-                        (CalendarExport.managed(item, zone).filter { name(listOf(it)) !in kept } + listOf("DTSTAMP:${CalendarExport.stamp(now)}",
+                        (CalendarExport.managed(item, zone).filter { Ics.blockName(listOf(it)) !in kept } + listOf("DTSTAMP:${CalendarExport.stamp(now)}",
                             "LAST-MODIFIED:${CalendarExport.stamp(now)}", "SEQUENCE:${sequence + 1}")).forEach { out += CalendarExport.fold(it) }
                         done = true
                     }

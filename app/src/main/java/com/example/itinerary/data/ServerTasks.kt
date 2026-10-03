@@ -132,20 +132,14 @@ object ServerTasks {
             if (before.done == task.done) addAll(listOf("STATUS", "COMPLETED", "PERCENT-COMPLETE"))
         }
         val replaced = MANAGED.toSet() - kept
-        val physical = original.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        val logical = mutableListOf<MutableList<String>>()
-        for (line in physical) {
-            if ((line.startsWith(" ") || line.startsWith("\t")) && logical.isNotEmpty()) logical.last() += line
-            else if (line.isNotEmpty()) logical += mutableListOf(line)
-        }
-        fun name(block: List<String>) = block.first().substringBefore(':').substringBefore(';').uppercase()
+        val logical = Ics.logicalBlocks(original)
         fun unfolded(block: List<String>) = block.first() + block.drop(1).joinToString("") { it.drop(1) }
         // The task's own top-level lines (not those of an alarm inside it).
         val stack = ArrayDeque<String>()
         var oldDue: String? = null
         var start: String? = null
         for (block in logical) {
-            val n = name(block)
+            val n = Ics.blockName(block)
             when {
                 n == "BEGIN" -> stack.addLast(block.first().substringAfter(':').trim().uppercase())
                 n == "END" -> stack.removeLastOrNull()
@@ -163,7 +157,7 @@ object ServerTasks {
         var sequence = 0
         for (block in logical) {
             val text = block.joinToString("\r\n")
-            val n = name(block)
+            val n = Ics.blockName(block)
             val inTask = !done && stack.lastOrNull() == "VTODO"
             when {
                 n == "BEGIN" -> { stack.addLast(block.first().substringAfter(':').trim().uppercase()); out += text }

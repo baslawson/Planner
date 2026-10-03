@@ -21,6 +21,20 @@ internal object Ics {
     fun lines(text: String): List<String> = text.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n")
         .replace(Regex("\n[ \t]"), "").lines().filter { it.isNotBlank() }
 
+    // A file's logical lines (a folded line with its continuation lines), each as the physical lines it came from, kept
+    // as they are so a patch can write them back unchanged. Empty lines are dropped.
+    fun logicalBlocks(text: String): List<List<String>> {
+        val logical = mutableListOf<MutableList<String>>()
+        for (line in text.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")) {
+            if ((line.startsWith(" ") || line.startsWith("\t")) && logical.isNotEmpty()) logical.last() += line
+            else if (line.isNotEmpty()) logical += mutableListOf(line)
+        }
+        return logical
+    }
+
+    // The property name of a logical line from [logicalBlocks] ("DTSTART" for "DTSTART;TZID=…:…"), in capitals.
+    fun blockName(block: List<String>): String = block.first().substringBefore(':').substringBefore(';').uppercase()
+
     fun property(line: String): Property {
         var quoted = false
         val colon = line.indices.firstOrNull { i ->
