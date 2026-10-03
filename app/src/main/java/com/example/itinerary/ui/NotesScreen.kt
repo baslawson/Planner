@@ -134,7 +134,11 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     // A note open in the editor that vanishes (deleted by sync, say) keeps its editor, which then offers to save it anew.
     val lastSeen = remember { mutableStateMapOf<String, PlannerNote>() }
     // Duplicate: the editor's copy until it is saved, and the message saying so with Open (the ⋮ menu or the bar).
-    var pendingCopy by remember { mutableStateOf<PlannerNote?>(null) }
+    // Kept across the activity being recreated (D6-8), without its words: those are in the editor's memory or draft.
+    var pendingCopy by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<PlannerNote?, String>(
+        save = { it?.let { note -> com.example.itinerary.data.NoteCodec.encode(listOf(note.copy(content = ""))).toString() } ?: "" },
+        restore = { text -> text.takeIf { it.isNotEmpty() }?.let { runCatching { com.example.itinerary.data.NoteCodec.decodeLenient(org.json.JSONArray(it)).firstOrNull() }.getOrNull() } },
+    )) { mutableStateOf<PlannerNote?>(null) }
     val duplicatedBar = remember { SnackbarHostState() }
     val barScope = rememberCoroutineScope()
     fun duplicated(copies: List<PlannerNote>) {
@@ -162,17 +166,27 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     }
     // U-13: the note a reminder's tap asked for, once the notes and any draft are read. Another note open in the editor
     // stays open (opening this one would close it); a note deleted since leaves just the page.
+    // While another note is open the reminder's note waits, and opens once that editor closes (the notification is
+    // gone by then, so "tap it again" couldn't work — D6-2).
+    var waitingNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(openNoteId, notes != null, draftChecked) {
         val id = openNoteId ?: return@LaunchedEffect
         val list = notes ?: return@LaunchedEffect
         if (!draftChecked) return@LaunchedEffect
         when {
             editingId == id -> {}
-            editingId != null -> android.widget.Toast.makeText(context, "Close this note first. Then tap the reminder again.", android.widget.Toast.LENGTH_LONG).show()
+            editingId != null -> { waitingNoteId = id
+                android.widget.Toast.makeText(context, "The reminder's note opens when you close this one.", android.widget.Toast.LENGTH_LONG).show() }
             list.none { it.id == id } -> android.widget.Toast.makeText(context, "This note may have been deleted.", android.widget.Toast.LENGTH_LONG).show()
             else -> { editingNew = false; editingId = id }
         }
         onNoteOpened()
+    }
+    LaunchedEffect(editingId, waitingNoteId, notes) {
+        val waiting = waitingNoteId ?: return@LaunchedEffect
+        if (editingId != null || notes == null) return@LaunchedEffect
+        waitingNoteId = null
+        if (notes.orEmpty().any { it.id == waiting }) { editingNew = false; editingId = waiting }
     }
     val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 
@@ -333,7 +347,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             NoteEditor(start, creating = editingNew && existing == null && lastSeen[id] == null, notebooks = notebooks, allTags = tags,
                 recovered = draft,
                 // Duplicate note: the editor goes, and a new one opens on the copy (not saved yet), as in the task editor.
-                onDuplicate = { copy -> pendingCopy = copy; editingNew = true; editingId = copy.id }) {
+                onDuplicate = { copy -> pendingCopy = copy.copy(position = Notes.copyPosition(existing ?: start, all))
+                    editingNew = true; editingId = copy.id }) {
                 editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
         } else LaunchedEffect(id) { editingId = null }
     }

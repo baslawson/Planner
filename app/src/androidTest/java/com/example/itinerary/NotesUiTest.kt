@@ -747,5 +747,8 @@ class NotesUiTest {
         click("Save"); await { notes().count { it.title == "QA second (copy)" } == 2 }
         assertTrue(notes().any { it.title == "QA second (copy)" && it.content == "two, edited" })
         assertEquals("two", notes().single { it.title == "QA second" }.content)
+        // ...and it went next to its original, not to the top (D6-7).
+        assertEquals("QA second", pageOrder().first())
+        assertEquals("two, edited", notes().filter { !it.archived }.sortedWith(Notes.order)[1].content)
     }
 }

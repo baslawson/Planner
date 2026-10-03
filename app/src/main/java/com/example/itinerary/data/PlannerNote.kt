@@ -63,6 +63,8 @@ interface NoteDao {
     @Insert suspend fun insert(note: PlannerNote)
     @Insert suspend fun insertAll(notes: List<PlannerNote>)
     @Update suspend fun update(note: PlannerNote)
+    // Room for a note placed at [from] (Duplicate): every note there or after it moves down one place.
+    @Query("UPDATE notes SET position = position + 1 WHERE position >= :from") suspend fun makeRoomAt(from: Long)
     @Query("DELETE FROM notes WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM notes") suspend fun deleteAll()
 }
@@ -91,7 +93,6 @@ object Notes {
     val order: Comparator<PlannerNote> = compareByDescending<PlannerNote> { it.pinned }.thenBy { it.position }
         .thenByDescending { it.modified }.thenBy { it.id }
 
-    /** The place for a note going to the top: above every note there is. */
     /**
      * A copy of [note] to keep as a new one (Duplicate): the same words, notebook, tags, colour, importance and attachments
      * (the files are shared; a file stays while any note uses it), titled "… (copy)" so the two cards tell apart. Not
@@ -107,6 +108,12 @@ object Notes {
         return if (base.isEmpty()) "Copy" else base.take(MAX_TITLE - suffix.length) + suffix
     }
 
+    // Where a copy of [original] goes among [notes]: right after it, or for a pinned note (the copy isn't pinned) at the top
+    // of the unpinned notes. 0 never comes back (it means "not placed").
+    fun copyPosition(original: PlannerNote, notes: Collection<PlannerNote>): Long =
+        if (original.pinned) topPosition(notes) else (original.position + 1).let { if (it == 0L) 1L else it }
+
+    /** The place for a note going to the top: above every note there is. */
     fun topPosition(notes: Collection<PlannerNote>): Long = (notes.minOfOrNull { it.position } ?: 0L).coerceAtMost(0L) - 1
 
     /**

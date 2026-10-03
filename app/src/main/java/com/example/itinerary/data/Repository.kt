@@ -278,12 +278,15 @@ class Repository(
         // A changed reminder time ends its snooze, as a task's does.
         val withSnooze = note.copy(snoozedUntil = if (note.reminderAt != null && note.reminderAt == old?.reminderAt) old.snoozedUntil else null)
         // A new note goes to the top of the page; an edited one keeps the place it was dragged to.
-        val placed = if (create && old == null) withSnooze.copy(position = Notes.topPosition(noteDao.all())) else withSnooze.copy(position = old?.position ?: withSnooze.position)
+        // A new note that comes with a place (the editor's Duplicate: next to its original) keeps it, the notes from there
+        // moving down one when it is stored (D6-7).
+        val keepsPlace = create && old == null && withSnooze.position != 0L && withSnooze.position != Notes.topPosition(noteDao.all())
+        val placed = if (create && old == null && !keepsPlace) withSnooze.copy(position = Notes.topPosition(noteDao.all())) else withSnooze.copy(position = old?.position ?: withSnooze.position)
         val clean = Notes.clean(placed).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
         require(Notes.hasContent(clean)) { "An empty note can't be saved" }
         Notes.validate(clean)
         withContext(NonCancellable) {
-            if (create) noteDao.insert(clean)
+            if (create) { if (keepsPlace) noteDao.makeRoomAt(clean.position); noteDao.insert(clean) }
             else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
             afterCommit(noteIds = listOf(clean.id),
                 resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
@@ -323,16 +326,17 @@ class Repository(
         }
     }
 
-    // Notes dragged into a new order: [places] from Notes.reorder. Their words didn't change, so neither does their time.
-    // Duplicate: a copy of each note (Notes.copyOf), placed right after its original; the notes after it move down one
-    // place (positions only, as a drag does). Returns the copies, in the order of [ids].
+    // Duplicate: a copy of each note (Notes.copyOf), placed right after its original (a pinned one's at the top of the
+    // unpinned notes); the notes after it move down one place, in one statement (positions only, as a drag does).
+    // Returns the copies, in the order of [ids].
     suspend fun duplicateNotes(ids: List<String>): List<PlannerNote> = changes.withLock {
         withContext(NonCancellable) {
             val copies = db.withTransaction {
                 ids.mapNotNull { id ->
                     val original = noteDao.byId(id) ?: return@mapNotNull null
-                    noteDao.all().filter { it.position > original.position }.forEach { noteDao.update(it.copy(position = it.position + 1)) }
-                    val copy = Notes.clean(Notes.copyOf(original).copy(position = original.position + 1))
+                    val place = Notes.copyPosition(original, noteDao.all())
+                    if (!original.pinned) noteDao.makeRoomAt(place)
+                    val copy = Notes.clean(Notes.copyOf(original).copy(position = place))
                     Notes.validate(copy)
                     noteDao.insert(copy)
                     copy
@@ -343,6 +347,7 @@ class Repository(
         }
     }
 
+    // Notes dragged into a new order: [places] from Notes.reorder. Their words didn't change, so neither does their time.
     suspend fun placeNotes(places: Map<String, Long>) = changes.withLock {
         if (places.isEmpty()) return@withLock
         withContext(NonCancellable) {

@@ -28,4 +28,12 @@ class NoteDuplicateTest {
         assertEquals(Notes.MAX_TITLE, Notes.copyTitle(PlannerNote(title = long)).length)
         assertTrue(Notes.copyTitle(PlannerNote(title = long)).endsWith(" (copy)"))
     }
+
+    // D6-7: a copy goes right after its original; a pinned note's (the copy isn't pinned) to the top of the unpinned ones.
+    @Test fun whereACopyGoes() {
+        val a = PlannerNote(id = "a", position = -10); val b = PlannerNote(id = "b", position = -9); val p = PlannerNote(id = "p", pinned = true, position = -20)
+        assertEquals(-9L, Notes.copyPosition(a, listOf(a, b, p)))
+        assertEquals(Notes.topPosition(listOf(a, b, p)), Notes.copyPosition(p, listOf(a, b, p)))
+        assertNotEquals(0L, Notes.copyPosition(PlannerNote(position = -1), emptyList())) // 0 means "not placed"
+    }
 }
