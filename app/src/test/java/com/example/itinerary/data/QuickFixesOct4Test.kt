@@ -40,6 +40,9 @@ class QuickFixesOct4Test {
         ok("Gym every Monday until 26 October").let { assertEquals(4, it.repeatCount); assertNull(it.endDate) }
         // With a clock time the date is the day of it, as before: a multi-day entry has no time.
         ok("Work until Friday 5pm").let { assertEquals(oct(9), it.date); assertEquals(at(17), it.time); assertNull(it.endDate) }
+        // "Remind me to …" or "todo …" is a task: due that day, as before.
+        task("Remind me to pay rent until Friday").let { assertEquals("Pay rent", it.title); assertEquals(oct(9), it.date); assertNull(it.endDate) }
+        task("Todo pack until Friday").let { assertEquals("Pack", it.title); assertEquals(oct(9), it.date); assertNull(it.quickProblem(true, now)) }
         // A date range.
         ok("Away from Friday to Sunday").let { assertEquals(oct(9), it.date); assertEquals(oct(11), it.endDate) }
         // An end before the start.

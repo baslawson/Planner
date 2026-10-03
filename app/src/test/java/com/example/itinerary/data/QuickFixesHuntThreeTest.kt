@@ -77,7 +77,8 @@ class QuickFixesHuntThreeTest {
             assertEquals("Tickets", it.title); assertEquals(plain.date, it.date); assertEquals(plain.error, it.error); assertEquals(plain.timePrompt, it.timePrompt)
         }
         ok("Move dentist to Friday").let { assertEquals("Move dentist", it.title); assertEquals(day(10, 2), it.date) }
-        ok("Away until Friday").let { assertEquals("Away", it.title); assertEquals(day(10, 2), it.date) }
+        // Since 4 Oct (Q-N9) "until" a date is one entry from today to that day; see QuickFixesOct4Test.
+        ok("Away until Friday").let { assertEquals("Away", it.title); assertEquals(today, it.date); assertEquals(day(10, 2), it.endDate) }
         ok("Party from 7pm").let { assertEquals("Party", it.title); assertEquals(at(19), it.time) }
         // Unchanged.
         ok("Trip to Paris Friday").let { assertEquals("Trip to Paris", it.title); assertEquals(day(10, 2), it.date) }

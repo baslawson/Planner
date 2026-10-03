@@ -798,6 +798,21 @@ object QuickEntry {
                 consume(match.range, QuickPhraseKind.REPEAT)
             }
         }
+        // "Holiday until Friday", "Away until the 20th": without a repeat, one entry over the days from today (or the date
+        // given) to that day, as "Holiday 5–9 Oct" is. Not with a time, which a multi-day entry can't have: "Work until
+        // Friday 5pm" stays Friday at 5pm, and "Meeting until 3pm" (no date) still asks to be finished.
+        var stayUntilText: String? = null
+        if (repeat == RepeatRule.NONE && rangeStart == null) repeatUntil.findAll(remaining).toList().singleOrNull()?.let { match ->
+            val timed = timePrompt != null || periodBlock != null || ranges.containsMatchIn(remaining) || durations.containsMatchIn(remaining) ||
+                relativeTimes.containsMatchIn(remaining) || nowWords.containsMatchIn(remaining) || endOfDay.containsMatchIn(remaining) ||
+                times.findAll(remaining).any { !re("[1-9]\\d{3}").matches(it.value.trim()) } ||
+                // "Away until Friday 9", "until Friday 1500": the hour or 24-hour time right after the date.
+                rx("^\\s*,?\\s*(?:\\d{1,2}(?![\\w:./-])|\\d{4}\\b)").containsMatchIn(remaining.substring(match.range.last + 1))
+            // "Remind me to pay rent until Friday", "todo …": a task, due that day as before.
+            if (timed || taskHint) return@let
+            stayUntilText = match.groupValues[1]
+            consume(match.range, QuickPhraseKind.DATE)
+        }
         // "every Monday starting 12 October": when the repeat begins.
         var startFrom: LocalDate? = null
         var startFromPast = false
@@ -823,7 +838,7 @@ object QuickEntry {
                 val days = if (match.groupValues[2].lowercase(Locale.ROOT).startsWith("d")) count else count * 7
                 if (!days.isFinite() || days % 1 != 0.0 || days < 1 || days > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS} days.")
-                if (rangeStart != null) return error("Use a date range or a length, not both.")
+                if (rangeStart != null || stayUntilText != null) return error("Use a date range or a length, not both.")
                 spanLength = days.toLong()
                 consume(match.range, QuickPhraseKind.DATE)
             }
@@ -835,7 +850,7 @@ object QuickEntry {
                 val count = re("\\d+").findAll(said).map { it.value.toDouble() }.toList().takeIf { it.size == 2 }?.max() ?: readAmount(said)
                 if (!count.isFinite() || count % 1 != 0.0 || count < 1 || count + 1 > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS - 1} nights.")
-                if (rangeStart != null) return error("Use a date range or a length, not both.")
+                if (rangeStart != null || stayUntilText != null) return error("Use a date range or a length, not both.")
                 spanLength = count.toLong() + 1
                 consume(match.range, QuickPhraseKind.DATE)
             }
@@ -1025,9 +1040,11 @@ object QuickEntry {
             repeatCount = repeat.dates(date, 365).count { it < end }
             if (repeatCount !in 2..365) return error("Choose a repeat rule and between 2 and 365 occurrences.")
         }
-        repeatUntilText?.let { raw ->
+        // The day an "until" names: a holiday or numeric date on or after [date], any other date counted from [base].
+        // Null with why it can't be read.
+        fun untilEnd(raw: String, base: LocalDate): Pair<LocalDate?, String> {
             val value = raw.lowercase(Locale.ROOT).replace(re("\\s+"), " ")
-            val end = (when {
+            val end = when {
                 rx("^(?:$holidayNames)$").matches(value) -> nextHoliday(value, date)
                 re("\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?").matches(value) -> {
                     val parts = value.split('/', '.', '-').map { it.toInt() }
@@ -1037,13 +1054,24 @@ object QuickEntry {
                     val readings = listOfNotNull(candidate(parts[0], parts[1])?.let { true to it }, candidate(parts[1], parts[0])?.let { false to it })
                         .distinctBy { it.second }
                     (readings.singleOrNull() ?: readings.firstOrNull { it.first == dayFirst }
-                        ?: if (readings.isNotEmpty()) return error("Write the end date with the month's name, for example until 3 October.") else null)?.second
+                        ?: if (readings.isNotEmpty()) return null to "Write the end date with the month's name, for example until 3 October." else null)?.second
                 }
-                else -> parseDate(value, today)
-            }) ?: return error("That end date isn't valid.")
+                else -> parseDate(value, base)
+            }
+            return end to "That end date isn't valid."
+        }
+        repeatUntilText?.let { raw ->
+            val end = untilEnd(raw, today).let { (end, problem) -> end ?: return error(problem) }
             if (end < date) return error("The repeat ends before it starts. Choose a later end date.")
             repeatCount = repeat.dates(date, 365).count { it <= end }
             if (repeatCount !in 2..365) return error("Choose an end date that gives between 2 and 365 occurrences.")
+        }
+        // "Away tomorrow until Friday": the Friday from the first day. Until the first day itself is just that day.
+        stayUntilText?.let { raw ->
+            val end = untilEnd(raw, date).let { (end, problem) -> end ?: return error(problem) }
+            if (end < date) return error("End the date range after it starts.")
+            if (ChronoUnit.DAYS.between(date, end) >= MultiDay.MAX_DAYS) return error("A date range can cover at most ${MultiDay.MAX_DAYS} days.")
+            if (end > date) rangeEnd = end
         }
 
         // A four-digit number is a time only where it reads like one: a leading zero, after at/from/until or a date,
@@ -1372,7 +1400,7 @@ object QuickEntry {
         // A title that followed a leading length or date keeps the capital the entry started with: "Friday drinks" → "Drinks".
         val startedCapital = text.trimStart().firstOrNull()?.isUpperCase() == true && consumed.any { it.first <= text.indexOfFirst { c -> !c.isWhitespace() } }
         if (taskHint || leading != null || startedCapital) title = title.replaceFirstChar { it.titlecase(Locale.ROOT) }
-        val dateSpecified = impliedToday || ds.isNotEmpty() || numeric.isNotEmpty() || repeat != RepeatRule.NONE || relative || holiday || rangeStart != null || startFrom != null ||
+        val dateSpecified = impliedToday || ds.isNotEmpty() || numeric.isNotEmpty() || repeat != RepeatRule.NONE || relative || holiday || rangeStart != null || startFrom != null || stayUntilText != null ||
             orDates != null || endOfDaySaid || zoneMovedDate
         val endDate = rangeEnd ?: spanLength?.takeIf { it > 1 }?.let { date.plusDays(it - 1) }
         // "Remind me to …" with a when: remind at the time, or at the usual 09:00 on the day.
