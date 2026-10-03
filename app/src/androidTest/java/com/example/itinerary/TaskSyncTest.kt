@@ -52,7 +52,9 @@ class TaskSyncTest {
             override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = base.getSharedPreferences("tasksync_test_$name", mode)
         }
         database = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
-        repo = Repository(database, AttachmentStore(context), ReminderScheduler(context))
+        // As the app: an Undo that has passed marks a change for sync (ItineraryApp.sendChanges; events and tasks).
+        repo = Repository(database, AttachmentStore(context), ReminderScheduler(context),
+            onDeletionFinished = { if (::sync.isInitialized) sync.markChanged() })
         val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
         val clientCertificates = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
         server = MockWebServer()
@@ -446,5 +448,20 @@ class TaskSyncTest {
         val after = ServerTasks.fingerprints.get()
         clock += 60_000; sync.check()
         assertEquals("idle again once it went through", after, ServerTasks.fingerprints.get())
+    }
+
+    // Bug hunt 3 Oct (b), S5-1: Delete forever while the task's Undo is still on offer ends the Undo too, so the next
+    // check deletes the task on Nextcloud (it used to wait for the 15-minute safety pass).
+    @Test fun deleteForeverDuringTheUndoDeletesTheTaskAtTheNextCheck() = runBlocking {
+        add("QA Forever task")
+        start()
+        clock += 60_000; sync.check() // reads its own write back
+        clock += 60_000; sync.check()
+        repo.deleteTask(task("QA Forever task").id); sync.markChanged() // the app marks every change
+        clock += 60_000; sync.check()
+        assertTrue("kept while its Undo is on offer", listFiles().values.any { it.second.contains("QA Forever task") })
+        repo.permanentlyDelete(repo.pendingDeletions.value.single().token)
+        clock += 60_000; sync.check()
+        assertTrue("deleted on Nextcloud by the next check", listFiles().values.none { it.second.contains("QA Forever task") })
     }
 }

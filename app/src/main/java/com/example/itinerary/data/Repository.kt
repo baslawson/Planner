@@ -548,8 +548,18 @@ class Repository(
         val files = entry?.let { contents(it).storedAttachments.map { a -> a.fileName } }.orEmpty()
         deletedDao.delete(id)
         entry?.let { payloads.delete(it.payload) }
-        _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
+        val dropped = dropPending { it.token == id }
         afterCommit(files = files, notify = false)
+        if (dropped) onDeletionFinished()
+    }
+
+    // S5-1: a deletion whose Undo was still on offer, deleted for good (Delete forever, or gone from Recently deleted):
+    // its Undo has passed too, so sync may now delete Planner's copy on Nextcloud: the caller says so (onDeletionFinished,
+    // as finishDeletion does) once the files are seen to. Whether any was dropped.
+    private fun dropPending(which: (PendingDeletion) -> Boolean): Boolean {
+        val dropped = _pendingDeletions.value.filter(which)
+        if (dropped.isNotEmpty()) _pendingDeletions.value -= dropped.toSet()
+        return dropped.isNotEmpty()
     }
 
     private suspend fun purgeExpiredDeleted() {
@@ -559,8 +569,9 @@ class Repository(
         db.withTransaction { expired.forEach { deletedDao.delete(it.id) } }
         expired.forEach { payloads.delete(it.payload) }
         val ids = expired.map { it.id }.toSet()
-        _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token in ids }
+        val dropped = dropPending { it.token in ids }
         afterCommit(files = files, notify = false)
+        if (dropped) onDeletionFinished()
     }
 
     val trips: Flow<List<Trip>> = tripDao.observeTrips()

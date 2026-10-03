@@ -58,7 +58,9 @@ class CalendarTwoWayTest {
             override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = base.getSharedPreferences("twoway_test_$name", mode)
         }
         database = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
-        repo = Repository(database, AttachmentStore(context), ReminderScheduler(context))
+        // As the app: an Undo that has passed marks a change for sync (ItineraryApp.sendChanges).
+        repo = Repository(database, AttachmentStore(context), ReminderScheduler(context),
+            onDeletionFinished = { if (::sync.isInitialized) sync.markChanged() })
         val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
         val clientCertificates = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
         server = MockWebServer()
@@ -877,5 +879,21 @@ class CalendarTwoWayTest {
         assertTrue(CalendarSync.fingerprints.get() > after)
         assertEquals(written + 1, writes().size)
         assertFalse(sync.sendState.value.error)
+    }
+
+    // Bug hunt 3 Oct (b), S5-1: Delete forever while the Undo is still on offer ends the Undo too, so the next check
+    // deletes Nextcloud's copy (it used to wait for the 15-minute safety pass).
+    @Test fun deleteForeverDuringTheUndoIsSentByTheNextCheck() = runBlocking {
+        save("QA Forever")
+        start()
+        clock += 60_000; sync.check() // reads its own write back
+        clock += 60_000; sync.check()
+        repo.deleteWithUndo(item("QA Forever")); sync.markChanged() // the app marks every change
+        clock += 60_000; sync.check()
+        assertTrue("kept while its Undo is on offer", dav.files.values.any { it.second.contains("QA Forever") })
+        repo.permanentlyDelete(repo.pendingDeletions.value.single().token)
+        assertTrue(repo.pendingDeletions.value.isEmpty())
+        clock += 60_000; sync.check()
+        assertTrue("deleted on Nextcloud by the next check", dav.files.values.none { it.second.contains("QA Forever") })
     }
 }
