@@ -273,11 +273,7 @@ object NoteCodec {
     // As read, cleaned but not checked: a draft may be empty or half done.
     fun decodeLenient(array: JSONArray): List<PlannerNote> = List(array.length()) { index ->
         val value = array.getJSONObject(index)
-        fun time(name: String): Long? = if (!value.has(name) || value.isNull(name)) null else {
-            val number = value.get(name)
-            require(number is Long || number is Int) { "Invalid note time" }
-            (number as Number).toLong()
-        }
+        fun time(name: String): Long? = if (!value.has(name) || value.isNull(name)) null else value.strictLong(name) { "Invalid note time" }
         val created = time("created") ?: 0L
         PlannerNote(value.getString("id"), value.optString("title"), value.optString("content"), value.optString("notebook"),
             if (!value.has("color") || value.isNull("color")) null else value.getInt("color"),

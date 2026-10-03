@@ -100,6 +100,14 @@ object Tasks {
     }
 }
 
+// A whole-number field ([name], there and not null) read strictly: 12.0 or "12" is refused with [message], as it is
+// in backups and drafts (task and note codecs).
+internal inline fun JSONObject.strictLong(name: String, message: () -> String): Long {
+    val number = get(name)
+    require(number is Long || number is Int, message)
+    return (number as Number).toLong()
+}
+
 object TaskCodec {
     fun encode(tasks: List<PlannerTask>): JSONArray = JSONArray().apply {
         tasks.forEach { task -> put(JSONObject().put("id", task.id).put("title", task.title)
@@ -118,22 +126,15 @@ object TaskCodec {
         PlannerTask(value.getString("id"), value.getString("title"),
             if (value.isNull("dueDate")) null else LocalDate.parse(value.getString("dueDate")),
             TaskPriority.valueOf(value.getString("priority")), value.getString("notes"), value.getBoolean("done"),
-            if (value.isNull("reminderAt")) null else {
-                val timestamp = value.get("reminderAt")
-                require(timestamp is Long || timestamp is Int) { "Invalid task reminder time" }
-                (timestamp as Number).toLong()
-            }, repeat = value.optString("repeat", "NONE"), repeatDays = value.optInt("repeatDays", 7),
+            if (value.isNull("reminderAt")) null else value.strictLong("reminderAt") { "Invalid task reminder time" }, repeat = value.optString("repeat", "NONE"), repeatDays = value.optInt("repeatDays", 7),
             repeatAnchorDay = value.optInt("repeatAnchorDay", 0),
             nextTaskId = if (value.isNull("nextTaskId")) null else value.getString("nextTaskId"),
             checklist = ChecklistCodec.decode(value.optJSONArray("checklist")?.toString() ?: "[]"),
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
             prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),
             // Optional: older backups have no task snoozes.
-            snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null else {
-                val timestamp = value.get("snoozedUntil")
-                require(timestamp is Long || timestamp is Int) { "Invalid task snooze time" }
-                (timestamp as Number).toLong()
-            })
+            snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null
+                else value.strictLong("snoozedUntil") { "Invalid task snooze time" })
             // A task saved before the cap may have more text; it is cut rather than refusing the whole file.
             .let(Tasks::capText).also(Tasks::validate)
     }.also { tasks -> require(tasks.map { it.id }.distinct().size == tasks.size) }
