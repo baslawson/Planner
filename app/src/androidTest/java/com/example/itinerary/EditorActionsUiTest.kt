@@ -60,10 +60,10 @@ class EditorActionsUiTest {
             assertTrue("$name: Delete clear of Close", close.left - delete.right >= 8 * dp)
             assertEquals("$name: same height", delete.height().toFloat(), save.height().toFloat(), 2f)
             assertEquals("$name: same height", close.height().toFloat(), save.height().toFloat(), 2f)
-            // A third smaller than ordinary buttons: Close's outline is 28 dp tall (40 dp elsewhere). Measured on screen, as
+            // A quarter smaller than ordinary buttons: Close's outline is 30 dp tall (40 dp elsewhere). Measured on screen, as
             // accessibility (and touch) still give a small button 48 dp.
             val drawn = drawnHeight(close)
-            assertEquals("$name: Close drawn 28 dp tall (was $drawn px)", 28 * dp, drawn.toFloat(), 3 * dp)
+            assertEquals("$name: Close drawn 30 dp tall (was $drawn px)", 30 * dp, drawn.toFloat(), 2 * dp)
         }
     }
     // The height of the outlined button inside [r], from a screenshot: a column a quarter in from its right end, scanned up

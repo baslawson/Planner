@@ -70,7 +70,7 @@ fun DangerOutlinedButton(
 }
 
 // An editor's pinned actions: Delete on the left (when [onDelete] is given), Close and Save on the right, 8 dp apart.
-// A third smaller than ordinary buttons (28 dp, text at 80 %, a 36 dp touch area), so they take less room over the
+// A quarter smaller than ordinary buttons (30 dp, text at 90 %, a 36 dp touch area), so they take less room over the
 // keyboard; larger text still makes them taller.
 // Wraps at large text: every button keeps its full size, and Save moves to its own line on the right rather than being
 // squeezed ("Sa|ve") or pushed off the screen.
@@ -89,9 +89,9 @@ fun EditorActions(
     androidx.compose.foundation.layout.FlowRow(modifier.fillMaxWidth(),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp, Alignment.End),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-        val size = Modifier.heightIn(min = 28.dp)
+        val size = Modifier.heightIn(min = 30.dp)
         val padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 17.dp, vertical = 2.dp)
-        val label = MaterialTheme.typography.labelLarge.let { it.copy(fontSize = it.fontSize * 0.8f, lineHeight = it.lineHeight * 0.8f) }
+        val label = MaterialTheme.typography.labelLarge.let { it.copy(fontSize = it.fontSize * 0.9f, lineHeight = it.lineHeight * 0.9f) }
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 36.dp) {
             if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
