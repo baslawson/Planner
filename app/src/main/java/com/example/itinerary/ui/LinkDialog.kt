@@ -1,12 +1,7 @@
 package com.example.itinerary.ui
-import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
-import com.example.itinerary.ui.MatrixButton as Button
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,7 +16,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.Links
 
 // Asks for a web address and an optional name. Confirms with (name, address); the address has been cleaned up

@@ -46,7 +46,6 @@ interface TaskDao {
     @Insert suspend fun insert(task: PlannerTask)
     @Insert suspend fun insertAll(tasks: List<PlannerTask>)
     @Update suspend fun update(task: PlannerTask)
-    @Query("UPDATE tasks SET done = :done WHERE id = :id") suspend fun setDone(id: String, done: Boolean)
     @Query("DELETE FROM tasks WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM tasks") suspend fun deleteAll()
 }

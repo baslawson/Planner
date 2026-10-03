@@ -129,7 +129,7 @@ object ServerTasks {
             if (before.done == task.done) addAll(listOf("STATUS", "COMPLETED", "PERCENT-COMPLETE"))
         }
         val replaced = MANAGED.toSet() - kept
-        val physical = original.removePrefix("﻿").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        val physical = original.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         val logical = mutableListOf<MutableList<String>>()
         for (line in physical) {
             if ((line.startsWith(" ") || line.startsWith("\t")) && logical.isNotEmpty()) logical.last() += line
@@ -204,7 +204,7 @@ object ServerTasks {
                 name == "DUE" && stack.lastOrNull() == "VTODO" && found == null -> found = line
             }
         }
-        for (line in text.removePrefix("﻿").replace("\r\n", "\n").replace("\r", "\n").split("\n")) {
+        for (line in text.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")) {
             if ((line.startsWith(" ") || line.startsWith("\t")) && block != null) block!!.append(line.drop(1))
             else { finish(); if (line.isNotEmpty()) block = StringBuilder(line) }
         }

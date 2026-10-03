@@ -49,7 +49,7 @@ class StagedBackup internal constructor(
     // Ticked Nextcloud calendars; null for a backup made before calendar sync, which leaves the current ones alone.
     internal val calendars: List<CalendarChoice>? = null,
     // Where Planner sends its events on Nextcloud and what it sent (step 5); null for a backup without it (the calendar
-    // stays, the record of what was sent doesn't: see CalendarSync.forgetSent).
+    // stays, the record of what was sent doesn't: see CalendarSync.forgetSentLocked).
     internal val send: Pair<CalendarChoice?, List<SentEvent>>? = null,
     // The same for tasks (see TaskSync.snapshot); null for a backup without it.
     internal val taskSend: Pair<CalendarChoice?, List<SentTask>>? = null,

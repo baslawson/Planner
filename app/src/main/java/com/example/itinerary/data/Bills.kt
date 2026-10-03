@@ -3,7 +3,6 @@ package com.example.itinerary.data
 import java.math.BigDecimal
 import java.time.YearMonth
 import java.text.NumberFormat
-import java.util.Currency
 
 object Bills {
     private val titleWhitespace = Regex("[\\s\\p{Z}]+")

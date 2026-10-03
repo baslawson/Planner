@@ -1,11 +1,7 @@
 package com.example.itinerary.data
 
-import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
-import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 data class BillSuggestion(val title: String?, val date: LocalDate?, val amount: Long?, val currency: String?,

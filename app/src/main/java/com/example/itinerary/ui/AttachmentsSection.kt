@@ -1,6 +1,5 @@
 package com.example.itinerary.ui
 import com.example.itinerary.ui.MatrixIconButton as IconButton
-import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import android.content.ActivityNotFoundException

@@ -10,7 +10,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun BackupStatusPanel() {

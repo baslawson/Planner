@@ -256,9 +256,7 @@ class CalendarSync(
     // After restoring a backup that doesn't say what was sent (made before backups kept that): the old record named
     // other events, so none is kept, and the synced calendar is taken up again as when choosing it. The next pull links
     // its files to the restored events by content; nothing is overwritten or deleted on the strength of an old record.
-    suspend fun forgetSent() = paused { forgetSentLocked() }
-
-    // forgetSent, inside paused.
+    // Called inside paused (backup restore).
     suspend fun forgetSentLocked() {
         db.withTransaction {
             db.sentDao().deleteAll()
@@ -945,7 +943,7 @@ class CalendarSync(
 
     // After restoring a backup: its Nextcloud calendars and subscribed links come back without events; the next sync
     // downloads them. Phone calendars are left as they are. E-10: for a backup from before it said which calendar ([keepSend])
-    // or task list ([keepTasks]) is kept in sync, this phone's stays so, as forgetSent and TaskSync.forget promise; a backup
+    // or task list ([keepTasks]) is kept in sync, this phone's stays so, as forgetSentLocked and TaskSync.forget promise; a backup
     // that does say sets its own right after (restoreSend, TaskSync.restore).
     suspend fun restoreChoices(choices: List<CalendarChoice>, keepSend: Boolean = false, keepTasks: Boolean = false) {
         db.withTransaction {

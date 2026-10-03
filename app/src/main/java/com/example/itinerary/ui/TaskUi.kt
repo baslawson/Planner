@@ -2,14 +2,12 @@ package com.example.itinerary.ui
 import com.example.itinerary.ui.MatrixFilterChip as FilterChip
 import com.example.itinerary.ui.MatrixTextButton as TextButton
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
-import com.example.itinerary.ui.MatrixButton as Button
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import org.json.JSONArray
-import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*

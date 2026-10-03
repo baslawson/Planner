@@ -18,7 +18,7 @@ internal object Ics {
     class Property(val name: String, val params: Map<String, String>, val value: String)
 
     // Unfolded, non-blank content lines.
-    fun lines(text: String): List<String> = text.removePrefix("﻿").replace("\r\n", "\n").replace("\r", "\n")
+    fun lines(text: String): List<String> = text.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n")
         .replace(Regex("\n[ \t]"), "").lines().filter { it.isNotBlank() }
 
     fun property(line: String): Property {

@@ -616,7 +616,7 @@ private fun ItemEditorForm(
             TemplateActions(isNew = isNew, title = title, billTask = billTask, canApply = !busy && !readingText,
                 enabled = !busy && !readingText && title.isNotBlank() && validBillAmount && validDuration && (billTask || validBuffers) && validRepeat && checklist.all { it.text.isNotBlank() },
                 content = { TemplateContent(currentItem(), shownReminders, repeat,
-                    if (repeat == RepeatRule.NONE) 1 else if (!creatingSeries && initial.seriesId != null) allEvents.count { it.seriesId == initial.seriesId }.coerceIn(2, 365) else count?.coerceIn(2, 365) ?: 12) }, onApply = ::applyTemplate)
+                    if (repeat == RepeatRule.NONE) 1 else if (!creatingSeries) allEvents.count { it.seriesId == initial.seriesId }.coerceIn(2, 365) else count?.coerceIn(2, 365) ?: 12) }, onApply = ::applyTemplate)
             initial.linkedTaskId?.let { LinkedTaskSection(it) }
             if (initial.skipped && !isNew) Text("This occurrence is skipped. Restore it from its action menu to resume reminders.")
             if (!isNew) {

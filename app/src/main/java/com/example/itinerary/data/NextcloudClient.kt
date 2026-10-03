@@ -205,10 +205,6 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         }
     }
 
-    // Step 5: deletes Planner's event [uid] in [calendar], only if the server still has version [etag].
-    fun deleteEvent(account: NextcloudAccount, calendar: String, uid: String, etag: String): WriteResult =
-        deleteFile(account, calendar, eventUrl(account, calendar, uid).encodedPath, etag)
-
     // Always conditional (E-7): a caller that doesn't know the version fetches the file first.
     fun deleteFile(account: NextcloudAccount, calendar: String, href: String, etag: String): WriteResult {
         val url = fileUrl(account, calendar, href)

@@ -71,7 +71,7 @@ object ServerEvents {
         }
         val replaced = CalendarExport.MANAGED - kept
         // Logical lines, each with the physical lines it came from.
-        val physical = original.removePrefix("﻿").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        val physical = original.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         val logical = mutableListOf<MutableList<String>>()
         for (line in physical) {
             if ((line.startsWith(" ") || line.startsWith("\t")) && logical.isNotEmpty()) logical.last() += line
