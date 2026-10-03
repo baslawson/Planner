@@ -6,8 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
@@ -116,9 +119,35 @@ class AlarmService : Service() {
 
     private fun startSound() {
         releasePlayer()
-        val uri = RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        // D6-1: the first sound that plays, of these (AlarmSound); vibration goes on whatever happens to the sound.
+        val unlocked = DirectBoot.isUnlocked(this)
+        soundChoices = AlarmSound.choices(unlocked,
+            if (unlocked) runCatching { RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_ALARM) }.getOrNull() else null,
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+            Uri.parse("android.resource://$packageName/${R.raw.alarm_fallback}"))
+        soundRun++
+        play(0)
+        // Keeps the CPU awake while the screen is off.
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "itinerary:alarm")
+            .apply { acquire(MAX_RING_MINUTES * 60_000L + 5_000L) }
+    }
+
+    private var soundChoices: List<Uri> = emptyList()
+    // Each alarm's sounds are a run of their own: a late error from the previous alarm's player changes nothing.
+    private var soundRun = 0
+
+    // Plays [soundChoices] from [index]; a sound that can't be read or played hands over to the next one. If none plays,
+    // Android's own beeps (ToneGenerator), so a ringing alarm is never silent.
+    private fun play(index: Int) {
+        releasePlayer()
+        val uri = soundChoices.getOrNull(index) ?: run { startBeeps(); return }
+        val run = soundRun
+        val next = { why: String ->
+            android.util.Log.w("AlarmService", "Couldn't play the alarm sound $uri ($why), trying the next one")
+            handler.post { if (ringing != null && run == soundRun) play(index + 1) }
+        }
         try {
             player = MediaPlayer().apply {
                 // Alarm usage keeps it audible in silent mode and lets it through default Do Not Disturb.
@@ -128,19 +157,30 @@ class AlarmService : Service() {
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build(),
                 )
+                setOnErrorListener { mp, what, extra -> if (player === mp) next("error $what/$extra"); true }
+                setOnPreparedListener { mp -> if (player === mp) runCatching { mp.start() }.onFailure { next(it.toString()) } }
                 setDataSource(this@AlarmService, uri)
                 isLooping = true
-                setOnPreparedListener { it.start() }
                 prepareAsync()
             }
         } catch (e: Exception) {
             releasePlayer()
+            next(e.toString())
         }
-        // Keeps the CPU awake while the screen is off.
-        wakeLock?.takeIf { it.isHeld }?.release()
-        wakeLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "itinerary:alarm")
-            .apply { acquire(MAX_RING_MINUTES * 60_000L + 5_000L) }
+    }
+
+    private var tones: ToneGenerator? = null
+    private val beep = object : Runnable {
+        override fun run() {
+            tones?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1_000)
+            handler.postDelayed(this, 1_600L)
+        }
+    }
+
+    private fun startBeeps() {
+        tones = runCatching { ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME) }
+            .onFailure { android.util.Log.w("AlarmService", "No alarm sound could play", it) }.getOrNull() ?: return
+        handler.post(beep)
     }
 
     private val vibrator: Vibrator?
@@ -193,10 +233,13 @@ class AlarmService : Service() {
 
     private fun releasePlayer() {
         player?.let {
+            player = null
             runCatching { it.stop() }
             it.release()
         }
-        player = null
+        handler.removeCallbacks(beep)
+        tones?.let { runCatching { it.stopTone() }; it.release() }
+        tones = null
     }
 
     override fun onDestroy() {
