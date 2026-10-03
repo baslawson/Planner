@@ -78,7 +78,7 @@ class QuickFixesOct4Test {
     // 4: a party size at the end after a booking or meal word is title text, not an unfinished length.
     @Test fun aPartySizeAtTheEnd() {
         event("Dinner Tonight For Two").let {
-            val tonight = event("Dinner tonight")
+            val tonight = event("Dinner Tonight")
             assertEquals("Dinner For Two", it.title); assertEquals(today, it.date); assertNull(it.time)
             assertEquals(tonight.timePrompt, it.timePrompt); assertEquals(tonight.quickProblem(false, now), it.quickProblem(false, now))
         }

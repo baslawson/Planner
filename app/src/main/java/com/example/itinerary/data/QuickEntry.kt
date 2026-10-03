@@ -194,7 +194,8 @@ object QuickEntry {
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
     private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-\\d.]+|$countWords|half|a quarter))?\\s*$")
     // "Table for 4 Saturday", "Dinner for two Friday": a whole number after "for", with the when after it, is how many people:
-    // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed.
+    // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed,
+    // unless a booking or meal word comes before it ("Dinner tonight for two").
     // Only 1–20: a larger number ("Study for 45 Monday") may be a length still missing its unit, so it keeps asking. 10–20 as
     // digits only after a booking or meal word ("Party for 20", "BBQ for 12"): "Practice for 15 tomorrow" may be minutes.
     private val partySize = rx("for\\s+(?:[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*")
@@ -1319,9 +1320,13 @@ object QuickEntry {
         if (duration != null && rx("\\band(?:\\s+(?:a|half|\\d+))?\\s*$").containsMatchIn(remaining))
             return error("Finish the duration, for example for 1 hour and 30 minutes.")
         if (rx("\\b(?:in\\s+(?:-?\\d+|$countWords)\\s*(?:days?|weeks?|months?|years?|fortnights?|hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m)|for\\s+-?(?:[\\d.,]*\\d|$countWords|half)(?:[\\s.,]+(?:and|half|quarter|[\\d.,]*\\d|$countWords))*\\s*(?:$hours|$minutes)|\\d{1,2}[:h]\\d*|\\d{1,2}\\.\\d+\\s*$meridiem)\\b").containsMatchIn(remaining) ||
-            unfinished.findAll(remaining).any { m -> !((m.value.trim() in setOf("in", "at", "on") || partySize.matches(m.value) ||
-                    largePartySize.matches(m.value) && bookingWord.containsMatchIn(remaining.substring(0, m.range.first))) &&
-                text.substring(m.range.first + m.value.trimEnd().length).isNotBlank()) } ||
+            unfinished.findAll(remaining).any { m ->
+                val booking = bookingWord.containsMatchIn(remaining.substring(0, m.range.first))
+                val party = partySize.matches(m.value) || largePartySize.matches(m.value) && booking
+                // "Dinner tonight for two", "Table Friday 7pm for 4": after a booking or meal word, a party size at the very
+                // end too.
+                !((m.value.trim() in setOf("in", "at", "on") || party) && text.substring(m.range.first + m.value.trimEnd().length).isNotBlank() ||
+                    party && booking) } ||
             rx("(?:[-–—]\\s*$|\\b(?:to|until)\\s+\\d)").containsMatchIn(remaining))
             return error("Finish the date, time or duration, or put literal title text in quotes.")
         // Phrases may overlap ("Saturday or all day Sunday" spans "all day"), so each run of consumed text becomes one space.
