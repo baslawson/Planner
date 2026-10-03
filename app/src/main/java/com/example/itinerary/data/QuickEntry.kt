@@ -535,6 +535,12 @@ object QuickEntry {
                 consume(marker.range, it.kind); continue
             }
             val tail = remaining.substring(start)
+            // "Meet at every Monday": "at" goes with the repeat read below. A capitalised name stays a place: "at Every Day
+            // Cafe" is masked as a name before this.
+            if (rx("^(?:every|each)\\s").containsMatchIn(tail) &&
+                sequenceOf(repeats, monthlyWeekdays, weekdayLists).any { r -> r.find(remaining, start)?.range?.first == start }) {
+                consume(marker.range, QuickPhraseKind.REPEAT); continue
+            }
             if (rx("^(?:\\d|~|noon\\b|midd?ay\\b|mid-day\\b|midnight\\b|(?:$spokenTime)|(?:$spokenWords)|$approx\\d|(?:the\\s+)?(?:end|last\\s+day)\\s+of\\s+(?:the\\s+)?month\\b)").containsMatchIn(tail)) continue
             val end = sequenceOf(dates, ranges, times, durations, relativeTimes, numericDate, unfinished, repeats, monthDayRepeat, reminders, reminderClocks, nightBefore, noReminder, endOfDay, nights, repeatCounts, allDay, schedulingWords).flatMap { it.findAll(remaining, start) }
                 .filter { it.range.first > start }.map { it.range.first }.plus(phrases.filter { it.kind == QuickPhraseKind.TIME && it.start > start }.map { it.start }).minOrNull() ?: text.length
