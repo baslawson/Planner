@@ -377,7 +377,7 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
                 if (note.tags.isNotEmpty()) Text(note.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium,
                     color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 note.reminderAt?.let { at ->
-                    val due = noteReminderLabel(note.snoozedUntil ?: at)
+                    val due = momentLabel(note.snoozedUntil ?: at)
                     Text("⏰ $due", style = MaterialTheme.typography.labelMedium, color = text, modifier = Modifier.semantics { contentDescription = "Reminder, $due" })
                 }
                 if (note.attachments.isNotEmpty()) Text("📎 ${note.attachments.size}", style = MaterialTheme.typography.labelMedium, color = soft,
@@ -446,12 +446,10 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
             Switch(checked = on, onCheckedChange = null, enabled = signedIn == true || on)
         }
         if (on) {
-            val format = LocalTimeFormat.current
             val message = when {
                 state.running -> "Syncing…"
                 state.error != null -> state.error!!
-                state.lastSynced != null -> "Synced " + java.time.Instant.ofEpochMilli(state.lastSynced!!).atZone(java.time.ZoneId.systemDefault())
-                    .let { "${it.toLocalDate().shortLabel()}, ${it.toLocalTime().label(format, context)}" } +
+                state.lastSynced != null -> "Synced " + momentLabel(state.lastSynced!!, short = true) +
                     if (state.conflicts > 0) " · ${state.conflicts} conflict cop${if (state.conflicts == 1) "y" else "ies"} made (changed in both places)" else "" +
                     if (state.skipped > 0) " · ${state.skipped} note${if (state.skipped == 1) "" else "s"} left as they are (too long for Planner, or Nextcloud wouldn't take the change)" else ""
                 else -> "Not synced yet."

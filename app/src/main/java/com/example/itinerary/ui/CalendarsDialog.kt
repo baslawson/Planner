@@ -41,8 +41,6 @@ import com.example.itinerary.data.CalendarSource
 import com.example.itinerary.data.OutsideCalendars
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.ZoneId
 
 // Settings → Calendars: tick which calendars to show, in two parts. Nextcloud uses the backup login (without one it offers
 // to connect); "On this phone" lists the phone's visible calendars once the user allows Planner to read them (asked only
@@ -208,8 +206,6 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
 
 @Composable
 private fun CalendarRow(source: CalendarSource, enabled: Boolean, onRemove: (() -> Unit)? = null, onTick: (Boolean) -> Unit) {
-    val context = LocalContext.current
-    val format = LocalTimeFormat.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = 48.dp)
             .toggleable(value = source.enabled, enabled = enabled, role = Role.Checkbox, onValueChange = onTick)
@@ -225,9 +221,7 @@ private fun CalendarRow(source: CalendarSource, enabled: Boolean, onRemove: (() 
             val detail = when {
                 source.lastError != null -> source.lastError
                 !source.enabled -> null
-                source.lastSynced != null -> Instant.ofEpochMilli(source.lastSynced).atZone(ZoneId.systemDefault()).let {
-                    "Synced ${it.toLocalDate().shortLabel()}, ${it.toLocalTime().label(format, context)}"
-                }
+                source.lastSynced != null -> "Synced ${momentLabel(source.lastSynced, short = true)}"
                 else -> "Not downloaded yet"
             }
             detail?.let {

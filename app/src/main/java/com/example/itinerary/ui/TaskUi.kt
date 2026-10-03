@@ -103,7 +103,7 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
                     color = if (!task.done && due < today) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 else Text("No due date", style = MaterialTheme.typography.bodySmall)
                 if (!task.done) task.activeReminderAt?.let { timestamp ->
-                    Text("Reminder: ${if (task.snoozedAt(System.currentTimeMillis()) != null) "snoozed until " else ""}${taskReminderLabel(timestamp)}",
+                    Text("Reminder: ${if (task.snoozedAt(System.currentTimeMillis()) != null) "snoozed until " else ""}${momentLabel(timestamp)}",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -111,12 +111,6 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
             else if (selection != null) TaskActionsMenu(task, today)
         }
     }
-}
-
-@Composable
-private fun taskReminderLabel(timestamp: Long): String {
-    val reminder = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
-    return "${reminder.toLocalDate().dayLabel(LocalDateFormat.current)}, ${reminder.toLocalTime().label(LocalTimeFormat.current, LocalContext.current)}"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -440,9 +434,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     reminderAt?.let { at ->
                         // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
                         val snoozed = initial.snoozedAt(System.currentTimeMillis())
-                        ReminderRow(taskReminderLabel(at), when {
+                        ReminderRow(momentLabel(at), when {
                             initial.done -> "Reminders are off while this task is completed."
-                            snoozed != null && at == initial.reminderAt -> "Snoozed until ${taskReminderLabel(snoozed)}. Changing the reminder ends the snooze."
+                            snoozed != null && at == initial.reminderAt -> "Snoozed until ${momentLabel(snoozed)}. Changing the reminder ends the snooze."
                             else -> null
                         }, onRemove = { reminderAt = null }, enabled = !busy)
                     }

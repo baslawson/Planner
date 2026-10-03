@@ -411,16 +411,10 @@ private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled:
         } + ("Custom" to onCustom),
         enabled = enabled) {
         reminderAt?.let { at ->
-            ReminderRow(noteReminderLabel(at), snoozedUntil?.let { "Snoozed until ${noteReminderLabel(it)}. Changing the reminder ends the snooze." },
+            ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
                 onRemove = { onSet(null) }, enabled = enabled)
         }
     }
-}
-
-@Composable
-internal fun noteReminderLabel(timestamp: Long): String {
-    val at = java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault())
-    return "${at.toLocalDate().dayLabel(LocalDateFormat.current)}, ${at.toLocalTime().label(LocalTimeFormat.current, LocalContext.current)}"
 }
 
 // A toolbar edit as the box's new value. The keyboard's composing range (the word it underlines) is dropped: it was

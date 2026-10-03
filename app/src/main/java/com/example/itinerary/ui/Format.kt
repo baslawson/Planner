@@ -2,12 +2,16 @@ package com.example.itinerary.ui
 
 import android.content.Context
 import android.text.format.DateFormat
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalContext
 import com.example.itinerary.data.DateFormatChoice
 import com.example.itinerary.data.TimeFormat
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
@@ -67,11 +71,22 @@ fun TimeFormat.is24Hour(context: Context): Boolean = when (this) {
 fun LocalDate.fullLabel(): String =
     format(patternFormatter("d MMM yyyy"))
 
-fun LocalTime.label(timeFormat: TimeFormat, context: Context): String {
-    // Locale defaults can differ from Android's explicit 12/24-hour preference.
-    val pattern = if (timeFormat.is24Hour(context)) "HH:mm" else "h:mm a"
-    return format(patternFormatter(pattern))
+// Locale defaults can differ from Android's explicit 12/24-hour preference.
+fun LocalTime.label(timeFormat: TimeFormat, context: Context): String = label(timeFormat.is24Hour(context))
+
+internal fun LocalTime.label(is24Hour: Boolean): String = format(patternFormatter(if (is24Hour) "HH:mm" else "h:mm a"))
+
+// A moment ([ms]) as "day, time": the day as the user writes days ([dayFormat]), or as "3 Oct" when it is null.
+internal fun momentLabel(ms: Long, dayFormat: DateFormatChoice?, is24Hour: Boolean, zone: ZoneId = ZoneId.systemDefault()): String {
+    val at = Instant.ofEpochMilli(ms).atZone(zone)
+    val day = if (dayFormat == null) at.toLocalDate().shortLabel() else at.toLocalDate().dayLabel(dayFormat)
+    return "$day, ${at.toLocalTime().label(is24Hour)}"
 }
+
+// A reminder or snooze time ("Saturday 3 October 2026, 14:05"); [short] for a "Synced 3 Oct, 14:05" line.
+@Composable
+internal fun momentLabel(ms: Long, short: Boolean = false): String =
+    momentLabel(ms, if (short) null else LocalDateFormat.current, LocalTimeFormat.current.is24Hour(LocalContext.current))
 
 fun YearMonth.label(): String =
     format(patternFormatter("MMMM yyyy"))
