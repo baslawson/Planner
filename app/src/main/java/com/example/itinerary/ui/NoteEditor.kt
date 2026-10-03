@@ -144,17 +144,31 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val attachmentStore = app.attachmentStore
     // Counted as an open editor (a widget day waits for it), and its state kept on disk shortly after each change.
     DisposableEffect(Unit) { NoteDraftStore.editorOpened(); onDispose { NoteDraftStore.editorClosed() } }
-    LaunchedEffect(current, base, pendingPhoto, unsaved) {
-        kotlinx.coroutines.delay(400)
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching { if (unsaved || pendingPhoto != null) draftStore.write(NoteDraftStore.Draft(current, base == null, base, pendingPhoto)) else draftStore.clear() }
+    // E5-5: the draft goes to the shared draft writer (on its thread, in order with clear), from the main thread: once
+    // the editor has closed (Discard, Save and close, Delete) nothing more is sent, and clear drops what was waiting.
+    val closed = remember { booleanArrayOf(false) }
+    val draftError = "Couldn't keep unsaved changes on this device."
+    fun keepDraft() {
+        if (closed[0]) return
+        runCatching {
+            if (unsaved || pendingPhoto != null) draftStore.schedule(NoteDraftStore.Draft(current, base == null, base, pendingPhoto)) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { if (!closed[0]) error = draftError }
+            } else draftStore.clear()
         }
     }
+    LaunchedEffect(current, base, pendingPhoto, unsaved) {
+        kotlinx.coroutines.delay(400)
+        keepDraft()
+    }
+    // Leaving or going to the background: what is typed is on disk before Android may close Planner.
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_STOP) { keepDraft(); runCatching { draftStore.flush() } }
+    DisposableEffect(Unit) { onDispose { runCatching { draftStore.flush() } } }
     // Files this editor has held: once it saves, discards or deletes, those nothing uses any more are removed (one still
-    // in a saved note, Recently deleted or elsewhere stays).
+    // in a saved note, Recently deleted or elsewhere stays). The draft is cleared first, here, so no write lands after it.
     fun releaseFiles() {
         val files = (initial.attachments + start.attachments + attachments + base?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
-        app.appScope.launch { runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { draftStore.clear() }; repo.releaseTaskFiles(files) } }
+        runCatching { draftStore.clear() }
+        app.appScope.launch { runCatching { repo.releaseTaskFiles(files) } }
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -227,7 +241,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         }
     }
     // Closed for good (not rotated): what the memory kept for it goes.
-    fun dismiss() { NoteEditorMemory.forget(memoryKey); onDismiss() }
+    fun dismiss() { closed[0] = true; NoteEditorMemory.forget(memoryKey); onDismiss() }
     fun discard() { releaseFiles(); dismiss() }
     fun close() { if (unsaved) askingToSave = true else discard() }
     fun delete() {
