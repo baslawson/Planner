@@ -188,4 +188,32 @@ object Markdown {
         val newEnd = if (s == e) newStart else (e + block.length - (last - first)).coerceIn(newStart, result.length)
         return Edit(result, newStart, newEnd)
     }
+
+    private val checkMark = Regex("^(\\s*)([-*+])\\s+\\[[ xX]]\\s?")
+    private val bulletMark = Regex("^(\\s*)([-*+])\\s+")
+    private val numberMark = Regex("^(\\s*)(\\d{1,9})([.)])\\s+")
+
+    /**
+     * Enter typed in a list item carries the list on, as a checklist app does: "- [ ] milk⏎" starts "- [ ] " (always
+     * unticked), "- " and "3. " give "- " and "4. ". Enter on an item with nothing in it ends the list: the mark goes and
+     * no line is added. Only a single "\n" typed at [cursor] counts ([new] is [old] with it), so pasting, the toolbar
+     * and autocorrect are left alone; so are code blocks, rules and Enter typed inside the mark. Null when nothing changes.
+     */
+    fun continueList(old: String, new: String, cursor: Int): Edit? {
+        val at = cursor - 1
+        if (new.length != old.length + 1 || at !in 0..old.length || new[at] != '\n' ||
+            new.substring(0, at) != old.substring(0, at) || new.substring(cursor) != old.substring(at)) return null
+        val lineStart = old.lastIndexOf('\n', at - 1) + 1
+        val lineEnd = old.indexOf('\n', at).let { if (it < 0) old.length else it }
+        val line = old.substring(lineStart, lineEnd)
+        if (rule.matches(line) || old.substring(0, lineStart).split('\n').count { fence.matches(it) } % 2 == 1) return null
+        val (mark, next) = checkMark.find(line)?.let { it.value to it.groupValues[1] + it.groupValues[2] + " [ ] " }
+            ?: numberMark.find(line)?.let { m -> m.destructured.let { (indent, n, sep) -> m.value to "$indent${n.toLong() + 1}$sep " } }
+            ?: bulletMark.find(line)?.let { it.value to it.groupValues[1] + it.groupValues[2] + " " }
+            ?: return null
+        if (at < lineStart + mark.length) return null
+        if (line.substring(mark.length).isBlank()) // an empty item: Enter leaves the list
+            return (old.substring(0, lineStart) + old.substring(lineEnd)).let { Edit(it, lineStart, lineStart) }
+        return Edit(new.substring(0, cursor) + next + new.substring(cursor), cursor + next.length, cursor + next.length)
+    }
 }

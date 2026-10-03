@@ -228,7 +228,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         })
                     } else {
                         MarkdownToolbar { edit -> content = edit(content) }
-                        OutlinedTextField(content, { content = if (it.text.length <= Notes.MAX_CONTENT) it else content },
+                        OutlinedTextField(content, { typed ->
+                                // Enter in a checklist or list item starts the next item (or ends the list on an empty one).
+                                val next = Markdown.continueList(content.text, typed.text, typed.selection.start)
+                                    ?.takeIf { typed.selection.collapsed }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
+                                content = if (next.text.length <= Notes.MAX_CONTENT) next else content
+                            },
                             Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 8,
                             textStyle = MaterialTheme.typography.bodyLarge,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))

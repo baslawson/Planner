@@ -42,6 +42,44 @@ class NotesTest {
         assertEquals(1 to 2, Markdown.checklist(text))
     }
 
+    // Types Enter where "|" is; the result has "|" where the cursor ends up, or null when Enter is left as it is.
+    private fun enter(before: String): String? {
+        val at = before.indexOf('|'); val old = before.removeRange(at, at + 1)
+        val new = old.substring(0, at) + "\n" + old.substring(at)
+        return Markdown.continueList(old, new, at + 1)?.let { it.text.substring(0, it.start) + "|" + it.text.substring(it.start) }
+    }
+
+    @Test fun enterCarriesAListOn() {
+        assertEquals("- [ ] test\n- [ ] |", enter("- [ ] test|"))
+        assertEquals("- [x] done\n- [ ] |", enter("- [x] done|")) // a new box is never ticked
+        assertEquals("- [ ] a\n  * [ ] b\n  * [ ] |", enter("- [ ] a\n  * [ ] b|"))
+        assertEquals("- milk\n- |", enter("- milk|"))
+        assertEquals("+ milk\n+ |", enter("+ milk|"))
+        assertEquals("9. nine\n10. |", enter("9. nine|"))
+        assertEquals("1) one\n2) |\nafter", enter("1) one|\nafter"))
+        // Enter in the middle of an item splits it: the rest goes into the new item.
+        assertEquals("- [ ] bread\n- [ ] |and milk", enter("- [ ] bread|and milk"))
+        // An empty item ends the list: the mark goes, no line is added.
+        assertEquals("- [ ] eggs\n|", enter("- [ ] eggs\n- [ ] |"))
+        assertEquals("- eggs\n|\nnext", enter("- eggs\n- |\nnext"))
+        assertEquals("|", enter("- [ ]  |"))
+    }
+
+    @Test fun enterIsLeftAloneOutsideLists() {
+        assertNull(enter("plain|"))
+        assertNull(enter("# Heading|"))
+        assertNull(enter("---|"))
+        assertNull(enter("- -|- -")) // inside a rule's dashes
+        assertNull(enter("|- [ ] milk")) // before the mark
+        assertNull(enter("- [| ] milk")) // inside the mark
+        assertNull(enter("```\n- in code|\n```"))
+        assertNull(enter("2026-10-03|")) // a date, not a numbered item
+        // Not a single Enter at the cursor: pasted text, or an Enter somewhere else.
+        assertNull(Markdown.continueList("- milk", "- milk\nbread", 13))
+        assertNull(Markdown.continueList("- milk", "- milk\n", 3))
+        assertNull(Markdown.continueList("- milk", "- milks", 7))
+    }
+
     @Test fun toolbarWrapsAndPrefixes() {
         assertEquals(Markdown.Edit("a **bc** d", 4, 6), Markdown.wrap("a bc d", 2, 4, "**"))
         assertEquals(Markdown.Edit("a bc d", 2, 4), Markdown.wrap("a **bc** d", 4, 6, "**"))

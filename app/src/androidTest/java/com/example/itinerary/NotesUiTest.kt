@@ -287,4 +287,34 @@ class NotesUiTest {
             screenshot("preview-dark")
         } finally { app.settings.setThemeMode(ThemeMode.SYSTEM) }
     }
+
+    private fun shell(command: String) = ins.uiAutomation.executeShellCommand(command).use { pfd ->
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader().readText() }
+    private fun noteText() = nodes().filter { it.isVisibleToUser && it.isEditable }.getOrNull(1)?.text?.toString()
+    private fun awaitNote(expected: String) {
+        val end = SystemClock.uptimeMillis() + 10000
+        while (SystemClock.uptimeMillis() < end) { if (noteText() == expected) return; Thread.sleep(150) }
+        screenshot("failure"); fail("Note text " + noteText()?.replace("\n", "\\n") + ", expected " + expected.replace("\n", "\\n"))
+    }
+
+    // Real key presses, not SET_TEXT: Enter on a checklist line starts the next box, Enter on an empty box ends the list.
+    @Test fun enterCarriesAChecklistOn() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(0, "QA list")
+        type(1, "- [ ] test")
+        val field = nodes().filter { it.isVisibleToUser && it.isEditable }[1]
+        field.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(400)
+        field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 10); putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, 10) })
+        Thread.sleep(300)
+        shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] test\n- [ ] ")
+        shell("input text eggs"); awaitNote("- [ ] test\n- [ ] eggs")
+        screenshot("checklist-enter")
+        shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] test\n- [ ] eggs\n- [ ] ")
+        shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] test\n- [ ] eggs\n") // the empty box ends the list
+        shell("input text done")
+        click("Save")
+        await { notes().singleOrNull()?.content == "- [ ] test\n- [ ] eggs\ndone" }
+    }
 }
