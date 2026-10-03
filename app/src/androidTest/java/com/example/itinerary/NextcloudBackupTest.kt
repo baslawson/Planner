@@ -50,6 +50,7 @@ class NextcloudBackupTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private lateinit var server: MockWebServer
     private lateinit var client: NextcloudClient
+    private lateinit var trusted: OkHttpClient
     private lateinit var account: NextcloudAccount
     private lateinit var sandbox: File
     private lateinit var context: Context
@@ -85,8 +86,9 @@ class NextcloudBackupTest {
         server = MockWebServer()
         server.useHttps(serverCertificates.sslSocketFactory(), false)
         server.start()
-        client = NextcloudClient(OkHttpClient.Builder()
-            .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build())
+        trusted = OkHttpClient.Builder()
+            .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build()
+        client = NextcloudClient(trusted)
         account = NextcloudAccount.create(server.url("/").toString(), "bas", "test-password-only")
         fixture = DavFixture()
         server.dispatcher = fixture
@@ -241,6 +243,41 @@ class NextcloudBackupTest {
             client.download(account, file.copy(etag = null), target)
             fail("Truncated download accepted")
         } catch (_: java.io.IOException) { } catch (_: BackupException) { }
+        assertFalse(target.exists())
+    }
+
+    // R5-2: a backup's upload and download aren't cut off by the whole-call limit (here 1 s instead of 5 min) on a slow
+    // link; other requests keep it. A download that breaks off says so plainly.
+    @Test fun testSlowBackupTransfersOutlastTheCallTimeout() {
+        val slow = NextcloudClient(trusted, callTimeoutMs = 1000)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = fixture.dispatch(request).apply {
+                if (request.method == "PUT") setHeadersDelay(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+        }
+        val archive = File(context.cacheDir, "slow-upload.zip").apply { writeBytes(ByteArray(64 * 1024) { it.toByte() }) }
+        val name = slow.upload(account, archive)
+        assertEquals(64 * 1024, fixture.files.values.single().size)
+        val bytes = ByteArray(64 * 1024) { (it * 7).toByte() }
+        val target = File(context.cacheDir, "slow-download.zip")
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setBody(Buffer().write(bytes))
+                .throttleBody(8 * 1024, 300, java.util.concurrent.TimeUnit.MILLISECONDS) // about 2.4 s
+        }
+        slow.download(account, NextcloudBackup(name, bytes.size.toLong(), null, null), target)
+        assertArrayEquals(bytes, target.readBytes())
+        // Anything else still has the limit.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = fixture.dispatch(request)
+                .setHeadersDelay(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }
+        expectFailure { slow.checkConnection(account) }
+        // Cut off mid-way: a plain message, not a raw I/O error, and no partial file.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setBody(Buffer().write(bytes))
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+        }
+        assertTrue(expectFailure { slow.download(account, NextcloudBackup(name, null, null, null), target) }.contains("interrupted"))
         assertFalse(target.exists())
     }
 

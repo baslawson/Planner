@@ -48,11 +48,14 @@ sealed class WriteResult {
 // with credentials. Backups are confined to the selected folder under this account's Files root. Calendar sync reads
 // (PROPFIND and REPORT) inside the account's calendar home; the only writes (step 5) are PUT and DELETE of Planner's own
 // event files in the calendar the user chose, always conditional (If-None-Match / If-Match) so nothing else is replaced.
-class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
+class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long = TimeUnit.MINUTES.toMillis(5)) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.MINUTES).build()
+        .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS).build()
+    // R5-2: a backup's own upload (PUT) and download (GET) take as long as the file and the link need: no limit on the
+    // whole call, only on a stall (the connect, read and write timeouts above still apply).
+    private val transfer = http.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).build()
 
     fun checkConnection(account: NextcloudAccount) {
         val root = account.filesRoot
@@ -92,7 +95,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         val temporary = fileUrl(account, ".upload-$id")
         try {
             request(account, "PUT", temporary, file.asRequestBody("application/zip".toMediaType()),
-                mapOf("If-None-Match" to "*")).use { if (it.code != 201 && it.code != 204) fail(it.code) }
+                mapOf("If-None-Match" to "*"), transfer = true).use { if (it.code != 201 && it.code != 204) fail(it.code) }
             request(account, "MOVE", temporary, null,
                 mapOf("Destination" to fileUrl(account, name).toString(), "Overwrite" to "F"))
                 .use { if (it.code != 201 && it.code != 204) fail(it.code) }
@@ -107,13 +110,22 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
         if (!validName(backup.name)) throw BackupException("Invalid backup filename.")
         val headers = backup.etag?.let { mapOf("If-Match" to it) }.orEmpty()
         try {
-            request(account, "GET", fileUrl(account, backup.name), headers = headers).use { response ->
+            request(account, "GET", fileUrl(account, backup.name), headers = headers, transfer = true).use { response ->
                 if (response.code != 200) fail(response.code)
                 val body = response.body ?: throw BackupException("The backup download was empty.")
                 if (body.contentLength() > target.parentFile!!.usableSpace) {
                     throw BackupException("There isn't enough free space on this device to download the backup.")
                 }
-                val copied = body.byteStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+                // The body arrives here, after request(): its errors get the same plain messages.
+                val copied = try {
+                    body.byteStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+                } catch (_: SocketTimeoutException) {
+                    throw BackupException("Nextcloud timed out during the backup download. Check your connection and try again.")
+                } catch (_: IOException) {
+                    throw BackupException(if (target.parentFile!!.usableSpace < 1024 * 1024)
+                        "There isn't enough free space on this device to download the backup."
+                    else "The backup download was interrupted. Check your connection and try again.")
+                }
                 if (body.contentLength() >= 0 && copied != body.contentLength()) {
                     throw BackupException("The backup download was interrupted. Try again.")
                 }
@@ -400,13 +412,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient()) {
     }
 
     private fun request(account: NextcloudAccount, method: String, url: HttpUrl, body: RequestBody? = null,
-                        headers: Map<String, String> = emptyMap()): Response {
+                        headers: Map<String, String> = emptyMap(), transfer: Boolean = false): Response {
         val request = Request.Builder().url(url).method(method, body)
             .header("Authorization", Credentials.basic(account.username, account.password, Charsets.UTF_8))
             .header("User-Agent", "Planner/0.1").header("Cache-Control", "no-store")
         headers.forEach { (name, value) -> request.header(name, value) }
         try {
-            return http.newCall(request.build()).execute()
+            return (if (transfer) this.transfer else http).newCall(request.build()).execute()
         } catch (_: SSLException) {
             throw BackupException("Couldn't verify the server's HTTPS certificate. Check the address and server certificate.")
         } catch (_: SocketTimeoutException) {
