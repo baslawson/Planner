@@ -365,25 +365,39 @@ fun AgendaScreen(
 @Composable
 private fun AgendaFilterBar(range: AgendaRange, onRange: (AgendaRange) -> Unit) {
     val green = MaterialTheme.colorScheme.primary
-    // Equal shares of the width when they fit; at large text whole chips move to a second line instead of
-    // splitting words ("Upcom|ing").
-    FlowRow(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        AgendaRange.entries.forEach { option ->
-            val selected = option == range
-            Surface(selected = selected, onClick = { onRange(option) },
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = if (selected) green.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent,
-                contentColor = if (selected) green else MaterialTheme.colorScheme.onSurfaceVariant,
-                border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), if (selected) green else MaterialTheme.colorScheme.outline)) {
-                Box(Modifier.padding(horizontal = 4.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    Text(option.label, style = MaterialTheme.typography.labelLarge,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+    // Four equal chips when every label fits a quarter of the width on one line; otherwise two per line, so a label
+    // never splits ("Upcomin|g"). FlowRow alone can't tell: it checks each chip's own narrowest width, then the
+    // weights hand out equal shares that can be narrower than "Upcoming".
+    val style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold) // bold is the widest
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val gaps = 8.dp * (AgendaRange.entries.size - 1)
+        // A chip's text gets its share less 4 dp padding and the border on each side.
+        val textRoom = (maxWidth - gaps) / AgendaRange.entries.size - 8.dp - com.example.itinerary.ui.theme.controlBorderWidth() * 2
+        val perLine = remember(textRoom, style, density) {
+            val widest = AgendaRange.entries.maxOf { measurer.measure(it.label, style, softWrap = false).size.width }
+            if (widest <= with(density) { textRoom.toPx() }) AgendaRange.entries.size else 2
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            maxItemsInEachRow = perLine,
+        ) {
+            AgendaRange.entries.forEach { option ->
+                val selected = option == range
+                Surface(selected = selected, onClick = { onRange(option) },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (selected) green.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = if (selected) green else MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), if (selected) green else MaterialTheme.colorScheme.outline)) {
+                    Box(Modifier.padding(horizontal = 4.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(option.label, style = MaterialTheme.typography.labelLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+                    }
                 }
             }
         }
