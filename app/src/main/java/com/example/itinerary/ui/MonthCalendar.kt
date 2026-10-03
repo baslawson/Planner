@@ -51,12 +51,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -225,9 +229,13 @@ private fun MonthPager(
                 request.target = target
                 pagerState.animateScrollToPage(target)
                 // A tap during the last move's height change still moves pages that change size: once the height
-                // has settled, finish the move.
-                snapshotFlow { height }.first { it == fullHeight }
-                if (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f)
+                // has settled, finish the move. AG-1: a swipe meanwhile is the user's and ends this move (its page then
+                // counts, as for a swipe during the animation): waiting on would never end when the swipe heads for a
+                // month of another height, and finishing would pull the grid back. A time limit guards the wait too.
+                val swiped = withTimeoutOrNull(2_000) {
+                    snapshotFlow { pagerState.isScrollInProgress to (height == fullHeight) }.first { (scrolling, settled) -> scrolling || settled }.first
+                } ?: false
+                if (!swiped && (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f))
                     pagerState.animateScrollToPage(target)
             }
         } finally {
@@ -393,10 +401,13 @@ private fun DayCell(
         else -> colors.onSurface
     }
 
+    // AG-3: the number alone tells TalkBack nothing; it reads the full date, today and the event dot, and the selection.
+    val description = dayCellDescription(date, isToday, hasItems)
     Box(
         modifier
             .height(LocalCalendarRowHeight.current)
-            .clickable(onClick = onClick)
+            .semantics { contentDescription = description; selected = isSelected }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -421,6 +432,11 @@ private fun DayCell(
         }
     }
 }
+
+// What TalkBack reads for a day of the month grid, e.g. "Monday 5 October 2026, today, has events".
+internal fun dayCellDescription(date: LocalDate, isToday: Boolean, hasItems: Boolean, locale: Locale = Locale.getDefault()): String =
+    listOfNotNull(date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", locale)),
+        "today".takeIf { isToday }, "has events".takeIf { hasItems }).joinToString(", ")
 
 // Today's ring fades between full strength and faint so it catches the eye. The alpha is read only while drawing,
 // so the pulse redraws this ring each frame without recomposing the calendar. It runs faint -> full because, with

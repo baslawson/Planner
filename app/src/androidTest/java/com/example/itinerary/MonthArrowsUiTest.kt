@@ -149,6 +149,36 @@ class MonthArrowsUiTest {
         }
     }
 
+    // A real upward swipe across the grid (the next month), quick enough to be a fling.
+    private fun swipeUp(x: Float, fromY: Float, toY: Float) {
+        val down = SystemClock.uptimeMillis()
+        fun event(action: Int, t: Long, y: Float) = android.view.MotionEvent.obtain(down, t, action, x, y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_DOWN, down, fromY), true)
+        for (step in 1..8) ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_MOVE, down + step * 12L, fromY + (toY - fromY) * step / 8), true)
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_UP, down + 110, toY), true)
+    }
+    // AG-1: a swipe right after an arrow's move has landed, while the grid is still changing height, moves on one more
+    // month and the header follows it (it used to stay on the arrow's month for good, or the grid was pulled back).
+    @Test fun aSwipeRightAfterAnArrowTapMovesOnAndTheHeaderFollows() {
+        openCalendar()
+        var month = YearMonth.from(start)
+        await("start month") { find(month.label()) != null }
+        rest(month)
+        repeat(5) {
+            click("Next month")
+            val arrow = month.plusMonths(1)
+            await("header $arrow") { find(arrow.label()) != null }
+            val day = Rect().also(visible("15").single()::getBoundsInScreen)
+            swipeUp(day.exactCenterX(), day.exactCenterY() + day.height(), day.exactCenterY() - 2 * day.height())
+            month = month.plusMonths(2)
+            val expected = month
+            await("header $expected after a swipe right after the arrow") { find(expected.label()) != null }
+            Thread.sleep(1500)
+            assertNotNull("header still $expected", find(expected.label()))
+            assertSnapped(expected, " after an arrow then a swipe")
+        }
+    }
+
     // One tap at a time from April 2036 (5 weeks) through August and November (6 weeks) and back: each month in place.
     @Test fun singleTapsBetweenFiveAndSixWeekMonthsKeepTheGridInPlace() {
         openCalendar()
