@@ -156,6 +156,14 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _savedSearches.value = values
     }
 
+    // Device-local: Enter in a note's list item starts the next item ("Continue lists on Enter"); not in backups.
+    private val _continueLists = MutableStateFlow(prefs.getBoolean("continue_lists", true))
+    val continueLists: StateFlow<Boolean> = _continueLists.asStateFlow()
+    fun setContinueLists(on: Boolean) {
+        prefs.edit { putBoolean("continue_lists", on) }
+        _continueLists.value = on
+    }
+
     // Device-local navigation state; independent of exported planner data.
     var lastViewCalendar: Boolean
         get() = prefs.getBoolean("last_view_calendar", false)

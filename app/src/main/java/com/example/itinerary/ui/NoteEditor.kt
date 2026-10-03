@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,6 +94,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         tags = tags, attachments = attachments, reminderAt = reminderAt)
     val unsaved = base?.let { Notes.clean(current) != Notes.clean(it) } ?: Notes.hasContent(current)
     // As stored now: a change made elsewhere (sync, a reminder's Done) shows here at once while nothing is edited.
+    val continueLists by app.settings.continueLists.collectAsStateWithLifecycle()
     val stored by remember(initial.id) { repo.observeNote(initial.id) }.collectAsStateWithLifecycle(initialValue = base)
     // Once seen in the database: a just-saved new note isn't "deleted" for the moment before its first reading arrives.
     var seenStored by remember { mutableStateOf(base != null) }
@@ -231,7 +233,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         OutlinedTextField(content, { typed ->
                                 // Enter in a checklist or list item starts the next item (or ends the list on an empty one).
                                 val next = Markdown.continueList(content.text, typed.text, typed.selection.start)
-                                    ?.takeIf { typed.selection.collapsed }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
+                                    ?.takeIf { typed.selection.collapsed && continueLists }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
                                 content = if (next.text.length <= Notes.MAX_CONTENT) next else content
                             },
                             Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 8,
@@ -239,6 +241,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                         Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(Modifier.fillMaxWidth().toggleable(value = continueLists, role = Role.Switch,
+                                onValueChange = app.settings::setContinueLists),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("Continue lists on Enter", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Switch(checked = continueLists, onCheckedChange = null)
+                        }
                     }
                     HorizontalDivider()
                     OutlinedTextField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, Modifier.fillMaxWidth(),
@@ -374,10 +382,11 @@ private fun MarkdownToolbar(apply: ((TextFieldValue) -> TextFieldValue) -> Unit)
     fun prefix(mark: String): (TextFieldValue) -> TextFieldValue = { v ->
         Markdown.prefixLines(v.text, v.selection.start, v.selection.end, mark).let { v.copy(text = it.text, selection = TextRange(it.start, it.end)) }
     }
+    // Checklist is ☑ with U+FE0E, so it is drawn as text in the app's font rather than as a colour emoji.
     val tools = listOf(
         Triple("B", "Bold", wrap("**")), Triple("I", "Italic", wrap("*")), Triple("S", "Strikethrough", wrap("~~")),
         Triple("H", "Heading", prefix("# ")), Triple("•", "Bulleted list", prefix("- ")),
-        Triple("☐", "Checklist", prefix("- [ ] ")), Triple("</>", "Code", wrap("`")),
+        Triple("\u2611\uFE0E", "Checklist", prefix("- [ ] ")), Triple("</>", "Code", wrap("`")),
     )
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tools.forEach { (label, name, edit) ->

@@ -136,10 +136,14 @@ class NotesUiTest {
         }
         openNotes()
         await { find("QA with file") != null && find("1 attachment") != null }
-        // A tag typed in the editor: Title 0, Note 1, Notebook 2, Add a tag 3.
-        click("New note"); await { find("Add a tag") != null }
+        // A tag typed in the editor; the tag box is below the note box, so scroll to it and find it by its own text.
+        click("New note"); await { find("New note") != null && find("Title") != null }
         type(0, "QA errands")
-        type(3, "#errands")
+        reveal("Add a tag")
+        val tagBox = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Add a tag" } }
+        assertTrue(tagBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "#errands") }))
+        Thread.sleep(300)
         click("Add tag")
         await { find("#errands") != null && find("Remove tag errands") != null }
         click("Save"); await { notes().any { it.title == "QA errands" && it.tags == listOf("errands") } }
@@ -316,5 +320,26 @@ class NotesUiTest {
         shell("input text done")
         click("Save")
         await { notes().singleOrNull()?.content == "- [ ] test\n- [ ] eggs\ndone" }
+    }
+
+    // "Continue lists on Enter" off: Enter is a plain new line again; the choice is remembered.
+    @Test fun continueListsSwitchTurnsItOff() {
+        try {
+            openNotes()
+            click("New note"); await { find("New note") != null && find("Title") != null }
+            screenshot("toolbar") // the Checklist button is a ticked box
+            type(0, "QA plain")
+            type(1, "- [ ] a")
+            assertTrue(app.settings.continueLists.value)
+            click("Continue lists on Enter"); await { !app.settings.continueLists.value }
+            screenshot("switch-off")
+            val field = nodes().filter { it.isVisibleToUser && it.isEditable }[1]
+            field.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(400)
+            field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 7); putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, 7) })
+            Thread.sleep(300)
+            shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] a\n")
+            click("Continue lists on Enter"); await { app.settings.continueLists.value }
+        } finally { app.settings.setContinueLists(true) }
     }
 }
