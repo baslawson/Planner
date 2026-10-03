@@ -160,8 +160,13 @@ enum class SyncMark { SYNCED, PROBLEM;
 
         // The marks by event id: only for the calendar Planner keeps in sync now. Turning two-way sync off keeps the
         // rows (choosing it again links the same files), but the cards then say nothing about Nextcloud.
-        fun forCards(rows: List<SentMarkRow>, sources: List<CalendarSource>): Map<Long, SyncMark> {
-            val synced = sources.filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }.mapTo(HashSet()) { it.account to it.href }
+        fun forCards(rows: List<SentMarkRow>, sources: List<CalendarSource>): Map<Long, SyncMark> = forCards(rows, syncedCalendars(sources))
+
+        // The calendar kept in sync now (login and path), all forCards needs of the calendars.
+        fun syncedCalendars(sources: List<CalendarSource>): Set<Pair<String, String>> =
+            sources.filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }.mapTo(HashSet()) { it.account to it.href }
+
+        fun forCards(rows: List<SentMarkRow>, synced: Set<Pair<String, String>>): Map<Long, SyncMark> {
             return rows.filter { (it.account to it.calendar) in synced }.mapNotNull { row -> of(row.uid, row.problem)?.let { row.itemId to it } }.toMap()
         }
     }

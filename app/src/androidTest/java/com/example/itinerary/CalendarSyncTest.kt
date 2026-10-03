@@ -233,6 +233,23 @@ class CalendarSyncTest {
         assertEquals(before, fixture.requests.size)
     }
 
+    // Optimization 3 Oct (B3): a sync that changes nothing doesn't refresh the widget (onChanged); one that downloads a
+    // changed calendar still does.
+    @Test fun aSyncThatChangesNothingLeavesTheWidgetAlone() = runBlocking {
+        sync.sync()
+        sync.setEnabled(source("Personal").id, true)
+        sync.check()
+        assertEquals(1, reports().size)
+        val before = changes
+        sync.check(); sync.check() // unchanged on the server
+        assertEquals(before, changes)
+        fixture.ctags["personal"] = "p2"
+        fixture.events["personal"] = listOf(event("Moved", "20261006T020000Z", "20261006T030000Z"))
+        sync.check()
+        assertEquals(listOf("Moved"), shown().values.map { it.event.title })
+        assertTrue(changes > before)
+    }
+
     @Test fun onlyTheCalendarHomeIsRead() {
         assertThrows(IllegalArgumentException::class.java) {
             client.calendarEvents(account, "/remote.php/dav/files/bas/Planner/", Instant.EPOCH, Instant.EPOCH.plusSeconds(60))

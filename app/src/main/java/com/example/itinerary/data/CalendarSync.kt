@@ -73,17 +73,21 @@ class CalendarSync(
     val sources: Flow<List<CalendarSource>> = dao.observeSources()
 
     // Planner's events on Nextcloud (two-way), by event id, for the cards to mark.
-    val syncMarks: Flow<Map<Long, SyncMark>> = combine(db.sentDao().observeMarks(), dao.observeSources()) { rows, sources -> SyncMark.forCards(rows, sources) }
+    // DA-6: the calendars are narrowed to what each map needs, and an unchanged list stops there: refreshing a calendar
+    // writes its lastSynced (every app open for the phone's), which needn't rebuild the maps.
+    val syncMarks: Flow<Map<Long, SyncMark>> = combine(db.sentDao().observeMarks(),
+        dao.observeSources().map { SyncMark.syncedCalendars(it) }.distinctUntilChanged()) { rows, synced -> SyncMark.forCards(rows, synced) }
         .distinctUntilChanged()
 
     // Ticked calendars' events with their calendar's name and colour, keyed by the id they are shown under.
-    val shown: Flow<Map<Long, OutsideInfo>> = combine(dao.observeShown(), dao.observeSources()) { events, sources ->
-        val byId = sources.associateBy { it.id }
+    val shown: Flow<Map<Long, OutsideInfo>> = combine(dao.observeShown().distinctUntilChanged(),
+        dao.observeSources().map { sources -> sources.associate { it.id to Label(it.name, it.color, it.kind) } }.distinctUntilChanged()) { events, byId ->
         events.mapNotNull { event ->
             val source = byId[event.sourceId] ?: return@mapNotNull null
             event.displayId() to OutsideInfo(event, source.name, source.color ?: OutsideCalendars.DEFAULT_COLOR, source.kind)
         }.toMap(LinkedHashMap())
     }.distinctUntilChanged()
+    private data class Label(val name: String, val color: Int?, val kind: String)
 
     suspend fun hasAccount(): Boolean = withContext(Dispatchers.IO) { runCatching { accounts.load() != null }.getOrDefault(false) }
 
@@ -865,21 +869,25 @@ class CalendarSync(
         val account = accounts.load() ?: throw BackupException("Connect to Nextcloud first.")
         val key = accountKey(account)
         val remote = client.calendars(account).associateBy { it.href }
+        // B3: whether this sync wrote what the widget shows (calendars, their events), so it is refreshed only then. The
+        // synced calendar's and task list's pulls refresh it themselves when they read, and Planner's own events and
+        // tasks through the Repository; the widget's own schedule (midnight, the date or zone changing) does the rest.
+        var wrote = false
         // Calendars of another login, and ones no longer on the server, go with their events.
         db.withTransaction {
             val existing = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-            existing.filter { it.account != key || it.href !in remote }.forEach { dao.deleteSource(it.id) }
+            existing.filter { it.account != key || it.href !in remote }.forEach { dao.deleteSource(it.id); wrote = true }
             val kept = existing.filter { it.account == key && it.href in remote }.associateBy { it.href }
             remote.values.forEach { calendar ->
                 val old = kept[calendar.href]
-                if (old == null) dao.insertSource(CalendarSource(account = key, href = calendar.href, name = calendar.name, color = calendar.color,
-                    writable = calendar.writable, events = calendar.events, tasks = calendar.tasks))
+                if (old == null) { wrote = true; dao.insertSource(CalendarSource(account = key, href = calendar.href, name = calendar.name, color = calendar.color,
+                    writable = calendar.writable, events = calendar.events, tasks = calendar.tasks)) }
                 else if (old.name != calendar.name || old.color != calendar.color || old.writable != calendar.writable ||
                     old.events != calendar.events || old.tasks != calendar.tasks)
                     dao.updateSource(old.copy(name = calendar.name, color = calendar.color, writable = calendar.writable,
                         events = calendar.events, tasks = calendar.tasks,
                         enabled = old.enabled && calendar.events, sendHere = old.sendHere && calendar.writable && calendar.events,
-                        tasksHere = old.tasksHere && calendar.writable && calendar.tasks))
+                        tasksHere = old.tasksHere && calendar.writable && calendar.tasks)).also { wrote = true }
             }
         }
         val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
@@ -906,6 +914,7 @@ class CalendarSync(
                     dao.insertEvents(read.events.map { it.copy(id = 0, sourceId = source.id) })
                     dao.updateSource(current.copy(ctag = calendar.ctag, fetchedFor = window, lastSynced = now(), lastError = null))
                 }
+                wrote = true
                 failedAt.remove(source.id)
             } catch (e: CancellationException) {
                 throw e
@@ -946,7 +955,7 @@ class CalendarSync(
         }
         // The task list kept in sync (its own state says how it went).
         val tasksFailed = tasks?.pull(account, remote, retry) == false
-        onChanged()
+        if (wrote) onChanged()
         val ticked = dao.sources().count { it.enabled && it.kind == OutsideCalendars.KIND_NEXTCLOUD }
         return buildString {
             append(when {
