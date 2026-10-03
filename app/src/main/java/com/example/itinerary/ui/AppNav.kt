@@ -67,7 +67,7 @@ private fun NavController.openCalendar(entry: NavBackStackEntry, date: LocalDate
 }
 
 @Composable
-fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}) {
+fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}, noteId: String? = null, onNoteOpened: () -> Unit = {}) {
     val windowEditors = remember { WindowEditors() }
     CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
     val nav = rememberNavController()
@@ -98,6 +98,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
             }
         }
     }
+    // U-13: the note a reminder's tap asked for, handed to the Notes page (see below).
+    var noteToOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(nav) {
         nav.currentBackStackEntryFlow.collect { entry ->
@@ -255,7 +257,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
-            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }) }
+            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null }) }
             composable("search") { entry ->
                 val vm: SearchViewModel = viewModel(
                     factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings, app.calendarSync.shown) } },
@@ -336,6 +338,17 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 onWidgetOpened()
             }
         }
+        // U-13: a note reminder's tap opens the Notes page with that note. An event or task editor open here is closed
+        // first, as for the widget's day: moving to Notes would drop it with its draft.
+        val noteWaits = openEventEditors + openTaskEditors > 0
+        LaunchedEffect(noteId) { if (noteId != null && noteWaits) Toast.makeText(app, noteWaitMessage(openEventEditors, openTaskEditors), Toast.LENGTH_LONG).show() }
+        LaunchedEffect(noteId, noteWaits) {
+            if (noteId != null && !noteWaits) {
+                noteToOpen = noteId
+                if (nav.currentDestination?.route != "notes") nav.navigate("notes") { launchSingleTop = true }
+                onNoteOpened()
+            }
+        }
         LaunchedEffect(entryAction, draftChecked) {
             if (entryAction != null && draftChecked) {
                 val existingDraft = runCatching { com.example.itinerary.data.EditorDraftStore(app).read() }
@@ -394,6 +407,13 @@ internal fun widgetWaitMessage(eventEditors: Int, taskEditors: Int, noteEditors:
     taskEditors == 0 -> "Close this event first. Then the widget's day opens."
     eventEditors == 0 -> "Close this task first. Then the widget's day opens."
     else -> "Close the open event and task first. Then the widget's day opens."
+}
+
+// What a note reminder's tap waits for (U-13), named by what is open.
+internal fun noteWaitMessage(eventEditors: Int, taskEditors: Int): String = when {
+    taskEditors == 0 -> "Close this event first. Then the note opens."
+    eventEditors == 0 -> "Close this task first. Then the note opens."
+    else -> "Close the open event and task first. Then the note opens."
 }
 
 // A shortcut waits for the one event draft Planner keeps, wherever its editor is open (U-N5: in another Planner

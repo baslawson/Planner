@@ -55,7 +55,7 @@ private fun filterOf(key: String): NoteFilter = when {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotesScreen(onBack: () -> Unit) {
+fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -146,6 +146,20 @@ fun NotesScreen(onBack: () -> Unit) {
             if (editingId != null && editingId != draft.note.id) return@LaunchedEffect
             recovered = draft; editingNew = draft.creating; editingId = draft.note.id
         } finally { draftChecked = true }
+    }
+    // U-13: the note a reminder's tap asked for, once the notes and any draft are read. Another note open in the editor
+    // stays open (opening this one would close it); a note deleted since leaves just the page.
+    LaunchedEffect(openNoteId, notes != null, draftChecked) {
+        val id = openNoteId ?: return@LaunchedEffect
+        val list = notes ?: return@LaunchedEffect
+        if (!draftChecked) return@LaunchedEffect
+        when {
+            editingId == id -> {}
+            editingId != null -> android.widget.Toast.makeText(context, "Close this note first. Then tap the reminder again.", android.widget.Toast.LENGTH_LONG).show()
+            list.none { it.id == id } -> android.widget.Toast.makeText(context, "This note may have been deleted.", android.widget.Toast.LENGTH_LONG).show()
+            else -> { editingNew = false; editingId = id }
+        }
+        onNoteOpened()
     }
     val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 

@@ -36,4 +36,13 @@ class LaunchFieldsTest {
         assertEquals("shortcut", merged.entryAction)
         assertEquals(LocalDate.of(1895, 6, 1), merged.widgetDate)
     }
+
+    // U-13: a note reminder's tap opens its note, and leaves an open share review alone.
+    @Test fun noteReminderSetsTheNoteAndLeavesTheShare() {
+        val merged = shareOpen.mergedWith(LaunchFields(noteId = "note-a"))
+        assertEquals("note-a", merged.noteId)
+        assertEquals("Dinner Friday 7pm", merged.sharedText)
+        assertEquals("note-a", merged.mergedWith(LaunchFields()).noteId)
+        assertEquals("note-b", merged.mergedWith(LaunchFields(noteId = "note-b")).noteId)
+    }
 }

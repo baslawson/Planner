@@ -58,7 +58,7 @@ internal fun opensCalendarFile(scheme: String?): Boolean = scheme == "content"
 
 /**
  * What an intent asks Planner to open: shared text (with its subject), a widget task, a calendar file, an entry
- * shortcut, a widget day. Null: not asked. [U] is android.net.Uri (generic so the rules run in a plain JVM test).
+ * shortcut, a widget day, a note (its reminder's notification, U-13). Null: not asked. [U] is android.net.Uri (generic so the rules run in a plain JVM test).
  */
 internal data class LaunchFields<U>(
     val sharedText: String? = null,
@@ -67,6 +67,7 @@ internal data class LaunchFields<U>(
     val calendarUri: U? = null,
     val entryAction: String? = null,
     val widgetDate: java.time.LocalDate? = null,
+    val noteId: String? = null,
 ) {
     /**
      * These fields after a later intent ([incoming]) arrives while Planner is open: what it carries replaces the old
@@ -80,6 +81,7 @@ internal data class LaunchFields<U>(
         calendarUri = incoming.calendarUri ?: calendarUri,
         entryAction = incoming.entryAction ?: entryAction,
         widgetDate = incoming.widgetDate ?: widgetDate,
+        noteId = incoming.noteId ?: noteId,
     )
 }
 
@@ -90,7 +92,8 @@ class MainActivity : ComponentActivity() {
     private var calendarUri by mutableStateOf<android.net.Uri?>(null)
     private var entryAction by mutableStateOf<String?>(null)
     private var widgetDate by mutableStateOf<java.time.LocalDate?>(null)
-    private fun launchFields() = LaunchFields(sharedText, sharedSubject, widgetTaskId, calendarUri, entryAction, widgetDate)
+    private var noteId by mutableStateOf<String?>(null)
+    private fun launchFields() = LaunchFields(sharedText, sharedSubject, widgetTaskId, calendarUri, entryAction, widgetDate, noteId)
     private fun launchFieldsOf(intent: Intent?): LaunchFields<android.net.Uri> {
         // Q-5: only as much as Planner can use is kept, since it goes into the saved state.
         val sharedText = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
@@ -106,6 +109,8 @@ class MainActivity : ComponentActivity() {
                 com.example.itinerary.widget.TodayWidget.OPEN_DATE -> runCatching { java.time.LocalDate.parse(intent.getStringExtra("widget_date")) }.getOrNull()
                 else -> null
             },
+            noteId = if (intent?.action == com.example.itinerary.reminders.NoteReminderReceiver.OPEN_NOTE)
+                intent.getStringExtra(com.example.itinerary.reminders.NoteReminderReceiver.EXTRA_NOTE_ID) else null,
         )
     }
     private fun setLaunchFields(fields: LaunchFields<android.net.Uri>) {
@@ -115,6 +120,7 @@ class MainActivity : ComponentActivity() {
         calendarUri = fields.calendarUri
         entryAction = fields.entryAction
         widgetDate = fields.widgetDate
+        noteId = fields.noteId
     }
     // A fresh launch takes everything from its intent; a later intent (see onNewIntent) only what it carries.
     private fun readWidgetIntent(intent: Intent?) = setLaunchFields(launchFieldsOf(intent))
@@ -126,6 +132,7 @@ class MainActivity : ComponentActivity() {
         outState.putParcelable("calendarUri", calendarUri)
         outState.putString("entryAction", entryAction)
         outState.putString("widgetDate", widgetDate?.toString())
+        outState.putString("noteId", noteId)
         super.onSaveInstanceState(outState)
     }
     override fun onNewIntent(intent: Intent) {
@@ -220,6 +227,7 @@ class MainActivity : ComponentActivity() {
             calendarUri = androidx.core.os.BundleCompat.getParcelable(savedInstanceState, "calendarUri", android.net.Uri::class.java)
             entryAction = savedInstanceState.getString("entryAction")?.takeIf(EntryShortcuts::accepts)
             widgetDate = savedInstanceState.getString("widgetDate")?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+            noteId = savedInstanceState.getString("noteId")
         }
         val settings = (application as ItineraryApp).settings
         // With App lock on, the recent-apps list shows a blank card instead of the last screen (Android 13 and later).
@@ -271,7 +279,7 @@ class MainActivity : ComponentActivity() {
                 LocalHeadingColor provides ComposeColor(headingColor),
                 LocalScrollBar provides ScrollBarStyle(ComposeColor(scrollBarColor), scrollBarSeeThrough),
             ) {
-                ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { Box { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN })
+                ItineraryTheme(appTheme = appTheme, darkTheme = darkTheme, font = appFont, textSizePercent = textSizePercent) { Box { AppNav(sharedText = sharedText, sharedSubject = sharedSubject, onSharedOpened = { sharedText = null; sharedSubject = null; intent?.action = Intent.ACTION_MAIN }, widgetTaskId = widgetTaskId, onWidgetTaskOpened = { widgetTaskId = null; intent?.action = Intent.ACTION_MAIN }, calendarUri = calendarUri, onCalendarOpened = { calendarUri = null; intent?.action = Intent.ACTION_MAIN }, widgetDate = widgetDate, onWidgetOpened = { widgetDate = null }, entryAction = entryAction, onEntryOpened = { entryAction = null; intent?.action = Intent.ACTION_MAIN }, noteId = noteId, onNoteOpened = { noteId = null; intent?.action = Intent.ACTION_MAIN })
                     // Under the lock screen (LockActivity), so Planner's content never shows in the moment before it.
                     val locked by appLock.locked.collectAsStateWithLifecycle()
                     if (locked) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
