@@ -80,8 +80,20 @@ class NextcloudAccount private constructor(
 class NextcloudAccountStore(context: Context, private val keyAlias: String = "planner.nextcloud.v1") {
     private val file = AtomicFile(File(context.noBackupFilesDir, "nextcloud-account"))
 
+    // The account as last unlocked, shared by every store on this file (calendar, task and notes sync each have one), so
+    // a sync check unlocks it once rather than five or six times. Kept while the file is unchanged on disk; save and clear
+    // replace it. The password is in memory between syncs as a result (it already was during one).
+    private val cacheKey = file.baseFile.absolutePath + "|" + keyAlias
+    private fun stamp() = file.baseFile.let { "${it.lastModified()}:${it.length()}" }
+
     fun load(): NextcloudAccount? {
-        if (!file.baseFile.exists()) return null
+        if (!file.baseFile.exists()) { cache.remove(cacheKey); return null }
+        val stamp = stamp()
+        cache[cacheKey]?.let { (at, account) -> if (at == stamp) return account }
+        return unlock().also { account -> if (account != null) cache[cacheKey] = stamp to account }
+    }
+
+    private fun unlock(): NextcloudAccount? {
         try {
             val bytes = file.openRead().use { it.readBytes() }
             check(bytes.size > 28)
@@ -112,12 +124,18 @@ class NextcloudAccountStore(context: Context, private val keyAlias: String = "pl
                 file.failWrite(stream)
                 throw e
             }
+            cache[cacheKey] = stamp() to account
         } catch (_: Exception) {
+            cache.remove(cacheKey)
             throw BackupException("Couldn't save the Nextcloud connection securely on this device.")
         }
     }
 
-    fun clear() { file.delete() }
+    fun clear() { cache.remove(cacheKey); file.delete() }
+
+    private companion object {
+        val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, NextcloudAccount>>()
+    }
 
     private fun key(create: Boolean): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
