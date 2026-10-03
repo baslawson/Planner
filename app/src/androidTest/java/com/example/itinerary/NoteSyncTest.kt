@@ -495,4 +495,31 @@ class NoteSyncTest {
         r.sync.check()
         assertEquals("typed", r.remote("Mine").value.content)
     }
+
+    // Bug hunt 3 Oct (b), S5-3: a note edited again while the follow-up pass sends its last edit gets one more pass at
+    // once; it used to be taken for a note that can't sync and wait for the next check.
+    @Test fun aNoteEditedAgainDuringTheFollowUpIsSentAfterIt() = rig("note-sync-follow-again") { r ->
+        r.repo.saveNote(PlannerNote(title = "A", content = "a1"), create = true)
+        r.repo.saveNote(PlannerNote(title = "B", content = "b1"), create = true)
+        assertTrue(r.sync.sync())
+        r.repo.saveNote(r.note("B").copy(content = "b2"), create = false)
+        val first = java.util.concurrent.CountDownLatch(1); val firstGo = java.util.concurrent.CountDownLatch(1)
+        val second = java.util.concurrent.CountDownLatch(1); val secondGo = java.util.concurrent.CountDownLatch(1)
+        // The first pass is held at B's PUT, the follow-up at A's.
+        r.fake.beforePut = { _ ->
+            r.fake.beforePut = { _ -> r.fake.beforePut = null; second.countDown(); secondGo.await(20, java.util.concurrent.TimeUnit.SECONDS) }
+            first.countDown(); firstGo.await(20, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        val pass = r.scope.async { r.sync.sync() }
+        assertTrue(first.await(20, java.util.concurrent.TimeUnit.SECONDS))
+        r.wired = true
+        r.repo.saveNote(r.note("A").copy(content = "a2"), create = false)
+        firstGo.countDown()
+        assertTrue(pass.await())
+        // The follow-up pass, sending a2: A is edited again meanwhile.
+        assertTrue(second.await(20, java.util.concurrent.TimeUnit.SECONDS))
+        r.repo.saveNote(r.note("A").copy(content = "a3"), create = false)
+        secondGo.countDown()
+        waitFor("a3 is sent after the follow-up pass") { r.remote("A").value.content == "a3" }
+    }
 }

@@ -207,12 +207,13 @@ class NoteSync(
     private var waiting: Job? = null
     // Asked for while a pass ran: one more follow if anything is left to sync.
     @Volatile private var again = false
-    // What was still out of step after the last follow-up pass, so a note that can't sync doesn't start a loop.
-    @Volatile private var stuck: Set<String> = emptySet()
+    // What was still out of step after the last follow-up pass, so a note that can't sync doesn't start a loop. S5-3: with
+    // each note's fields as they were then, so one edited again since is not taken for stuck.
+    @Volatile private var stuck: Map<String, List<String>?> = emptyMap()
     // SY-2: a check's full pass that leaves the same notes out of step (refused, too long), fails the same way, or can't
     // be asked about cheaply (no list ETag) waits longer each time. [checked]: what was out of step after the last one.
     private val backoff = SyncBackoff()
-    @Volatile private var checked: Set<String>? = null
+    @Volatile private var checked: Map<String, List<String>?>? = null
 
     // Turning it on syncs at once; off leaves the notes as they are on both sides, and forgets the links.
     suspend fun setEnabled(on: Boolean) {
@@ -233,7 +234,7 @@ class NoteSync(
     // forget, inside paused: no links, and nothing remembered about the last list or passes.
     suspend fun forgetLocked() {
         rows.deleteAll()
-        listTag = null; stuck = emptySet(); checked = null; backoff.reset()
+        listTag = null; stuck = emptyMap(); checked = null; backoff.reset()
     }
 
     // A pass a few seconds from now, once changes have settled (after an edit), or at once. A pass already running
@@ -253,12 +254,13 @@ class NoteSync(
     }
 
     // SY-3: asked for while a pass ran (whoever started it): one more follows, if something is still out of step and it
-    // isn't what was left after the last follow-up (a note that can't sync doesn't start a loop).
+    // isn't what was left after the last follow-up (a note that can't sync doesn't start a loop). S5-3: the same notes
+    // edited again since are not what was left: they get their pass.
     private suspend fun followUp() {
         if (!again) return
         again = false
-        val left = runCatching { outOfStep() }.getOrDefault(emptySet())
-        if (left.isNotEmpty() && left != stuck) { stuck = left; request() } else stuck = emptySet()
+        val left = runCatching { outOfStep() }.getOrDefault(emptyMap())
+        if (left.isNotEmpty() && left != stuck) { stuck = left; request() } else stuck = emptyMap()
     }
 
     // The list's ETag as the last pass read it, with the login it was read with: lets check() ask "changed?" cheaply.
@@ -274,7 +276,8 @@ class NoteSync(
         val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return
         val tag = listTag?.takeIf { it.first == CalendarSync.accountKey(account) }
         val left = outOfStep()
-        // Only what the last check's pass left, and not due yet: a pass only if the list changed there.
+        // Only what the last check's pass left (S5-3: the same notes, unchanged since), and not due yet: a pass only if
+        // the list changed there.
         val waiting = left == checked && !backoff.due(System.currentTimeMillis())
         if (left.isEmpty() || waiting) {
             val unchanged = tag?.let { withContext(Dispatchers.IO) { runCatching { api.unchanged(account, it.second) }.getOrNull() } }
@@ -288,13 +291,19 @@ class NoteSync(
             else listOf(_state.value.error, after, listTag == null), System.currentTimeMillis())
     }
 
-    // Planner's notes not as last synced: new, changed, or deleted with the Undo gone.
-    private suspend fun outOfStep(): Set<String> {
+    // Planner's notes not as last synced (new, changed, or deleted with the Undo gone), each with its fields now (null:
+    // deleted), so a note changed again since can be told from one left as it was.
+    private suspend fun outOfStep(): Map<String, List<String>?> {
         val links = rows.all().associateBy { it.noteId }
         val pending = pendingDeleted()
         val local = store.all()
-        return local.filter { it.id !in pending && links[it.id]?.let { row -> NoteMapping.fields(it) != NoteMapping.fields(row) } ?: true }
-            .mapTo(HashSet()) { it.id } + (links.keys - local.mapTo(HashSet()) { it.id } - pending)
+        val left = HashMap<String, List<String>?>()
+        local.forEach { note ->
+            val fields = NoteMapping.fields(note)
+            if (note.id !in pending && links[note.id]?.let { row -> fields != NoteMapping.fields(row) } != false) left[note.id] = fields
+        }
+        (links.keys - local.mapTo(HashSet()) { it.id } - pending).forEach { left[it] = null }
+        return left
     }
 
     // A pass asked for (an edit, Sync now, the background run): AutoSync's checks start again from no wait.
