@@ -119,8 +119,21 @@ class SupportPromptUiTest {
         launch();Thread.sleep(1500);return find(title)!=null
     }
 
-    @Before fun showIt() { SupportPrompt.showInTestApp = true; prefs.edit { clear() } }
-    @After fun hideIt() { SupportPrompt.showInTestApp = false }
+    // These stand for an update (the test app itself is always a fresh install); freshInstallShowsNothing for the other.
+    @Before fun showIt() { SupportPrompt.showInTestApp = true; SupportPrompt.freshInstallInTests = false; prefs.edit { clear() } }
+    @After fun hideIt() { SupportPrompt.showInTestApp = false; SupportPrompt.freshInstallInTests = null }
+
+    // 3 Oct (user): no support pop-up after a fresh install; the version counts as seen, so the next update asks.
+    @Test fun freshInstallShowsNothing() {
+        SupportPrompt.freshInstallInTests = true
+        assertFalse(relaunchAndWait())
+        assertEquals(installed, prefs.getLong(SupportPrompt.KEY_SHOWN_FOR, 0))
+        // The first update after it does ask.
+        SupportPrompt.freshInstallInTests = false
+        prefs.edit { putLong(SupportPrompt.KEY_SHOWN_FOR, installed - 1) }
+        launch(); await { find(title) != null }
+        click("No thanks"); await { find(title) == null }
+    }
 
     @Test fun shownOnceAfterInstallAndRemindMeLaterAddsATask()=runBlocking {
         launch();await { find(title)!=null }
