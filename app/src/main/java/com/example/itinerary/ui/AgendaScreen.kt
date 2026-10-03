@@ -137,7 +137,8 @@ fun AgendaScreen(
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
     val selectableTasks = remember(shownTasks) { shownTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
-    val selection = rememberEventSelection(selectable, visibleTasks = selectableTasks)
+    // Not before the events are read: a selection restored after Android closed Planner would be emptied (L5-2).
+    val selection = rememberEventSelection(selectable, prune = loadedEvents != null, visibleTasks = selectableTasks)
 
     // The rows above the days, in the list's order (the list below uses the same flags).
     val showBackupFailed = backupStatus.failed

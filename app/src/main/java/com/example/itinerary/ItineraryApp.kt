@@ -58,7 +58,8 @@ class ItineraryApp : Application() {
         com.example.itinerary.data.Updates(com.example.itinerary.data.Updates.prefs(this),
             com.example.itinerary.data.ReleaseApi(http),
             installed = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty(),
-            folder = java.io.File(cacheDir, "updates"), supported = packageName == com.example.itinerary.data.Updates.RELEASE_ID)
+            folder = java.io.File(cacheDir, "updates"), supported = packageName == com.example.itinerary.data.Updates.RELEASE_ID &&
+                com.example.itinerary.data.Updates.installable(android.os.Build.SUPPORTED_ABIS))
     }
 
     val autoSync: AutoSync by lazy { AutoSync(calendarSync, noteSync, appScope) }

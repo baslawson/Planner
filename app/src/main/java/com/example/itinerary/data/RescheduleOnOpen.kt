@@ -7,12 +7,11 @@ package com.example.itinerary.data
 object RescheduleOnOpen {
     private var last: String? = null
 
-    // [state]: what decides the alarms now. True when they should be set again.
-    @Synchronized fun due(state: String): Boolean {
-        if (state == last) return false
-        last = state
-        return true
-    }
+    // [state]: what decides the alarms now. True when they should be set again; [done] records it once that has worked,
+    // so a pass cut short (the screen closed while it waited) is tried again at the next open.
+    @Synchronized fun due(state: String): Boolean = state != last
+
+    @Synchronized fun done(state: String) { last = state }
 
     // Tests start each case afresh.
     @Synchronized internal fun forget() { last = null }

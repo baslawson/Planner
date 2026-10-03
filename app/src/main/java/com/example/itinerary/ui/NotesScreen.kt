@@ -76,8 +76,10 @@ fun NotesScreen(onBack: () -> Unit) {
     }
     val sort by app.settings.noteSort.collectAsStateWithLifecycle()
     val asList by app.settings.notesAsList.collectAsStateWithLifecycle()
-    // Each note's text normalised once per change to the notes, not on every letter typed in the search (UI-3).
-    val searchFields = remember(all) { Notes.searchFields(all) }
+    // Each note's text normalised once per change to the notes while a search is typed (UI-3), and not at all without
+    // one: every save, pin or sync would otherwise redo it for nothing (L5-1).
+    val searching = query.isNotBlank()
+    val searchFields = remember(all, searching) { if (searching) Notes.searchFields(all) else emptyMap() }
     val shown = remember(all, filter, query, sort, searchFields) { Notes.visible(all, filter, query, sort, searchFields) }
 
     // Long press, held still: notes ticked for Pin, Archive, Move to notebook or Delete together. Kept across rotation;
@@ -103,7 +105,7 @@ fun NotesScreen(onBack: () -> Unit) {
     // The saved order has come back, or the page changed after it was saved (or saving changed nothing): the page shows
     // its own order again, so a later Sort or Pin shows at once.
     LaunchedEffect(shown) {
-        if (drag.id == null && drag.order != null && (shown.map { it.id } == drag.order || shown.size != drag.order?.size || !drag.saving)) drag.order = null
+        if (drag.id == null && drag.order != null && (shown.map { it.id } == drag.order || shown.size != drag.order?.size || drag.saving == 0)) drag.order = null
     }
     val canDrag = query.isBlank() && !selecting
     val currentCanDrag by rememberUpdatedState(canDrag)
@@ -115,13 +117,16 @@ fun NotesScreen(onBack: () -> Unit) {
             app.settings.setNoteSort(com.example.itinerary.data.NoteSort.MY_ORDER)
         // Nothing moved: no saved order will come back to take the dragged one's place.
         if (places.isEmpty()) { drag.order = null; return }
-        drag.saving = true
+        // Shown at once (a screen reader's move too, so a second Move later goes on from here — E5-6); one count per
+        // save still running, so a second drop saving meanwhile doesn't put the first back for a moment (E5-7).
+        drag.order = order
+        drag.saving++
         app.appScope.launch {
             try { repo.placeNotes(places) }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { drag.order = null
                 android.widget.Toast.makeText(context, "Couldn't move this note. Please try again.", android.widget.Toast.LENGTH_LONG).show() } }
-            finally { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.NonCancellable) { drag.saving = false } }
+            finally { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.NonCancellable) { drag.saving-- } }
         }
     }
     // ...and stays there, rather than jumping back if a note joins that notebook or tag again later.

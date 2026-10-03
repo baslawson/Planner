@@ -115,13 +115,24 @@ class Updates(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface State {
+        // The release the pop-up offers in this state, or null when it shows nothing: a background download asks only
+        // once it's ready, and its failure stays in Settings (A5-4). The support prompt waits while this is shown (A5-3).
+        fun offered(): AppRelease? = when (this) {
+            is Available -> release
+            is Downloading -> release.takeIf { asked }
+            is Ready -> release
+            is Failed -> release?.takeIf { asked }
+            else -> null
+        }
+
         data object Idle : State
         data object Checking : State
         data class UpToDate(val at: Long) : State
         data class Available(val release: AppRelease) : State
         data class Downloading(val release: AppRelease, val progress: Float, val asked: Boolean) : State
         data class Ready(val release: AppRelease, val file: File, val hash: String) : State
-        data class Failed(val message: String, val release: AppRelease? = null) : State
+        // [asked]: the failure follows Update now / Try again / Install now; a background download's failure doesn't pop up.
+        data class Failed(val message: String, val release: AppRelease? = null, val asked: Boolean = true) : State
     }
 
     // A download already checked survives Planner being restarted (Android does that when "install unknown apps" is
@@ -211,7 +222,7 @@ class Updates(
                 part.delete(); _state.value = State.Available(release); throw e
             } catch (e: Exception) {
                 part.delete()
-                _state.value = State.Failed((e as? UpdateException)?.message ?: "The update couldn't be downloaded. Check the connection and try again.", release)
+                _state.value = State.Failed((e as? UpdateException)?.message ?: "The update couldn't be downloaded. Check the connection and try again.", release, asked)
             }
         } finally { lock.unlock() }
     }
@@ -272,6 +283,10 @@ class Updates(
         private const val KEY_READY = "ready"
         // The release app's id: only it is the app the GitHub APK updates.
         const val RELEASE_ID = "io.github.baslawson.planner"
+        // The processor types the release APK carries (app/build.gradle.kts abiFilters). A phone with none of them
+        // (32-bit x86 only) can't install it, so it isn't offered (A5-5).
+        val APK_ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        fun installable(deviceAbis: Array<String>) = deviceAbis.any { it in APK_ABIS }
         fun prefs(context: Context): SharedPreferences = context.getSharedPreferences("updates", Context.MODE_PRIVATE)
     }
 }

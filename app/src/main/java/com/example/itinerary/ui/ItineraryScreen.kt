@@ -77,7 +77,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
     // Outside events can't be deleted from Planner, so they can't be selected either.
     val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
-    val selection = rememberEventSelection(selectable)
+    val itemsLoaded by vm.itemsLoaded.collectAsStateWithLifecycle()
+    val selection = rememberEventSelection(selectable, prune = itemsLoaded)
     val datesWithItems = remember(allItems) {
         buildSet {
             allItems.forEach { event ->

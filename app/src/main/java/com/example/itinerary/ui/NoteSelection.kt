@@ -40,8 +40,8 @@ import kotlinx.coroutines.launch
 internal class NoteDragState {
     var id by mutableStateOf<String?>(null)
     var order by mutableStateOf<List<String>?>(null)
-    // While the dropped order is being saved: until then a page in another order is an older reading, not the saved one.
-    var saving = false
+    // How many dropped orders are still being saved: until then a page in another order is an older reading.
+    var saving = 0
     var total by mutableStateOf(Offset.Zero)
     var start = Offset.Zero
     var size = Offset.Zero

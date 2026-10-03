@@ -401,12 +401,14 @@ private fun DayCell(
         else -> colors.onSurface
     }
 
-    // AG-3: the number alone tells TalkBack nothing; it reads the full date, today and the event dot, and the selection.
-    // Worked out only when the semantics are read (TalkBack, tests), not on every composition of the cell (UI-7).
+    // AG-3: the number alone tells TalkBack nothing; it reads the full date, today and the dot, and the selection.
+    // Worked out only when the semantics are read (TalkBack, tests), not on every composition of the cell (UI-7), in the
+    // phone's language now (Planner handles a language change itself, so the cell redraws with it — L5-3).
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     Box(
         modifier
             .height(LocalCalendarRowHeight.current)
-            .semantics { contentDescription = dayCellDescription(date, isToday, hasItems); selected = isSelected }
+            .semantics { contentDescription = dayCellDescription(date, isToday, hasItems, locale); selected = isSelected }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center,
@@ -433,10 +435,11 @@ private fun DayCell(
     }
 }
 
-// What TalkBack reads for a day of the month grid, e.g. "Monday 5 October 2026, today, has events".
+// What TalkBack reads for a day of the month grid, e.g. "Monday 5 October 2026, today, has entries" (the dot is events,
+// bills or tasks alike).
 internal fun dayCellDescription(date: LocalDate, isToday: Boolean, hasItems: Boolean, locale: Locale = Locale.getDefault()): String =
     listOfNotNull(date.format(patternFormatter("EEEE d MMMM yyyy", locale)),
-        "today".takeIf { isToday }, "has events".takeIf { hasItems }).joinToString(", ")
+        "today".takeIf { isToday }, "has entries".takeIf { hasItems }).joinToString(", ")
 
 // Today's ring fades between full strength and faint so it catches the eye. The alpha is read only while drawing,
 // so the pulse redraws this ring each frame without recomposing the calendar. It runs faint -> full because, with

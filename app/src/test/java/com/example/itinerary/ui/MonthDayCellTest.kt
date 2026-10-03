@@ -12,7 +12,7 @@ class MonthDayCellTest {
     @Test fun aDayReadsAsItsFullDateWithTodayAndEvents() {
         assertEquals("Monday 5 October 2026", dayCellDescription(oct5, isToday = false, hasItems = false, Locale.UK))
         assertEquals("Monday 5 October 2026, today", dayCellDescription(oct5, isToday = true, hasItems = false, Locale.UK))
-        assertEquals("Monday 5 October 2026, has events", dayCellDescription(oct5, isToday = false, hasItems = true, Locale.UK))
-        assertEquals("Monday 5 October 2026, today, has events", dayCellDescription(oct5, isToday = true, hasItems = true, Locale.UK))
+        assertEquals("Monday 5 October 2026, has entries", dayCellDescription(oct5, isToday = false, hasItems = true, Locale.UK))
+        assertEquals("Monday 5 October 2026, today, has entries", dayCellDescription(oct5, isToday = true, hasItems = true, Locale.UK))
     }
 }

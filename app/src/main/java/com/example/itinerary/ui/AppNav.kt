@@ -378,7 +378,11 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     val openEvents by com.example.itinerary.data.EditorDraftStore.openEditors.collectAsStateWithLifecycle()
     val openTasks by com.example.itinerary.data.TaskDraftStore.openEditors.collectAsStateWithLifecycle()
     val openNotes by com.example.itinerary.data.NoteDraftStore.openEditors.collectAsStateWithLifecycle()
-    SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || openNotes > 0 || recovered != null)
+    // Not over the update pop-up either (it carries the same support line): one ask at a time.
+    val updateState by app.updates.state.collectAsStateWithLifecycle()
+    val updateDismissed by app.updates.dismissed.collectAsStateWithLifecycle()
+    val updateShown = app.updates.supported && !updateDismissed && updateState.offered() != null
+    SupportPromptHost(blocked = openEvents > 0 || openTasks > 0 || openNotes > 0 || recovered != null || updateShown)
     }
     }
 }

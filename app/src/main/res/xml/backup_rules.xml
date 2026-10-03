@@ -7,4 +7,8 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="pending_alarms.xml" />
+    <!-- support_prompt: "already shown" belongs to this install, so a fresh one (reinstall, new phone) stays quiet.
+         updates: a download made on this phone (its file isn't carried over). -->
+    <exclude domain="sharedpref" path="support_prompt.xml" />
+    <exclude domain="sharedpref" path="updates.xml" />
 </full-backup-content>

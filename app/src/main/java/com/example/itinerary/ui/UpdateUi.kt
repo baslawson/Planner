@@ -68,13 +68,7 @@ fun UpdateDialog() {
     val state by remember(updates) { updates.state.map(::wholePercent).distinctUntilChanged() }
         .collectAsStateWithLifecycle(wholePercent(updates.state.value))
     val dismissed by updates.dismissed.collectAsStateWithLifecycle()
-    val release = when (val s = state) {
-        is Updates.State.Available -> s.release
-        is Updates.State.Downloading -> s.release.takeIf { s.asked }
-        is Updates.State.Ready -> s.release
-        is Updates.State.Failed -> s.release
-        else -> null
-    }
+    val release = state.offered()
     // A build that can't update itself never offers one (a state left from before it was switched off included).
     if (dismissed || release == null || !updates.supported) return
     val s = state

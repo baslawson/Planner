@@ -27,4 +27,22 @@ class AppVersionTest {
         assertNull(AppVersion.sha256Of("not a hash  Planner.apk"))
         assertNull(AppVersion.sha256Of(hash.dropLast(1)))
     }
+
+    // A5-5: only phones that can install the release APK are offered it.
+    @Test fun onlyPhonesTheApkRunsOnAreOffered() {
+        assertTrue(Updates.installable(arrayOf("arm64-v8a", "armeabi-v7a", "armeabi")))
+        assertTrue(Updates.installable(arrayOf("x86_64", "x86", "arm64-v8a")))
+        assertFalse(Updates.installable(arrayOf("x86")))
+        assertFalse(Updates.installable(emptyArray()))
+    }
+
+    // A5-4: a background download's failure doesn't pop up; one after Update now does.
+    @Test fun aBackgroundFailureIsNotOffered() {
+        val r = AppRelease("0.0.15", "", "https://x/Planner.apk", "https://x/Planner.apk.sha256", "")
+        assertNull(Updates.State.Failed("no", r, asked = false).offered())
+        assertEquals(r, Updates.State.Failed("no", r).offered())
+        assertNull(Updates.State.Downloading(r, 0.5f, asked = false).offered())
+        assertEquals(r, Updates.State.Ready(r, java.io.File("x"), "h").offered())
+        assertNull(Updates.State.Failed("offline").offered())
+    }
 }

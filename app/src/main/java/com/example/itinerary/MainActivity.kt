@@ -193,7 +193,11 @@ class MainActivity : ComponentActivity() {
             com.example.itinerary.reminders.showMissedReminders(applicationContext, afterBoot = false)
             val app = application as ItineraryApp
             val state = com.example.itinerary.data.RescheduleOnOpen.state(app.reminderScheduler.canScheduleExact(), java.time.ZoneId.systemDefault())
-            if (com.example.itinerary.data.RescheduleOnOpen.due(state)) app.repository.rescheduleAllReminders()
+            // In the app's scope: leaving the screen doesn't cut it short; it counts as done only once it finished.
+            if (com.example.itinerary.data.RescheduleOnOpen.due(state)) app.appScope.launch(Dispatchers.IO) {
+                app.repository.rescheduleAllReminders()
+                com.example.itinerary.data.RescheduleOnOpen.done(state)
+            }
         }
         // The phone's ticked calendars and links; Nextcloud is checked by AutoSync while Planner is on screen, if it's on.
         (application as ItineraryApp).let { app ->

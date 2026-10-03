@@ -24,6 +24,7 @@ android {
         testInstrumentationRunnerArguments["notAnnotation"] = "com.example.itinerary.HarnessStage"
         // The bundled OCR library is a native one, built for each processor type. 32-bit x86 is left out: no such
         // phone runs Android 8 (minSdk 26); the x86_64 emulator and every ARM phone are kept.
+        // Keep in step with Updates.APK_ABIS (phones without one of these aren't offered updates).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 
