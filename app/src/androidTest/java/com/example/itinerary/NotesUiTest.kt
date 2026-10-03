@@ -93,8 +93,13 @@ class NotesUiTest {
         // Found once: when its list opens, the list becomes the active window and the box is no longer in nodes().
         val box = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == label } }
         box.performAction(AccessibilityNodeInfo.ACTION_FOCUS); box.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(300)
-        assertTrue(box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
+        // In long runs the box is sometimes still settling (its list opening) and refuses the first try: try again.
+        val typed = (1..5).any { attempt ->
+            if (attempt > 1) { Thread.sleep(400); box.refresh() }
+            box.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) })
+        }
+        assertTrue("Couldn't type into $label", typed)
         Thread.sleep(400)
         return box
     }
