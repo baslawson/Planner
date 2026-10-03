@@ -39,7 +39,10 @@ data class QuickInput(
         // "In 30 minutes" counts from now, so only for entries based on today.
         val clock = now.toLocalDateTime().takeIf { baseDate == now.toLocalDate() }
         val parsed = parse(clock, now.zone)
-        val corrected = parsed.corrected(dateOverride, timeOverride)
+        val read = parsed.corrected(dateOverride, timeOverride)
+        // A task has a day, not a time: "Cooking tonight", "Bins tomorrow night" are due that day, with nothing to ask.
+        val dayOnly = task && read.ambiguousTime && read.time == null && read.timePrompt != null && read.dateChoices.isEmpty()
+        val corrected = if (!dayOnly) read else read.copy(ambiguousTime = false, error = read.error.takeUnless { read.clarificationOnly })
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
             reminderTrigger(corrected.date, if (task) null else corrected.time, parsed.reminderMinutes.toLong(), now.zone) <= now

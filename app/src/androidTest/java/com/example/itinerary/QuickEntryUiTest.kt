@@ -142,9 +142,13 @@ class QuickEntryUiTest {
         click("Quick entry");click("Task");setText("","QA quick plumber tmr")
         click("Add task");await { data().tasks.any { it.title=="QA quick plumber" } }
         assertEquals(LocalDate.now().plusDays(1),data().tasks.single { it.title=="QA quick plumber" }.dueDate)
+        // A part of the day only gives a task its day: no "Tasks use due dates" for tonight.
+        click("Quick entry");click("Task");setText("","QA cooking tonight")
+        click("Add task");await { data().tasks.any { it.title=="QA cooking" } }
+        assertEquals(LocalDate.now(),data().tasks.single { it.title=="QA cooking" }.dueDate)
         click("Quick entry");click("Task");setText("","QA timed task tmr 3pm")
         await { find("Tasks use due dates. Choose Event for a time or duration.")!=null }
-        assertEquals(before+2,data().tasks.size);click("Close")
+        assertEquals(before+3,data().tasks.size);click("Close")
     }
     // Parser round 4 in the real dialog: a range without am/pm offers the choice (and keeps its length), and every few
     // months saves a series of that kind.

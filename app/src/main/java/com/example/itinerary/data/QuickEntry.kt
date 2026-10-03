@@ -58,6 +58,9 @@ object QuickEntry {
     /** Spellings read as tomorrow outright, not only offered as a correction while typing. */
     val tomorrowSpellings = listOf("tomorrow", "tmr", "tmrw", "tomoz", "tomorow", "tommorow", "tommorrow", "2morrow", "2moro", "2morow", "tmw")
     private val tomorrowWords = tomorrowSpellings.joinToString("|")
+    /** Spellings read as tonight. */
+    val tonightSpellings = listOf("tonight", "tonite", "tonigh", "2nite", "2night", "tonght")
+    private val tonightWords = tonightSpellings.joinToString("|")
     // Dates built from words that are otherwise unsupported on their own: next week, weekend, end of, next month.
     private const val weekAfterNext = "(?:the\\s+)?week\\s+after\\s+next\\s+(?:on\\s+)?(?:$weekdays)|(?:$weekdays)\\s+(?:the\\s+)?week\\s+after\\s+next"
     private const val nextWeekDay = "next\\s+week\\s+(?:on\\s+)?(?:$weekdays)|(?:$weekdays)\\s+next\\s+week"
@@ -287,9 +290,9 @@ object QuickEntry {
     private val nextWord = Regex("^[\\s,]*([A-Za-z]+)")
     private val scheduleVocabulary = (listOf("at", "on", "in", "from", "for", "to", "until", "till", "by", "with", "and", "then",
         "before", "after", "actually", "every", "each", "remind", "notify", "next", "this", "the", "today", "tomorrow", "tmr",
-        "tonight", "morning", "afternoon", "arvo", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all",
+        "morning", "afternoon", "arvo", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all",
         "yesterday", "last", "ago") +
-        weekdays.split('|') + months.split('|') + tomorrowSpellings).toSet()
+        weekdays.split('|') + months.split('|') + tomorrowSpellings + tonightSpellings).toSet()
     // A frequency word naming something: "Weekly report", "The Daily Telegraph", "the Every Day Cafe". Group 1 is the
     // adjective form, group 2 the word after it; see parse.
     private val frequencyNames = rx("(?<![\\w-])(?:(daily|weekly|bi-?weekly|fortnightly|monthly|quarterly|yearly|annually)|every\\s+day)(?=\\s+(\\p{L}+))")
@@ -298,8 +301,8 @@ object QuickEntry {
     // Capitalised words right after "at": the place's name so far ("at Rising "). Not a possessive: "at Mum's Sun" is Sunday.
     private val placeNameBefore = Regex("(?:\\b[Aa][Tt]\\s+|(?<!\\S)@\\s*)(?:\\p{Lu}[\\p{L}&-]*\\s+)+$")
 
-    private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|tonight|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo)\\b")
-    private val vagueTimes = rx("(?:morning|afternoon|arvo|evening|night|tonight|breakfast|lunch|dinner|work|lunch\\s*time|first\\s+thing)$")
+    private val unsupported = rx("\\b(?:every\\s+other\\s+(?!weeks?\\b|day\\b|months?\\b|(?:$weekdays)\\b)\\w+|(?:at\\s+)?lunch\\s*time|first\\s+thing(?:\\s+in\\s+the\\s+morning)?|(?:after|before)\\s+(?:breakfast|lunch|dinner|work)|(?:$tomorrowWords|yesterday|this|next|nxt)\\s+(?:morning|afternoon|arvo|evening|night|weekend)|last\\s+night(?!\\s+of\\b)|(?:$weekdays)\\s+(?:morning|afternoon|arvo|evening|night)|(?:this|next|nxt)\\s+(?:week|wk|month|mth|year|yr)|(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:week|month|year)|$tonightWords|in\\s+the\\s+(?:morning|afternoon|arvo|evening)|arvo)\\b")
+    private val vagueTimes = rx("(?:morning|afternoon|arvo|evening|night|$tonightWords|breakfast|lunch|dinner|work|lunch\\s*time|first\\s+thing)$")
     // A part of the day that also settles am/pm for a clock time beside it: tomorrow morning at 7.
     private val dayPeriods = mapOf(
         "morning" to LocalTime.of(4, 0)..LocalTime.of(11, 59), "afternoon" to LocalTime.NOON..LocalTime.of(17, 59), "arvo" to LocalTime.NOON..LocalTime.of(17, 59),
@@ -448,7 +451,7 @@ object QuickEntry {
         val wordDateRanges = (wordDateMatches.findAll(remaining) + repeatStart.findAll(remaining)).map { it.range }.toList()
         unsupported.findAll(remaining).toList().forEach { match ->
             if (wordDateRanges.any { it.first <= match.range.last && match.range.first <= it.last }) return@forEach
-            val value = match.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
+            val value = match.value.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").let { if (it in tonightSpellings) "tonight" else it }
             if (!vagueTimes.containsMatchIn(value)) {
                 phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
                 return error("‘${match.value}’ needs a specific date, time or supported repeat. Edit it, or open More options → Adjust recognised text to keep it in the title.")
