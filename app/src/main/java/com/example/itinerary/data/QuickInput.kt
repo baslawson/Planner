@@ -53,9 +53,17 @@ data class QuickInput(
             title = if (task && parsed.location.isNotBlank()) "${parsed.title} at ${parsed.location}" else parsed.title,
             location = if (task) "" else parsed.location,
             reminderMinutes = parsed.reminderMinutes.takeUnless { removeReminder || impliedPassed },
-            durationMinutes = if (durationText == null) parsed.durationMinutes else if (durationText.isEmpty()) null else durationText.toIntOrNull() ?: 0,
+            durationMinutes = if (durationText == null) parsed.durationMinutes ?: endLength(parsed, corrected)
+                else if (durationText.isEmpty()) null else durationText.toIntOrNull() ?: 0,
             repeatCount = countText?.toIntOrNull() ?: if (countText == null) parsed.repeatCount else 0,
         )
+    }
+
+    /** "Party until midnight" once its start is chosen: the minutes from the start to the end (midnight is the end of the day). */
+    private fun endLength(parsed: QuickEntrySuggestion, corrected: QuickEntrySuggestion): Int? {
+        val end = parsed.endTime ?: return null
+        val start = corrected.time ?: return null
+        return Math.floorMod(end.toSecondOfDay() / 60 - start.toSecondOfDay() / 60, 1440).takeIf { it > 0 }
     }
 }
 

@@ -42,6 +42,8 @@ data class QuickEntrySuggestion(
     val nextDayTimes: Int = 0,
     /** The vague part of the day ("2night" in "Book 2night club") when title words follow it; null otherwise. */
     val periodInTitle: String? = null,
+    /** "Party until midnight": when it ends (midnight is the end of [date]) while its start is asked; null otherwise. */
+    val endTime: LocalTime? = null,
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -234,6 +236,8 @@ object QuickEntry {
     private val reminderClocks = rx("\\b(?:and\\s+)?(?:remind|notify)\\s+me\\s+(?:at\\s+|@\\s*)($clock)(\\s+(?:on\\s+)?the\\s+day\\s+before)?(?![\\w])")
     // "remind me the night before": the day before at 8pm.
     private val nightBefore = rx("\\b(?:and\\s+)?(?:remind|notify|alert)\\s+me\\s+(?:on\\s+)?the\\s+(?:night|evening)\\s+before\\b")
+    // "until midnight", "till 12 midnight": an end without a start; see parse.
+    private val untilMidnight = rx("(?:\\b(?:until|till?)|(?<!\\S)['’]til)\\s+(?:12\\s*)?midnight\\b")
     private val noReminder = rx("\\b(?:(?:and|with)\\s+)?no\\s+(?:reminders?|alarms?|alerts?)\\b")
     // "EOD", "by close of business": 5pm.
     private val endOfDay = rx("\\b(?:(?:by|at|before|due(?:\\s+by)?)\\s+)?(?:eod|cob|close\\s+of\\s+business|end\\s+of\\s+(?:the\\s+)?(?:business\\s+)?day)\\b")
@@ -1174,6 +1178,16 @@ object QuickEntry {
             consume(range.range, QuickPhraseKind.TIME)
             }
         }
+        // "Party until midnight": it ends at the end of the day and its start is asked; the length follows from the start
+        // chosen (see QuickInput.suggestion). With a start it is a range above: "Party 9pm until midnight". Other end times
+        // alone still ask to be finished: "Meeting until 3pm".
+        var endTime: LocalTime? = null
+        if (rs.isEmpty()) untilMidnight.find(remaining)?.let { match ->
+            if (duration != null) return error("Use an end time or a duration, not both.")
+            endTime = LocalTime.MIDNIGHT; ambiguous = true
+            if (timePrompt == null) timePrompt = "It ends at midnight. What time does it start? Tap Choose time."
+            consume(match.range, QuickPhraseKind.TIME)
+        }
         // "EOD", "by close of business": 5pm, today unless a date is given.
         var endOfDaySaid = false
         endOfDay.findAll(remaining).toList().takeIf { it.isNotEmpty() }?.let { found ->
@@ -1373,7 +1387,7 @@ object QuickEntry {
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
-            taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle)
+            taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle, endTime)
     }
 
     /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */

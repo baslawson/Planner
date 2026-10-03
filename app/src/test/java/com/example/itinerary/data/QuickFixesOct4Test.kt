@@ -58,7 +58,8 @@ class QuickFixesOct4Test {
         ok("Party tonight until midnight", "22:30").let { assertEquals(at(22, 30), it.time); assertEquals(90, it.durationMinutes) }
         ok("Party 9pm until midnight").let { assertEquals("Party", it.title); assertEquals(at(21), it.time); assertEquals(180, it.durationMinutes) }
         ok("Party 9pm till midnight").let { assertEquals(at(21), it.time); assertEquals(180, it.durationMinutes) }
-        assertEquals("Tasks use due dates. Choose Event for a time or duration.", task("Bins until midnight").quickProblem(true, now))
+        // A task has a day, not a time: due today, as "Bins tonight" is.
+        task("Bins until midnight").let { assertEquals("Bins", it.title); assertEquals(today, it.date); assertNull(it.quickProblem(true, now)) }
     }
 
     // 3 (Q5-4): after a part of the day, an hour followed by a name is that hour, when it falls in that part of the day.
