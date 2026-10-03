@@ -104,10 +104,11 @@ class UpdateUiTest {
             ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             await { find("Install now") != null }
             click("Install now")
-            await { "packageinstaller" in resumed() }
+            await { find("Update this app?") != null || "packageinstaller" in resumed() }
             Thread.sleep(1500); screenshot("android-installer")
-            shell("input keyevent KEYCODE_BACK")
-            await { "packageinstaller" !in resumed() }
+            // Cancelled with the installer's own button (Back doesn't always reach its dialog).
+            click("Cancel")
+            await { find("Update this app?") == null }
         } finally {
             updates.supported = false
             Updates.prefs(context).edit().clear().commit()
