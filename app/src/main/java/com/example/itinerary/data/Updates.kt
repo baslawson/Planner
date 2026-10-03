@@ -120,7 +120,7 @@ class Updates(
         data class UpToDate(val at: Long) : State
         data class Available(val release: AppRelease) : State
         data class Downloading(val release: AppRelease, val progress: Float, val asked: Boolean) : State
-        data class Ready(val release: AppRelease, val file: File) : State
+        data class Ready(val release: AppRelease, val file: File, val hash: String) : State
         data class Failed(val message: String, val release: AppRelease? = null) : State
     }
 
@@ -156,14 +156,17 @@ class Updates(
         if (!lock.tryLock()) return
         try {
             if (_state.value is State.Downloading) return
+            // A download already checked is kept through a check: offered again if it's still the latest, replaced only
+            // by a newer release, and never lost to a check that fails.
+            val ready = _state.value as? State.Ready
             _dismissed.value = false
             _state.value = State.Checking
             val release = try {
                 withContext(Dispatchers.IO) { api.latest() }
-            } catch (e: CancellationException) { _state.value = State.Idle; throw e }
+            } catch (e: CancellationException) { _state.value = ready ?: State.Idle; throw e }
             catch (e: Exception) {
                 // At start-up a failed check stays quiet (no pop-up); the next start tries again.
-                _state.value = if (fromSettings) State.Failed((e as? UpdateException)?.message ?: "Couldn't check for updates. Check the connection.") else State.Idle
+                _state.value = ready ?: if (fromSettings) State.Failed((e as? UpdateException)?.message ?: "Couldn't check for updates. Check the connection.") else State.Idle
                 return
             }
             prefs.edit().putLong(KEY_LAST, now()).apply()
@@ -171,6 +174,7 @@ class Updates(
                 (!fromSettings && prefs.getString(KEY_SKIPPED, null) == release.version)) {
                 _state.value = State.UpToDate(now()); cleanUp(); return
             }
+            if (ready != null && !AppVersion.newer(release.version, ready.release.version)) { _state.value = ready; return }
             _state.value = State.Available(release)
         } finally { lock.unlock() }
         (_state.value as? State.Available)?.let { if (_autoDownload.value) download(it.release, asked = false) }
@@ -189,13 +193,20 @@ class Updates(
             try {
                 val expected = AppVersion.sha256Of(withContext(Dispatchers.IO) { api.text(release.shaUrl) })
                     ?: throw UpdateException("The update's checksum couldn't be read, so it wasn't downloaded.")
-                api.download(release.apkUrl, part) { p -> _state.value = State.Downloading(release, p, asked) }
-                if (sha256(part) != expected) { part.delete(); throw UpdateException("The download didn't match the release's checksum, so it was deleted. Try again.") }
-                file.delete()
-                if (!part.renameTo(file)) throw UpdateException("The update couldn't be saved.")
+                // Already downloaded and still matching (Try again after a failed install, say): not downloaded again.
+                if (!(file.isFile && sha256(file) == expected)) {
+                    api.download(release.apkUrl, part) { p -> _state.value = State.Downloading(release, p, asked) }
+                    if (sha256(part) != expected) { part.delete(); throw UpdateException("The download didn't match the release's checksum, so it was deleted. Try again.") }
+                    file.delete()
+                    if (!part.renameTo(file)) throw UpdateException("The update couldn't be saved.")
+                }
+                // Downloading a version undoes skipping it (Check now offers a skipped one again).
+                if (prefs.getString(KEY_SKIPPED, null) == release.version) prefs.edit().remove(KEY_SKIPPED).apply()
                 prefs.edit().putString(KEY_READY, JSONObject().put("version", release.version).put("notes", release.notes)
                     .put("apk", release.apkUrl).put("sha", release.shaUrl).put("page", release.page).put("hash", expected).toString()).apply()
-                _state.value = State.Ready(release, file)
+                _state.value = State.Ready(release, file, expected)
+                // Older versions' files and a .part left by a download Android cut off go.
+                folder.listFiles()?.forEach { if (it != file) it.delete() }
             } catch (e: CancellationException) {
                 part.delete(); _state.value = State.Available(release); throw e
             } catch (e: Exception) {
@@ -206,6 +217,16 @@ class Updates(
     }
 
     fun later() { _dismissed.value = true }
+
+    // Just before Install now: the ready file is still there and still the one checked (the cache can be cleared, or a
+    // file restored after a restart changed). If not, it's offered for download again.
+    suspend fun stillReady(): Boolean {
+        val ready = _state.value as? State.Ready ?: return false
+        if (ready.file.isFile && runCatching { sha256(ready.file) }.getOrNull() == ready.hash) return true
+        ready.file.delete(); prefs.edit().remove(KEY_READY).apply()
+        _state.value = State.Failed("The downloaded update is gone or damaged. Download it again.", ready.release)
+        return false
+    }
 
     fun skip(release: AppRelease) {
         prefs.edit().putString(KEY_SKIPPED, release.version).apply()
@@ -227,10 +248,13 @@ class Updates(
         val o = prefs.getString(KEY_READY, null)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         val release = AppRelease(o.optString("version"), o.optString("notes"), o.optString("apk"), o.optString("sha"), o.optString("page"))
         val file = File(folder, "Planner-${release.version}.apk")
-        if (!supported || !AppVersion.newer(release.version, installed) || !file.isFile) {
+        val hash = o.optString("hash")
+        if (!supported || !AppVersion.newer(release.version, installed) || !file.isFile || AppVersion.sha256Of(hash) == null) {
             prefs.edit().remove(KEY_READY).apply(); folder.listFiles()?.forEach { it.delete() }; return null
         }
-        return State.Ready(release, file)
+        // A .part from a download cut off by the restart, or an older version's file, is of no use.
+        folder.listFiles()?.forEach { if (it != file) it.delete() }
+        return State.Ready(release, file, hash)
     }
 
     private suspend fun sha256(file: File): String = withContext(Dispatchers.IO) {

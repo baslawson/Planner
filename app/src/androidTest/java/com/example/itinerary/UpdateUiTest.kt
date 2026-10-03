@@ -72,6 +72,7 @@ class UpdateUiTest {
             click("Update now")
             await(60000) { find("Install now") != null }
             screenshot("ready")
+            assertNotNull(find("Skip this version")) // UP-2: a ready update can be skipped too
             assertEquals(fake.apk.size.toLong(), (updates.state.value as Updates.State.Ready).file.length())
 
             // Not yet allowed to install apps: Android's page for that opens. (Allowing it there restarts the app, so that

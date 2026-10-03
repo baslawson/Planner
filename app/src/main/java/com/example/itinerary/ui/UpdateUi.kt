@@ -29,16 +29,31 @@ import java.io.File
 
 // Hands the checked APK to Android's installer, which asks before updating. The first time, Android wants Planner
 // allowed to install apps: its settings page opens, and Install now works once that's on.
+// A phone without either screen (a work profile, some makers' builds) says so instead of closing Planner.
 fun installUpdate(context: Context, file: File) {
-    if (!context.packageManager.canRequestPackageInstalls()) {
-        Toast.makeText(context, "Allow Planner to install updates, then tap Install now again.", Toast.LENGTH_LONG).show()
-        context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        return
+    try {
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(context, "Allow Planner to install updates, then tap Install now again.", Toast.LENGTH_LONG).show()
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: android.content.ActivityNotFoundException) {
+        Toast.makeText(context, "This phone doesn't let apps install updates. Download Planner from its GitHub page instead.", Toast.LENGTH_LONG).show()
     }
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+// Install now, after checking the file is still the one downloaded and checked.
+fun installReady(context: Context) {
+    val app = context.applicationContext as ItineraryApp
+    app.appScope.launch {
+        if (!app.updates.stillReady()) return@launch
+        val file = (app.updates.state.value as? Updates.State.Ready)?.file ?: return@launch
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { installUpdate(context, file) }
+    }
 }
 
 // The pop-up for a new version: what's new (the release notes), then Update now / Later / Skip this version; the
@@ -64,12 +79,12 @@ fun UpdateDialog() {
         onDismissRequest = updates::later,
         primary = when (s) {
             is Updates.State.Available -> DialogAction("Update now") { app.appScope.launch { updates.download(release) } }
-            is Updates.State.Ready -> DialogAction("Install now") { installUpdate(context, s.file) }
+            is Updates.State.Ready -> DialogAction("Install now") { installReady(context) }
             is Updates.State.Failed -> DialogAction("Try again") { app.appScope.launch { updates.download(release) } }
             else -> null
         },
         dismiss = DialogAction("Later", onClick = updates::later),
-        extra = if (s is Updates.State.Available) listOf(DialogAction("Skip this version") { updates.skip(release) }) else emptyList(),
+        extra = if (s is Updates.State.Available || s is Updates.State.Ready) listOf(DialogAction("Skip this version") { updates.skip(release) }) else emptyList(),
         note = when (s) {
             is Updates.State.Downloading -> ({
                 androidx.compose.foundation.layout.Column {
@@ -117,6 +132,12 @@ fun UpdatesSettingsSection() {
     SwitchRow("Download updates automatically", auto, updates::setAutoDownload)
     Text("Planner asks GitHub once a day at most, and always asks you before installing.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // A found or downloaded update can be acted on here too, after Later.
+    when (val s = state) {
+        is Updates.State.Ready -> StackedButton("Install Planner ${s.release.version}") { installReady(context) }
+        is Updates.State.Available -> StackedButton("Update to Planner ${s.release.version}") { app.appScope.launch { updates.download(s.release) } }
+        else -> {}
+    }
     StackedButton(if (state is Updates.State.Checking) "Checking…" else "Check now") { app.appScope.launch { updates.check() } }
     val line = when (val s = state) {
         is Updates.State.Checking -> "Checking for updates…"

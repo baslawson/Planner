@@ -59,6 +59,22 @@ class UpdatesTest {
             }
             updates.download(available.release) // back for the checks below
 
+            // Bug hunt 3 Oct (UP-1): a later check keeps a ready update instead of downloading it again.
+            val apkGets = fake.requests.count { it == "/dl/Planner.apk" }
+            updates.check(); assertTrue(updates.state.value is Updates.State.Ready)
+            clock += Updates.DAY_MS; updates.checkIfDue(); assertTrue(updates.state.value is Updates.State.Ready)
+            // ...and Try again with the file still matching doesn't download it again.
+            updates.download(available.release); assertEquals(apkGets, fake.requests.count { it == "/dl/Planner.apk" })
+            // UP-3: a .part left by a download Android cut off goes at the next start.
+            File(folder, "Planner-0.0.15.apk.part").writeText("cut off"); File(folder, "Planner-0.0.13.apk").writeText("old")
+            Updates(prefs, ReleaseApi(fake.http, fake.base), "0.0.14", folder, supported = true, now = { clock })
+            assertEquals(listOf("Planner-0.0.15.apk"), folder.list()!!.toList())
+            // UP-4: a damaged ready file is caught before Install now, and offered for download again.
+            val damaged = Updates(prefs, ReleaseApi(fake.http, fake.base), "0.0.14", folder, supported = true, now = { clock })
+            File(folder, "Planner-0.0.15.apk").appendBytes(byteArrayOf(1))
+            assertFalse(damaged.stillReady()); assertTrue(damaged.state.value is Updates.State.Failed)
+            updates.download(available.release); assertTrue(updates.stillReady())
+
             // The same or an older version, or none: up to date, and the old download goes.
             fake.version = "v0.0.14"; updates.check(); assertTrue(updates.state.value is Updates.State.UpToDate)
             assertTrue(folder.listFiles().orEmpty().isEmpty())
@@ -77,9 +93,12 @@ class UpdatesTest {
             updates.setCheckOnStart(false); val before = fake.requests.size
             clock += 2 * Updates.DAY_MS; updates.checkIfDue(); assertEquals(before, fake.requests.size)
 
-            // Offline from Settings: said; at start-up: quiet.
-            updates.setCheckOnStart(true)
+            // Offline with an update ready: it stays ready (UP-1).
             fake.server.shutdown()
+            updates.check(); assertTrue(updates.state.value is Updates.State.Ready)
+            // Offline from Settings with nothing ready: said; at start-up: quiet.
+            updates.skip((updates.state.value as Updates.State.Ready).release)
+            updates.setCheckOnStart(true)
             updates.check(); assertTrue(updates.state.value is Updates.State.Failed)
             clock += 2 * Updates.DAY_MS; updates.checkIfDue(); assertEquals(Updates.State.Idle, updates.state.value)
         } finally {
