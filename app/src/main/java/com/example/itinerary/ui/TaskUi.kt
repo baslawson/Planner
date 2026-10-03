@@ -467,7 +467,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 }
             } }
             HorizontalDivider()
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 EditorActions(onDelete = if (!creating && !deletedElsewhere) ({ confirmingDelete = true }) else null,

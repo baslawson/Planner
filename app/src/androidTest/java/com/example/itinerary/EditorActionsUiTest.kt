@@ -60,7 +60,24 @@ class EditorActionsUiTest {
             assertTrue("$name: Delete clear of Close", close.left - delete.right >= 8 * dp)
             assertEquals("$name: same height", delete.height().toFloat(), save.height().toFloat(), 2f)
             assertEquals("$name: same height", close.height().toFloat(), save.height().toFloat(), 2f)
+            // A third smaller than ordinary buttons: Close's outline is 28 dp tall (40 dp elsewhere). Measured on screen, as
+            // accessibility (and touch) still give a small button 48 dp.
+            val drawn = drawnHeight(close)
+            assertEquals("$name: Close drawn 28 dp tall (was $drawn px)", 28 * dp, drawn.toFloat(), 3 * dp)
         }
+    }
+    // The height of the outlined button inside [r], from a screenshot: a column a quarter in from its right end, scanned up
+    // and down from the middle to the first pixel that differs clearly from the fill (the outline).
+    private fun drawnHeight(r: Rect): Int {
+        val shot = ins.uiAutomation.takeScreenshot()!!
+        try {
+            val x = r.right - r.width() / 4
+            val fill = shot.getPixel(x, r.centerY())
+            fun differs(c: Int) = listOf(16, 8, 0).sumOf { kotlin.math.abs((c shr it and 255) - (fill shr it and 255)) } > 90
+            var top = r.centerY(); while (top > r.top && !differs(shot.getPixel(x, top))) top--
+            var bottom = r.centerY(); while (bottom < r.bottom && !differs(shot.getPixel(x, bottom))) bottom++
+            return bottom - top
+        } finally { shot.recycle() }
     }
     private fun closeEditor() { click("Close"); await { find("Edit task") == null && find("Edit event") == null } }
     private fun openTask(task: PlannerTask) {
@@ -87,6 +104,18 @@ class EditorActionsUiTest {
         themed(ThemeMode.DARK) { openTask(task); checkBar("task-dark", wrapped = false); closeEditor() }
         themed(ThemeMode.LIGHT) { openTask(task); checkBar("task-light", wrapped = false); closeEditor() }
         themed(ThemeMode.DARK, TextSize.MAX_PERCENT) { openTask(task); checkBar("task-dark-large", wrapped = true); closeEditor() }
+    }
+
+    @Test fun noteEditorBar() {
+        val note = runBlocking { app.repository.saveNote(PlannerNote(title = "QA bar note", content = "text"), create = true) }
+        themed(ThemeMode.DARK) {
+            app.settings.lastViewCalendar = false; app.settings.noteFilter = "all"
+            ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            await { find("AGENDA") != null }
+            click("More options"); click("Notes"); click(note.title)
+            await { find("Edit note") != null }
+            checkBar("note-dark", wrapped = false)
+        }
     }
 
     @Test fun eventEditorBar() {

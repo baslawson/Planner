@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -55,6 +56,7 @@ fun DangerOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit,
 ) {
     val red = MaterialTheme.colorScheme.error
@@ -64,10 +66,12 @@ fun DangerOutlinedButton(
             disabledContainerColor = muted.copy(alpha = 0.04f),
             disabledContentColor = muted.copy(alpha = if (com.example.itinerary.ui.theme.LocalHighContrast.current) 0.6f else 0.38f)),
         border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), if (enabled) red else muted.copy(alpha = 0.12f)),
-        content = content)
+        contentPadding = contentPadding, content = content)
 }
 
 // An editor's pinned actions: Delete on the left (when [onDelete] is given), Close and Save on the right, 8 dp apart.
+// A third smaller than ordinary buttons (28 dp, text at 80 %, a 36 dp touch area), so they take less room over the
+// keyboard; larger text still makes them taller.
 // Wraps at large text: every button keeps its full size, and Save moves to its own line on the right rather than being
 // squeezed ("Sa|ve") or pushed off the screen.
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -85,10 +89,18 @@ fun EditorActions(
     androidx.compose.foundation.layout.FlowRow(modifier.fillMaxWidth(),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp, Alignment.End),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-        if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete) { Text("Delete") }
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-        OutlinedButton(enabled = closeEnabled, onClick = onClose) { Text("Close") }
-        MatrixButton(enabled = saveEnabled, onClick = onSave, content = saveLabel)
+        val size = Modifier.heightIn(min = 28.dp)
+        val padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 17.dp, vertical = 2.dp)
+        val label = MaterialTheme.typography.labelLarge.let { it.copy(fontSize = it.fontSize * 0.8f, lineHeight = it.lineHeight * 0.8f) }
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 36.dp) {
+            if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete, modifier = size, contentPadding = padding) {
+                androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            OutlinedButton(enabled = closeEnabled, onClick = onClose, modifier = size, contentPadding = padding) {
+                androidx.compose.material3.ProvideTextStyle(label) { Text("Close") } }
+            MatrixButton(enabled = saveEnabled, onClick = onSave, modifier = size, contentPadding = padding) {
+                androidx.compose.material3.ProvideTextStyle(label) { saveLabel() } }
+        }
     }
 }
 

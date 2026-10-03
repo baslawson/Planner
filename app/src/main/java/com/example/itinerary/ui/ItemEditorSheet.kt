@@ -946,7 +946,7 @@ private fun ItemEditorForm(
             EditorActions(
                 onDelete = if (isNew) null else ({ if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }),
                 onClose = ::close, onSave = { save() },
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp).padding(bottom = 12.dp),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 8.dp),
                 deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
                 saveEnabled = canSave && (unsaved || isNew),
             ) { SaveLabel(busy, saved = justSaved && !unsaved) }
@@ -1132,7 +1132,7 @@ private fun Modifier.lockedWhile(locked: Boolean): Modifier = if (!locked) this 
 @Composable
 internal fun SaveLabel(busy: Boolean, saved: Boolean) {
     Row(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
-        if (saved && !busy) { Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)) }
+        if (saved && !busy) { Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
         Text(if (busy) "Saving…" else if (saved) "Saved" else "Save")
     }
 }

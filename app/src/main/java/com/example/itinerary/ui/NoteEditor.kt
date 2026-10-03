@@ -309,7 +309,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 }
             }
             HorizontalDivider()
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Beside Save, where it can't be missed.
                 if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = MaterialTheme.colorScheme.error)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

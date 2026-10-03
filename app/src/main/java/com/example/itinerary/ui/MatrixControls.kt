@@ -24,8 +24,8 @@ private fun matrixBorder(enabled: Boolean) = BorderStroke(com.example.itinerary.
 
 @Composable
 fun MatrixButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
-    content: @Composable RowScope.() -> Unit) {
-    Button(onClick, modifier, enabled, colors = matrixButtonColors(), border = matrixBorder(enabled), content = content)
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding, content: @Composable RowScope.() -> Unit) {
+    Button(onClick, modifier, enabled, colors = matrixButtonColors(), border = matrixBorder(enabled), contentPadding = contentPadding, content = content)
 }
 
 @Composable
