@@ -125,7 +125,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
     val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,
         tags = tags, attachments = attachments, reminderAt = reminderAt, priority = priority)
-    val unsaved = base?.let { Notes.clean(current) != Notes.clean(it) } ?: Notes.hasContent(current)
+    // The stored version cleaned once, not again on every letter typed (UI-10).
+    val cleanBase = remember(base) { base?.let(Notes::clean) }
+    val unsaved = cleanBase?.let { Notes.clean(current) != it } ?: Notes.hasContent(current)
     // As stored now: a change made elsewhere (sync, a reminder's Done) shows here at once while nothing is edited.
     val continueLists by app.settings.continueLists.collectAsStateWithLifecycle()
     val stored by remember(initial.id) { repo.observeNote(initial.id) }.collectAsStateWithLifecycle(initialValue = base)
