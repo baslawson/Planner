@@ -1326,7 +1326,12 @@ object QuickEntry {
             return error("Finish the date, time or duration, or put literal title text in quotes.")
         // Phrases may overlap ("Saturday or all day Sunday" spans "all day"), so each run of consumed text becomes one space.
         val gone = BooleanArray(text.length).also { flags -> consumed.forEach { r -> r.forEach { if (it in flags.indices) flags[it] = true } } }
-        var title = text.indices.filter { !gone[it] || it == 0 || !gone[it - 1] }.joinToString("") { if (gone[it]) " " else text[it].toString() }
+        var title = text.indices.filter { !gone[it] || it == 0 || !gone[it - 1] }.joinToString("") { if (gone[it]) "\uE002" else text[it].toString() }
+            // Punctuation the removed phrase ended with: dropped at the end ("Bins tonight!"), else kept on the word before
+            // ("Call Mum tomorrow. Ask about Xmas").
+            .replace(re("^\\s*\uE002\\s*[!?.]+(?=\\s|$)"), "").replace(re("\\s*\uE002\\s*[!?.]+(?=\\s*$)"), "")
+            .replace(re("(?<=\\S)\\s*\uE002\\s*([!?.]+)(?=\\s)"), "$1")
+            .replace('\uE002', ' ')
         // "Book 2night club", "Watch tonight show": a part of the day before a word that names a show or club may be part of
         // the title. A task then asks rather than take it silently as the due day; see quickProblem. Other words after it
         // ("Pay bills tonight online", "Gym tomorrow morning early") leave it the due day.
