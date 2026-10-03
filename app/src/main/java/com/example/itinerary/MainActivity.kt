@@ -195,6 +195,8 @@ class MainActivity : ComponentActivity() {
         // The phone's ticked calendars and links; Nextcloud is checked by AutoSync while Planner is on screen, if it's on.
         (application as ItineraryApp).let { app ->
             app.appScope.launch { app.calendarSync.syncIfDue(nextcloud = false) }
+            // A new version on GitHub, at most once a day (Settings → Updates); it only asks.
+            app.appScope.launch { app.updates.checkIfDue() }
             autoSync = lifecycleScope.launch { app.settings.autoSync.collectLatest { on -> if (on) app.autoSync.watch(applicationContext) } }
         }
     }
@@ -266,6 +268,7 @@ class MainActivity : ComponentActivity() {
                     // Under the lock screen (LockActivity), so Planner's content never shows in the moment before it.
                     val locked by appLock.locked.collectAsStateWithLifecycle()
                     if (locked) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
+                    else com.example.itinerary.ui.UpdateDialog()
                 } }
             }
         }

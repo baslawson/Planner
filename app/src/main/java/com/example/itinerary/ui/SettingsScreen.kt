@@ -228,6 +228,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     StackedButton("Open app settings") { openAppSettings(context) }
+                    UpdatesSettingsSection()
                 }
             }
         }

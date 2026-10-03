@@ -51,6 +51,14 @@ class ItineraryApp : Application() {
         calendarSync.requestSend(); taskSync.requestSend(); noteSync.request()
     }
 
+    // New versions on GitHub (Settings → Updates); only the release app updates itself.
+    val updates: com.example.itinerary.data.Updates by lazy {
+        com.example.itinerary.data.Updates(com.example.itinerary.data.Updates.prefs(this),
+            com.example.itinerary.data.ReleaseApi(okhttp3.OkHttpClient()),
+            installed = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty(),
+            folder = java.io.File(cacheDir, "updates"), supported = packageName == com.example.itinerary.data.Updates.RELEASE_ID)
+    }
+
     val autoSync: AutoSync by lazy { AutoSync(calendarSync, noteSync, appScope) }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).

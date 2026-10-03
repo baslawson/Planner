@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Updates from GitHub: Android still asks before installing (Settings → Updates). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Calendar sync step 3: read-only; asked for only when the user taps "Show phone calendars". -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
