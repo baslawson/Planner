@@ -166,8 +166,10 @@ object Markdown {
         return Edit(text.substring(0, s) + mark + text.substring(s, e) + mark + text.substring(e), s + m, e + m)
     }
 
-    // The mark a line starts with: a checklist box, a bullet, or a heading.
-    private val lineMark = Regex("^(- \\[[ xX]] |[-*+] |#{1,6} )")
+    // The mark a line starts with, after its indent: a checklist box (ticked or not, any bullet), a bullet, or a heading.
+    private val lineMark = Regex("^([ \\t]*)([-*+] \\[[ xX]] |[-*+] |#{1,6} )")
+    // Which mark it is: every checklist box is one mark, as is every bullet; each heading level is its own.
+    private fun markKind(mark: String) = when { '[' in mark -> "[ ]"; mark.startsWith('#') -> mark; else -> "-" }
 
     /** Starts every line of the selection with [prefix] ("# ", "- ", "- [ ] "), or takes it off if they all have it. */
     fun prefixLines(text: String, start: Int, end: Int, prefix: String): Edit {
@@ -175,11 +177,24 @@ object Markdown {
         val first = text.lastIndexOf('\n', s - 1) + 1
         val last = text.indexOf('\n', e).let { if (it < 0) text.length else it }
         val lines = text.substring(first, last).split('\n')
-        fun markOf(line: String) = lineMark.find(line)?.value.orEmpty()
-        // Off only when every line has exactly this mark ("- " on a checklist line is a different mark, not this one).
-        val remove = lines.all { markOf(it) == prefix }
-        // A line keeps one mark: a bullet made a checklist line has its "- " replaced, not added to.
-        val changed = lines.map { if (remove) it.removePrefix(prefix) else prefix + it.removePrefix(markOf(it)) }
+        val kind = markKind(prefix)
+        fun markOf(line: String) = lineMark.find(line)?.groupValues?.get(2).orEmpty()
+        // Off only when every line has this mark ("- " on a checklist line is a different mark, not this one).
+        val remove = lines.all { markOf(it).let { m -> m.isNotEmpty() && markKind(m) == kind } }
+        val changed = lines.map { line ->
+            val indent = line.takeWhile { it == ' ' || it == '\t' }
+            val mark = markOf(line)
+            val rest = line.substring(indent.length + mark.length)
+            when {
+                remove -> indent + rest
+                // Already this mark (a ticked box, a "*" bullet): left as it is.
+                mark.isNotEmpty() && markKind(mark) == kind -> line
+                // A heading starts the line; a list item keeps its indent (a nested item stays nested).
+                kind.startsWith('#') -> prefix + rest
+                // A line keeps one mark: a bullet made a checklist line has its "- " replaced, not added to.
+                else -> indent + prefix + rest
+            }
+        }
         val block = changed.joinToString("\n")
         val result = text.substring(0, first) + block + text.substring(last)
         // The selection keeps to the same text: the first line's start moves by its own change, the end by the total.

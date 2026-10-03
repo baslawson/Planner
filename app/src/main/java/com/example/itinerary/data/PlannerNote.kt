@@ -99,11 +99,25 @@ object Notes {
      * notes not shown (another notebook, the archive) keep theirs. Only the notes whose place changes are returned.
      */
     fun reorder(shown: List<PlannerNote>, newOrder: List<String>): Map<String, Long> {
-        val slots = shown.map { it.position }.sorted()
         val byId = shown.associateBy { it.id }
+        // The order was taken when the drag began: a note that left the page since (deleted or moved by sync) is skipped,
+        // and one that joined keeps its place, so only notes in both trade places.
+        val moving = newOrder.distinct().mapNotNull { byId[it] }
+        val slots = moving.map { it.position }.sorted()
         // Places must differ for the order to hold: equal ones (never dragged) are spread out first.
         val distinct = if (slots.distinct().size == slots.size) slots else slots.indices.map { slots.first() + it }
-        return newOrder.mapIndexedNotNull { index, id -> byId[id]?.takeIf { it.position != distinct[index] }?.let { id to distinct[index] } }.toMap()
+        return moving.mapIndexedNotNull { index, note -> if (note.position != distinct[index]) note.id to distinct[index] else null }.toMap()
+    }
+
+    /**
+     * The order after the note [id] in [order] (as the page shows it) moves one place earlier ([by] = -1) or later (1),
+     * for screen readers, which can't drag; null at either end, and pinned and unpinned notes stay apart.
+     */
+    fun moved(order: List<PlannerNote>, id: String, by: Int): List<String>? {
+        val from = order.indexOfFirst { it.id == id }
+        val to = from + by
+        if (from < 0 || to !in order.indices || order[to].pinned != order[from].pinned) return null
+        return order.map { it.id }.toMutableList().apply { add(to, removeAt(from)) }
     }
 
     /** [order] for [sort]: pinned first, then the sort's own key, then the dragged order. */
@@ -114,7 +128,8 @@ object Notes {
             NoteSort.IMPORTANCE -> compareByDescending { it.priority.rank }
             NoteSort.CHANGED -> compareByDescending { it.modified }
             NoteSort.CREATED -> compareByDescending { it.created }
-            NoteSort.TITLE -> compareBy { Search.normalize(label(it)) }
+            // Each note's name worked out once per sort (an untitled note's is read from its text), not per comparison.
+            NoteSort.TITLE -> java.util.IdentityHashMap<PlannerNote, String>().let { names -> compareBy { names.getOrPut(it) { Search.normalize(label(it)) } } }
             // The card colours in their order, then custom colours by hue, then plain cards.
             NoteSort.COLOUR -> compareBy { note -> note.color?.let { c -> colors.indexOf(c).takeIf { it >= 0 }?.toFloat() ?: (100f + hue(c)) }
                 ?: Float.MAX_VALUE }
@@ -209,7 +224,7 @@ class NoteChangedException(val latest: PlannerNote) : IllegalStateException("Thi
 
 /**
  * Three-way merge of a note: [mine] and [theirs] both started from [base]. Each field takes whichever side changed it;
- * null when both changed the same field differently (the user decides). The snooze follows theirs (it's never edited here).
+ * null when both changed the same field differently (the user decides). The snooze and the place follow theirs (never edited here).
  */
 fun mergeNotes(base: PlannerNote, mine: PlannerNote, theirs: PlannerNote): PlannerNote? {
     fun <T> pick(get: (PlannerNote) -> T): Pair<T, Boolean> {
@@ -219,9 +234,11 @@ fun mergeNotes(base: PlannerNote, mine: PlannerNote, theirs: PlannerNote): Plann
     val title = pick { it.title }; val content = pick { it.content }; val notebook = pick { it.notebook }
     val color = pick { it.color }; val pinned = pick { it.pinned }; val tags = pick { it.tags }
     val attachments = pick { it.attachments }; val reminder = pick { it.reminderAt }; val archived = pick { it.archived }
-    if (!listOf(title, content, notebook, color, pinned, tags, attachments, reminder, archived).all { it.second }) return null
+    val priority = pick { it.priority }
+    if (!listOf(title, content, notebook, color, pinned, tags, attachments, reminder, archived, priority).all { it.second }) return null
     return theirs.copy(title = title.first, content = content.first, notebook = notebook.first, color = color.first,
-        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first, archived = archived.first)
+        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first, archived = archived.first,
+        priority = priority.first)
 }
 
 object NoteCodec {
