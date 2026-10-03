@@ -59,17 +59,23 @@ class NoteReminderReceiver : BroadcastReceiver() {
 
 /**
  * A note reminder's notification: [note]'s name and first lines, or with no note (before the first unlock, see
- * NoteReminderReceiver) just "Note reminder". On the lock screen it is "Note reminder" either way (R-2). [quiet]: shown
- * again after the unlock with the note's words, without sounding a second time.
+ * NoteReminderReceiver) just "Note reminder". On the lock screen it is "Note reminder" either way (R-2): posted while the phone
+ * is locked it leaves the words out of the notification itself too, and is shown again with them after the unlock
+ * (NoteWords). [quiet]: shown again with the note's words, without sounding a second time.
  */
 internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false) {
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val label = note?.let(Notes::label) ?: "Note reminder"
+    // D6-3: posted while locked (or with the screen off), the note's words wait for the unlock (NoteWords).
+    val tag = "note:$id"
+    val shown = note?.takeIf { !NoteWords.hide(context) }
+    if (note != null && shown == null) NoteWords.later(context, tag) { postNoteReminder(context, id, trigger, note, quiet = true) }
+    else NoteWords.shown(tag)
+    val label = shown?.let(Notes::label) ?: "Note reminder"
     // The text after the name, as the note's card shows it.
-    val lines = note?.let { n -> Markdown.plain(n.content).lines().filter { it.isNotBlank() } }.orEmpty()
-    val body = (if (note == null || note.title.isBlank()) lines.drop(1) else lines).take(6).joinToString("\n")
+    val lines = shown?.let { n -> Markdown.plain(n.content).lines().filter { it.isNotBlank() } }.orEmpty()
+    val body = (if (shown == null || shown.title.isBlank()) lines.drop(1) else lines).take(6).joinToString("\n")
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(label)
@@ -87,7 +93,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setOnlyAlertOnce(quiet)
         .addDataAction(context, "Done", NoteActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
-    try { NotificationManagerCompat.from(context).notify("note:$id", 0, notification) }
+    try { NotificationManagerCompat.from(context).notify(tag, 0, notification) }
     catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
 }
 

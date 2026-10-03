@@ -72,16 +72,13 @@ object DirectBoot {
                 MissedReminders.eventId(f.key)?.let { repository.deliverReminder(it, f.trigger) { _, _ -> } }
                 MissedReminders.taskId(f.key)?.let { repository.deliverTaskReminder(it, f.trigger) {} }
                 MissedReminders.noteId(f.key)?.let { id ->
-                    repository.deliverNoteReminder(id, f.trigger) { note -> if (stillShown(context, "note:$id")) showNote(note, f.trigger) }
+                    repository.deliverNoteReminder(id, f.trigger) { note -> if (notificationShown(context, "note:$id")) showNote(note, f.trigger) }
                 }
             } catch (e: Exception) { android.util.Log.w("DirectBoot", "Couldn't record ${f.key}", e) }
         }
         store.clearFired()
     }
 
-    private fun stillShown(context: Context, tag: String): Boolean = runCatching {
-        context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.tag == tag }
-    }.getOrDefault(false)
 }
 
 /**
@@ -115,6 +112,11 @@ class LockedAlarmStore(dir: File) {
         catch (e: Exception) { file.failWrite(out); throw e }
     }
 }
+
+/** Whether Planner's notification [tag]/[id] is still shown. */
+internal fun notificationShown(context: Context, tag: String?, id: Int = 0): Boolean = runCatching {
+    context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.tag == tag && it.id == id }
+}.getOrDefault(false)
 
 /** Sets one alarm from the snapshot. Faked in tests. */
 interface LockedAlarmSetter {

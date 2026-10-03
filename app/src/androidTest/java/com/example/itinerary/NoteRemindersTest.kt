@@ -72,6 +72,9 @@ class NoteRemindersTest {
         val manager = context.getSystemService(NotificationManager::class.java)
         val note = app.repository.saveNote(PlannerNote(title = "QA note reminder", content = "Bring the **blue** folder",
             reminderAt = System.currentTimeMillis() + 5_000), create = true)
+        // The words are shown with the phone unlocked; its screen may go off during the wait (NoteWordsTest has locked).
+        val savedLocked = com.example.itinerary.reminders.NoteWords.locked
+        com.example.itinerary.reminders.NoteWords.locked = { false }
         try {
             fun shown() = manager.activeNotifications.firstOrNull { it.tag == "note:${note.id}" }
             val end = SystemClock.uptimeMillis() + 120_000
@@ -88,6 +91,7 @@ class NoteRemindersTest {
             assertNull(app.repository.note(note.id)!!.reminderAt)
             assertNull(shown())
         } finally {
+            com.example.itinerary.reminders.NoteWords.locked = savedLocked
             manager.cancel("note:${note.id}", 0)
             app.repository.deleteNote(note.id)
         }

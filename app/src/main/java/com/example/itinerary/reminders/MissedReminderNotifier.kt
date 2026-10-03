@@ -113,6 +113,23 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
         .setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open(code)).setAutoCancel(true)
         .apply { if (grouped) setGroup(MISSED_GROUP).setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY) }
+    // On the lock screen no note words, as the reminder itself (R-2). Posted while locked, not in the notification
+    // itself either: it is shown again with them, quietly, after the unlock (D6-3, NoteWords).
+    fun missedNote(m: MissedReminders.Note, quiet: Boolean) {
+        val tag = "note:${m.note.id}"
+        val words = !NoteWords.hide(context)
+        if (words) NoteWords.shown(tag) else NoteWords.later(context, tag) { missedNote(m, quiet = true) }
+        manager.notify(tag, 0, builder(if (words) com.example.itinerary.data.Notes.label(m.note) else "Missed note reminder", dueText(m.due), 0)
+            .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Missed note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
+            // U-13: opens the note, as the reminder itself does.
+            .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            .setOnlyAlertOnce(quiet)
+            .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build())
+    }
     try {
         shown.forEach { m ->
             when (m) {
@@ -128,16 +145,7 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
                 is MissedReminders.Task -> manager.notify("task:${m.task.id}", 0, builder(m.task.title, dueText(m.due), 0)
                     .setSubText("Task reminder").setWhen(m.due).setShowWhen(true)
                     .addAction(0, "Done", TaskActionReceiver.done(context, m.task.id, m.due)).build())
-                is MissedReminders.Note -> manager.notify("note:${m.note.id}", 0, builder(com.example.itinerary.data.Notes.label(m.note), dueText(m.due), 0)
-                    .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
-                    // On the lock screen no note words, as the reminder itself (R-2).
-                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                    .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
-                        .setContentTitle("Missed note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
-                    // U-13: opens the note, as the reminder itself does.
-                    .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                    .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build())
+                is MissedReminders.Note -> missedNote(m, quiet = false)
             }
         }
         if (grouped) {
