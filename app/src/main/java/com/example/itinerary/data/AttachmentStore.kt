@@ -20,6 +20,9 @@ import java.util.UUID
 // Owns the files behind attachments. Everything is copied into app-private storage so an
 // attachment keeps working after the original is moved or deleted.
 class AttachmentStore(private val context: Context) {
+    // For ML Kit, started on first use (DocumentText.index).
+    internal val appContext: Context get() = context.applicationContext
+
     private data class ThumbKey(val name: String, val maxPx: Int, val length: Long, val modified: Long)
     private val thumbnails = object : android.util.LruCache<ThumbKey, Bitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: ThumbKey, value: Bitmap) = value.allocationByteCount

@@ -17,3 +17,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Itinerary"
 include(":app")
+// Makes app/src/main/baseline-prof.txt (the start-up profile) on a device; see baselineprofile/README.md.
+include(":baselineprofile")

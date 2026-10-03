@@ -21,10 +21,17 @@ object DocumentText {
     fun supports(attachment: Attachment) = attachment.url == null &&
         (attachment.mimeType.startsWith("image/") || attachment.mimeType == "application/pdf")
 
+    // ML Kit's own start-up provider is removed from the manifest (it ran at every process start); it starts here once.
+    @Volatile private var started = false
+    private fun start(context: android.content.Context) = synchronized(this) {
+        if (!started) { runCatching { com.google.mlkit.common.MlKit.initialize(context) }; started = true }
+    }
+
     suspend fun index(attachment: Attachment, store: AttachmentStore): Attachment {
         if (!supports(attachment)) return attachment
         return try {
             withContext(Dispatchers.IO) {
+                start(store.appContext)
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 val text = StringBuilder()
                 var partial = false

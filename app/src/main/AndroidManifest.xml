@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Updates from GitHub: Android still asks before installing (Settings → Updates). -->
@@ -125,6 +126,13 @@
         </receiver>
 
         <!-- Lets the camera app write photos into, and viewer apps read files from, our private storage. -->
+        <!-- ML Kit (document text) starts when a document is first read (DocumentText), not at every start of the app:
+             a reminder, the widget or a boot needs none of it. -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

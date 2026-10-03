@@ -22,7 +22,14 @@ android {
         testInstrumentationRunner = "com.example.itinerary.PlannerTestRunner"
         // Steps that need an outside action between them are run one at a time, not in the full suite.
         testInstrumentationRunnerArguments["notAnnotation"] = "com.example.itinerary.HarnessStage"
+        // The bundled OCR library is a native one, built for each processor type. 32-bit x86 is left out: no such
+        // phone runs Android 8 (minSdk 26); the x86_64 emulator and every ARM phone are kept.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
+
+    // Native libraries are stored compressed in the APK (about half the download; Android unpacks them once at
+    // install). Uncompressed is only worth it for apps installed from a store that splits by device.
+    packaging { jniLibs { useLegacyPackaging = true } }
 
     // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
     // without that file a release build is simply left unsigned.
@@ -50,6 +57,14 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")
+        }
+        // Only for making the start-up profile (the :baselineprofile module): the release build under its own ID and the
+        // debug key, so generating it never touches the installed Planner or Planner debug.
+        create("benchmark") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".benchmark"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
     testBuildType = "uitest"
