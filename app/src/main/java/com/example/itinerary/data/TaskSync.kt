@@ -4,13 +4,10 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -62,7 +59,6 @@ class TaskSync(
     val hidden = _hidden.asStateFlow()
     val rows: Flow<List<SentTask>> = rowsDao.observe()
     val conflicts: Flow<List<SentTask>> = rows.map { rows -> rows.filter { it.problem == SentEvent.CONFLICT } }
-    private var sendJob: Job? = null
     private val debounce = SendDebounce()
     // SY-2: the list and its ctag when its read last failed (see pull).
     @Volatile private var failedAt: Pair<Long, String>? = null
@@ -126,15 +122,7 @@ class TaskSync(
     fun requestSend() {
         markChanged()
         val scope = scope ?: return
-        synchronized(debounce) {
-            if (!debounce.request()) return
-            sendJob?.cancel()
-            sendJob = scope.launch {
-                kotlinx.coroutines.delay(CalendarSync.SEND_DELAY_MS)
-                synchronized(debounce) { ensureActive(); debounce.started() }
-                try { send() } finally { if (synchronized(debounce) { debounce.finished() }) requestSend() }
-            }
-        }
+        debounce.launch(scope, CalendarSync.SEND_DELAY_MS, send = { send() }, sendAgain = ::requestSend)
     }
 
     // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
@@ -181,7 +169,7 @@ class TaskSync(
             try { when {
                 pending || row == null -> {
                     if (!pending && (!checked || task.done)) continue
-                    val uid = row?.uid?.takeIf { pending } ?: "planner-task-${java.util.UUID.randomUUID()}@planner"
+                    val uid = row?.uid?.takeIf { pending } ?: newTaskUid()
                     val body = ServerTasks.encode(task, uid, stamp())
                     // Noted before writing, so a reply lost on the way back leaves this uid to retry, not a second file.
                     val noted = SentTask(id = row?.id ?: 0, taskId = task.id, account = target.account, list = target.href, uid = uid,
@@ -231,27 +219,14 @@ class TaskSync(
         }
     }
 
-    // See CalendarSync.removeCopy: only at the version Planner synced, learnt first when the row doesn't know it (E-7).
-    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentTask): WriteResult? {
-        if (!CalendarSync.deletable(row.uid, row.problem)) return null
-        val href = hrefOf(target, row)
-        val etag = row.etag ?: run {
-            val file = client().getFile(account, target.href, href) ?: return WriteResult.Missing
-            CalendarSync.deleteVersion(row.problem, row.ics, file) ?: return WriteResult.Changed
-        }
-        return client().deleteFile(account, target.href, href, etag)
-    }
+    // See CalendarSync.removeSyncedCopy: only at the version Planner synced, learnt first when the row doesn't know it (E-7).
+    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentTask): WriteResult? =
+        CalendarSync.removeSyncedCopy(client, account, target.href, { hrefOf(target, row) }, row.uid, row.problem, row.etag, row.ics)
 
     private suspend fun summary(target: CalendarSource): CalendarSync.State {
         val conflicts = rowsDao.countWith(target.href, listOf(SentEvent.CONFLICT))
         val waiting = rowsDao.countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
-        return when {
-            conflicts > 0 -> CalendarSync.State(message = "$conflicts task${if (conflicts == 1) " was" else "s were"} changed in both places. " +
-                "Choose which version to keep.", error = true)
-            waiting > 0 -> CalendarSync.State(message = "$waiting task${if (waiting == 1) " was" else "s were"} changed on Nextcloud; " +
-                "Planner will check at the next sync.")
-            else -> CalendarSync.State()
-        }
+        return CalendarSync.conflictSummary("task", conflicts, waiting) ?: CalendarSync.State()
     }
 
     // Called by CalendarSync.sync with the lists the server has (it has just brought the calendar rows up to date). False
@@ -391,7 +366,7 @@ class TaskSync(
                     Resolution.PLANNER -> when {
                         task == null -> { if (current != null && client().deleteFile(account, target.href, href, current.etag ?: changedAgain()) == WriteResult.Changed) changedAgain(); rowsDao.delete(row.id) }
                         current == null -> {
-                            val uid = "planner-task-${java.util.UUID.randomUUID()}@planner"
+                            val uid = newTaskUid()
                             val body = ServerTasks.encode(task, uid, stamp())
                             rowsDao.put(row.copy(uid = uid, href = null, etag = null, ics = null, fingerprint = ServerTasks.fingerprint(task), problem = SentEvent.PENDING, conflict = null))
                             val result = client().putEvent(account, target.href, uid, body, null) as? WriteResult.Ok ?: changedAgain()
@@ -424,7 +399,7 @@ class TaskSync(
                         rowsDao.put(row.copy(taskId = saved.id, etag = current.etag, ics = current.data, fingerprint = ServerTasks.fingerprint(saved), problem = null, conflict = null))
                         // Planner's task was synced, so it is sent even when done (a done task without a row never is).
                         rowsDao.put(SentTask(taskId = task.id, account = target.account, list = target.href,
-                            uid = "planner-task-${java.util.UUID.randomUUID()}@planner", fingerprint = ServerTasks.fingerprint(task), problem = SentEvent.PENDING))
+                            uid = newTaskUid(), fingerprint = ServerTasks.fingerprint(task), problem = SentEvent.PENDING))
                     }
                 }
             }
@@ -462,10 +437,10 @@ class TaskSync(
 
     companion object {
         // What the user is told when Nextcloud refused [count] tasks (the first with HTTP [code]).
-        internal fun refusedMessage(count: Int, code: Int) = "Nextcloud refused ${if (count == 1) "1 task" else "$count tasks"} (HTTP $code). " +
-            "The others were sent; Planner tries again at the next sync."
+        internal fun refusedMessage(count: Int, code: Int) = CalendarSync.refusedMessage(count, code, "task")
 
         internal fun isPlannerUid(uid: String?) = uid != null && uid.startsWith("planner-task-") && uid.endsWith("@planner")
+        internal fun newTaskUid() = "planner-task-${java.util.UUID.randomUUID()}@planner"
 
         // [file] is the one a pending [row] wrote (its reply was lost): the row takes it (see CalendarSync.adopted).
         internal fun adopted(row: SentTask, file: ServerFile, task: PlannerTask?, zone: ZoneId): SentTask {

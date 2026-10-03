@@ -2,6 +2,9 @@ package com.example.itinerary.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,7 +61,6 @@ class CalendarSync(
     private val _sendState = MutableStateFlow(State())
     val sendState = _sendState.asStateFlow()
     val sent: Flow<List<SentEvent>> = db.sentDao().observe()
-    private var sendJob: kotlinx.coroutines.Job? = null
     private val debounce = SendDebounce()
     // E-9: what the last pull of the synced calendar couldn't do (too many files to list them all); shown with the send state.
     @Volatile private var partial: String? = null
@@ -313,16 +315,7 @@ class CalendarSync(
         markChanged()
         val scope = scope ?: return
         checkBackoff.reset()
-        synchronized(debounce) {
-            if (!debounce.request()) return
-            sendJob?.cancel()
-            sendJob = scope.launch {
-                kotlinx.coroutines.delay(SEND_DELAY_MS)
-                // From here on no request cancels this job (see SendDebounce); one that came first already has.
-                synchronized(debounce) { ensureActive(); debounce.started() }
-                try { send() } finally { if (synchronized(debounce) { debounce.finished() }) requestSend() }
-            }
-        }
+        debounce.launch(scope, SEND_DELAY_MS, send = { send() }, sendAgain = ::requestSend)
     }
 
     // One pass Planner → Nextcloud: creates what's new, updates what changed (only what Planner manages in the file),
@@ -387,7 +380,7 @@ class CalendarSync(
             try { when {
                 pending || row == null || row.uid == null && row.fingerprint != print -> {
                     if (!pending && !checked) continue
-                    val uid = row?.uid?.takeIf { pending } ?: "planner-${java.util.UUID.randomUUID()}@planner"
+                    val uid = row?.uid?.takeIf { pending } ?: newEventUid()
                     val body = CalendarExport.encode(item, uid, zone(), java.time.Instant.ofEpochMilli(now()))
                     // Noted before writing, so a reply lost on the way back leaves this uid to retry, not a second file.
                     val noted = SentEvent(id = row?.id ?: 0, itemId = item.id, account = target.account, calendar = target.href,
@@ -444,27 +437,12 @@ class CalendarSync(
     private suspend fun summary(target: CalendarSource): State {
         val conflicts = db.sentDao().countWith(target.href, listOf(SentEvent.CONFLICT))
         val waiting = db.sentDao().countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
-        return when {
-            conflicts > 0 -> State(message = "$conflicts event${if (conflicts == 1) " was" else "s were"} changed in both places. " +
-                "Choose which version to keep.", error = true)
-            waiting > 0 -> State(message = "$waiting event${if (waiting == 1) " was" else "s were"} changed on Nextcloud; " +
-                "Planner will check at the next sync.")
-            else -> State(message = partial)
-        }
+        return conflictSummary("event", conflicts, waiting) ?: State(message = partial)
     }
 
-    // Deletes Planner's copy of [row], only if Nextcloud still has the version Planner synced. A copy changed on Nextcloud
-    // meanwhile stays there (the server refuses the delete: Changed). Null when nothing was tried (see deletable). A row
-    // that doesn't know its version (E-7) learns it first: never a delete without one.
-    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentEvent): WriteResult? {
-        if (!deletable(row)) return null
-        val href = hrefOf(target, row)
-        val etag = row.etag ?: run {
-            val file = client.getFile(account, target.href, href) ?: return WriteResult.Missing
-            deleteVersion(row.problem, row.ics, file) ?: return WriteResult.Changed
-        }
-        return client.deleteFile(account, target.href, href, etag)
-    }
+    // See removeSyncedCopy.
+    private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentEvent): WriteResult? =
+        removeSyncedCopy({ client }, account, target.href, { hrefOf(target, row) }, row.uid, row.problem, row.etag, row.ics)
 
     // The files of [edited] events (noted past ones, edited since) looked for around their dates only, and linked (see
     // editedFiles, linkedForSend): their rows now. The pull doesn't read the whole history for them. The [noted] past
@@ -659,7 +637,7 @@ class CalendarSync(
                     Resolution.PLANNER -> when {
                         item == null -> { if (current != null && client.deleteFile(account, target.href, href, current.etag ?: changedAgain()) == WriteResult.Changed) changedAgain(); sentDao.delete(row.id) }
                         current == null -> {
-                            val uid = "planner-${java.util.UUID.randomUUID()}@planner"
+                            val uid = newEventUid()
                             val body = CalendarExport.encode(item, uid, zone(), stamp)
                             // Noted first (see sendLocked): a lost reply is retried under this uid.
                             sentDao.put(row.copy(uid = uid, href = null, etag = null, ics = null, fingerprint = fingerprint(item), problem = SentEvent.PENDING, conflict = null))
@@ -1131,8 +1109,18 @@ class CalendarSync(
             if (inSync(row.fingerprint, now, zone)) ServerEvents.apply(now, server) else null
 
         // What the user is told when Nextcloud refused [count] events (the first with HTTP [code]); see TaskSync.refusedMessage.
-        internal fun refusedMessage(count: Int, code: Int) = "Nextcloud refused ${if (count == 1) "1 event" else "$count events"} (HTTP $code). " +
-            "The others were sent; Planner tries again at the next sync."
+        internal fun refusedMessage(count: Int, code: Int, noun: String = "event") =
+            "Nextcloud refused ${if (count == 1) "1 $noun" else "$count ${noun}s"} (HTTP $code). The others were sent; Planner tries again at the next sync."
+
+        // What a send tells the user when [conflicts] [noun]s ("event", "task") were changed in both places, or [waiting]
+        // were changed on Nextcloud; null when neither.
+        internal fun conflictSummary(noun: String, conflicts: Int, waiting: Int): State? = when {
+            conflicts > 0 -> State(message = "$conflicts $noun${if (conflicts == 1) " was" else "s were"} changed in both places. " +
+                "Choose which version to keep.", error = true)
+            waiting > 0 -> State(message = "$waiting $noun${if (waiting == 1) " was" else "s were"} changed on Nextcloud; " +
+                "Planner will check at the next sync.")
+            else -> null
+        }
 
         // How many too-large replies one pull takes while reading a range in parts (see filesBetween): enough for a window
         // sixteen times the size of one reply.
@@ -1171,6 +1159,21 @@ class CalendarSync(
             else -> null
         }
 
+        // Deletes Planner's copy of a synced event or task (file [href] in [calendar]), only if Nextcloud still has the
+        // version Planner synced. A copy changed on Nextcloud meanwhile stays there (the server refuses the delete:
+        // Changed). Null when nothing was tried (see deletable). A row that doesn't know its version (E-7) learns it
+        // first: never a delete without one.
+        internal fun removeSyncedCopy(client: () -> NextcloudClient, account: NextcloudAccount, calendar: String, href: () -> String,
+                                      uid: String?, problem: String?, etag: String?, ics: String?): WriteResult? {
+            if (!deletable(uid, problem)) return null
+            val file = href()
+            val version = etag ?: run {
+                val current = client().getFile(account, calendar, file) ?: return WriteResult.Missing
+                deleteVersion(problem, ics, current) ?: return WriteResult.Changed
+            }
+            return client().deleteFile(account, calendar, file, version)
+        }
+
         // Whether the copy of [row] may be deleted on Nextcloud: sent, and with nothing to settle first.
         internal fun deletable(row: SentEvent) = deletable(row.uid, row.problem)
         internal fun deletable(uid: String?, problem: String?) = uid != null && (problem == null || problem == SentEvent.PENDING)
@@ -1186,6 +1189,7 @@ class CalendarSync(
 
         // Planner's own file names for events it created (see sendLocked).
         internal fun isPlannerUid(uid: String?) = uid != null && uid.startsWith("planner-") && uid.endsWith("@planner")
+        internal fun newEventUid() = "planner-${java.util.UUID.randomUUID()}@planner"
 
         // Which files ([href], uid, the event as Planner would hold it) are [candidates] already (Planner events without
         // a file), by file: first exactly (title, dates, time, length); then, for files Planner itself created, the one
@@ -1237,6 +1241,22 @@ class CalendarSync(
 internal class SendDebounce {
     private var sending = false
     private var again = false
+    private var job: Job? = null
+
+    // Runs [send] after [delayMs] unless another change restarts the wait first; a change while it sends runs
+    // [sendAgain] once it is over (see request, started, finished).
+    fun launch(scope: CoroutineScope, delayMs: Long, send: suspend () -> Unit, sendAgain: () -> Unit) {
+        synchronized(this) {
+            if (!request()) return
+            job?.cancel()
+            job = scope.launch {
+                delay(delayMs)
+                // From here on no request cancels this job; one that came first already has.
+                synchronized(this@SendDebounce) { ensureActive(); started() }
+                try { send() } finally { if (synchronized(this@SendDebounce) { finished() }) sendAgain() }
+            }
+        }
+    }
 
     // A change in Planner. True: (re)start the wait now. False: a pass is sending; another one follows it.
     fun request(): Boolean { if (sending) again = true; return !sending }
