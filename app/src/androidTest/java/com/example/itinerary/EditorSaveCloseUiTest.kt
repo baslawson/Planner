@@ -228,4 +228,30 @@ class EditorSaveCloseUiTest {
         click("Close")
         await { !editorOpen() }
     }
+
+    // AG-2: the open editor's event is archived by a sync pull (Repository.archiveEvents, as the pull does): the editor
+    // says so beside Save, Delete goes, and Save keeps what was typed as a new event instead of failing every time (and
+    // leaving a draft that fails again on the next start).
+    @Test fun anEventDeletedUnderneathTheEditorIsSavedAsANewOne() {
+        val id=seed("QA gone underneath")
+        open();openEvent("QA gone underneath")
+        assertNotNull(button("Delete"))
+        setText("QA gone underneath","QA gone underneath mine")
+        runBlocking { app.repository.archiveEvents(setOf(id)) }
+        await { find("This event was deleted elsewhere. Save keeps your version as a new event.")!=null }
+        screenshot("deleted-underneath")
+        assertNull(button("Delete"))
+        assertNull(find("Changed elsewhere"))
+        click("Save")
+        await { data().items.any { it.id!=id && it.title=="QA gone underneath mine" } && !enabled("Save") }
+        val copy=data().items.single { it.title=="QA gone underneath mine" }
+        assertEquals(LocalTime.of(10,0),copy.startTime)
+        assertNull(data().items.firstOrNull { it.id==id })
+        // Now the new event's editor: no note, Delete is back, and no draft is left to recover.
+        assertNull(find("This event was deleted elsewhere. Save keeps your version as a new event."))
+        assertNotNull(button("Delete"))
+        assertNull(runCatching { EditorDraftStore(context).read() }.getOrNull())
+        click("Close")
+        await { !editorOpen() }
+    }
 }

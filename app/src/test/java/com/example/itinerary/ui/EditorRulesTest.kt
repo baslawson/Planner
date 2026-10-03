@@ -108,6 +108,19 @@ class EditorRulesTest {
         assertEquals(false, EditorRules.changedElsewhere(opened, opened.copy(id = 8, title = "x")))
     }
 
+    // AG-2: gone once read as gone (also when already gone on opening); not before the first read, nor for a new event.
+    @Test fun deletedElsewhereOnceTheStoredEventIsReadAsGone() {
+        val opened = ItineraryItem(id = 7, tripId = 0, date = oct3, startTime = null, title = "Dentist")
+        assertEquals(true, EditorRules.deletedElsewhere(opened, loaded = true, stored = null))
+        assertEquals(false, EditorRules.deletedElsewhere(opened, loaded = false, stored = null))
+        assertEquals(false, EditorRules.deletedElsewhere(opened, loaded = true, stored = opened))
+        assertEquals(false, EditorRules.deletedElsewhere(opened.copy(id = 0), loaded = true, stored = null))
+        assertEquals("This event was deleted elsewhere. Save keeps your version as a new event.", EditorRules.deletedElsewhereNote(bill = false))
+        // The repository's own refusal (deleted between the check and the save) is readable, not "try again".
+        val reason = "This event was deleted elsewhere. Save again to keep your version as a new event."
+        assertEquals(reason, EditorRules.saveError(IllegalArgumentException(reason), false))
+    }
+
     // U6: a date moved back by Undo in Planner counts as changed too, so the banner doesn't claim it came from Nextcloud.
     @Test fun changedElsewhereBannerDoesNotNameNextcloud() {
         val opened = ItineraryItem(id = 7, tripId = 0, date = oct3, startTime = LocalTime.of(9, 0), title = "Dentist")

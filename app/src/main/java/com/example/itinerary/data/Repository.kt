@@ -676,7 +676,8 @@ class Repository(
             val item = if (original != null && options.paymentBaseline != null)
                 Payments.mergeEditor(item, original, options.paymentBaseline) else item
             val originalReminders = if (original != null) reminderDao.forItem(original.id) else emptyList()
-            check(item.id == 0L || original != null) { "This event no longer exists" }
+            // A readable reason (the editor shows IllegalArgumentException's message): retrying can't help.
+            require(item.id == 0L || original != null) { "This event was deleted elsewhere. Save again to keep your version as a new event." }
             val owner = if (item.id == 0L && item.tripId == 0L) {
                 tripDao.firstId() ?: tripDao.upsert(
                     Trip(name = "Agenda", destination = "", startDate = item.date, endDate = item.date),

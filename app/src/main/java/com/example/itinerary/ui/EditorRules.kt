@@ -80,6 +80,16 @@ object EditorRules {
     // of "Moved … to tomorrow", U6), and the editor can't tell which it was.
     fun changedElsewhereBanner(bill: Boolean): String = "This ${if (bill) "bill" else "event"} was changed elsewhere"
 
+    // AG-2: the event this editor opened is no longer stored (a sync pull archived it, or it was deleted in another window).
+    // [loaded]: the stored copy has been read, so one already gone when the editor opened (a recovered draft) counts too.
+    // Save then keeps the form as a new event, so the draft doesn't fail and come back on every start.
+    fun deletedElsewhere(baseline: ItineraryItem, loaded: Boolean, stored: ItineraryItem?): Boolean =
+        baseline.id != 0L && loaded && stored == null
+
+    fun deletedElsewhereNote(bill: Boolean): String = (if (bill) "bill" else "event").let {
+        "This $it was deleted elsewhere. Save keeps your version as a new $it."
+    }
+
     // U-N1: the same for a task: [stored] differs from [baseline] in what Save would write over (title, notes, due date,
     // priority, and R-5: the reminder time, repeat and checklist; a time-zone change moves the reminder underneath, and
     // Save would set the old instant again). Done and a snooze alone don't count: Save keeps both as stored while the

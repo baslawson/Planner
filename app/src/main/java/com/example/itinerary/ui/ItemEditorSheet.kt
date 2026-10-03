@@ -98,11 +98,15 @@ import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.Links
 import com.example.itinerary.data.PlanColors
 import com.example.itinerary.data.Reminder
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+
+// The event as read from the database: [item] null once it is gone.
+private class StoredEvent(val item: ItineraryItem?)
 
 // One of two side-by-side choices: solid with a tick when it is the current one, an outline when it is not.
 @Composable
@@ -215,8 +219,10 @@ private fun ItemEditorForm(
     val allEvents by repository.allItems.collectAsStateWithLifecycle(initialValue = emptyList())
     // E10: the event as stored, watched while this form is open. Each form (the first, and each one after a Save or a
     // Reload) watches afresh from its own [initial], so its own save is never taken for a change from elsewhere.
-    val stored by remember { if (initial.id == 0L) kotlinx.coroutines.flow.flowOf(null) else repository.observeItem(initial.id) }
-        .collectAsStateWithLifecycle(initialValue = null)
+    // Wrapped so "not read yet" (null) differs from "read: gone" (AG-2, deletedElsewhere).
+    val storedRead by remember { if (initial.id == 0L) kotlinx.coroutines.flow.flowOf(StoredEvent(null))
+        else repository.observeItem(initial.id).map(::StoredEvent) }.collectAsStateWithLifecycle(initialValue = null)
+    val stored = storedRead?.item
     var askingStale by remember { mutableStateOf(false) }
     var askingReload by remember { mutableStateOf(false) }
 
@@ -230,6 +236,9 @@ private fun ItemEditorForm(
     }
     var committed by remember { mutableStateOf(value = false) }
     var disposed by remember { mutableStateOf(false) }
+    // AG-2: the event is gone (a sync pull, another window). Save keeps the form as a new single event, like Duplicate
+    // but with everything as typed; Delete and the series choice go. Not while this form saves or deletes it itself.
+    val deletedElsewhere = !committed && !busy && EditorRules.deletedElsewhere(initial, storedRead != null, stored)
     var pendingPhoto by remember { mutableStateOf(draft?.optString("pendingPhoto")?.takeIf { it.isNotEmpty() }?.let(store::fileFor)) }
     var addingLink by remember { mutableStateOf(value = false) }
     val shownAttachments by remember(existingAttachments) {
@@ -428,12 +437,14 @@ private fun ItemEditorForm(
     } }
     val count = repeatCount.toIntOrNull()
     val creatingSeries = isNew || initial.seriesId == null
-    val changeRepeat = !isNew && entireSeries && repeat.name != initial.repeatRule
+    // A series edit only while the series is there: an event deleted elsewhere is saved as a new single one.
+    val seriesEdit = !isNew && !deletedElsewhere && entireSeries
+    val changeRepeat = seriesEdit && repeat.name != initial.repeatRule
     val validRepeat = repeat.valid && (!creatingSeries || repeat == RepeatRule.NONE || count != null && count in 2..365)
-    val plannedDates = remember(date, repeat, count, isNew, entireSeries, allEvents) { runCatching {
+    val plannedDates = remember(date, repeat, count, isNew, seriesEdit, allEvents) { runCatching {
         when {
             creatingSeries -> repeat.dates(date, count?.coerceIn(1, 365) ?: 1)
-            entireSeries -> {
+            seriesEdit -> {
                 val shift = java.time.temporal.ChronoUnit.DAYS.between(initial.date, date)
                 val members = allEvents.filter { it.seriesId == initial.seriesId }.sortedBy { it.date }
                 if (changeRepeat && repeat != RepeatRule.NONE && members.isNotEmpty())
@@ -443,8 +454,8 @@ private fun ItemEditorForm(
             else -> listOf(date)
         }
     }.getOrDefault(listOf(date)) }
-    val clashes = remember(allEvents, plannedDates, time, duration, before, after, isNew, entireSeries) {
-        val excluded = if (isNew) emptySet() else if (entireSeries && initial.seriesId != null) {
+    val clashes = remember(allEvents, plannedDates, time, duration, before, after, isNew, seriesEdit) {
+        val excluded = if (isNew) emptySet() else if (seriesEdit && initial.seriesId != null) {
             allEvents.filter { it.seriesId == initial.seriesId }.mapTo(HashSet()) { it.id }
         } else setOf(initial.id)
         overlappingEvents(allEvents, plannedDates, time, duration?.takeIf { it in 1..1440 }, excluded, before.coerceIn(0, 1440), after.coerceIn(0, 1440))
@@ -517,15 +528,15 @@ private fun ItemEditorForm(
         // event, so anything typed in between would be lost.
         focusManager.clearFocus(force = true)
         error = null
-        val copy = duplicating
+        val copy = duplicating || deletedElsewhere
         val item = currentItem(copy)
         val attachmentsToAdd = if (copy) shownAttachments.map { it.copy(id = 0, itemId = 0) } else added.toList()
         val remindersToAdd = if (copy) shownReminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) } else addedReminders.toList()
         val attachmentsToRemove = if (copy) emptyList() else removed.toList()
         val remindersToRemove = if (copy) emptyList() else removedReminders.toList()
         val options = EventSaveOptions(if (creatingSeries || changeRepeat) repeat else RepeatRule.NONE,
-            if (creatingSeries && repeat != RepeatRule.NONE) count!! else 1, !isNew && entireSeries, changeRepeat, draftToken,
-            paymentBaseline = paymentBaseline.takeUnless { isNew })
+            if (creatingSeries && repeat != RepeatRule.NONE) count!! else 1, seriesEdit, changeRepeat, draftToken,
+            paymentBaseline = paymentBaseline.takeUnless { copy || isNew })
         scope.launch {
             withContext(NonCancellable) {
                 try {
@@ -626,7 +637,7 @@ private fun ItemEditorForm(
             }
             if (recovered != null) Text("Unfinished draft recovered. Save to keep your changes.")
             if (duplicating) Text("Edit this copy, then Save to add it. The original is kept.")
-            if (!isNew && initial.seriesId != null) {
+            if (!isNew && !deletedElsewhere && initial.seriesId != null) {
                 Text("${RepeatRule.parse(initial.repeatRule)?.label ?: "Repeating"} series")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = !entireSeries, onClick = { entireSeries = false }, label = { Text(if (billTask) "This bill" else "This event") })
@@ -801,7 +812,7 @@ private fun ItemEditorForm(
                 if ((before > 0 || after > 0) && duration == null)
                     Text("Set an end time for precise buffers. Without one, clashes use the start time and free time uses your chosen default duration.", style = MaterialTheme.typography.bodySmall)
             }
-            if (creatingSeries || entireSeries) {
+            if (creatingSeries || seriesEdit) {
                 SettingsDropdown(
                     label = "Repeat",
                     current = repeat.label,
@@ -941,14 +952,16 @@ private fun ItemEditorForm(
             } } // Close the inner scrollable Column
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
+            if (deletedElsewhere) Text(EditorRules.deletedElsewhereNote(billTask), color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 20.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             EditorActions(
-                onDelete = if (isNew) null else ({ if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }),
+                onDelete = if (isNew || deletedElsewhere) null else ({ if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }),
                 onClose = ::close, onSave = { save() },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 8.dp),
                 deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
-                saveEnabled = canSave && (unsaved || isNew),
+                saveEnabled = canSave && (unsaved || isNew || deletedElsewhere),
             ) { SaveLabel(busy, saved = justSaved && !unsaved) }
         }
     }
