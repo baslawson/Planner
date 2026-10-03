@@ -42,7 +42,7 @@ class ItineraryApp : Application() {
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
             onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); sendChanges() },
-            onDeletionFinished = { sendChanges() })
+            onDeletionFinished = { sendChanges() }, shareScope = appScope)
     }
 
     // Planner's changes go to Nextcloud a few seconds later, while "Sync changes automatically" is on (see AutoSync).
@@ -56,12 +56,18 @@ class ItineraryApp : Application() {
     // New versions on GitHub (Settings → Updates); only the release app updates itself.
     val updates: com.example.itinerary.data.Updates by lazy {
         com.example.itinerary.data.Updates(com.example.itinerary.data.Updates.prefs(this),
-            com.example.itinerary.data.ReleaseApi(okhttp3.OkHttpClient()),
+            com.example.itinerary.data.ReleaseApi(http),
             installed = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty(),
             folder = java.io.File(cacheDir, "updates"), supported = packageName == com.example.itinerary.data.Updates.RELEASE_ID)
     }
 
     val autoSync: AutoSync by lazy { AutoSync(calendarSync, noteSync, appScope) }
+
+    // DA-8: one HTTP client for the whole app, so calendar and notes sync to the same Nextcloud share connections (one
+    // TLS handshake, one pool and dispatcher). Each user keeps its own settings: NextcloudClient and CalendarLinkClient
+    // derive theirs from it (newBuilder: redirects off, their timeouts); notes and updates use it as it is (the defaults,
+    // as their own OkHttpClient() had).
+    val http: okhttp3.OkHttpClient by lazy { okhttp3.OkHttpClient() }
 
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
@@ -71,7 +77,8 @@ class ItineraryApp : Application() {
     // Other calendars shown read-only beside Planner's own events (Nextcloud on the backup login, the phone's, links), and
     // two-way sync with one Nextcloud calendar.
     val calendarSync: CalendarSync by lazy {
-        CalendarSync(database, NextcloudAccountStore(this), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
+        CalendarSync(database, NextcloudAccountStore(this), client = com.example.itinerary.data.NextcloudClient(http),
+            linkClient = com.example.itinerary.data.CalendarLinkClient(http), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
             phone = phoneCalendars, scope = appScope, planner = repository.asPlannerStore(),
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
             .also { it.tasks = taskSync }
@@ -87,7 +94,7 @@ class ItineraryApp : Application() {
 
     // Two-way sync of notes with the Nextcloud Notes app, on the same login; off until switched on in Notes.
     val noteSync: com.example.itinerary.data.NoteSync by lazy {
-        com.example.itinerary.data.NoteSync(database, NextcloudAccountStore(this), com.example.itinerary.data.NotesApi(okhttp3.OkHttpClient()),
+        com.example.itinerary.data.NoteSync(database, NextcloudAccountStore(this), com.example.itinerary.data.NotesApi(http),
             repository.asNoteStore(), com.example.itinerary.data.NoteSync.prefs(this),
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.notes }.mapTo(HashSet()) { it.id } }, scope = appScope)
     }
@@ -96,7 +103,7 @@ class ItineraryApp : Application() {
 
     val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync, noteSync) }
 
-    val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup) }
+    val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup, client = com.example.itinerary.data.NextcloudClient(http)) }
 
     override fun onCreate() {
         super.onCreate()

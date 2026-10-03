@@ -19,6 +19,7 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 
 data class PendingDeletion(
     val token: String = UUID.randomUUID().toString(),
@@ -46,6 +47,8 @@ class Repository(
     private val onChanged: () -> Unit = {},
     // A deletion's Undo is no longer on offer (calendar sync may now delete Planner's copy on Nextcloud).
     private val onDeletionFinished: () -> Unit = {},
+    // DA-7: where allItems is shared among its collectors (the app's scope); null (tests) leaves it a plain Room query.
+    shareScope: kotlinx.coroutines.CoroutineScope? = null,
 ) {
     // Stay below SQLite's bind-parameter limit, including on older Android versions.
     private suspend fun <T> readIds(ids: Collection<Long>, query: suspend (List<Long>) -> List<T>): List<T> {
@@ -564,7 +567,12 @@ class Repository(
     fun trip(id: Long): Flow<Trip?> = tripDao.observeTrip(id)
 
     // Across every trip, for search.
-    val allItems: Flow<List<ItineraryItem>> = itemDao.observeAll()
+    // DA-7: one query per change, shared by every screen watching (seven or more collect it), not one each. Kept while
+    // anything watches and 5 seconds after (rotation), then dropped, so a later collector never starts from an old list.
+    val allItems: Flow<List<ItineraryItem>> = itemDao.observeAll().let { query ->
+        if (shareScope == null) query
+        else query.shareIn(shareScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
+    }
 
     // Across every trip, trimmed to the columns a plan card's event summary draws (see PlanEvent).
     val planEvents: Flow<List<PlanEvent>> = itemDao.observePlanEvents()
