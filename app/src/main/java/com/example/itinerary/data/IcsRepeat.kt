@@ -22,16 +22,17 @@ internal class IcsRepeat private constructor(
     private val weekStart: DayOfWeek = DayOfWeek.MONDAY, // WKST: where a week (of INTERVAL=2 and so on) begins
 ) {
     // Dates on the event's own clock, in order: [start] first (it always counts, even if the rule wouldn't pick it), then
-    // each later date the rule picks, up to [limit] and the rule's own end, at most [max] kept. Dates before [from] still
-    // count towards COUNT but aren't kept, so an old repeating event reaches today without filling [max] with the past.
+    // each later date the rule picks, up to [limit] and the rule's own end, at most the latest [max] kept. Dates before
+    // [from] still count towards COUNT but aren't kept. Past [max] the oldest go rather than the rule stopping, so an old
+    // repeating event with no end (daily since 2010) still reaches today and [limit].
     fun dates(start: LocalDate, startTime: java.time.LocalTime, limit: LocalDate, max: Int = 5000, from: LocalDate = start): List<LocalDate> {
-        val result = mutableListOf<LocalDate>()
+        val result = ArrayDeque<LocalDate>()
         var counted = 0
         // True when the rule has ended.
         fun take(date: LocalDate): Boolean {
             counted++
-            if (date >= from) result += date
-            return count != null && counted >= count || result.size >= max
+            if (date >= from) { result += date; if (result.size > max) result.removeFirst() }
+            return count != null && counted >= count
         }
         if (take(start)) return result
         for (period in 0L until 200_000L) {

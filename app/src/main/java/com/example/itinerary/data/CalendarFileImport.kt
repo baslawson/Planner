@@ -87,8 +87,9 @@ object CalendarFileImport {
 
     // Every event in the file with its dates up to [limit] (and from [from], when given), and how many couldn't be read.
     private fun expandAll(lines: List<String>, zone: ZoneId, limit: LocalDate, from: LocalDate?): Pair<List<Expanded>, Int> {
-        val events = Ics.events(lines, 50_000, "This calendar file has too many events.", unfinished = "This calendar file is incomplete.")
         var skipped = 0
+        val events = Ics.events(lines, 50_000, "This calendar file has too many events.", unfinished = "This calendar file is incomplete.",
+            unreadable = { skipped++ })
         fun one(props: List<Ics.Property>, name: String) = props.firstOrNull { it.name == name }
         // Moved or cancelled single dates of a repeating event: the same UID with a RECURRENCE-ID.
         // One whose repeating event isn't in the file is just an event of its own.

@@ -145,6 +145,37 @@ class CalendarFileImportTest {
         assertEquals(today.plusMonths(12), daily.datesFor(today, includePast = true).last())
     }
 
+    // RB-1: a daily event since 2010 with no end still reaches today and 12 months ahead; the 5000-date cap keeps the
+    // newest dates, not the oldest.
+    @Test fun aLongRunningRepeatReachesTodayDespiteTheDateCap() {
+        val daily = single("DTSTART:20100101T090000\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Since 2010")
+        assertFalse(daily.past(today))
+        assertEquals(today.plusMonths(12), daily.datesFor(today, includePast = false).last())
+        // today to 12 months ahead is 366 dates; a series keeps the latest 365.
+        assertEquals(today.plusDays(1), daily.datesFor(today, includePast = false).first())
+        assertTrue(today in daily.dates)
+        assertEquals(365, daily.datesFor(today, includePast = true).size)
+        // A series that ended long ago is still listed (as past), with its own dates.
+        val old = single("DTSTART:20100101T090000\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:Old")
+        assertTrue(old.past(today)); assertEquals(3, old.dates.size)
+    }
+
+    // RB-2: one malformed line (no ':', or a parameter without '=') makes only its event unreadable, not the file.
+    @Test fun aMalformedLineSkipsOnlyItsEvent() {
+        val file = read("DTSTART:20261001T100000\r\nSUMMARY:Good",
+            "DTSTART:20261002T100000\r\nDESCRIPTION:first part\r\nraw second line without a colon\r\nSUMMARY:Broken",
+            "DTSTART;BADPARAM:20261003T100000\r\nSUMMARY:Broken too")
+        assertEquals(listOf("Good"), file.entries.map { it.item.title })
+        assertEquals(2, file.skipped)
+        // Outside an event (the calendar's header) such a line is ignored.
+        val header = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nnonsense\r\nBEGIN:VEVENT\r\nDTSTART:20261001T100000\r\nSUMMARY:Good\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        assertEquals(0, CalendarFileImport.read(header, ZoneOffset.UTC, today).skipped)
+        // A subscribed calendar link is read the same way.
+        val window = CalendarFileImport.window(ics("DTSTART:20261001T100000\r\nSUMMARY:Good", "DTSTART:20261002T100000\r\nbroken\r\nSUMMARY:Bad"),
+            ZoneOffset.UTC, today, today.plusDays(10))
+        assertEquals(listOf("Good"), window.events.map { it.title }); assertEquals(1, window.skipped)
+    }
+
     // E9: a one-time import of an all-day event longer than Planner holds keeps the first MultiDay.MAX_DAYS and says so;
     // a subscribed (read-only) calendar shows those days too.
     @Test fun anAllDayEventLongerThanPlannerHoldsIsCutWithANote() {

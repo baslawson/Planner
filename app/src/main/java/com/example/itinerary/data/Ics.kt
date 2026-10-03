@@ -108,22 +108,29 @@ internal object Ics {
     fun isDate(p: Property): Boolean =p.params["VALUE"] == "DATE" || p.value.matches(Regex("[0-9]{8}"))
 
     // The properties of each VEVENT (or [component], such as VTODO), in file order; those of components inside one (such as
-    // an alarm) are left out.
+    // an alarm) are left out. With [unreadable], a line that isn't a property (a raw line break inside a description) only
+    // costs its own event, which is left out and reported there; outside an event such a line is ignored. Without it the
+    // whole text is refused (a server's reply holds one item).
     fun events(lines: List<String>, max: Int, tooMany: String, unfinished: String = "Incomplete calendar component.",
-               component: String = "VEVENT"): List<List<Property>> {
+               component: String = "VEVENT", unreadable: (() -> Unit)? = null): List<List<Property>> {
         val stack = mutableListOf<String>(); val events = mutableListOf<List<Property>>(); var current: MutableList<Property>? = null
+        var broken = false
         for (line in lines) {
-            val p = property(line)
+            val p = if (unreadable == null) property(line) else runCatching { property(line) }.getOrNull()
+            if (p == null) { if (current != null) broken = true; continue }
             when (p.name) {
                 "BEGIN" -> {
                     val name = p.value.uppercase()
-                    if (name == component) { require(current == null); current = mutableListOf() }
+                    if (name == component) { require(current == null); current = mutableListOf(); broken = false }
                     stack += name
                 }
                 "END" -> {
                     val name = p.value.uppercase()
                     require(stack.lastOrNull() == name) { "Incomplete calendar component." }
-                    if (name == component) { events += requireNotNull(current).toList(); current = null; require(events.size <= max) { tooMany } }
+                    if (name == component) {
+                        if (broken) unreadable?.invoke() else events += requireNotNull(current).toList()
+                        current = null; require(events.size <= max) { tooMany }
+                    }
                     stack.removeAt(stack.lastIndex)
                 }
                 else -> if (stack.lastOrNull() == component) current?.add(p)
