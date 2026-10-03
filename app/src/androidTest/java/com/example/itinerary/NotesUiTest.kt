@@ -712,4 +712,40 @@ class NotesUiTest {
         await { find("QA home note") != null && app.settings.noteFilter == "all" }
         openNotes() // defaults back for the other tests
     }
+
+    // Duplicate (4 Oct): from a card's ⋮ (next to the original, "Note duplicated" with Open), from the selection bar (each
+    // one next to its original), and from the editor (an unsaved copy of what is typed; the original stays as saved).
+    @Test fun duplicateFromTheMenuTheBarAndTheEditor() {
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = "QA first", content = "one", tags = listOf("t"), priority = TaskPriority.HIGH,
+                pinned = false, reminderAt = System.currentTimeMillis() + 86_400_000), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA second", content = "two"), create = true)
+        }
+        openNotes()
+        await { find("QA first") != null && find("QA second") != null }
+        // ⋮ → Duplicate: right after the original, the reminder left behind; Open opens the copy.
+        click("Actions for QA first"); click("Duplicate")
+        await { notes().any { it.title == "QA first (copy)" } }
+        val copy = notes().single { it.title == "QA first (copy)" }
+        assertEquals("one", copy.content); assertEquals(listOf("t"), copy.tags); assertEquals(TaskPriority.HIGH, copy.priority)
+        assertNull(copy.reminderAt)
+        assertEquals(listOf("QA second", "QA first", "QA first (copy)"), pageOrder())
+        await { find("Note duplicated") != null }; screenshot("duplicated-bar")
+        click("Open"); await { find("Edit note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA first (copy)" } }
+        click("Close"); await { find("Search notes") != null }
+        // The selection bar: both picked, each copied next to its own.
+        hold("QA second"); await { find("1 selected") != null }
+        click("QA first"); await { find("2 selected") != null }
+        click("Duplicate"); await { notes().size == 5 }
+        assertEquals(listOf("QA second", "QA second (copy)", "QA first", "QA first (copy)", "QA first (copy)"), pageOrder())
+        await { find("2 notes duplicated") != null }
+        // The editor: what is typed goes to the copy; the original keeps what was saved.
+        click("QA second"); await { find("Edit note") != null }
+        click("Edit") // a note with words opens in Preview
+        type(1, "two, edited")
+        click("Duplicate note"); await { find("New note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA second (copy)" } }
+        click("Save"); await { notes().count { it.title == "QA second (copy)" } == 2 }
+        assertTrue(notes().any { it.title == "QA second (copy)" && it.content == "two, edited" })
+        assertEquals("two", notes().single { it.title == "QA second" }.content)
+    }
 }

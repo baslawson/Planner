@@ -92,6 +92,21 @@ object Notes {
         .thenByDescending { it.modified }.thenBy { it.id }
 
     /** The place for a note going to the top: above every note there is. */
+    /**
+     * A copy of [note] to keep as a new one (Duplicate): the same words, notebook, tags, colour, importance and attachments
+     * (the files are shared; a file stays while any note uses it), titled "… (copy)" so the two cards tell apart. Not
+     * the reminder (no second alert) and not the pin (it doesn't jump to the top); an archived note's copy stays archived.
+     */
+    fun copyOf(note: PlannerNote, now: Long = System.currentTimeMillis()): PlannerNote =
+        note.copy(id = UUID.randomUUID().toString(), title = copyTitle(note), pinned = false, reminderAt = null, snoozedUntil = null,
+            created = now, modified = now, position = 0)
+
+    fun copyTitle(note: PlannerNote): String {
+        val base = note.title.trim().ifBlank { label(note).takeUnless { it == "Untitled note" }.orEmpty() }
+        val suffix = " (copy)"
+        return if (base.isEmpty()) "Copy" else base.take(MAX_TITLE - suffix.length) + suffix
+    }
+
     fun topPosition(notes: Collection<PlannerNote>): Long = (notes.minOfOrNull { it.position } ?: 0L).coerceAtMost(0L) - 1
 
     /**

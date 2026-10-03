@@ -79,7 +79,7 @@ internal object NoteEditorMemory {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(),
-               recovered: NoteDraftStore.Draft? = null, onDismiss: () -> Unit) {
+               recovered: NoteDraftStore.Draft? = null, onDuplicate: ((PlannerNote) -> Unit)? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -265,6 +265,13 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
+                    // A copy of what is here now as a new note (not saved yet); the original stays as last saved. The copy's
+                    // editor takes over this one's files, so they aren't released here.
+                    if (base != null && onDuplicate != null) MatrixTextButton(enabled = !busy && Notes.hasContent(current), onClick = {
+                        val copy = Notes.copyOf(current)
+                        runCatching { draftStore.clear() }
+                        dismiss(); onDuplicate(copy)
+                    }) { Text("Duplicate note") }
                     OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
                         label = { Text("Title") }, singleLine = true,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))

@@ -324,6 +324,25 @@ class Repository(
     }
 
     // Notes dragged into a new order: [places] from Notes.reorder. Their words didn't change, so neither does their time.
+    // Duplicate: a copy of each note (Notes.copyOf), placed right after its original; the notes after it move down one
+    // place (positions only, as a drag does). Returns the copies, in the order of [ids].
+    suspend fun duplicateNotes(ids: List<String>): List<PlannerNote> = changes.withLock {
+        withContext(NonCancellable) {
+            val copies = db.withTransaction {
+                ids.mapNotNull { id ->
+                    val original = noteDao.byId(id) ?: return@mapNotNull null
+                    noteDao.all().filter { it.position > original.position }.forEach { noteDao.update(it.copy(position = it.position + 1)) }
+                    val copy = Notes.clean(Notes.copyOf(original).copy(position = original.position + 1))
+                    Notes.validate(copy)
+                    noteDao.insert(copy)
+                    copy
+                }
+            }
+            afterCommit(noteIds = copies.map { it.id })
+            copies
+        }
+    }
+
     suspend fun placeNotes(places: Map<String, Long>) = changes.withLock {
         if (places.isEmpty()) return@withLock
         withContext(NonCancellable) {

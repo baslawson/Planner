@@ -133,6 +133,19 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     LaunchedEffect(filter, notes) { if (notes != null && filter == NoteFilter.All && filterKey != "all") filterKey = "all" }
     // A note open in the editor that vanishes (deleted by sync, say) keeps its editor, which then offers to save it anew.
     val lastSeen = remember { mutableStateMapOf<String, PlannerNote>() }
+    // Duplicate: the editor's copy until it is saved, and the message saying so with Open (the ⋮ menu or the bar).
+    var pendingCopy by remember { mutableStateOf<PlannerNote?>(null) }
+    val duplicatedBar = remember { SnackbarHostState() }
+    val barScope = rememberCoroutineScope()
+    fun duplicated(copies: List<PlannerNote>) {
+        if (copies.isEmpty()) return
+        selectedIds = emptyList()
+        barScope.launch {
+            val text = if (copies.size == 1) "Note duplicated" else "${copies.size} notes duplicated"
+            val result = duplicatedBar.showSnackbar(text, actionLabel = if (copies.size == 1) "Open" else null, duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) { editingNew = false; editingId = copies.single().id }
+        }
+    }
     // An editor Android closed mid-edit: its draft reopens it once, here. That includes the editor still open in the
     // saved state, whose body is only in the draft (NoteEditorMemory); a rotated editor has it in memory instead.
     var recovered by remember { mutableStateOf<com.example.itinerary.data.NoteDraftStore.Draft?>(null) }
@@ -176,6 +189,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     Box(Modifier.fillMaxSize()) {
     OverlayMenuScreen(overlayMenu) {
         Scaffold(
+            snackbarHost = { SnackbarHost(duplicatedBar) },
             topBar = {
                 TopAppBar(
                     title = { HeadingText("Notes", style = MaterialTheme.typography.titleLarge) },
@@ -204,7 +218,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                 )
             },
             bottomBar = {
-                if (selecting) NoteSelectionBar(displayed.filter { it.id in selectedSet }, displayed, notebooks) { selectedIds = it }
+                if (selecting) NoteSelectionBar(displayed.filter { it.id in selectedSet }, displayed, notebooks, onDuplicated = ::duplicated) { selectedIds = it }
             },
             floatingActionButton = {
                 if (filter != NoteFilter.Archive && !selecting) ExtendedFloatingActionButton(
@@ -295,7 +309,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                                     if (drag.id != null || android.os.SystemClock.uptimeMillis() - drag.releasedAt < 400) Unit
                                     else if (selecting) toggle(note.id) else { editingNew = false; editingId = note.id }
                                 },
-                                onSelect = { toggle(note.id) })
+                                onSelect = { toggle(note.id) }, onDuplicated = ::duplicated)
                         }
                     }
                     }
@@ -313,11 +327,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         LaunchedEffect(id, existing != null) { if (existing != null) editingNew = false }
         val draft = recovered?.takeIf { it.note.id == id }
         // A new note starts in the notebook being looked at.
-        val start = existing ?: lastSeen[id] ?: draft?.note ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
+        val start = existing ?: lastSeen[id] ?: draft?.note ?: pendingCopy?.takeIf { it.id == id } ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
             tags = listOfNotNull((filter as? NoteFilter.Tag)?.name)) else null
         if (start != null) key(id) {
             NoteEditor(start, creating = editingNew && existing == null && lastSeen[id] == null, notebooks = notebooks, allTags = tags,
-                recovered = draft) { editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
+                recovered = draft,
+                // Duplicate note: the editor goes, and a new one opens on the copy (not saved yet), as in the task editor.
+                onDuplicate = { copy -> pendingCopy = copy; editingNew = true; editingId = copy.id }) {
+                editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
         } else LaunchedEffect(id) { editingId = null }
     }
     }
@@ -354,7 +371,7 @@ internal fun noteFilterCounts(notes: List<PlannerNote>): Map<NoteFilter, Int> {
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, modifier: Modifier, onOpen: () -> Unit, onSelect: () -> Unit,
-                     moves: List<androidx.compose.ui.semantics.CustomAccessibilityAction> = emptyList()) {
+                     moves: List<androidx.compose.ui.semantics.CustomAccessibilityAction> = emptyList(), onDuplicated: (List<PlannerNote>) -> Unit = {}) {
     val tint = note.color?.let { Color(it) }
     val text = tint?.let(::onColour) ?: MaterialTheme.colorScheme.onSurface
     val soft = if (tint != null) text.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
@@ -378,7 +395,7 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
                 if (note.pinned) Icon(Icons.Filled.Star, contentDescription = "Pinned", tint = if (tint != null) text else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 8.dp).size(18.dp))
                 if (selecting) Checkbox(checked = selected, onCheckedChange = null, modifier = Modifier.padding(4.dp))
-                else NoteActionsMenu(note, label, text)
+                else NoteActionsMenu(note, label, text, onDuplicated)
             }
             Column(Modifier.padding(end = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val preview = card.preview
@@ -404,9 +421,9 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
     }
 }
 
-// A note card's ⋮: Pin / Unpin, Archive / Unarchive, and Delete (to Recently deleted, with the Undo bar).
+// A note card's ⋮: Pin / Unpin, Archive / Unarchive, Duplicate, and Delete (to Recently deleted, with the Undo bar).
 @Composable
-private fun NoteActionsMenu(note: PlannerNote, label: String, tint: Color) {
+private fun NoteActionsMenu(note: PlannerNote, label: String, tint: Color, onDuplicated: (List<PlannerNote>) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     var busy by remember(note.id) { mutableStateOf(false) }
@@ -427,6 +444,10 @@ private fun NoteActionsMenu(note: PlannerNote, label: String, tint: Color) {
             close(); act("Couldn't change this note. Please try again.") { app.repository.updateNote(note.id) { it.copy(pinned = !it.pinned) } } })
         DropdownMenuItem(text = { Text(if (note.archived) "Unarchive" else "Archive") }, onClick = {
             close(); act("Couldn't change this note. Please try again.") { app.repository.updateNote(note.id) { it.copy(archived = !it.archived) } } })
+        DropdownMenuItem(text = { Text("Duplicate") }, onClick = {
+            close(); act("Couldn't duplicate this note. Please try again.") {
+                val copies = app.repository.duplicateNotes(listOf(note.id))
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDuplicated(copies) } } })
         DropdownMenuItem(text = { Text("Delete note", color = MaterialTheme.colorScheme.error) }, onClick = {
             close(); act("Couldn't delete this note. Please try again.") { app.repository.deleteNote(note.id) } })
     })

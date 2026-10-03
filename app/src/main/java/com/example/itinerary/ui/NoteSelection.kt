@@ -118,12 +118,12 @@ private fun finish(note: PlannerNote, drag: NoteDragState, onSelect: () -> Unit,
 
 /**
  * The bar under the Notes page while notes are selected: the count with a box that selects all [shown] (or none), Cancel,
- * and what can be done to them all: Pin / Unpin, Archive / Unarchive, Move to notebook, and Delete (asked first).
+ * and what can be done to them all: Pin / Unpin, Archive / Unarchive, Move to notebook, Duplicate, and Delete (asked first).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun NoteSelectionBar(selected: List<PlannerNote>, shown: List<PlannerNote>, notebooks: List<String>,
-                              onSelect: (List<String>) -> Unit) {
+                              onDuplicated: (List<PlannerNote>) -> Unit = {}, onSelect: (List<String>) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     var busy by remember { mutableStateOf(false) }
@@ -171,6 +171,12 @@ internal fun NoteSelectionBar(selected: List<PlannerNote>, shown: List<PlannerNo
                         Text(if (archive) "Archive" else "Unarchive")
                     }
                     MatrixQuietButton(enabled = !busy && selected.isNotEmpty(), onClick = { moving = true }) { Text("Move to notebook") }
+                    // Each one copied, next to its original, in the order they show.
+                    MatrixQuietButton(enabled = !busy && selected.isNotEmpty(), onClick = {
+                        val inOrder = shown.map { it.id }.filter { it in ids }
+                        act("Couldn't duplicate these notes. Please try again.") {
+                            val copies = app.repository.duplicateNotes(inOrder)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDuplicated(copies) } } }) { Text("Duplicate") }
                 }
                 DangerButton(onClick = { confirming = true }, modifier = Modifier.fillMaxWidth(), enabled = !busy && selected.isNotEmpty()) {
                     Text("Delete $count")
