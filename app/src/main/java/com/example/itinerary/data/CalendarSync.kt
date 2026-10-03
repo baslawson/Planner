@@ -312,6 +312,7 @@ class CalendarSync(
     // its files to the restored events by content; nothing is overwritten or deleted on the strength of an old record.
     // Called inside paused (backup restore).
     suspend fun forgetSentLocked() {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction {
             db.sentDao().deleteAll()
             dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.sendHere }?.let { takeUp(it) }
@@ -442,16 +443,19 @@ class CalendarSync(
                 catch (e: RefusedException) { refused += e; continue }
             if (kept == null) sentDao.delete(row.id) else if (kept != row) sentDao.put(kept)
         }
-        return summary(target).let { state ->
-            if (refused.isEmpty()) state
-            else State(message = listOfNotNull(refusedMessage(refused.size, refused.first().code), state.message).joinToString(" "), error = true)
-        }
+        lastRefused = if (refused.isEmpty()) null else refusedMessage(refused.size, refused.first().code)
+        return summary(target)
     }
+
+    // What the last send pass couldn't send (Nextcloud refused files), kept in the summary until a pass sends them, so a
+    // pull in between (Planner reading its own writes back) doesn't make the refusal vanish from the sync icon.
+    @Volatile private var lastRefused: String? = null
 
     private suspend fun summary(target: CalendarSource): State {
         val conflicts = db.sentDao().countWith(target.href, listOf(SentEvent.CONFLICT))
         val waiting = db.sentDao().countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
-        return conflictSummary("event", conflicts, waiting) ?: State(message = partial)
+        val state = conflictSummary("event", conflicts, waiting) ?: State(message = partial)
+        return lastRefused?.let { State(message = listOfNotNull(it, state.message).joinToString(" "), error = true) } ?: state
     }
 
     // See removeSyncedCopy.
@@ -707,6 +711,7 @@ class CalendarSync(
 
     // restoreSend, inside paused.
     suspend fun restoreSendLocked(target: CalendarChoice?, rows: List<SentEvent>) {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction {
             db.sentDao().deleteAll()
             dao.sources().filter { it.sendHere }.forEach { dao.updateSource(it.copy(sendHere = false)) }
@@ -975,6 +980,7 @@ class CalendarSync(
 
     // After disconnecting Nextcloud: its calendars and every downloaded event leave the phone. Phone calendars stay.
     suspend fun clearNextcloud() {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         // What Planner sent stays on Nextcloud; the record of it goes with the login.
         db.withTransaction { dao.deleteEventsOfKind(OutsideCalendars.KIND_NEXTCLOUD); dao.deleteSourcesOfKind(OutsideCalendars.KIND_NEXTCLOUD); db.sentDao().deleteAll() }
         tasks?.clear()
@@ -986,6 +992,7 @@ class CalendarSync(
 
     // Everything, both kinds (the test runner's clean start).
     suspend fun clearAll() {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction { dao.deleteAllEvents(); dao.deleteAllSources(); db.sentDao().deleteAll() }
         tasks?.clear()
         _sendState.value = State()

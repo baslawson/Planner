@@ -70,6 +70,7 @@ class TaskSync(
     // to Planner's instead of sending them twice.
     // E-4: not while a send, pull or choice is under way (see paused).
     suspend fun setTarget(id: Long?) {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         lock.withLock {
             db.withTransaction {
                 val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
@@ -95,6 +96,7 @@ class TaskSync(
 
     // forget, inside paused.
     suspend fun forgetLocked() {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction {
             rowsDao.deleteAll()
             target()?.let { dao.updateSource(it.copy(taskCtag = null, taskError = null)) }
@@ -104,6 +106,7 @@ class TaskSync(
 
     // After disconnecting Nextcloud (its calendars go with it) or the test runner's clean start.
     suspend fun clear() = paused {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         rowsDao.deleteAll()
         _state.value = CalendarSync.State(); _hidden.value = 0
     }
@@ -220,11 +223,12 @@ class TaskSync(
             val kept = afterDelete(row, result)
             if (kept == null) rowsDao.delete(row.id) else if (kept != row) rowsDao.put(kept)
         }
-        return summary(target).let { state ->
-            if (refused.isEmpty()) state
-            else CalendarSync.State(message = listOfNotNull(refusedMessage(refused.size, refused.first().code), state.message).joinToString(" "), error = true)
-        }
+        lastRefused = if (refused.isEmpty()) null else refusedMessage(refused.size, refused.first().code)
+        return summary(target)
     }
+
+    // See CalendarSync.lastRefused.
+    @Volatile private var lastRefused: String? = null
 
     // See CalendarSync.removeSyncedCopy: only at the version Planner synced, learnt first when the row doesn't know it (E-7).
     private fun removeCopy(account: NextcloudAccount, target: CalendarSource, row: SentTask): WriteResult? =
@@ -233,7 +237,8 @@ class TaskSync(
     private suspend fun summary(target: CalendarSource): CalendarSync.State {
         val conflicts = rowsDao.countWith(target.href, listOf(SentEvent.CONFLICT))
         val waiting = rowsDao.countWith(target.href, listOf(SentEvent.CHANGED, SentEvent.DELETED))
-        return CalendarSync.conflictSummary("task", conflicts, waiting) ?: CalendarSync.State()
+        val state = CalendarSync.conflictSummary("task", conflicts, waiting) ?: CalendarSync.State()
+        return lastRefused?.let { CalendarSync.State(message = listOfNotNull(it, state.message).joinToString(" "), error = true) } ?: state
     }
 
     // Called by CalendarSync.sync with the lists the server has (it has just brought the calendar rows up to date). False
@@ -430,6 +435,7 @@ class TaskSync(
     // After restoring a backup (after CalendarSync's own restore, which rebuilds the calendar rows): its list and record,
     // or none. Inside paused.
     suspend fun restoreLocked(target: CalendarChoice?, rows: List<SentTask>) {
+        lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction {
             rowsDao.deleteAll()
             dao.sources().filter { it.tasksHere }.forEach { dao.updateSource(it.copy(tasksHere = false, taskCtag = null, taskError = null)) }
