@@ -21,6 +21,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -211,6 +212,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     BackHandler { if (!busy) close() }
 
     val scroll = rememberScrollState()
+    // While the note box is typed in, the Markdown buttons sit on top of the keyboard instead of scrolling away.
+    var noteFocused by remember { mutableStateOf(false) }
+    val toolsPinned = !preview && noteFocused && WindowInsets.isImeVisible
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
@@ -234,14 +238,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                             content = content.copy(text = Markdown.toggle(content.text, line))
                         })
                     } else {
-                        MarkdownToolbar { edit -> content = edit(content) }
+                        if (!toolsPinned) MarkdownToolbar { edit -> content = edit(content) }
                         OutlinedTextField(content, { typed ->
                                 // Enter in a checklist or list item starts the next item (or ends the list on an empty one).
                                 val next = Markdown.continueList(content.text, typed.text, typed.selection.start)
                                     ?.takeIf { typed.selection.collapsed && continueLists }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
                                 content = if (next.text.length <= Notes.MAX_CONTENT) next else content
                             },
-                            Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 8,
+                            Modifier.fillMaxWidth().onFocusChanged { noteFocused = it.isFocused }, label = { Text("Note") }, minLines = 8,
                             textStyle = MaterialTheme.typography.bodyLarge,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                         Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist.",
@@ -312,6 +316,10 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ delete() }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
                     saveEnabled = canSave && (unsaved || deletedElsewhere)) { SaveLabel(busy, saved = justSaved && !unsaved) }
+            }
+            if (toolsPinned) {
+                HorizontalDivider()
+                MarkdownToolbar(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) { edit -> content = edit(content) }
             }
         }
     }
@@ -386,7 +394,7 @@ internal fun noteReminderLabel(timestamp: Long): String {
 
 // Bold, italic, strike, heading, list, checklist and code, applied to the selection (or where the cursor is).
 @Composable
-private fun MarkdownToolbar(apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
+private fun MarkdownToolbar(modifier: Modifier = Modifier, apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
     fun wrap(mark: String): (TextFieldValue) -> TextFieldValue = { v ->
         Markdown.wrap(v.text, v.selection.start, v.selection.end, mark).let { v.copy(text = it.text, selection = TextRange(it.start, it.end)) }
     }
@@ -399,7 +407,8 @@ private fun MarkdownToolbar(apply: ((TextFieldValue) -> TextFieldValue) -> Unit)
         Triple("H", "Heading", prefix("# ")), Triple("•", "Bulleted list", prefix("- ")),
         Triple("\u2611\uFE0E", "Checklist", prefix("- [ ] ")), Triple("</>", "Code", wrap("`")),
     )
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier.horizontalScroll(rememberScrollState()).semantics { contentDescription = "Formatting" },
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tools.forEach { (label, name, edit) ->
             OutlinedButton(onClick = { apply(edit) }, modifier = Modifier.semantics { contentDescription = name }.defaultMinSize(minWidth = 44.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp)) {

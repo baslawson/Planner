@@ -369,6 +369,55 @@ class NotesUiTest {
         await { notes().singleOrNull()?.content == "- [ ] test\n- [ ] eggs\ndone" }
     }
 
+    // The focused window's own view of the keyboard: where its top is on screen, or null while it's down.
+    private fun imeTop(): Int? {
+        var top: Int? = null
+        ins.runOnMainSync {
+            android.view.inspector.WindowInspector.getGlobalWindowViews().firstOrNull { it.hasWindowFocus() }?.let { v ->
+                val ime = v.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
+                val loc = IntArray(2); v.getLocationOnScreen(loc)
+                if (ime > 0) top = loc[1] + v.height - ime
+            }
+        }
+        return top
+    }
+    private fun bounds(text: String) = android.graphics.Rect().also { find(text)!!.getBoundsInScreen(it) }
+    private fun realTap(field: AccessibilityNodeInfo) {
+        val r = android.graphics.Rect().also(field::getBoundsInScreen); shell("input tap ${r.centerX()} ${r.centerY()}"); Thread.sleep(1500)
+    }
+
+    // Typing in the note box: B, I, ☑… sit right on top of the keyboard (below Save), and still act on the selection.
+    // In the title box, or with the keyboard down, they go back above the note box.
+    @Test fun formattingButtonsSitOnTopOfTheKeyboard() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(0, "QA pinned")
+        type(1, "hello world")
+        val density = context.resources.displayMetrics.density
+        realTap(nodes().filter { it.isVisibleToUser && it.isEditable }[1])
+        await(8000) { imeTop() != null }
+        Thread.sleep(800)
+        val top = imeTop()!!
+        val bold = bounds("Bold")
+        screenshot("pinned-tools")
+        assertTrue("Bold ${bold.bottom} should touch the keyboard at $top", bold.bottom <= top + 2 && top - bold.bottom <= 16 * density)
+        assertTrue("Bold ${bold.top} should be below Save ${bounds("Save").bottom}", bold.top >= bounds("Save").bottom)
+        listOf("Italic", "Strikethrough", "Heading", "Bulleted list", "Checklist", "Code").forEach { assertNotNull(it, find(it)) }
+        // A selected word, then Bold: the note box keeps the keyboard and the buttons stay put.
+        nodes().filter { it.isVisibleToUser && it.isEditable }[1].performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0); putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, 5) })
+        Thread.sleep(300)
+        click("Bold"); awaitNote("**hello** world")
+        await(5000) { imeTop() != null && find("Bold") != null && bounds("Bold").bottom <= imeTop()!! + 2 }
+        // The title box: the buttons go back above the note box.
+        realTap(nodes().filter { it.isVisibleToUser && it.isEditable }[0])
+        await(8000) { find("Bold") != null && nodes().filter { it.isVisibleToUser && it.isEditable }.size > 1 &&
+            bounds("Bold").bottom <= android.graphics.Rect().also(nodes().filter { it.isVisibleToUser && it.isEditable }[1]::getBoundsInScreen).top }
+        screenshot("tools-in-place")
+        click("Save")
+        await { notes().singleOrNull()?.content == "**hello** world" }
+    }
+
     // "Continue lists on Enter" off: Enter is a plain new line again; the choice is remembered.
     @Test fun continueListsSwitchTurnsItOff() {
         try {
