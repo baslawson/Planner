@@ -85,13 +85,15 @@ fun pushUntilReadable(color: Color, background: Color, target: Color, startAmoun
     return result
 }
 
+// WCAG contrast ratio of two colours.
 fun contrastRatio(a: Color, b: Color): Float {
     val la = a.luminance() + 0.05f
     val lb = b.luminance() + 0.05f
     return maxOf(la, lb) / minOf(la, lb)
 }
 
-private val RAINBOW = Brush.sweepGradient(
+// The rainbow on every "pick your own colour" swatch until a colour of one's own is chosen.
+internal val CUSTOM_COLOUR_BRUSH = Brush.sweepGradient(
     listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red),
 )
 
@@ -120,7 +122,7 @@ fun PlanColorPicker(
         }
         if (onPickCustom != null) {
             Swatch(
-                modifier = if (custom != null) Modifier.background(custom) else Modifier.background(RAINBOW),
+                modifier = if (custom != null) Modifier.background(custom) else Modifier.background(CUSTOM_COLOUR_BRUSH),
                 chosen = custom != null,
                 description = if (custom != null) "Custom colour, tap to change" else "Pick a custom colour",
                 onClick = onPickCustom,

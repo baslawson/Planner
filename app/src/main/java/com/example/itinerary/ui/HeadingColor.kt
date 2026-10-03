@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
@@ -103,11 +102,6 @@ internal val HEADING_SWATCHES = listOf(
     HeadingSwatch("White", Color(0xFFF2F2F2)),
 )
 
-// Rainbow used on the "pick your own" swatch until a colour of one's own is chosen.
-internal val HEADING_RAINBOW = Brush.sweepGradient(
-    listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red),
-)
-
 // The Settings block for the heading colour: a row of swatches (the default first) plus one for a colour of one's own,
 // and a sample heading that shows the result.
 @OptIn(ExperimentalLayoutApi::class)
@@ -137,7 +131,7 @@ fun HeadingColorSettingsSection(argb: Int, onChange: (Int) -> Unit) {
             )
         }
         Swatch(
-            modifier = if (ready == null) Modifier.background(current) else Modifier.background(HEADING_RAINBOW),
+            modifier = if (ready == null) Modifier.background(current) else Modifier.background(CUSTOM_COLOUR_BRUSH),
             chosen = ready == null,
             description = if (ready == null) "Custom colour, tap to change" else "Pick a custom colour",
             onClick = { picking = true },

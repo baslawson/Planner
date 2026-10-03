@@ -22,7 +22,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -461,10 +460,5 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
 }
 
 /** White or black, whichever reads better on [background] (4.5:1 or more on all the card colours): a card's text and marks. */
-internal fun onColour(background: Color): Color = if (contrast(Color.White, background) >= contrast(Color.Black, background)) Color.White else Color.Black
-
-// WCAG contrast ratio of two colours.
-private fun contrast(a: Color, b: Color): Float {
-    val la = a.luminance() + 0.05f; val lb = b.luminance() + 0.05f
-    return maxOf(la, lb) / minOf(la, lb)
-}
+internal fun onColour(background: Color): Color =
+    if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) Color.White else Color.Black

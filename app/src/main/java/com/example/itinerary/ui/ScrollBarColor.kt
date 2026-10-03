@@ -84,7 +84,7 @@ fun ScrollBarSettingsSection(argb: Int, seeThroughPercent: Int, onColorChange: (
             )
         }
         Swatch(
-            modifier = if (ready == null) Modifier.background(current) else Modifier.background(HEADING_RAINBOW),
+            modifier = if (ready == null) Modifier.background(current) else Modifier.background(CUSTOM_COLOUR_BRUSH),
             chosen = ready == null,
             description = if (ready == null) "Custom scroll bar colour, tap to change" else "Pick a custom scroll bar colour",
             onClick = { picking = true },

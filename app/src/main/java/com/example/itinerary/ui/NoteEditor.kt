@@ -470,8 +470,7 @@ internal fun ColorChoices(selected: Int?, onCustom: () -> Unit, onSelect: (Int?)
         // A colour of the note's own, chosen with Custom: a swatch of its own, picked like the others.
         if (selected != null && selected !in Notes.colors)
             Swatch("Custom colour (chosen)", true, Modifier.background(Color(selected)), onColour(Color(selected)), onClick = onCustom)
-        Swatch("Custom colour", false, Modifier.background(androidx.compose.ui.graphics.Brush.sweepGradient(
-            listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))), Color.White, onClick = onCustom) {
+        Swatch("Custom colour", false, Modifier.background(CUSTOM_COLOUR_BRUSH), Color.White, onClick = onCustom) {
             Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
         }
     }
