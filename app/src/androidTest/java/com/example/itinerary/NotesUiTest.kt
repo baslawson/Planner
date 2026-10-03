@@ -425,4 +425,88 @@ class NotesUiTest {
         await { notes().any { it.title == "QA three" && it.notebook == "Home" && it.tags == listOf("errands", "ideas") } }
         assertEquals(listOf("Home", "Work"), Notes.notebooks(notes()))
     }
+
+    // A finger on the screen: down at [from], held [holdMs], moved to [to] in small steps, then lifted.
+    private fun touch(from: android.graphics.Point, holdMs: Long, to: android.graphics.Point = from) {
+        val start = SystemClock.uptimeMillis()
+        fun send(action: Int, x: Int, y: Int) {
+            val e = android.view.MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, x.toFloat(), y.toFloat(), 0)
+            e.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            ins.uiAutomation.injectInputEvent(e, true); e.recycle()
+        }
+        send(android.view.MotionEvent.ACTION_DOWN, from.x, from.y)
+        Thread.sleep(holdMs)
+        val steps = 30
+        for (i in 1..steps) { send(android.view.MotionEvent.ACTION_MOVE, from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps); Thread.sleep(20) }
+        Thread.sleep(300)
+        send(android.view.MotionEvent.ACTION_UP, to.x, to.y)
+        Thread.sleep(500)
+    }
+    private fun centre(text: String): android.graphics.Point {
+        await { find(text) != null }
+        val r = android.graphics.Rect(); find(text)!!.getBoundsInScreen(r); return android.graphics.Point(r.centerX(), r.centerY())
+    }
+    private fun hold(text: String) = touch(centre(text), 900)
+    private fun pageOrder() = notes().filter { !it.archived }.sortedWith(Notes.order).map { it.title }
+
+    // Long press held still selects; the bar selects all or none, and pins, archives, moves and deletes them together.
+    @Test fun longPressSelectsAndActsOnSeveralNotes() {
+        runBlocking { listOf("QA a", "QA b", "QA c").forEach { app.repository.saveNote(PlannerNote(title = it), create = true) } }
+        openNotes()
+        await { find("QA a") != null && find("QA c") != null }
+        hold("QA a"); await { find("1 selected") != null }
+        assertNull(find("New note")) // no new note while selecting
+        click("QA b"); await { find("2 selected") != null }
+        click("QA b"); await { find("1 selected") != null } // a tap while selecting unticks
+        click("Select all"); await { find("3 selected") != null }
+        screenshot("notes-selected")
+        click("Select all"); await { find("Cancel") == null && find("New note") != null } // all off: selection over
+        // Pin them all.
+        hold("QA a"); click("Select all"); await { find("3 selected") != null }
+        click("Pin"); await { notes().all { it.pinned } && find("Cancel") == null }
+        // Archive two.
+        hold("QA a"); click("QA b"); await { find("2 selected") != null }
+        click("Archive"); await { notes().count { it.archived } == 2 && find("Cancel") == null }
+        show("Archive"); await { find("QA a") != null && find("QA b") != null && find("QA c") == null }
+        show("All notes"); await { find("QA c") != null }
+        // Move to a notebook.
+        hold("QA c"); await { find("1 selected") != null }
+        click("Move to notebook"); await { find("Move 1 note to a notebook") != null }
+        typeInto("Notebook", "Work"); click("Move")
+        await { notes().single { it.title == "QA c" }.notebook == "Work" && find("Cancel") == null }
+        // Back leaves the selection.
+        hold("QA c"); await { find("1 selected") != null }
+        ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        await { find("Cancel") == null && find("Search notes") != null }
+        // Delete asks first, listing the notes; Keep notes changes nothing.
+        hold("QA c"); click("Delete 1 note"); await { find("Delete 1 note?") != null }
+        screenshot("notes-delete-warning")
+        click("Keep notes"); await { find("Delete 1 note?") == null }
+        assertEquals(3, notes().size)
+        click("Delete 1 note"); await { find("Delete 1 note?") != null }; click("Delete 1 note")
+        await { notes().none { it.title == "QA c" } && find("Cancel") == null }
+        assertEquals(2, notes().size)
+    }
+
+    // Long press held and moved drags a card to a new place, kept after a fresh start; not while searching.
+    @Test fun dragPutsANoteWhereItIsDropped() {
+        runBlocking { listOf("QA one", "QA two", "QA three").forEach { app.repository.saveNote(PlannerNote(title = it), create = true); Thread.sleep(5) } }
+        openNotes()
+        await { find("QA one") != null && find("QA three") != null }
+        assertEquals(listOf("QA three", "QA two", "QA one"), pageOrder()) // newest at the top
+        screenshot("drag-before")
+        // "QA one" (last) dropped on "QA three" (first).
+        touch(centre("QA one"), 900, centre("QA three"))
+        await { pageOrder() == listOf("QA one", "QA three", "QA two") }
+        await { find("Cancel") == null } // a drag doesn't select
+        screenshot("drag-after")
+        // While searching, the cards stay where they are.
+        reveal("Search notes")
+        val search = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Search notes" } }
+        search.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "QA") })
+        Thread.sleep(500)
+        touch(centre("QA two"), 900, centre("QA one"))
+        Thread.sleep(800)
+        assertEquals(listOf("QA one", "QA three", "QA two"), pageOrder())
+    }
 }

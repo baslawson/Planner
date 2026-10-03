@@ -93,6 +93,27 @@ class NotesTest {
         assertEquals("Garden", Notes.existingSpelling(names, "Garden"))
     }
 
+    @Test fun notesKeepTheOrderTheyAreDraggedInto() {
+        val a = PlannerNote(id = "a", title = "A", position = -30, modified = 1)
+        val b = PlannerNote(id = "b", title = "B", position = -20, modified = 3)
+        val c = PlannerNote(id = "c", title = "C", position = -10, modified = 2)
+        val pinned = PlannerNote(id = "p", title = "P", position = 5, pinned = true)
+        // Pinned first, then by place, whatever changed last.
+        assertEquals(listOf("p", "a", "b", "c"), listOf(c, b, pinned, a).sortedWith(Notes.order).map { it.id })
+        // A new note goes above all of them.
+        assertEquals(-31L, Notes.topPosition(listOf(a, b, c, pinned)))
+        assertEquals(-1L, Notes.topPosition(emptyList()))
+        // Dragging C to the top: the three swap places among themselves; nothing else moves.
+        assertEquals(mapOf("c" to -30L, "a" to -20L, "b" to -10L), Notes.reorder(listOf(a, b, c), listOf("c", "a", "b")))
+        // Only the notes that move are changed.
+        assertEquals(mapOf("b" to -10L, "c" to -20L), Notes.reorder(listOf(a, b, c), listOf("a", "c", "b")))
+        // A filtered page (A and C shown, B in another notebook): B keeps its place.
+        assertEquals(mapOf("c" to -30L, "a" to -10L), Notes.reorder(listOf(a, c), listOf("c", "a")))
+        // Notes never placed (equal places) are spread out first.
+        val x = PlannerNote(id = "x", title = "X"); val y = PlannerNote(id = "y", title = "Y")
+        assertEquals(mapOf("x" to 1L), Notes.reorder(listOf(x, y), listOf("y", "x")))
+    }
+
     @Test fun toolbarWrapsAndPrefixes() {
         assertEquals(Markdown.Edit("a **bc** d", 4, 6), Markdown.wrap("a bc d", 2, 4, "**"))
         assertEquals(Markdown.Edit("a bc d", 2, 4), Markdown.wrap("a **bc** d", 4, 6, "**"))

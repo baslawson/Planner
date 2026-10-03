@@ -271,7 +271,9 @@ class Repository(
         if (!create && expected != null && old != null && old != expected) throw NoteChangedException(old)
         // A changed reminder time ends its snooze, as a task's does.
         val withSnooze = note.copy(snoozedUntil = if (note.reminderAt != null && note.reminderAt == old?.reminderAt) old.snoozedUntil else null)
-        val clean = Notes.clean(withSnooze).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
+        // A new note goes to the top of the page; an edited one keeps the place it was dragged to.
+        val placed = if (create && old == null) withSnooze.copy(position = Notes.topPosition(noteDao.all())) else withSnooze.copy(position = old?.position ?: withSnooze.position)
+        val clean = Notes.clean(placed).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
         require(Notes.hasContent(clean)) { "An empty note can't be saved" }
         Notes.validate(clean)
         withContext(NonCancellable) {
@@ -300,14 +302,39 @@ class Repository(
 
     suspend fun allNotes(): List<PlannerNote> = noteDao.all()
 
+    // Several notes changed at once from the Notes page's selection (pin, archive, move to a notebook), all or none.
+    suspend fun updateNotes(ids: Collection<String>, change: (PlannerNote) -> PlannerNote) = changes.withLock {
+        withContext(NonCancellable) {
+            val changed = db.withTransaction {
+                ids.mapNotNull { id ->
+                    val note = noteDao.byId(id) ?: return@mapNotNull null
+                    val next = Notes.clean(change(note)).takeIf { it != note } ?: return@mapNotNull null
+                    Notes.validate(next)
+                    noteDao.update(next); next
+                }
+            }
+            if (changed.isNotEmpty()) afterCommit(noteIds = changed.map { it.id })
+        }
+    }
+
+    // Notes dragged into a new order: [places] from Notes.reorder. Their words didn't change, so neither does their time.
+    suspend fun placeNotes(places: Map<String, Long>) = changes.withLock {
+        if (places.isEmpty()) return@withLock
+        withContext(NonCancellable) {
+            db.withTransaction { places.forEach { (id, position) -> noteDao.byId(id)?.let { noteDao.update(it.copy(position = position)) } } }
+            afterCommit(noteIds = places.keys.toList(), notify = false)
+        }
+    }
+
     // Note sync: [note] put in place exactly as given (Nextcloud's time and all), only if the note is still [expected]
     // (null: not there yet), so an edit made meanwhile is never overwritten. True when it was.
     suspend fun putSyncedNote(note: PlannerNote, expected: PlannerNote?): Boolean = changes.withLock {
         withContext(NonCancellable) {
-            val clean = Notes.clean(note)
-            Notes.validate(clean)
-            val current = noteDao.byId(clean.id)
+            val current = noteDao.byId(note.id)
             if (current != expected) return@withContext false
+            // Nextcloud has no order: a note new here goes to the top, a known one keeps its place.
+            val clean = Notes.clean(note.copy(position = current?.position ?: Notes.topPosition(noteDao.all())))
+            Notes.validate(clean)
             if (current == null) noteDao.insert(clean) else noteDao.update(clean)
             afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && current.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
             true
@@ -329,17 +356,21 @@ class Repository(
     }
 
     // To Recently deleted, with the Undo bar, as a task goes.
-    suspend fun deleteNote(id: String) = changes.withLock {
+    suspend fun deleteNote(id: String) = deleteNotes(listOf(id))
+
+    // Several notes to Recently deleted together, with one Undo bar for all of them.
+    suspend fun deleteNotes(ids: Collection<String>) = changes.withLock {
         withContext(NonCancellable) {
             val bundle = archiving { archived ->
-                val note = noteDao.byId(id) ?: return@archiving null
-                val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), notes = listOf(note))
+                val notes = ids.mapNotNull { noteDao.byId(it) }
+                if (notes.isEmpty()) return@archiving null
+                val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), notes = notes)
                 archive(deleted, archived, emptyList())
-                noteDao.delete(id)
+                notes.forEach { noteDao.delete(it.id) }
                 deleted
             } ?: return@withContext
             _pendingDeletions.value += bundle
-            afterCommit(noteIds = listOf(id))
+            afterCommit(noteIds = bundle.notes.map { it.id })
         }
     }
 

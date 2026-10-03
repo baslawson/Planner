@@ -171,4 +171,34 @@ class NotesDataTest {
             assertEquals(note, db.noteDao().all().single()); db.close()
         } finally { context.deleteDatabase(name) }
     }
+
+    @Test fun version32UpgradeKeepsTheNotesInTheOrderTheyShowed() = runBlocking {
+        val name = "notes-upgrade-33.db"
+        context.deleteDatabase(name)
+        try {
+            var db = Room.databaseBuilder(context, AppDatabase::class.java, name).build()
+            val older = PlannerNote(id = "older", title = "Older", modified = 1_000, created = 1_000)
+            val newer = PlannerNote(id = "newer", title = "Newer", modified = 2_000, created = 2_000)
+            db.noteDao().insertAll(listOf(older, newer)); db.close()
+            // Back to version 32: no place column.
+            val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
+            raw.execSQL("ALTER TABLE notes DROP COLUMN position"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 32; raw.close()
+            db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
+            val upgraded = db.noteDao().all()
+            assertEquals(listOf(-1_000L, -2_000L), upgraded.sortedBy { it.id == "newer" }.map { it.position })
+            assertEquals(listOf("Newer", "Older"), upgraded.sortedWith(Notes.order).map { it.title })
+            db.close()
+            // Reopened as an ordinary version 33 database (Room checks the table matches what it expects).
+            db = Room.databaseBuilder(context, AppDatabase::class.java, name).build()
+            assertEquals(2, db.noteDao().all().size); db.close()
+        } finally { context.deleteDatabase(name) }
+    }
+
+    @Test fun aNotesPlaceIsBackedUpAndOlderFilesKeepTheOldOrder() {
+        val note = PlannerNote(id = "n", title = "Placed", position = -42, modified = 100)
+        assertEquals(-42L, NoteCodec.decode(NoteCodec.encode(listOf(note))).single().position)
+        // A file from before notes had places: newest change first, as the page showed them then.
+        val old = NoteCodec.encode(listOf(note)).apply { getJSONObject(0).remove("position") }
+        assertEquals(-100L, NoteCodec.decode(old).single().position)
+    }
 }

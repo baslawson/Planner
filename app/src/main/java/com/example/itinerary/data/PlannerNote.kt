@@ -27,6 +27,9 @@ data class PlannerNote(
     val attachments: List<Attachment> = emptyList(),
     val reminderAt: Long? = null,
     val snoozedUntil: Long? = null,
+    // Its place on the Notes page, set by dragging (lowest first, pinned notes above the rest); stays on the phone.
+    // 0 = not placed yet: the repository puts a new note at the top.
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
 )
 
 /** When the note's reminder is due now: the snooze if there is one, else [PlannerNote.reminderAt]. */
@@ -77,8 +80,24 @@ object Notes {
     val colors: List<Int> = listOf(0xFF1B5E20, 0xFF00695C, 0xFF0D47A1, 0xFF4A148C, 0xFF880E4F, 0xFFB71C1C, 0xFFE65100, 0xFF5D4037)
         .map { it.toInt() }
 
-    // Pinned first, then the most recently changed.
-    val order: Comparator<PlannerNote> = compareByDescending<PlannerNote> { it.pinned }.thenByDescending { it.modified }.thenBy { it.id }
+    // Pinned first, then the order dragged into (new notes at the top).
+    val order: Comparator<PlannerNote> = compareByDescending<PlannerNote> { it.pinned }.thenBy { it.position }
+        .thenByDescending { it.modified }.thenBy { it.id }
+
+    /** The place for a note going to the top: above every note there is. */
+    fun topPosition(notes: Collection<PlannerNote>): Long = (notes.minOfOrNull { it.position } ?: 0L).coerceAtMost(0L) - 1
+
+    /**
+     * New places after [shown] (as on the page) was dragged into [newOrder]: the notes shown take each other's places, so
+     * notes not shown (another notebook, the archive) keep theirs. Only the notes whose place changes are returned.
+     */
+    fun reorder(shown: List<PlannerNote>, newOrder: List<String>): Map<String, Long> {
+        val slots = shown.map { it.position }.sorted()
+        val byId = shown.associateBy { it.id }
+        // Places must differ for the order to hold: equal ones (never dragged) are spread out first.
+        val distinct = if (slots.distinct().size == slots.size) slots else slots.indices.map { slots.first() + it }
+        return newOrder.mapIndexedNotNull { index, id -> byId[id]?.takeIf { it.position != distinct[index] }?.let { id to distinct[index] } }.toMap()
+    }
 
     fun visible(notes: List<PlannerNote>, filter: NoteFilter, query: String): List<PlannerNote> {
         val needle = Search.normalize(query.trim())
@@ -182,7 +201,8 @@ object NoteCodec {
             .put("tags", JSONArray(note.tags))
             .put("attachments", DraftCodec.attachments(note.attachments))
             .put("reminderAt", note.reminderAt ?: JSONObject.NULL)
-            .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)) }
+            .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)
+            .put("position", note.position)) }
     }
 
     fun decode(array: JSONArray): List<PlannerNote> = decodeLenient(array).onEach(Notes::validate)
@@ -201,7 +221,9 @@ object NoteCodec {
             if (!value.has("color") || value.isNull("color")) null else value.getInt("color"),
             value.optBoolean("pinned"), value.optBoolean("archived"), created, time("modified") ?: created,
             StringListCodec.decode(value.optJSONArray("tags") ?: JSONArray()),
-            DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"))
+            DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"),
+            // Older files have no place: most recently changed first, as the page sorted them then.
+            time("position") ?: -(time("modified") ?: created))
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
             .let(Notes::clean)
     }

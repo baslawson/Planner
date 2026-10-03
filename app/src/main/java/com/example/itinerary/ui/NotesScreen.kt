@@ -3,6 +3,7 @@ import com.example.itinerary.ui.MatrixFilterChip as FilterChip
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -27,6 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,6 +76,27 @@ fun NotesScreen(onBack: () -> Unit) {
         if (it is NoteFilter.Notebook && it.name !in notebooks || it is NoteFilter.Tag && it.name !in tags) NoteFilter.All else it
     }
     val shown = remember(all, filter, query) { Notes.visible(all, filter, query) }
+
+    // Long press, held still: notes ticked for Pin, Archive, Move to notebook or Delete together. Kept across rotation;
+    // cleared when the filter or the search changes, and a note that leaves the page leaves the selection.
+    var selectedIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var selectionFor by rememberSaveable { mutableStateOf("$filterKey|$query") }
+    LaunchedEffect(filterKey, query) { if (selectionFor != "$filterKey|$query") { selectionFor = "$filterKey|$query"; selectedIds = emptyList() } }
+    LaunchedEffect(shown, notes) { if (notes != null) selectedIds.filter { id -> shown.any { it.id == id } }.let { if (it != selectedIds) selectedIds = it } }
+    val selecting = selectedIds.isNotEmpty()
+    androidx.activity.compose.BackHandler(selecting) { selectedIds = emptyList() }
+    fun toggle(id: String) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
+
+    // Long press, held and moved: the card is dragged to a new place. While it moves (and until the saved order comes
+    // back) the page shows the dragged order; not while searching (only matches show) or selecting.
+    val drag = remember { NoteDragState() }
+    val displayed = drag.order?.let { order -> shown.associateBy { it.id }.let { byId -> order.mapNotNull { byId[it] } } }
+        ?.takeIf { it.size == shown.size } ?: shown
+    val currentShown by rememberUpdatedState(shown)
+    val currentDisplayed by rememberUpdatedState(displayed)
+    LaunchedEffect(shown) { if (drag.id == null && drag.order != null && (shown.map { it.id } == drag.order || shown.size != drag.order?.size)) drag.order = null }
+    val canDrag = query.isBlank() && !selecting
+    val currentCanDrag by rememberUpdatedState(canDrag)
     // ...and stays there, rather than jumping back if a note joins that notebook or tag again later.
     LaunchedEffect(filter, notes) { if (notes != null && filter == NoteFilter.All && filterKey != "all") filterKey = "all" }
     // A note open in the editor that vanishes (deleted by sync, say) keeps its editor, which then offers to save it anew.
@@ -121,8 +145,11 @@ fun NotesScreen(onBack: () -> Unit) {
                     },
                 )
             },
+            bottomBar = {
+                if (selecting) NoteSelectionBar(displayed.filter { it.id in selectedIds }, displayed, notebooks) { selectedIds = it }
+            },
             floatingActionButton = {
-                if (filter != NoteFilter.Archive) ExtendedFloatingActionButton(
+                if (filter != NoteFilter.Archive && !selecting) ExtendedFloatingActionButton(
                     onClick = { editingNew = true; editingId = UUID.randomUUID().toString() },
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) }, text = { Text("New note") },
                     containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary,
@@ -165,16 +192,46 @@ fun NotesScreen(onBack: () -> Unit) {
                             else -> "No notes yet. Tap New note to write one."
                         },
                         Modifier.padding(horizontal = 16.dp, vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> LazyVerticalStaggeredGrid(
+                    else -> {
+                    val grid = rememberLazyStaggeredGridState()
+                    val scope = rememberCoroutineScope()
+                    val haptic = rememberLongPressHaptic()
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val slop = androidx.compose.ui.platform.LocalViewConfiguration.current.touchSlop
+                    val edge = with(density) { 64.dp.toPx() }
+                    LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Adaptive(160.dp),
-                        state = rememberLazyStaggeredGridState(),
+                        state = grid,
                         modifier = Modifier.fillMaxSize(),
                         // Room under the last cards for the New note button.
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 96.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalItemSpacing = 10.dp,
                     ) {
-                        items(shown, key = { it.id }) { note -> NoteCard(note, onOpen = { editingNew = false; editingId = note.id }) }
+                        items(displayed, key = { it.id }) { note ->
+                            NoteCard(note, selecting = selecting, selected = note.id in selectedIds,
+                                // The dragged card follows the finger, not the grid's slide animation.
+                                modifier = (if (drag.id == note.id) Modifier else Modifier.animateItem()).noteLongPress(note, drag, grid, { currentDisplayed }, { currentCanDrag }, slop, edge,
+                                    onSelect = { toggle(note.id) },
+                                    onDrop = { order ->
+                                        val places = Notes.reorder(currentShown, order)
+                                        app.appScope.launch {
+                                            try { repo.placeNotes(places) }
+                                            catch (e: CancellationException) { throw e }
+                                            catch (_: Exception) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { drag.order = null
+                                                android.widget.Toast.makeText(context, "Couldn't move this note. Please try again.", android.widget.Toast.LENGTH_LONG).show() } }
+                                        }
+                                    },
+                                    haptic = haptic, scroll = { by -> scope.launch { grid.scrollBy(by) } }),
+                                onOpen = {
+                                    // The touch that ended a long press isn't also a tap. The card's click sees the lift first,
+                                    // while the long press is still on (drag.id), so both are checked.
+                                    if (drag.id != null || android.os.SystemClock.uptimeMillis() - drag.releasedAt < 400) Unit
+                                    else if (selecting) toggle(note.id) else { editingNew = false; editingId = note.id }
+                                },
+                                onSelect = { toggle(note.id) })
+                        }
+                    }
                     }
                 }
             }
@@ -198,7 +255,7 @@ fun NotesScreen(onBack: () -> Unit) {
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
+private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, modifier: Modifier, onOpen: () -> Unit, onSelect: () -> Unit) {
     val tint = note.color?.let { Color(it) }
     // White or black, whichever reads better on the card's colour (4.5:1 or more on all of them).
     val text = tint?.let { if (contrast(Color.White, it) >= contrast(Color.Black, it)) Color.White else Color.Black } ?: MaterialTheme.colorScheme.onSurface
@@ -207,8 +264,12 @@ private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = tint ?: MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, if (tint != null) tint else MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClickLabel = "Open note", onClick = onOpen),
+        border = if (selected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+            else BorderStroke(1.dp, if (tint != null) tint else MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.fillMaxWidth()
+            .combinedClickable(onClickLabel = if (selecting) (if (selected) "Deselect note" else "Select note") else "Open note", onClick = onOpen)
+            // The long press itself is the card's own gesture (select, or drag); this offers selecting to screen readers.
+            .semantics { onLongClick("Select note") { onSelect(); true }; if (selecting) this.selected = selected },
     ) {
         Column(Modifier.padding(start = 14.dp, top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -216,7 +277,8 @@ private fun NoteCard(note: PlannerNote, onOpen: () -> Unit) {
                     fontWeight = FontWeight.Bold, color = text, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 if (note.pinned) Icon(Icons.Filled.Star, contentDescription = "Pinned", tint = if (tint != null) Color.White else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 8.dp).size(18.dp))
-                NoteActionsMenu(note, label, text)
+                if (selecting) Checkbox(checked = selected, onCheckedChange = null, modifier = Modifier.padding(4.dp))
+                else NoteActionsMenu(note, label, text)
             }
             Column(Modifier.padding(end = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val body = remember(note.content) { Markdown.plain(note.content).lines().filter { it.isNotBlank() } }
