@@ -272,7 +272,10 @@ private fun ItemEditorForm(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { disposed = true } }
+    // B1: the draft is written off the main thread a moment after typing pauses. What is still waiting goes to disk at
+    // once when the editor leaves and when Planner goes to the background, before Android might close it.
+    DisposableEffect(Unit) { onDispose { disposed = true; runCatching { draftStore.flush() } } }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_STOP) { runCatching { draftStore.flush() } }
 
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
         val file = pendingPhoto
@@ -496,6 +499,7 @@ private fun ItemEditorForm(
         checklist.all { it.text.isNotBlank() } && !busy
     // This holder is deliberately not Compose state: recording a successful write must not redraw the editor.
     val writtenDraft = remember { arrayOfNulls<JSONObject>(1) }
+    val draftError = "Couldn't protect this draft. Keep the app open and save your event."
     // Observe the derived state during composition, not only inside SideEffect. Otherwise an edit
     // handled by a nested text-field scope would not schedule the parent's persistence effect.
     val snapshotToWrite = draftSnapshot
@@ -503,8 +507,12 @@ private fun ItemEditorForm(
         val snapshot = snapshotToWrite
         if (snapshot != null && !committed) try {
             if (!keepDraft) { if (writtenDraft[0] != null) { draftStore.clear(); writtenDraft[0] = null } }
-            else if (writtenDraft[0] !== snapshot) { draftStore.write(snapshot); writtenDraft[0] = snapshot }
-        } catch (_: Exception) { error = "Couldn't protect this draft. Keep the app open and save your event." }
+            else if (writtenDraft[0] !== snapshot) {
+                // A write that fails says so as before, a moment later.
+                draftStore.schedule(snapshot) { android.os.Handler(android.os.Looper.getMainLooper()).post { error = draftError } }
+                writtenDraft[0] = snapshot
+            }
+        } catch (_: Exception) { error = draftError }
     }
     fun applyTemplate(content: TemplateContent) {
         val item = content.forDate(date)

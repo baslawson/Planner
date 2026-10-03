@@ -16,16 +16,30 @@ import java.time.LocalTime
  *  or undoing the edits clears it. */
 class EditorDraftStore(context: Context) {
     private val file = AtomicFile(File(context.filesDir, "editor-draft.json"))
-    @Synchronized fun read(): JSONObject? = if (!file.baseFile.exists()) null else
-        JSONObject(file.openRead().bufferedReader().use { it.readText() })
-    @Synchronized fun write(json: JSONObject) {
+    // A draft still waiting for the writer (B1) is the current one; a copy, so a reader can't change what is written.
+    fun read(): JSONObject? = (writer.pending(KEY) as JSONObject?)?.let { JSONObject(it.toString()) } ?: synchronized(lock) {
+        if (!file.baseFile.exists()) null else JSONObject(file.openRead().bufferedReader().use { it.readText() })
+    }
+    /** Written now, on this thread. */
+    fun write(json: JSONObject) = writer.now(KEY) { writeFile(json) }
+    /** Written off the main thread shortly after typing pauses ([flush] for at once); only the newest is written.
+     *  [json] must not change afterwards. */
+    fun schedule(json: JSONObject, onFailure: (Exception) -> Unit) = writer.schedule(KEY, json, onFailure) { writeFile(json) }
+    fun flush() = writer.flush()
+    /** Also drops a draft still waiting to be written, so none lands after this. */
+    fun clear() { writer.now(KEY) { synchronized(lock) { file.delete() } } }
+    private fun writeFile(json: JSONObject) = synchronized(lock) {
         val stream = file.startWrite()
         try { stream.write(json.toString().toByteArray()); file.finishWrite(stream) }
         catch (e: Throwable) { file.failWrite(stream); throw e }
     }
-    @Synchronized fun clear() { file.delete() }
 
     companion object {
+        private const val KEY = "event"
+        private val lock = Any()
+        // One for the process: the editor, the recovery check and the widget each make their own store.
+        private val writer = DraftWriter()
+
         // How many event editors are on screen now (D10), saved or not. A widget tap waits while one is open, because moving to
         // another screen would drop the editor without saving or discarding it.
         private val open = MutableStateFlow(0)

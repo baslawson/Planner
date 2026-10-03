@@ -285,15 +285,21 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     // What the editor opened with. Until something differs no draft is kept, so opening a task (or a new one) and
     // going Back leaves nothing to resume and doesn't block sharing; edits undone again clear it.
     val untouched = remember { encoded }
+    val draftError = "Couldn't protect this draft. Keep the app open and save your task."
     SideEffect {
         if (!finished && encoded != lastWritten[0]) {
             try {
-                if (draft == null && encoded == untouched) draftStore.clear(draftKey) else draftStore.write(draftKey, snapshot)
+                // B1: written off the main thread a moment after typing pauses; a failure says so a moment later.
+                if (draft == null && encoded == untouched) draftStore.clear(draftKey)
+                else draftStore.schedule(draftKey, encoded) { android.os.Handler(android.os.Looper.getMainLooper()).post { error = draftError } }
                 lastWritten[0] = encoded
             }
-            catch (_: Exception) { error = "Couldn't protect this draft. Keep the app open and save your task." }
+            catch (_: Exception) { error = draftError }
         }
     }
+    // What is still waiting goes to disk at once when the editor leaves and when Planner goes to the background.
+    DisposableEffect(Unit) { onDispose { runCatching { draftStore.flush() } } }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { runCatching { draftStore.flush() } }
     fun discard() {
         action { /* Explicit discard clears the draft and releases only unowned files. */ }
     }
