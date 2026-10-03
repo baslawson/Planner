@@ -147,4 +147,33 @@ class LockedBootTest {
         DirectBoot.afterRing(context.applicationContext as ItineraryApp)
         assertEquals(writtenAt, store.writtenAt())
     }
+
+    // D6-10: on Android 11 and lower a task shown while locked has no Done. After the unlock it is shown again with it
+    // (restoreActions, forced here so it runs on any Android: on 12+ the locked Done asks for the unlock first, and the
+    // one shown again doesn't).
+    @Test fun afterTheUnlockATaskShownLockedGetsItsDoneBack() = kotlinx.coroutines.runBlocking {
+        val app = context.applicationContext as ItineraryApp
+        val due = System.currentTimeMillis() - 2_000
+        val planned = PlannerTask(id = "qa-locked-done", title = "QA locked done", reminderAt = due)
+        app.repository.saveTask(planned)
+        fun shown() = manager.activeNotifications.firstOrNull { it.tag == "task:${planned.id}" }?.notification
+        try {
+            TaskReminderReceiver().onReceive(context, TaskReminderReceiver.intent(context, planned.id).putExtra("trigger", due)
+                .putExtra(TaskReminderReceiver.EXTRA_LOCKED_TITLE, planned.title))
+            Thread.sleep(500)
+            val locked = shown()!!.actions.map { it.title.toString() to (android.os.Build.VERSION.SDK_INT >= 31 && it.isAuthenticationRequired) }
+            assertEquals(if (android.os.Build.VERSION.SDK_INT >= 31) listOf("Done" to true, "Snooze" to false) else listOf("Snooze" to false), locked)
+            unlocked = true
+            DirectBoot.replayFired(app, app.repository, app.reminderScheduler.ledger, restoreActions = true,
+                showTask = { task, trigger -> com.example.itinerary.reminders.postTaskReminder(app, task.id, task.title, trigger, quiet = true) }) { _, _ -> }
+            Thread.sleep(500)
+            val after = shown()!!.actions
+            assertEquals(listOf("Done", "Snooze"), after.map { it.title.toString() })
+            if (android.os.Build.VERSION.SDK_INT >= 31) assertFalse(after.first().isAuthenticationRequired)
+            assertEquals(emptyList<Any>(), store.fired())
+        } finally {
+            manager.cancel("task:${planned.id}", 0)
+            app.repository.deleteTask(planned.id)
+        }
+    }
 }

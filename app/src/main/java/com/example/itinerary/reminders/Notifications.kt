@@ -95,6 +95,8 @@ fun postReminderNotification(
     snoozeToken: String? = null,
     // A "Ring until I stop it" reminder that Android didn't let ring (ReminderReceiver).
     couldNotRing: Boolean = false,
+    // Shown again (D6-10: with its Mark paid, after the unlock), without sounding a second time.
+    quiet: Boolean = false,
 ): Boolean {
     if (!notificationsEnabled(context)) return false
     val open = PendingIntent.getActivity(
@@ -112,6 +114,7 @@ fun postReminderNotification(
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setAutoCancel(true)
         .setContentIntent(open)
+        .setOnlyAlertOnce(quiet)
         .apply {
             if (reminderId != null && reminderId > 0) {
                 if (billToken != null) addDataAction(context, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))

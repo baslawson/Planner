@@ -76,7 +76,11 @@ suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
     val app = context.applicationContext as ItineraryApp
     if (!afterBoot) kotlinx.coroutines.delay(MissedReminders.SETTLE_MS)
     // RB-3: the alarms that rang before the first unlock aren't missed.
-    try { DirectBoot.replayFired(app, app.repository, app.reminderScheduler.ledger) { note, trigger -> postNoteReminder(app, note.id, trigger, note, quiet = true) } }
+    try {
+        DirectBoot.replayFired(app, app.repository, app.reminderScheduler.ledger,
+            showTask = { task, trigger -> postTaskReminder(app, task.id, task.title, trigger, quiet = true) },
+            showEvent = { item, reminder -> showEventAgain(app, item, reminder) }) { note, trigger -> postNoteReminder(app, note.id, trigger, note, quiet = true) }
+    }
     catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't record the reminders rung while locked", e) }
     val now = System.currentTimeMillis()
     try {
@@ -84,6 +88,22 @@ suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
             if (afterBoot) 0L else MissedReminders.openGraceMs(app.reminderScheduler.canScheduleExact()),
             app.reminderScheduler::disarm) { postMissedReminders(app, it, now, afterBoot) }
     } catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't show missed reminders", e) }
+}
+
+// D6-10: an event or bill reminder shown before the first unlock, shown again with its buttons (Mark paid), quietly.
+// Its title is kept ("Missed alarm: …" after a ringing one gave up), and the "couldn't ring" note if it had one.
+internal fun showEventAgain(context: Context, item: com.example.itinerary.data.ItineraryItem, reminder: com.example.itinerary.data.Reminder) {
+    val intent = reminderIntent(context, item, reminder)
+    val content = reminderContent(context, intent.extras) ?: return
+    val id = reminder.id.toInt()
+    val shown = runCatching {
+        context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.firstOrNull { it.tag == null && it.id == id }?.notification
+    }.getOrNull()
+    val title = shown?.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() ?: content.title
+    val couldNotRing = shown != null && shown.flags and android.app.Notification.FLAG_INSISTENT != 0
+    postReminderNotification(context, id, title, content.text, content.subText, reminder.id,
+        intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
+        couldNotRing = couldNotRing, quiet = true)
 }
 
 private const val MISSED_GROUP = "planner.missed"

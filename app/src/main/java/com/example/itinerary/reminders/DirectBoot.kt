@@ -59,9 +59,14 @@ object DirectBoot {
     /**
      * Once unlocked, before missed reminders are looked for: the alarms that rang while locked are taken off the ledger
      * (they aren't missed) and recorded as delivered, as ringing unlocked would have done. A note reminder shown then
-     * said only "Note reminder"; if it is still there it is shown again with the note's words ([showNote]).
+     * said only "Note reminder"; if it is still there it is shown again with the note's words ([showNote]). D6-10: on
+     * Android 11 and lower a task's Done and a bill's Mark paid were left out while locked (addDataAction), so with
+     * [restoreActions] a task or event notification still there is shown again with its buttons ([showTask], [showEvent]).
      */
     internal suspend fun replayFired(context: Context, repository: Repository, ledger: AlarmLedger,
+                                     restoreActions: Boolean = Build.VERSION.SDK_INT < 31,
+                                     showTask: (com.example.itinerary.data.PlannerTask, Long) -> Unit = { _, _ -> },
+                                     showEvent: (com.example.itinerary.data.ItineraryItem, com.example.itinerary.data.Reminder) -> Unit = { _, _ -> },
                                      showNote: (com.example.itinerary.data.PlannerNote, Long) -> Unit) {
         val store = store(context)
         val fired = store.fired()
@@ -69,8 +74,12 @@ object DirectBoot {
         fired.forEach { f ->
             try {
                 ledger.fired(f.key, f.at)
-                MissedReminders.eventId(f.key)?.let { repository.deliverReminder(it, f.trigger) { _, _ -> } }
-                MissedReminders.taskId(f.key)?.let { repository.deliverTaskReminder(it, f.trigger) {} }
+                MissedReminders.eventId(f.key)?.let { id -> repository.deliverReminder(id, f.trigger) { item, reminder ->
+                    if (restoreActions && notificationShown(context, null, id.toInt())) showEvent(item, reminder)
+                } }
+                MissedReminders.taskId(f.key)?.let { id -> repository.deliverTaskReminder(id, f.trigger) { task ->
+                    if (restoreActions && notificationShown(context, "task:$id")) showTask(task, f.trigger)
+                } }
                 MissedReminders.noteId(f.key)?.let { id ->
                     repository.deliverNoteReminder(id, f.trigger) { note -> if (notificationShown(context, "note:$id")) showNote(note, f.trigger) }
                 }
