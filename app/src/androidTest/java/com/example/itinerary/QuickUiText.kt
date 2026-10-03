@@ -4,8 +4,8 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * The text field to type into, found by its current text. In Quick entry, "" means the lowest empty field below Title
- * (When), or else the When box, whose text is then replaced
+ * The text field to type into, found by its current text. In Quick entry, "" means the lowest empty field other than
+ * Title (When), or else the When box, whose text is then replaced
  * (an empty field may report null or its placeholder). Typing a whole entry into Title would never be read as a date.
  */
 /**
@@ -22,9 +22,20 @@ internal val android.app.UiAutomation.freshRoot: AccessibilityNodeInfo?
 internal fun pickEditable(nodes: List<AccessibilityNodeInfo>, old: String): AccessibilityNodeInfo? {
     val visible = nodes.filter { it.isVisibleToUser && it.isEditable }
     val quickEntry = nodes.any { it.isVisibleToUser && it.text?.toString() == "Quick entry" && !it.isClickable }
-    if (old.isEmpty() && quickEntry && visible.size >= 2) {
-        val belowTitle = visible.sortedBy { Rect().also(it::getBoundsInScreen).top }.drop(1)
-        return belowTitle.lastOrNull { it.text.isNullOrEmpty() } ?: belowTitle.first()
+    if (old.isEmpty() && quickEntry) {
+        // Leave out Title by its label, not by being the highest field: the dialog slides up while the keyboard opens,
+        // and fields read a moment apart can swap places on screen (3 Oct: the entry was typed into Title once).
+        // Until both fields are there, wait rather than fall back to the first empty field, which is Title.
+        val rest = visible.filterNot { field -> (0 until field.childCount).any { field.getChild(it)?.text?.toString() == "Title" } }
+        if (rest.size < visible.size) {
+            if (rest.isEmpty()) return null
+            val belowTitle = rest.sortedBy { Rect().also(it::getBoundsInScreen).top }
+            return belowTitle.lastOrNull { it.text.isNullOrEmpty() } ?: belowTitle.first()
+        }
+        if (visible.size >= 2) { // no Title label read: the highest field is taken as Title, as before
+            val belowTitle = visible.sortedBy { Rect().also(it::getBoundsInScreen).top }.drop(1)
+            return belowTitle.lastOrNull { it.text.isNullOrEmpty() } ?: belowTitle.first()
+        }
     }
     return visible.firstOrNull { (it.text?.toString() ?: "") == old }
 }
