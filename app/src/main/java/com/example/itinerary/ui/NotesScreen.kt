@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -57,7 +58,8 @@ private fun filterOf(key: String): NoteFilter = when {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotesScreen(onBack: () -> Unit) {
-    val app = LocalContext.current.applicationContext as ItineraryApp
+    val context = LocalContext.current
+    val app = context.applicationContext as ItineraryApp
     val repo = app.repository
     val notes by repo.notes.collectAsStateWithLifecycle(initialValue = null)
     var query by rememberSaveable { mutableStateOf("") }
@@ -95,21 +97,47 @@ fun NotesScreen(onBack: () -> Unit) {
         ?.takeIf { it.size == shown.size } ?: shown
     val currentShown by rememberUpdatedState(shown)
     val currentDisplayed by rememberUpdatedState(displayed)
-    LaunchedEffect(shown) { if (drag.id == null && drag.order != null && (shown.map { it.id } == drag.order || shown.size != drag.order?.size)) drag.order = null }
+    // The saved order has come back, or the page changed after it was saved (or saving changed nothing): the page shows
+    // its own order again, so a later Sort or Pin shows at once.
+    LaunchedEffect(shown) {
+        if (drag.id == null && drag.order != null && (shown.map { it.id } == drag.order || shown.size != drag.order?.size || !drag.saving)) drag.order = null
+    }
     val canDrag = query.isBlank() && !selecting
     val currentCanDrag by rememberUpdatedState(canDrag)
+    // The notes put in [order] (dropped there, or moved by a screen reader's action).
+    fun place(order: List<String>) {
+        val places = Notes.reorder(currentShown, order)
+        // Dropped where it shows: in another sort that is now the user's own order.
+        if (app.settings.noteSort.value != com.example.itinerary.data.NoteSort.MY_ORDER)
+            app.settings.setNoteSort(com.example.itinerary.data.NoteSort.MY_ORDER)
+        // Nothing moved: no saved order will come back to take the dragged one's place.
+        if (places.isEmpty()) { drag.order = null; return }
+        drag.saving = true
+        app.appScope.launch {
+            try { repo.placeNotes(places) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { drag.order = null
+                android.widget.Toast.makeText(context, "Couldn't move this note. Please try again.", android.widget.Toast.LENGTH_LONG).show() } }
+            finally { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.NonCancellable) { drag.saving = false } }
+        }
+    }
     // ...and stays there, rather than jumping back if a note joins that notebook or tag again later.
     LaunchedEffect(filter, notes) { if (notes != null && filter == NoteFilter.All && filterKey != "all") filterKey = "all" }
     // A note open in the editor that vanishes (deleted by sync, say) keeps its editor, which then offers to save it anew.
     val lastSeen = remember { mutableStateMapOf<String, PlannerNote>() }
-    // An editor Android closed mid-edit: its draft reopens it once, here.
+    // An editor Android closed mid-edit: its draft reopens it once, here. That includes the editor still open in the
+    // saved state, whose body is only in the draft (NoteEditorMemory); a rotated editor has it in memory instead.
     var recovered by remember { mutableStateOf<com.example.itinerary.data.NoteDraftStore.Draft?>(null) }
-    val context = LocalContext.current
+    var draftChecked by remember { mutableStateOf(editingId?.let(NoteEditorMemory::holds) == true) }
     LaunchedEffect(Unit) {
-        if (editingId != null) return@LaunchedEffect
-        val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching { com.example.itinerary.data.NoteDraftStore(context).read() }.getOrNull() } ?: return@LaunchedEffect
-        recovered = draft; editingNew = draft.creating; editingId = draft.note.id
+        try {
+            if (draftChecked) return@LaunchedEffect
+            val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.example.itinerary.data.NoteDraftStore(context).read() }.getOrNull() } ?: return@LaunchedEffect
+            // Read now, not before: a card tapped meanwhile opens its own note.
+            if (editingId != null && editingId != draft.note.id) return@LaunchedEffect
+            recovered = draft; editingNew = draft.creating; editingId = draft.note.id
+        } finally { draftChecked = true }
     }
     val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 
@@ -213,6 +241,9 @@ fun NotesScreen(onBack: () -> Unit) {
                     val density = androidx.compose.ui.platform.LocalDensity.current
                     val slop = androidx.compose.ui.platform.LocalViewConfiguration.current.touchSlop
                     val edge = with(density) { 64.dp.toPx() }
+                    // Screen readers can't drag: in My order a card offers Move earlier / Move later instead.
+                    val placeOf = remember(displayed) { displayed.withIndex().associate { it.value.id to it.index } }
+                    fun canMove(index: Int, by: Int) = displayed.getOrNull(index + by)?.pinned == displayed.getOrNull(index)?.pinned
                     LazyVerticalStaggeredGrid(
                         columns = if (asList) StaggeredGridCells.Fixed(1) else StaggeredGridCells.Adaptive(160.dp),
                         state = grid,
@@ -223,22 +254,16 @@ fun NotesScreen(onBack: () -> Unit) {
                         verticalItemSpacing = 10.dp,
                     ) {
                         items(displayed, key = { it.id }) { note ->
-                            NoteCard(note, selecting = selecting, selected = note.id in selectedIds,
+                            val index = placeOf[note.id] ?: 0
+                            val moves = if (!canDrag || sort != com.example.itinerary.data.NoteSort.MY_ORDER) emptyList() else listOfNotNull(
+                                androidx.compose.ui.semantics.CustomAccessibilityAction("Move earlier") {
+                                    Notes.moved(currentDisplayed, note.id, -1)?.let(::place) != null }.takeIf { canMove(index, -1) },
+                                androidx.compose.ui.semantics.CustomAccessibilityAction("Move later") {
+                                    Notes.moved(currentDisplayed, note.id, 1)?.let(::place) != null }.takeIf { canMove(index, 1) })
+                            NoteCard(note, selecting = selecting, selected = note.id in selectedIds, moves = moves,
                                 // The dragged card follows the finger, not the grid's slide animation.
                                 modifier = (if (drag.id == note.id) Modifier else Modifier.animateItem()).noteLongPress(note, drag, grid, { currentDisplayed }, { currentCanDrag }, slop, edge,
-                                    onSelect = { toggle(note.id) },
-                                    onDrop = { order ->
-                                        val places = Notes.reorder(currentShown, order)
-                                        // Dropped where it shows: in another sort that is now the user's own order.
-                                        if (app.settings.noteSort.value != com.example.itinerary.data.NoteSort.MY_ORDER)
-                                            app.settings.setNoteSort(com.example.itinerary.data.NoteSort.MY_ORDER)
-                                        app.appScope.launch {
-                                            try { repo.placeNotes(places) }
-                                            catch (e: CancellationException) { throw e }
-                                            catch (_: Exception) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { drag.order = null
-                                                android.widget.Toast.makeText(context, "Couldn't move this note. Please try again.", android.widget.Toast.LENGTH_LONG).show() } }
-                                        }
-                                    },
+                                    onSelect = { toggle(note.id) }, onDrop = ::place,
                                     haptic = haptic, scroll = { by -> scope.launch { grid.scrollBy(by) } }),
                                 onOpen = {
                                     // The touch that ended a long press isn't also a tap. The card's click sees the lift first,
@@ -255,9 +280,13 @@ fun NotesScreen(onBack: () -> Unit) {
         }
     }
     if (showSync) NoteSyncDialog { showSync = false }
-    editingId?.let { id ->
+    // Not before the notes and any draft are read: reopened after Android closed Planner, the editor would otherwise take
+    // a note already saved for a new one (and every Save would fail), or open without its draft.
+    if (notes != null && draftChecked) editingId?.let { id ->
         val existing = all.firstOrNull { it.id == id }
         if (existing != null) lastSeen[id] = existing
+        // Saved once: no longer new, should the page be rebuilt (rotation, or Android closing Planner).
+        LaunchedEffect(id, existing != null) { if (existing != null) editingNew = false }
         val draft = recovered?.takeIf { it.note.id == id }
         // A new note starts in the notebook being looked at.
         val start = existing ?: lastSeen[id] ?: draft?.note ?: if (editingNew) PlannerNote(id = id, notebook = (filter as? NoteFilter.Notebook)?.name.orEmpty(),
@@ -265,17 +294,17 @@ fun NotesScreen(onBack: () -> Unit) {
         if (start != null) key(id) {
             NoteEditor(start, creating = editingNew && existing == null && lastSeen[id] == null, notebooks = notebooks, allTags = tags,
                 recovered = draft) { editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
-        } else if (notes != null) LaunchedEffect(id) { editingId = null }
+        } else LaunchedEffect(id) { editingId = null }
     }
     }
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, modifier: Modifier, onOpen: () -> Unit, onSelect: () -> Unit) {
+private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, modifier: Modifier, onOpen: () -> Unit, onSelect: () -> Unit,
+                     moves: List<androidx.compose.ui.semantics.CustomAccessibilityAction> = emptyList()) {
     val tint = note.color?.let { Color(it) }
-    // White or black, whichever reads better on the card's colour (4.5:1 or more on all of them).
-    val text = tint?.let { if (contrast(Color.White, it) >= contrast(Color.Black, it)) Color.White else Color.Black } ?: MaterialTheme.colorScheme.onSurface
+    val text = tint?.let(::onColour) ?: MaterialTheme.colorScheme.onSurface
     val soft = if (tint != null) text.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
     val label = remember(note.title, note.content) { Notes.label(note) }
     Surface(
@@ -286,13 +315,14 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
         modifier = modifier.fillMaxWidth()
             .combinedClickable(onClickLabel = if (selecting) (if (selected) "Deselect note" else "Select note") else "Open note", onClick = onOpen)
             // The long press itself is the card's own gesture (select, or drag); this offers selecting to screen readers.
-            .semantics { onLongClick("Select note") { onSelect(); true }; if (selecting) this.selected = selected },
+            .semantics { onLongClick("Select note") { onSelect(); true }; if (selecting) this.selected = selected
+                if (moves.isNotEmpty()) customActions = moves },
     ) {
         Column(Modifier.padding(start = 14.dp, top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Text(label, Modifier.weight(1f).padding(top = 6.dp), style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold, color = text, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                if (note.pinned) Icon(Icons.Filled.Star, contentDescription = "Pinned", tint = if (tint != null) Color.White else MaterialTheme.colorScheme.primary,
+                if (note.pinned) Icon(Icons.Filled.Star, contentDescription = "Pinned", tint = if (tint != null) text else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 8.dp).size(18.dp))
                 if (selecting) Checkbox(checked = selected, onCheckedChange = null, modifier = Modifier.padding(4.dp))
                 else NoteActionsMenu(note, label, text)
@@ -398,6 +428,9 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** White or black, whichever reads better on [background] (4.5:1 or more on all the card colours): a card's text and marks. */
+internal fun onColour(background: Color): Color = if (contrast(Color.White, background) >= contrast(Color.Black, background)) Color.White else Color.Black
 
 // WCAG contrast ratio of two colours.
 private fun contrast(a: Color, b: Color): Float {

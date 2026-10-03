@@ -601,6 +601,92 @@ class NotesUiTest {
         } finally { app.settings.setNotesAsList(false); app.settings.setNoteSort(NoteSort.MY_ORDER) }
     }
 
+    private fun recreate() {
+        ins.runOnMainSync {
+            androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).first().recreate()
+        }
+        Thread.sleep(500)
+    }
+    // What Android closing Planner leaves: the saved state, the draft on disk, and nothing in memory.
+    private fun recreateAsAfterProcessDeath() {
+        ins.runOnMainSync { com.example.itinerary.ui.NoteEditorMemory.forgetAll() }
+        recreate()
+    }
+
+    // Bug hunt 3 Oct NA-1 / NA-8: a new note saved once, still open when the page is rebuilt (rotation, or Android
+    // closing Planner), was taken for a new one again and every Save failed. Its body is no longer in the saved state.
+    @Test fun aSavedNewNoteStillSavesAfterThePageIsRebuilt() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(0, "QA restored"); type(1, "A")
+        click("Save"); await { find("Saved") != null && notes().singleOrNull()?.content == "A" }
+        type(1, "AB"); Thread.sleep(800) // the draft is written 400 ms after a change
+        // Rotation: the body comes back from memory.
+        recreate()
+        await { find("Edit note") != null && noteText() == "AB" }
+        // Android closed Planner: the draft has the body.
+        recreateAsAfterProcessDeath()
+        await { find("Edit note") != null && find("Recovered unsaved changes. Save them, or Close and Discard.") != null && noteText() == "AB" }
+        screenshot("restored-after-process-death")
+        click("Save"); await { notes().singleOrNull()?.content == "AB" && find("Saved") != null }
+        assertNull(find("Couldn't save this note. Please try again."))
+        // No draft either: the editor still opens the saved note (not a new one), and Save updates it.
+        type(1, "ABC"); Thread.sleep(800)
+        com.example.itinerary.data.NoteDraftStore(context).clear()
+        recreateAsAfterProcessDeath()
+        await { find("Edit note") != null && find("Delete") != null }
+        type(1, "ABCD"); click("Save")
+        await { notes().singleOrNull()?.content == "ABCD" && find("Saved") != null }
+        assertNull(find("Couldn't save this note. Please try again."))
+        click("Close"); await { find("Search notes") != null }
+        assertEquals(1, notes().size)
+    }
+
+    // NA-3: a drag let go where it began left the page in that order, so Sort and Pin seemed to do nothing.
+    @Test fun aDropThatMovesNothingLeavesSortAndPinWorking() {
+        try {
+            runBlocking { listOf("QA b", "QA c", "QA a").forEach { app.repository.saveNote(PlannerNote(title = it), create = true); Thread.sleep(5) } }
+            openNotes()
+            click("Show as list"); await { app.settings.notesAsList.value }
+            fun top(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.top
+            await { find("QA a") != null && top("QA a") < top("QA c") && top("QA c") < top("QA b") } // newest first
+            // Held, moved sideways past the touch slop over its own card, and let go: no place changes.
+            val from = centre("QA c")
+            touch(from, 900, android.graphics.Point(from.x + 80, from.y))
+            await { find("Cancel") == null }
+            click("Sort"); pick("Title A–Z")
+            await { top("QA a") < top("QA b") && top("QA b") < top("QA c") }
+            click("Actions for QA c"); click("Pin to the top")
+            await { notes().single { it.title == "QA c" }.pinned && top("QA c") < top("QA a") }
+            screenshot("drop-in-place-then-sort")
+        } finally { app.settings.setNotesAsList(false); app.settings.setNoteSort(NoteSort.MY_ORDER) }
+    }
+
+    // NA-10: in My order a card offers Move earlier / Move later to screen readers, which can't drag.
+    @Test fun screenReaderActionsMoveACard() {
+        runBlocking { listOf("QA one", "QA two", "QA three").forEach { app.repository.saveNote(PlannerNote(title = it), create = true); Thread.sleep(5) } }
+        openNotes()
+        await { find("QA one") != null && find("QA three") != null }
+        fun card(text: String): AccessibilityNodeInfo { var n = find(text); while (n != null && !n.isClickable) n = n.parent; return n!! }
+        fun actions(text: String) = card(text).actionList.mapNotNull { it.label?.toString() }
+        assertEquals(listOf("QA three", "QA two", "QA one"), pageOrder())
+        assertTrue("Move later" in actions("QA three")); assertFalse("Move earlier" in actions("QA three"))
+        assertFalse("Move later" in actions("QA one"))
+        val later = card("QA three").actionList.first { it.label?.toString() == "Move later" }
+        assertTrue(card("QA three").performAction(later.id))
+        await { pageOrder() == listOf("QA two", "QA three", "QA one") }
+        await { "Move earlier" in actions("QA three") }
+        val earlier = card("QA one").actionList.first { it.label?.toString() == "Move earlier" }
+        assertTrue(card("QA one").performAction(earlier.id))
+        await { pageOrder() == listOf("QA two", "QA one", "QA three") }
+        // In another sort there is no order of the user's own to move in.
+        try {
+            click("Sort"); pick("Title A–Z")
+            await { app.settings.noteSort.value == NoteSort.TITLE && "Move later" !in actions("QA one") && "Move earlier" !in actions("QA two") }
+        } finally { app.settings.setNoteSort(NoteSort.MY_ORDER) }
+    }
+
     // Notes opens on the last Show choice, list view and sort; one whose notebook has gone falls back to all notes.
     @Test fun notesOpensAsLastLeft() {
         runBlocking {

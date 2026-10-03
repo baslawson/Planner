@@ -40,6 +40,8 @@ import kotlinx.coroutines.launch
 internal class NoteDragState {
     var id by mutableStateOf<String?>(null)
     var order by mutableStateOf<List<String>?>(null)
+    // While the dropped order is being saved: until then a page in another order is an older reading, not the saved one.
+    var saving = false
     var total by mutableStateOf(Offset.Zero)
     var start = Offset.Zero
     var size = Offset.Zero
@@ -91,7 +93,9 @@ internal fun Modifier.noteLongPress(
                 val target = grid.layoutInfo.visibleItemsInfo.firstOrNull { item ->
                     item.key != note.id && Rect(item.offset.toOffset(), Size(item.size.width.toFloat(), item.size.height.toFloat())).contains(centre)
                 }?.key as? String
-                if (target != null && notes[target]?.pinned == note.pinned) {
+                // Pinned as the note is now: the gesture outlives a Pin from the ⋮ menu, and [note] is as it was then.
+                val pinned = notes[note.id]?.pinned ?: note.pinned
+                if (target != null && notes[target]?.pinned == pinned) {
                     val to = current.indexOf(target)
                     if (to >= 0) drag.order = current.filter { it != note.id }.toMutableList().apply { add(to, note.id) }
                 }

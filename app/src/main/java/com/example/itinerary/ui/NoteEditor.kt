@@ -48,6 +48,31 @@ import kotlinx.coroutines.launch
 internal val NOTE_COLOR_NAMES = listOf("Green", "Teal", "Blue", "Purple", "Pink", "Red", "Orange", "Brown")
 
 /**
+ * The open note editor's body, attachments and starting version, kept in memory rather than in the saved-instance
+ * Bundle: a long note with recognised text could pass the Bundle's size limit (TransactionTooLargeException). They
+ * outlive a rotation here; when Android closes Planner they go, and the on-disk draft (NoteDraftStore) has them.
+ * One note editor is open at a time. Its key is in the Bundle, so only that editor, recreated, finds them again.
+ */
+internal object NoteEditorMemory {
+    class Body(content: TextFieldValue, attachments: List<Attachment>, base: PlannerNote?) {
+        var content by mutableStateOf(content)
+        var attachments by mutableStateOf(attachments)
+        var base by mutableStateOf(base)
+    }
+    private var key: String? = null
+    private var noteId: String? = null
+    private var body: Body? = null
+
+    fun keep(key: String, noteId: String, body: Body) { this.key = key; this.noteId = noteId; this.body = body }
+    fun restore(key: String, noteId: String): Body? = body?.takeIf { this.key == key && this.noteId == noteId }
+    /** Whether an editor of [noteId] left its state here: recreated after a rotation, not after Android closed Planner. */
+    fun holds(noteId: String) = body != null && this.noteId == noteId
+    fun forget(key: String) { if (this.key == key) forgetAll() }
+    // What Android closing Planner does to it; also for tests.
+    fun forgetAll() { key = null; noteId = null; body = null }
+}
+
+/**
  * A note, full screen: title, notebook, colour and pin, then the body in Markdown — written in Edit, read (and its
  * checklist ticked) in Preview — with the editors' Delete · Close · Save bar. A new note opens in Edit, a saved one in
  * Preview. Save keeps the editor open ("Saved"); Close with changes asks first.
@@ -63,10 +88,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val draftStore = remember { NoteDraftStore(context) }
     // What the fields start from: a recovered draft (Android closed Planner mid-edit), else the note.
     val start = recovered?.note ?: initial
+    // The body, attachments and base live in NoteEditorMemory, not in the saved state (see there).
+    val memoryKey = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val body = remember { NoteEditorMemory.restore(memoryKey, initial.id) ?: NoteEditorMemory.Body(TextFieldValue(start.content), start.attachments,
+        if (recovered != null) recovered.base else if (creating) null else initial).also { NoteEditorMemory.keep(memoryKey, initial.id, it) } }
     // The stored version these edits started from (null: a new note not saved yet). Save checks it's still current.
-    var base by remember { mutableStateOf(if (recovered != null) recovered.base else if (creating) null else initial) }
+    var base by body::base
     var title by rememberSaveable { mutableStateOf(start.title) }
-    var content by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(start.content)) }
+    var content by body::content
     var notebook by rememberSaveable { mutableStateOf(start.notebook) }
     var color by rememberSaveable { mutableStateOf(start.color) }
     var pickingColor by rememberSaveable { mutableStateOf(false) }
@@ -74,10 +103,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var pinned by rememberSaveable { mutableStateOf(start.pinned) }
     var tags by rememberSaveable { mutableStateOf(start.tags) }
     var newTag by rememberSaveable { mutableStateOf("") }
-    // Kept as JSON across rotation; the files themselves are already in the store.
-    var attachmentsJson by rememberSaveable { mutableStateOf(com.example.itinerary.data.DraftCodec.attachments(start.attachments).toString()) }
-    val attachments = remember(attachmentsJson) { com.example.itinerary.data.DraftCodec.attachments(org.json.JSONArray(attachmentsJson)) }
-    fun setAttachments(list: List<Attachment>) { attachmentsJson = com.example.itinerary.data.DraftCodec.attachments(list).toString() }
+    // The files themselves are already in the store.
+    val attachments by body::attachments
+    fun setAttachments(list: List<Attachment>) { body.attachments = list }
     var pendingPhoto by rememberSaveable { mutableStateOf(recovered?.pendingPhoto) }
     var reminderAt by rememberSaveable { mutableStateOf(start.reminderAt) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
@@ -197,13 +225,15 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             finally { busy = false }
         }
     }
-    fun discard() { releaseFiles(); onDismiss() }
+    // Closed for good (not rotated): what the memory kept for it goes.
+    fun dismiss() { NoteEditorMemory.forget(memoryKey); onDismiss() }
+    fun discard() { releaseFiles(); dismiss() }
     fun close() { if (unsaved) askingToSave = true else discard() }
     fun delete() {
         val id = base?.id ?: return discard()
         busy = true
         scope.launch {
-            try { repo.deleteNote(id); releaseFiles(); onDismiss() }
+            try { repo.deleteNote(id); releaseFiles(); dismiss() }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { error = "Couldn't delete this note. Please try again." }
             finally { busy = false }
@@ -235,7 +265,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     if (preview) {
                         if (content.text.isBlank()) Text("Nothing written yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         else MarkdownView(content.text, Modifier.fillMaxWidth(), onToggle = { line ->
-                            content = content.copy(text = Markdown.toggle(content.text, line))
+                            content = TextFieldValue(Markdown.toggle(content.text, line), content.selection)
                         })
                     } else {
                         if (!toolsPinned) MarkdownToolbar { edit -> content = edit(content) }
@@ -351,7 +381,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         }
     }
     if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
-        primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(onDismiss) },
+        primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(::dismiss) },
         dismiss = DialogAction("Keep editing") { askingToSave = false },
         extra = listOf(DialogAction("Discard", danger = true) { askingToSave = false; discard() })) {
         Text("Your changes to this note haven't been saved.")
@@ -392,15 +422,15 @@ internal fun noteReminderLabel(timestamp: Long): String {
     return "${at.toLocalDate().dayLabel(LocalDateFormat.current)}, ${at.toLocalTime().label(LocalTimeFormat.current, LocalContext.current)}"
 }
 
+// A toolbar edit as the box's new value. The keyboard's composing range (the word it underlines) is dropped: it was
+// over the old text, and kept it could make the next key replace the wrong letters.
+internal fun toolbarValue(edit: Markdown.Edit) = TextFieldValue(edit.text, TextRange(edit.start, edit.end))
+
 // Bold, italic, strike, heading, list, checklist and code, applied to the selection (or where the cursor is).
 @Composable
 private fun MarkdownToolbar(modifier: Modifier = Modifier, apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
-    fun wrap(mark: String): (TextFieldValue) -> TextFieldValue = { v ->
-        Markdown.wrap(v.text, v.selection.start, v.selection.end, mark).let { v.copy(text = it.text, selection = TextRange(it.start, it.end)) }
-    }
-    fun prefix(mark: String): (TextFieldValue) -> TextFieldValue = { v ->
-        Markdown.prefixLines(v.text, v.selection.start, v.selection.end, mark).let { v.copy(text = it.text, selection = TextRange(it.start, it.end)) }
-    }
+    fun wrap(mark: String): (TextFieldValue) -> TextFieldValue = { v -> toolbarValue(Markdown.wrap(v.text, v.selection.start, v.selection.end, mark)) }
+    fun prefix(mark: String): (TextFieldValue) -> TextFieldValue = { v -> toolbarValue(Markdown.prefixLines(v.text, v.selection.start, v.selection.end, mark)) }
     // Checklist is ☑ with U+FE0E, so it is drawn as text in the app's font rather than as a colour emoji.
     val tools = listOf(
         Triple("B", "Bold", wrap("**")), Triple("I", "Italic", wrap("*")), Triple("S", "Strikethrough", wrap("~~")),
@@ -440,11 +470,11 @@ internal fun ColorChoices(selected: Int?, onCustom: () -> Unit, onSelect: (Int?)
         (listOf<Int?>(null) + Notes.colors).forEachIndexed { index, argb ->
             Swatch(if (argb == null) "No colour" else NOTE_COLOR_NAMES[index - 1], argb == selected,
                 Modifier.background(argb?.let { Color(it) } ?: MaterialTheme.colorScheme.surfaceContainerHigh),
-                if (argb == null) ring else Color.White, onClick = { onSelect(argb) })
+                argb?.let { onColour(Color(it)) } ?: ring, onClick = { onSelect(argb) })
         }
         // A colour of the note's own, chosen with Custom: a swatch of its own, picked like the others.
         if (selected != null && selected !in Notes.colors)
-            Swatch("Custom colour (chosen)", true, Modifier.background(Color(selected)), Color.White, onClick = onCustom)
+            Swatch("Custom colour (chosen)", true, Modifier.background(Color(selected)), onColour(Color(selected)), onClick = onCustom)
         Swatch("Custom colour", false, Modifier.background(androidx.compose.ui.graphics.Brush.sweepGradient(
             listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))), Color.White, onClick = onCustom) {
             Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
