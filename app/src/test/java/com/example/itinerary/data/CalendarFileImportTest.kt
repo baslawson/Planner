@@ -150,9 +150,13 @@ class CalendarFileImportTest {
     @Test fun aLongRunningRepeatReachesTodayDespiteTheDateCap() {
         val daily = single("DTSTART:20100101T090000\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Since 2010")
         assertFalse(daily.past(today))
-        assertEquals(today.plusMonths(12), daily.datesFor(today, includePast = false).last())
-        // today to 12 months ahead is 366 dates; a series keeps the latest 365.
-        assertEquals(today.plusDays(1), daily.datesFor(today, includePast = false).first())
+        // today to 12 months ahead is 366 dates; a series from today keeps today (R5-5) and drops the far end.
+        assertEquals(today, daily.datesFor(today, includePast = false).first())
+        assertEquals(365, daily.datesFor(today, includePast = false).size)
+        assertEquals(today.plusMonths(12).minusDays(1), daily.datesFor(today, includePast = false).last())
+        // A daily series starting today with past events included has no past dates either: today stays.
+        val fromToday = single("DTSTART:20260929T090000\r\nRRULE:FREQ=DAILY\r\nSUMMARY:From today")
+        assertEquals(today, fromToday.datesFor(today, includePast = true).first())
         assertTrue(today in daily.dates)
         assertEquals(365, daily.datesFor(today, includePast = true).size)
         // A series that ended long ago is still listed (as past), with its own dates.
@@ -174,6 +178,31 @@ class CalendarFileImportTest {
         val window = CalendarFileImport.window(ics("DTSTART:20261001T100000\r\nSUMMARY:Good", "DTSTART:20261002T100000\r\nbroken\r\nSUMMARY:Bad"),
             ZoneOffset.UTC, today, today.plusDays(10))
         assertEquals(listOf("Good"), window.events.map { it.title }); assertEquals(1, window.skipped)
+    }
+
+    // R5-1: a raw line break whose next line starts "End:" or "Begin:" (a shift's times in its description) costs only its
+    // event, as does an event cut short before the next BEGIN:VEVENT; a server's single item is still refused whole.
+    @Test fun aRawBeginOrEndLineSkipsOnlyItsEvent() {
+        val file = read("DTSTART:20261001T100000\r\nSUMMARY:Good",
+            "DTSTART:20261002T100000\r\nDESCRIPTION:Shift\r\nStart: 9:00\r\nEnd: 17:00\r\nSUMMARY:Shift",
+            "DTSTART:20261003T100000\r\nDESCRIPTION:Plan\r\nBegin: 9am\r\nSUMMARY:Begins",
+            "DTSTART:20261004T100000\r\nDESCRIPTION:Plan\r\nBegin:Shift\r\nSUMMARY:Named begin",
+            "DTSTART:20261005T100000\r\nDESCRIPTION:Plan\r\nEnd:Shift\r\nSUMMARY:Named end",
+            "DTSTART:20261006T100000\r\nSUMMARY:Also good")
+        assertEquals(listOf("Good", "Also good"), file.entries.map { it.item.title })
+        assertEquals(4, file.skipped)
+        val cut = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nDTSTART:20261001T100000\r\nSUMMARY:Cut short\r\n" +
+            "BEGIN:VEVENT\r\nDTSTART:20261002T100000\r\nSUMMARY:Next\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        val read = CalendarFileImport.read(cut, ZoneOffset.UTC, today)
+        assertEquals(listOf("Next"), read.entries.map { it.item.title }); assertEquals(1, read.skipped)
+        // Cut short inside its alarm: still only that event.
+        val alarm = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261001T100000\r\nSUMMARY:Alarm cut\r\nBEGIN:VALARM\r\nTRIGGER:-PT5M\r\n" +
+            "BEGIN:VEVENT\r\nDTSTART:20261002T100000\r\nSUMMARY:Next\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        val readAlarm = CalendarFileImport.read(alarm, ZoneOffset.UTC, today)
+        assertEquals(listOf("Next"), readAlarm.entries.map { it.item.title }); assertEquals(1, readAlarm.skipped)
+        // Without the callback (a server's reply) such an item is refused, as before.
+        val one = Ics.lines("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261002T100000\r\nEnd: 17:00\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+        assertThrows(IllegalArgumentException::class.java) { Ics.events(one, 50, "Too many events.") }
     }
 
     // E9: a one-time import of an all-day event longer than Planner holds keeps the first MultiDay.MAX_DAYS and says so;

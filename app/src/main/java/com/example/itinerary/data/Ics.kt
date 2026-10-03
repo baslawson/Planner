@@ -125,21 +125,40 @@ internal object Ics {
     // an alarm) are left out. With [unreadable], a line that isn't a property (a raw line break inside a description) only
     // costs its own event, which is left out and reported there; outside an event such a line is ignored. Without it the
     // whole text is refused (a server's reply holds one item).
+    // R5-1: with [unreadable], so is a raw line that reads as BEGIN or END ("End: 17:00" in a shift's description): one
+    // whose value isn't a component name is ignored outside an event; inside one, it or an END that doesn't close what
+    // is open costs that event. An event cut short (no END:VEVENT before the next BEGIN:VEVENT) costs only itself.
     fun events(lines: List<String>, max: Int, tooMany: String, unfinished: String = "Incomplete calendar component.",
                component: String = "VEVENT", unreadable: (() -> Unit)? = null): List<List<Property>> {
         val stack = mutableListOf<String>(); val events = mutableListOf<List<Property>>(); var current: MutableList<Property>? = null
         var broken = false
+        val forgiving = unreadable != null
         for (line in lines) {
             val p = if (unreadable == null) property(line) else runCatching { property(line) }.getOrNull()
             if (p == null) { if (current != null) broken = true; continue }
+            if (forgiving && (p.name == "BEGIN" || p.name == "END") && !p.value.matches(COMPONENT_NAME)) {
+                if (current != null) broken = true; continue
+            }
             when (p.name) {
                 "BEGIN" -> {
                     val name = p.value.uppercase()
+                    if (name == component && forgiving && current != null) {
+                        // The open one was cut short: it is skipped, and what it had open goes with it.
+                        unreadable?.invoke(); current = null
+                        stack.subList(stack.lastIndexOf(component), stack.size).clear()
+                    }
                     if (name == component) { require(current == null); current = mutableListOf(); broken = false }
                     stack += name
                 }
                 "END" -> {
                     val name = p.value.uppercase()
+                    if (forgiving && current != null && stack.lastOrNull() != name) {
+                        // A stray END inside the event, or its own END with something inside still open: either way
+                        // the event can't be trusted. Its own END still closes it.
+                        broken = true
+                        if (name != component) continue
+                        stack.subList(stack.lastIndexOf(component) + 1, stack.size).clear()
+                    }
                     require(stack.lastOrNull() == name) { "Incomplete calendar component." }
                     if (name == component) {
                         if (broken) unreadable?.invoke() else events += requireNotNull(current).toList()
@@ -153,6 +172,8 @@ internal object Ics {
         require(stack.isEmpty()) { unfinished }
         return events
     }
+
+    private val COMPONENT_NAME = Regex("[A-Za-z][A-Za-z0-9-]*")
 
     fun date(p: Property): LocalDate = LocalDate.parse(p.value.take(8), DateTimeFormatter.BASIC_ISO_DATE)
 
