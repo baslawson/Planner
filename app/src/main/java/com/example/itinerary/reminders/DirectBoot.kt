@@ -28,6 +28,19 @@ object DirectBoot {
 
     fun isUnlocked(context: Context): Boolean = unlocked(context)
 
+    /**
+     * D6-4: after a reminder rang, unlocked. One alarm fewer, so one waiting for a free alarm gets it (AlarmWindow); and
+     * once the snapshot is [LockedAlarmSelection.REFRESH_MS] old every alarm is set again (as opening Planner does) and
+     * the snapshot written from them, so it keeps the next two weeks however long Planner goes unopened.
+     */
+    suspend fun afterRing(app: com.example.itinerary.ItineraryApp, now: Long = System.currentTimeMillis()) {
+        fun stale(at: Long) = runCatching { LockedAlarmSelection.stale(store(app).writtenAt(), at) }.getOrDefault(false)
+        if (!stale(now)) { app.repository.refillReminders(); return }
+        app.repository.rescheduleAllReminders()
+        // Nothing had changed, so that wrote nothing: written now, so the next ring doesn't do it all again.
+        if (stale(System.currentTimeMillis())) app.reminderScheduler.saveLockedAlarms(force = true)
+    }
+
     /** At LOCKED_BOOT_COMPLETED: the snapshot's alarms still ahead are set. The number set. */
     fun armFromSnapshot(context: Context, now: Long = System.currentTimeMillis()): Int {
         val snapshot = store(context).read() ?: return 0
@@ -78,12 +91,15 @@ object DirectBoot {
 class LockedAlarmStore(dir: File) {
     constructor(context: Context) : this(File(context.createDeviceProtectedStorageContext().noBackupFilesDir, "locked-alarms"))
 
-    private val snapshotFile = AtomicFile(File(dir, "snapshot"))
+    private val snapshotPath = File(dir, "snapshot")
+    private val snapshotFile = AtomicFile(snapshotPath)
     private val firedFile = AtomicFile(File(dir, "fired"))
     private val folder = dir
 
     @Synchronized fun read(): LockedSnapshot? = text(snapshotFile)?.let(LockedAlarmCodec::decode)
     @Synchronized fun write(snapshot: LockedSnapshot) = put(snapshotFile, LockedAlarmCodec.encode(snapshot))
+    /** When the snapshot was last written; null when there is none. */
+    @Synchronized fun writtenAt(): Long? = snapshotPath.lastModified().takeIf { it > 0L }
 
     @Synchronized fun fired(): List<LockedFired> = text(firedFile)?.let(LockedAlarmCodec::decodeFired).orEmpty()
     @Synchronized fun recordFired(fired: LockedFired) = put(firedFile, LockedAlarmCodec.encodeFired(fired() + fired))

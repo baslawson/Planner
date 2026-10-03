@@ -28,7 +28,7 @@ interface ReminderAlarms {
     // A task reminder or snooze has rung at [trigger] (DeliveredAlarms): it isn't set again for that time.
     fun markDelivered(key: String, trigger: Long) {}
     // After a batch of alarm changes: the snapshot of them for a locked reboot is written (RB-3, LockedAlarm).
-    fun saveLockedAlarms() {}
+    fun saveLockedAlarms(force: Boolean = false) {}
 }
 
 class ReminderScheduler(private val context: Context) : ReminderAlarms {
@@ -38,7 +38,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     // RB-3: every alarm set here, with what it shows, for a reboot that stays locked (LockedAlarm). Kept beside the ledger.
     private val locked = LockedAlarmMirror(read = { DirectBoot.store(context).read() }, write = { DirectBoot.store(context).write(it) },
         timeFormat = { (context.applicationContext as? com.example.itinerary.ItineraryApp)?.settings?.timeFormat?.value?.name })
-    override fun saveLockedAlarms() = locked.save(System.currentTimeMillis())
+    override fun saveLockedAlarms(force: Boolean) = locked.save(System.currentTimeMillis(), force)
     private fun armed(alarm: LockedAlarm) { ledger.set(alarm.key, alarm.trigger); locked.put(alarm) }
     private fun disarmed(key: String) { ledger.remove(key); locked.remove(key) }
     override fun markDelivered(key: String, trigger: Long) = delivered.record(key, trigger)

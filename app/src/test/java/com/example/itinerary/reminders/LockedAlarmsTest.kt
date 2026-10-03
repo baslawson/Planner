@@ -104,4 +104,25 @@ class LockedAlarmsTest {
         mirror.put(event); mirror.save(now)
         assertEquals(listOf(LockedSnapshot(null, listOf(event))), writes)
     }
+
+    // D6-4: a snapshot written some time ago is refreshed when a reminder rings, so a long stretch without opening
+    // Planner still leaves the next two weeks in it.
+    @Test fun aSnapshotIsRefreshedOnceItIsHalfADayOldOrMissingOrFromTheFuture() {
+        assertTrue(LockedAlarmSelection.stale(null, now))
+        assertFalse(LockedAlarmSelection.stale(now - LockedAlarmSelection.REFRESH_MS + 1, now))
+        assertTrue(LockedAlarmSelection.stale(now - LockedAlarmSelection.REFRESH_MS, now))
+        // The clock was set back since it was written.
+        assertTrue(LockedAlarmSelection.stale(now + hour, now))
+    }
+
+    @Test fun aForcedSaveWritesTheSelectionAsItIsNowEvenWithNothingChanged() {
+        val writes = mutableListOf<LockedSnapshot>()
+        val gone = LockedAlarm.Task("gone", now + hour, "Rung already")
+        val later = event.copy(trigger = now + 5 * hour)
+        val mirror = LockedAlarmMirror(read = { LockedSnapshot("HOUR_12", listOf(gone, later)) }, write = { writes += it }, timeFormat = { "HOUR_12" })
+        mirror.save(now + 2 * hour)
+        assertEquals(0, writes.size)
+        mirror.save(now + 2 * hour, force = true)
+        assertEquals(listOf(LockedSnapshot("HOUR_12", listOf(later))), writes)
+    }
 }

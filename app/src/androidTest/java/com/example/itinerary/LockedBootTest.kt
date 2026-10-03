@@ -132,4 +132,19 @@ class LockedBootTest {
             assertFalse(store.read()!!.alarms.any { it.key == "t:${planned.id}" })
         } finally { scheduler.cancelTask(planned.id) }
     }
+
+    // D6-4: a reminder ringing (unlocked) rewrites a snapshot half a day old from every alarm, so it never runs out.
+    @Test fun aRingRefreshesAnOldSnapshot() = kotlinx.coroutines.runBlocking {
+        unlocked = true
+        val past = LockedAlarm.Task("qa-locked-past", now - 60_000, "QA rung long ago")
+        store.write(LockedSnapshot("HOUR_24", listOf(past)))
+        File(dir, "snapshot").setLastModified(now - com.example.itinerary.reminders.LockedAlarmSelection.REFRESH_MS - 60_000)
+        DirectBoot.afterRing(context.applicationContext as ItineraryApp)
+        val writtenAt = store.writtenAt()!!
+        assertTrue("written again: $writtenAt", writtenAt >= now - 5_000)
+        assertFalse(store.read()!!.alarms.any { it.key == past.key })
+        // Fresh: the next ring only refills, it doesn't write again.
+        DirectBoot.afterRing(context.applicationContext as ItineraryApp)
+        assertEquals(writtenAt, store.writtenAt())
+    }
 }

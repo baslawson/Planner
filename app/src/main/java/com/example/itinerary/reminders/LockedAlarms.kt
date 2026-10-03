@@ -53,6 +53,15 @@ object LockedAlarmSelection {
     /** ...and at most this many of them, the nearest. */
     const val MAX = 64
 
+    /**
+     * D6-4: the snapshot is written after a change, and a fresh process knows only the alarms in it; with Planner left
+     * unopened it would run out after two weeks. So a reminder ringing rewrites it from every alarm once it is this old.
+     */
+    const val REFRESH_MS = 12 * 3_600_000L
+
+    /** Whether a snapshot written at [writtenAt] (null: none) is due for that ([REFRESH_MS]; or the clock went back). */
+    fun stale(writtenAt: Long?, now: Long): Boolean = writtenAt == null || writtenAt > now || now - writtenAt >= REFRESH_MS
+
     /** The alarms still ahead of [now], within [HORIZON_MS], nearest first, at most [MAX]. */
     fun select(alarms: Collection<LockedAlarm>, now: Long): List<LockedAlarm> =
         alarms.filter { it.trigger > now && it.trigger <= now + HORIZON_MS }.sortedBy { it.trigger }.take(MAX)
@@ -161,11 +170,11 @@ class LockedAlarmMirror(private val read: () -> LockedSnapshot?, private val wri
         if (loaded().remove(key) != null) dirty = true
     }
 
-    /** Writes the snapshot if an alarm or the time format changed since it was last written. */
-    @Synchronized fun save(now: Long) {
+    /** Writes the snapshot if an alarm or the time format changed since it was last written, or when [force]d. */
+    @Synchronized fun save(now: Long, force: Boolean = false) {
         val map = loaded()
         val format = runCatching { timeFormat() }.getOrNull()
-        if (!dirty && written?.timeFormat == format) return
+        if (!force && !dirty && written?.timeFormat == format) return
         val snapshot = LockedSnapshot(format, LockedAlarmSelection.select(map.values, now))
         write(snapshot)
         written = snapshot

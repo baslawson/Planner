@@ -27,8 +27,8 @@ class ReminderReceiver : BroadcastReceiver() {
                     id, intent.getLongExtra(ReminderScheduler.EXTRA_TRIGGER, 0L)) { item, reminder ->
                     show(context, reminderIntent(context, item, reminder))
                 }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow).
-                withContext(Dispatchers.IO) { (context.applicationContext as ItineraryApp).repository.refillReminders() }
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
+                withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }
             } catch (e: Exception) { android.util.Log.w("ReminderReceiver", "Couldn't deliver reminder", e) }
             finally { pending.finish() }
         }

@@ -28,8 +28,8 @@ class TaskReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 (context.applicationContext as ItineraryApp).repository.deliverTaskReminder(id, trigger) { task -> post(context, id, task.title, trigger) }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow).
-                withContext(Dispatchers.IO) { (context.applicationContext as ItineraryApp).repository.refillReminders() }
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
+                withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }
             } catch (e: Exception) {
                 android.util.Log.w("TaskReminderReceiver", "Couldn't deliver task reminder", e)
             } finally { pending.finish() }

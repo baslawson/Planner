@@ -34,8 +34,8 @@ class NoteReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 app.repository.deliverNoteReminder(id, trigger) { note -> postNoteReminder(context, id, trigger, note) }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow).
-                withContext(Dispatchers.IO) { app.repository.refillReminders() }
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
+                withContext(Dispatchers.IO) { DirectBoot.afterRing(app) }
             } catch (e: Exception) {
                 android.util.Log.w("NoteReminderReceiver", "Couldn't deliver note reminder", e)
             } finally { pending.finish() }
