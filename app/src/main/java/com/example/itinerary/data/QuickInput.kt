@@ -41,8 +41,11 @@ data class QuickInput(
         val parsed = parse(clock, now.zone)
         val read = parsed.corrected(dateOverride, timeOverride)
         // A task has a day, not a time: "Cooking tonight", "Bins tomorrow night" are due that day, with nothing to ask.
-        val dayOnly = task && read.ambiguousTime && read.time == null && read.timePrompt != null && read.dateChoices.isEmpty()
-        val corrected = if (!dayOnly) read else read.copy(ambiguousTime = false, error = read.error.takeUnless { read.clarificationOnly })
+        // Not with title words straight after it ("Book 2night club"): that asks first, see quickProblem.
+        val dayOnly = task && read.ambiguousTime && read.time == null && read.timePrompt != null && read.periodInTitle == null
+        // "Bins Friday or Saturday night": still asked which date.
+        val corrected = if (!dayOnly) read else read.copy(ambiguousTime = false,
+            error = read.error.takeUnless { read.clarificationOnly && read.dateChoices.isEmpty() })
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
             reminderTrigger(corrected.date, if (task) null else corrected.time, parsed.reminderMinutes.toLong(), now.zone) <= now
@@ -67,6 +70,8 @@ fun QuickEntrySuggestion.nextRepeatDate(task: Boolean, now: ZonedDateTime): Loca
 fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String? {
     val reminder = reminderMinutes?.let { reminderTrigger(date, if (task) null else time, it.toLong(), now.zone) }
     return when {
+        task && ambiguousTime && time == null && periodInTitle != null ->
+            "‘$periodInTitle’ would be the due day, out of the title. Put it at the end, or open More options → Adjust recognised text to keep it in the title."
         task && (time != null || ambiguousTime || durationMinutes != null) -> "Tasks use due dates. Choose Event for a time or duration."
         task && endDate != null -> "Tasks use one due date. Choose Event for several days."
         endDate != null && (time != null || durationMinutes != null) -> "An entry over several days is all day. Remove the time, or add each day separately."
