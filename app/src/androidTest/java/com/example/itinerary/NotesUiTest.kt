@@ -210,7 +210,7 @@ class NotesUiTest {
         // The attachment is listed in the note and can be taken off.
         click("QA with file"); reveal("Receipt.txt")
         screenshot("editor-attachment")
-        click("Remove"); await { find("Receipt.txt") == null }
+        click("Remove Receipt.txt"); await { find("Receipt.txt") == null }
         click("Save"); await { notes().single { it.title == "QA with file" }.attachments.isEmpty() }
         click("Close"); await { find("QA with file") != null && find("1 attachment") == null }
         // Nothing uses the file now, so it has gone.

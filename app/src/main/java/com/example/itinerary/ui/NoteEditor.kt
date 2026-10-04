@@ -111,6 +111,11 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var title by rememberSaveable { mutableStateOf(start.title) }
     var content by body::content
     var notebook by rememberSaveable { mutableStateOf(start.notebook) }
+    // Undo and Redo of the typing in this note (wish list #2); the body's cursor goes where the change was.
+    val undo = rememberEditorUndo()
+    Track(undo, "title", title) { title = it }
+    Track(undo, "body", content.text) { text -> content = TextFieldValue(text, androidx.compose.ui.text.TextRange(undoCursor(content.text, text))) }
+    Track(undo, "notebook", notebook) { notebook = it }
     var color by rememberSaveable { mutableStateOf(start.color) }
     var pickingColor by rememberSaveable { mutableStateOf(false) }
     var priority by rememberSaveable { mutableStateOf(start.priority) }
@@ -291,7 +296,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var noteFocused by remember { mutableStateOf(false) }
     val toolsPinned = !preview && noteFocused && WindowInsets.isImeVisible
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo)) {
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
@@ -368,10 +373,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     HorizontalDivider()
                     HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
                     attachments.forEach { attachment ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            MatrixTextButton(enabled = !busy, modifier = Modifier.weight(1f), onClick = { openAttachment(context, attachmentStore, attachment) }) { Text(attachment.name) }
-                            MatrixTextButton(enabled = !busy, onClick = { setAttachments(attachments.filterNot { it.fileName == attachment.fileName }) }) { Text("Remove") }
-                        }
+                        AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) },
+                            onRemove = { setAttachments(attachments.filterNot { it.fileName == attachment.fileName }) })
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
@@ -393,7 +396,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ delete() }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && (unsaved || deletedElsewhere)) { SaveLabel(busy, saved = justSaved && !unsaved) }
+                    saveEnabled = canSave && (unsaved || deletedElsewhere), undo = undo) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
             if (toolsPinned) {
                 HorizontalDivider()

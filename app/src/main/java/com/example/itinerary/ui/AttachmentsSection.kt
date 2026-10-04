@@ -68,32 +68,7 @@ fun AttachmentsSection(
             fontWeight = FontWeight.Bold,
         )
         attachments.forEach { attachment ->
-            // The remove button already sits at the end of the row, so no arrow here.
-            TappableRow(onClick = { onOpen(attachment) }, modifier = Modifier.fillMaxWidth(), arrow = false) {
-                AttachmentThumb(attachment, store)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f).align(Alignment.CenterVertically)) {
-                    Text(
-                        attachment.name,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    // A link also shows where it goes.
-                    attachment.url?.let { url ->
-                        Text(
-                            url,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                IconButton(enabled = !readingText, onClick = { onRemove(attachment) }, modifier = Modifier.align(Alignment.CenterVertically)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Remove ${attachment.name}")
-                }
-            }
+            AttachmentRow(attachment, store, enabled = !readingText, onOpen = { onOpen(attachment) }, onRemove = { onRemove(attachment) })
             if (com.example.itinerary.scanner.DocumentText.supports(attachment)) {
                 Text(when (attachment.textStatus) {
                     "READY" -> "Text searchable after Save"
@@ -119,10 +94,42 @@ fun AttachmentsSection(
     }
 }
 
+// One attachment: its preview (a photo, a PDF's first page, else its kind), its name (and a link's address), and a
+// remove button. Shared by the event, task and note editors (wish list #4).
+@Composable
+fun AttachmentRow(attachment: Attachment, store: AttachmentStore, enabled: Boolean, onOpen: () -> Unit, onRemove: () -> Unit) {
+    // The remove button already sits at the end of the row, so no arrow here.
+    TappableRow(onClick = onOpen, modifier = Modifier.fillMaxWidth(), arrow = false) {
+        AttachmentThumb(attachment, store)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f).align(Alignment.CenterVertically)) {
+            Text(
+                attachment.name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            // A link also shows where it goes.
+            attachment.url?.let { url ->
+                Text(
+                    url,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        IconButton(enabled = enabled, onClick = onRemove, modifier = Modifier.align(Alignment.CenterVertically)) {
+            Icon(Icons.Filled.Close, contentDescription = "Remove ${attachment.name}")
+        }
+    }
+}
+
 @Composable
 private fun AttachmentThumb(attachment: Attachment, store: AttachmentStore) {
     val bitmap by produceState<ImageBitmap?>(null, attachment.fileName) {
-        value = if (attachment.mimeType.startsWith("image/")) {
+        value = if (attachment.url == null && (attachment.mimeType.startsWith("image/") || attachment.mimeType == "application/pdf")) {
             withContext(Dispatchers.IO) { store.thumbnail(attachment.fileName, 160)?.asImageBitmap() }
         } else {
             null

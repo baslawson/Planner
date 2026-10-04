@@ -363,6 +363,12 @@ private fun ItemEditorForm(
     var lastTimedTime by remember { mutableStateOf(draft?.optString("lastTimedTime")?.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) ?: values.startTime ?: LocalTime.of(9, 0)) }
     var location by remember { mutableStateOf(values.location) }
     var notes by remember { mutableStateOf(values.notes) }
+    // Undo and Redo of the typing in this form (wish list #2).
+    val undo = rememberEditorUndo()
+    Track(undo, "title", title) { title = it }
+    Track(undo, "location", location) { location = it }
+    Track(undo, "notes", notes) { notes = it }
+    checklist.forEach { entry -> Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } }
     var category by remember { mutableStateOf(values.category) }
     val billTask = category == "Bills"
     fun selectCategory(selected: String) {
@@ -641,6 +647,7 @@ private fun ItemEditorForm(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
+                .undoKeys(undo)
         ) {
             ScrollHints(editorScroll, Modifier.weight(1f),
                 overlay = { ChecklistJumpButton(checklist, checklistAnchor, editorScroll) }) { Column(
@@ -1013,7 +1020,7 @@ private fun ItemEditorForm(
                 onClose = ::close, onSave = { save() },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 8.dp),
                 deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
-                saveEnabled = canSave && (unsaved || isNew || deletedElsewhere),
+                saveEnabled = canSave && (unsaved || isNew || deletedElsewhere), undo = undo,
             ) { SaveLabel(busy, saved = justSaved && !unsaved) }
         }
     }

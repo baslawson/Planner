@@ -29,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.itinerary.ItineraryApp
+import com.example.itinerary.data.page
 import java.time.LocalDate
 
 // Goes back from [entry], but only while it is the screen being shown. A second quick tap on a back arrow lands on
@@ -135,7 +136,15 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 viewRestored = true
                 // Keep Agenda underneath Calendar so Back and the toggle still work.
                 // Explicit widget dates take priority over the saved view/date.
-                if (route == "agenda" && app.settings.lastViewCalendar && widgetDate == null) {
+                // Settings → Open Planner on (wish list #10). A widget day, shortcut, share, calendar file or reminder opens
+                // what it is for instead, over Agenda as before.
+                val page = app.settings.startScreen.value.page(app.settings.lastViewCalendar)
+                val asked = widgetDate != null || noteId != null || sharedText != null || entryAction != null || calendarUri != null || widgetTaskId != null
+                if (route == "agenda" && page == com.example.itinerary.data.StartScreen.NOTES && !asked) {
+                    nav.navigate("notes") { launchSingleTop = true }
+                    return@collect
+                }
+                if (route == "agenda" && page == com.example.itinerary.data.StartScreen.CALENDAR && widgetDate == null) {
                     nav.navigate("calendar") { launchSingleTop = true }
                     return@collect
                 }

@@ -250,6 +250,11 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         List(array.length()) { i -> array.getJSONObject(i).let { ChecklistEntry(it.getString("id"), it.getString("text"), it.getBoolean("done")) } }
     } ?: initial.checklist) }
     var prerequisiteIds by remember { mutableStateOf(draft?.optJSONArray("prerequisiteIds")?.let(StringListCodec::decode) ?: initial.prerequisiteIds) }
+    // Undo and Redo of the typing in this form (wish list #2).
+    val undo = rememberEditorUndo()
+    Track(undo, "title", title) { title = it }
+    Track(undo, "notes", notes) { notes = it }
+    checklist.forEach { entry -> Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } }
     var attachments by remember { mutableStateOf(if (draft != null) DraftCodec.attachments(draft.optJSONArray("attachments")) else initial.attachments) }
     var pendingPhoto by remember { mutableStateOf(draft?.optString("pendingPhoto")?.takeIf { it.isNotBlank() }) }
     var finished by remember { mutableStateOf(false) }
@@ -393,7 +398,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val taskScroll = rememberScrollState()
     val checklistAnchor = remember { ChecklistAnchor() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo)) {
             ScrollHints(taskScroll, Modifier.weight(1f).fillMaxWidth(),
                 overlay = { ChecklistJumpButton(checklist, checklistAnchor, taskScroll) }) { Column(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -493,15 +498,12 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 HorizontalDivider()
                 HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
                 attachments.forEach { attachment ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(enabled = !busy, modifier = Modifier.weight(1f), onClick = { openAttachment(context, attachmentStore, attachment) }) { Text(attachment.name) }
-                        TextButton(enabled = !busy, onClick = {
-                            attachments = attachments.filterNot { it.fileName == attachment.fileName }
-                            // Persist the removal before checking shared-file ownership.
-                            draftStore.write(draftKey, snapshot.put("attachments", DraftCodec.attachments(attachments)))
-                            scope.launch { repo.releaseTaskFiles(listOf(attachment.fileName)) }
-                        }) { Text("Remove") }
-                    }
+                    AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) }, onRemove = {
+                        attachments = attachments.filterNot { it.fileName == attachment.fileName }
+                        // Persist the removal before checking shared-file ownership.
+                        draftStore.write(draftKey, snapshot.put("attachments", DraftCodec.attachments(attachments)))
+                        scope.launch { repo.releaseTaskFiles(listOf(attachment.fileName)) }
+                    })
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
@@ -522,7 +524,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 EditorActions(onDelete = if (!creating && !deletedElsewhere) ({ confirmingDelete = true }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && (unsaved || creating)) { SaveLabel(busy, saved = justSaved && !unsaved) }
+                    saveEnabled = canSave && (unsaved || creating), undo = undo) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
         }
     }

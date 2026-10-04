@@ -89,6 +89,7 @@ fun SettingsScreen(
     val settings = (context.applicationContext as ItineraryApp).settings
     val showBillsSummary by settings.showBillsSummary.collectAsStateWithLifecycle()
     val noteOpenView by settings.noteOpenView.collectAsStateWithLifecycle()
+    val startScreen by settings.startScreen.collectAsStateWithLifecycle()
     val scheduler = remember { (context.applicationContext as ItineraryApp).reminderScheduler }
     // Re-checked on resume because the user grants this in system settings, outside the app.
     val exactAllowed by rememberExactAlarmsAllowed(scheduler)
@@ -129,6 +130,14 @@ fun SettingsScreen(
                     SettingsHeading("Agenda")
                     SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
+                    SettingsSection(
+                        title = "Open Planner on",
+                        options = com.example.itinerary.data.StartScreen.entries,
+                        selected = startScreen,
+                        label = { it.label },
+                        onSelect = settings::setStartScreen,
+                    )
+                    Text("A widget, shortcut, share or reminder still opens what it's for.", style = MaterialTheme.typography.bodySmall)
                     SettingsSection(
                         title = "Notes open in",
                         options = com.example.itinerary.data.NoteOpenView.entries,

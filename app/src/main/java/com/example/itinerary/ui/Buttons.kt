@@ -3,6 +3,7 @@ import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.BorderStroke
@@ -27,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.selection.toggleable
@@ -108,17 +110,27 @@ fun EditorActions(
     deleteEnabled: Boolean = true,
     closeEnabled: Boolean = true,
     saveEnabled: Boolean = true,
+    // Undo and Redo of what was typed in the editor (wish list #2).
+    undo: EditorUndo? = null,
     saveLabel: @Composable RowScope.() -> Unit,
 ) {
     androidx.compose.foundation.layout.FlowRow(modifier.fillMaxWidth(),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp, Alignment.End),
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        // Wrapped lines leave room for each button's 48 dp touch area, so a wrapped Save can't overlap Close's.
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
         val size = Modifier.heightIn(min = 30.dp)
         val padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 17.dp, vertical = 2.dp)
         val label = MaterialTheme.typography.labelLarge.let { it.copy(fontSize = it.fontSize * 0.9f, lineHeight = it.lineHeight * 0.9f) }
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 36.dp) {
             if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
+            if (undo != null) {
+                val tight = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                OutlinedButton(enabled = undo.canUndo, onClick = undo::undo, contentPadding = tight, modifier = size) {
+                    androidx.compose.material3.Icon(UndoIcons.undo, contentDescription = "Undo", modifier = Modifier.size(18.dp)) }
+                OutlinedButton(enabled = undo.canRedo, onClick = undo::redo, contentPadding = tight, modifier = size) {
+                    androidx.compose.material3.Icon(UndoIcons.redo, contentDescription = "Redo", modifier = Modifier.size(18.dp)) }
+            }
             androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
             OutlinedButton(enabled = closeEnabled, onClick = onClose, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Close") } }
@@ -173,4 +185,13 @@ fun TappableRow(
             }
         }
     }
+}
+
+// Material's Undo and Redo arrows (Apache 2.0), drawn here as the app bundles only the core icon set.
+internal object UndoIcons {
+    private fun icon(name: String, path: String) = androidx.compose.ui.graphics.vector.ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+        .addPath(androidx.compose.ui.graphics.vector.PathParser().parsePathString(path).toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.Black)).build()
+    val undo = icon("Undo", "M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z")
+    val redo = icon("Redo", "M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z")
 }

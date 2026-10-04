@@ -142,6 +142,15 @@ object AddButton {
     const val DEFAULT_SEE_THROUGH = 30
 }
 
+/** Which page Planner opens on when started from its icon. */
+enum class StartScreen(val label: String) { LAST("Agenda or Calendar, where I left it"), AGENDA("Agenda"), CALENDAR("Calendar"), NOTES("Notes") }
+
+/** The page to open; [lastCalendar]: Calendar was left open last (else Agenda). */
+fun StartScreen.page(lastCalendar: Boolean): StartScreen = when (this) {
+    StartScreen.LAST -> if (lastCalendar) StartScreen.CALENDAR else StartScreen.AGENDA
+    else -> this
+}
+
 class SettingsRepository(context: Context, private val onChanged: () -> Unit = {}) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -192,6 +201,10 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         get() = prefs.getString("note_filter", null) ?: "all"
         set(value) { prefs.edit { putString("note_filter", value) } }
 
+    // Settings → Open Planner on (wish list #10).
+    private val _startScreen = MutableStateFlow(runCatching { StartScreen.valueOf(prefs.getString("start_screen", null) ?: "") }.getOrDefault(StartScreen.LAST))
+    val startScreen: StateFlow<StartScreen> = _startScreen.asStateFlow()
+    fun setStartScreen(screen: StartScreen) { prefs.edit { putString("start_screen", screen.name) }; _startScreen.value = screen }
     // Device-local navigation state; independent of exported planner data.
     var lastViewCalendar: Boolean
         get() = prefs.getBoolean("last_view_calendar", false)

@@ -102,12 +102,31 @@ class AttachmentStore(private val context: Context) {
         }
     }
 
+    private fun isPdf(file: File): Boolean = runCatching {
+        file.inputStream().use { input -> ByteArray(5).let { head -> input.read(head) == 5 && String(head, Charsets.US_ASCII) == "%PDF-" } }
+    }.getOrDefault(false)
+
+    private fun pdfFirstPage(file: File, maxPx: Int): Bitmap? = runCatching {
+        android.graphics.pdf.PdfRenderer(android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)).use { pdf ->
+            if (pdf.pageCount == 0) return@use null
+            pdf.openPage(0).use { page ->
+                val scale = maxPx.toFloat() / maxOf(page.width, page.height)
+                Bitmap.createBitmap(maxOf(1, (page.width * scale).toInt()), maxOf(1, (page.height * scale).toInt()), Bitmap.Config.ARGB_8888).also {
+                    it.eraseColor(android.graphics.Color.WHITE)
+                    page.render(it, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                }
+            }
+        }
+    }.getOrNull()
+
     // Small preview decoded at reduced size, rotated per the photo's EXIF orientation.
     @Synchronized fun thumbnail(fileName: String, maxPx: Int): Bitmap? {
         require(maxPx > 0)
         val file = fileFor(fileName)
         val key = ThumbKey(fileName, maxPx, file.length(), file.lastModified())
         thumbnails.get(key)?.let { return it }
+        // A PDF (or a scan saved as one) shows its first page (wish list #4); a locked or damaged one shows its kind.
+        if (isPdf(file)) return pdfFirstPage(file, maxPx)?.also { thumbnails.put(key, it) }
         val path = file.path
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
