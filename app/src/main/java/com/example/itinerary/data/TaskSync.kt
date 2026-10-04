@@ -22,10 +22,11 @@ interface TaskStore {
     suspend fun archive(id: String, still: (PlannerTask) -> Boolean): Boolean
 }
 
+// Sync's writes, not changes made in Planner (SyncWrite).
 fun Repository.asTaskStore(): TaskStore = object : TaskStore {
-    override suspend fun add(task: PlannerTask): String { saveTask(task); return task.id }
-    override suspend fun update(id: String, change: (PlannerTask) -> PlannerTask?) = saveTaskIf(id, change)
-    override suspend fun archive(id: String, still: (PlannerTask) -> Boolean) = archiveTask(id, still)
+    override suspend fun add(task: PlannerTask): String { SyncWrite.of { saveTask(task) }; return task.id }
+    override suspend fun update(id: String, change: (PlannerTask) -> PlannerTask?) = SyncWrite.of { saveTaskIf(id, change) }
+    override suspend fun archive(id: String, still: (PlannerTask) -> Boolean) = SyncWrite.of { archiveTask(id, still) }
 }
 
 // Two-way task sync with one Nextcloud task list, the way CalendarSync keeps events in sync with one calendar: every write
@@ -70,8 +71,10 @@ class TaskSync(
     // to Planner's instead of sending them twice.
     // E-4: not while a send, pull or choice is under way (see paused).
     suspend fun setTarget(id: Long?) {
-        lastRefused = null // a new record of what was sent: no refusal carried over
         lock.withLock {
+            // A new record of what was sent: no refusal carried over. S6-6: inside the lock, so a send still under way
+            // can't set it again afterwards.
+            lastRefused = null
             db.withTransaction {
                 val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
                 sources.filter { it.tasksHere && it.id != id }.forEach { dao.updateSource(it.copy(tasksHere = false, taskCtag = null, taskError = null)) }
@@ -257,7 +260,8 @@ class TaskSync(
                 target = current; ctag = list.ctag
                 read = pullLocked(account, current, list.ctag)
                 // What it read may leave something to send (new files wait for the first read of a list just chosen);
-                // not a change in Planner, so it waits for a check backing off (S5-2).
+                // not a change in Planner, so it waits for a check backing off (S5-2). The pull's own writes to Planner's
+                // tasks aren't reported as changes either (asTaskStore, S6-5), so they don't reset that backoff.
                 if (read) changes.incrementAndGet()
                 failedAt = null
             }

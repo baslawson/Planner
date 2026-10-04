@@ -44,7 +44,8 @@ class Repository(
     private val db: AppDatabase,
     private val store: AttachmentStore,
     private val scheduler: ReminderAlarms,
-    private val onChanged: () -> Unit = {},
+    // [local]: made in Planner, not taken in from Nextcloud by sync (see SyncWrite).
+    private val onChanged: (local: Boolean) -> Unit = {},
     // A deletion's Undo is no longer on offer (calendar sync may now delete Planner's copy on Nextcloud).
     private val onDeletionFinished: () -> Unit = {},
     // DA-7: where allItems is shared among its collectors (the app's scope); null (tests) leaves it a plain Room query.
@@ -147,7 +148,7 @@ class Repository(
         if (reminderIds.isNotEmpty() || taskIds.isNotEmpty() || noteIds.isNotEmpty()) work["reminders:window"] = {
             if (AlarmWindow.needsRefill(scheduler.armedCount(), scheduler.armHorizon())) armReminders()
         }
-        if (notify) work["widget"] = { onChanged() }
+        if (notify) { val local = !SyncWrite.active(); work["widget"] = { onChanged(local) } }
         performFollowUp(work)
     }
 
@@ -391,15 +392,13 @@ class Repository(
     // Several notes to Recently deleted together, with one Undo bar for all of them.
     suspend fun deleteNotes(ids: Collection<String>) = changes.withLock {
         withContext(NonCancellable) {
-            val bundle = archiving { archived ->
+            val bundle = deletingWithUndo({ archived ->
                 val notes = ids.mapNotNull { noteDao.byId(it) }
-                if (notes.isEmpty()) return@archiving null
+                if (notes.isEmpty()) return@deletingWithUndo null
                 val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), notes = notes)
                 archive(deleted, archived, emptyList())
-                notes.forEach { noteDao.delete(it.id) }
                 deleted
-            } ?: return@withContext
-            _pendingDeletions.value += bundle
+            }) { deleted -> deleted.notes.forEach { noteDao.delete(it.id) } } ?: return@withContext
             afterCommit(noteIds = bundle.notes.map { it.id })
         }
     }
@@ -428,14 +427,12 @@ class Repository(
 
     suspend fun deleteTask(id: String) = changes.withLock {
         withContext(NonCancellable) {
-            val bundle = archiving { archived ->
-                val task = taskDao.byId(id) ?: return@archiving null
+            deletingWithUndo({ archived ->
+                val task = taskDao.byId(id) ?: return@deletingWithUndo null
                 val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task))
                 archive(deleted, archived, emptyList())
-                taskDao.delete(id)
                 deleted
-            } ?: return@withContext
-            _pendingDeletions.value += bundle
+            }) { taskDao.delete(id) } ?: return@withContext
             afterCommit(taskIds = listOf(id))
         }
     }
@@ -513,6 +510,25 @@ class Repository(
         val archived = mutableListOf<DeletedEntry>()
         try { return db.withTransaction { block(archived) } }
         catch (e: Throwable) { dropUncommitted(archived); throw e }
+    }
+
+    // A deletion with Undo: [archive] puts what goes into Recently deleted and returns its bundle (null: nothing to
+    // delete), then [remove] deletes it. S6-7: the bundle is offered for Undo before the delete commits, so a send pass
+    // never finds it gone without its Undo waiting (it would delete Nextcloud's copy); a delete that fails takes it back.
+    private suspend fun deletingWithUndo(archive: suspend (MutableList<DeletedEntry>) -> PendingDeletion?,
+                                         remove: suspend (PendingDeletion) -> Unit): PendingDeletion? {
+        var offered: PendingDeletion? = null
+        try {
+            return archiving { archived ->
+                val bundle = archive(archived) ?: return@archiving null
+                _pendingDeletions.value += bundle; offered = bundle
+                remove(bundle)
+                bundle
+            }
+        } catch (e: Throwable) {
+            offered?.let { bundle -> _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == bundle.token } }
+            throw e
+        }
     }
 
     // After a failed transaction: the payload files of [entries] whose rows didn't get saved.
@@ -860,8 +876,8 @@ class Repository(
     // By id, as it is now: the card's ⋮ only has the id and whether it repeats.
     suspend fun deleteWithUndo(id: Long, entireSeries: Boolean = false) = changes.withLock {
         requirePlannerEvent(id)
-        val deleted = archiving { archived ->
-            val current = itemDao.byId(id) ?: return@archiving null
+        val deleted = deletingWithUndo({ archived ->
+            val current = itemDao.byId(id) ?: return@deletingWithUndo null
             val selected = if (entireSeries && current.seriesId != null) {
                 itemDao.forSeries(current.seriesId).sortedBy { it.id }
             } else listOf(current)
@@ -870,10 +886,8 @@ class Repository(
                 attachments = readIds(ids, attachmentDao::forItems).sortedBy { it.id },
                 reminders = readIds(ids, reminderDao::forItems).sortedBy { it.id })
             archive(bundle, archived)
-            selected.forEach { itemDao.delete(it) }
             bundle
-        } ?: return@withLock
-        _pendingDeletions.value += deleted
+        }) { bundle -> bundle.items.forEach { itemDao.delete(it) } } ?: return@withLock
         afterCommit(reminderIds = deleted.reminders.map { it.id })
     }
 
@@ -882,20 +896,20 @@ class Repository(
     suspend fun deleteEventsWithUndo(ids: Set<Long>, taskIds: Set<String> = emptySet()) = changes.withLock {
         requirePlannerEvents(ids)
         withContext(NonCancellable) {
-            val deleted = archiving { archived ->
+            val deleted = deletingWithUndo({ archived ->
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
                 val tasks = taskIds.mapNotNull { taskDao.byId(it) }.sortedBy { it.id }
-                if (selected.isEmpty() && tasks.isEmpty()) return@archiving null
+                if (selected.isEmpty() && tasks.isEmpty()) return@deletingWithUndo null
                 val selectedIds = selected.mapTo(hashSetOf()) { it.id }
                 val bundle = PendingDeletion(items = selected,
                     attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
                     reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id }, tasks = tasks)
                 archive(bundle, archived)
-                selected.forEach { itemDao.delete(it) }
-                tasks.forEach { taskDao.delete(it.id) }
                 bundle
+            }) { bundle ->
+                bundle.items.forEach { itemDao.delete(it) }
+                bundle.tasks.forEach { taskDao.delete(it.id) }
             } ?: return@withContext
-            _pendingDeletions.value += deleted
             afterCommit(reminderIds = deleted.reminders.map { it.id }, taskIds = deleted.tasks.map { it.id })
         }
     }

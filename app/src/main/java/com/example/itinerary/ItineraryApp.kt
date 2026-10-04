@@ -41,7 +41,8 @@ class ItineraryApp : Application() {
 
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
-            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this); sendChanges() },
+            // S6-5: what a sync pull wrote is no change to send (see SyncWrite).
+            onChanged = { local -> com.example.itinerary.widget.TodayWidget.requestUpdate(this); if (local) sendChanges() },
             onDeletionFinished = { sendChanges() }, shareScope = appScope)
     }
 

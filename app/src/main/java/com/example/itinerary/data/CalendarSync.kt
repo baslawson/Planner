@@ -275,6 +275,8 @@ class CalendarSync(
     suspend fun setSendTarget(id: Long?) {
         // Not while a send, pull or choice is under way (see paused); released before the sync that follows.
         sendLock.withLock {
+            // S6-6: a refusal by the calendar left isn't about the new one (inside the lock: no send can set it again).
+            lastRefused = null
             db.withTransaction {
                 val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
                 sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }

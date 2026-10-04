@@ -185,12 +185,13 @@ interface PlannerStore {
     suspend fun archive(id: Long, still: (ItineraryItem) -> Boolean): Boolean
 }
 
+// Sync's writes, not changes made in Planner (SyncWrite).
 fun Repository.asPlannerStore(): PlannerStore = object : PlannerStore {
-    override suspend fun update(item: ItineraryItem) = saveItem(item)
-    override suspend fun update(id: Long, change: (ItineraryItem) -> ItineraryItem?) = saveItemIf(id, change)
-    override suspend fun add(item: ItineraryItem): Long = importEvents(listOf(item)).single()
-    override suspend fun archive(ids: Set<Long>) { archiveEvents(ids) }
-    override suspend fun archive(id: Long, still: (ItineraryItem) -> Boolean) = id in archiveEvents(setOf(id), still)
+    override suspend fun update(item: ItineraryItem) = SyncWrite.of { saveItem(item) }
+    override suspend fun update(id: Long, change: (ItineraryItem) -> ItineraryItem?) = SyncWrite.of { saveItemIf(id, change) }
+    override suspend fun add(item: ItineraryItem): Long = SyncWrite.of { importEvents(listOf(item)).single() }
+    override suspend fun archive(ids: Set<Long>) { SyncWrite.of { archiveEvents(ids) } }
+    override suspend fun archive(id: Long, still: (ItineraryItem) -> Boolean) = SyncWrite.of { id in archiveEvents(setOf(id), still) }
 }
 
 @Dao
