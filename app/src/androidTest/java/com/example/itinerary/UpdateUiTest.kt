@@ -15,6 +15,9 @@ import java.io.File
  *  installer. The APK served is this test app's own file, so the installer has a real app to show; it is cancelled. */
 @Suppress("DEPRECATION")
 class UpdateUiTest {
+    // Newer than whatever version the app is at, so a version bump can't make it "up to date".
+    private val NEWER = "9.9.9"
+
     private val ins get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = ins.targetContext
     private val app get() = context.applicationContext as ItineraryApp
@@ -45,7 +48,7 @@ class UpdateUiTest {
     private fun resumed() = shell("dumpsys activity activities").lineSequence().firstOrNull { "topResumedActivity" in it }.orEmpty()
 
     @Test fun offeredAtStartThenDownloadedCheckedAndHandedToAndroid() {
-        val fake = FakeGitHub(apk = File(context.packageCodePath).readBytes())
+        val fake = FakeGitHub(version = "v$NEWER", apk = File(context.packageCodePath).readBytes())
         val updates = app.updates
         val original = updates.api
         Updates.prefs(context).edit().clear().commit()
@@ -56,7 +59,7 @@ class UpdateUiTest {
             app.settings.lastViewCalendar = false
             ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             // Start-up check: the pop-up, with the release notes.
-            await { find("Planner 0.0.15 is available") != null }
+            await { find("Planner $NEWER is available") != null }
             await { find("Faster") != null || nodes().any { it.text?.toString()?.contains("Faster") == true } }
             assertNotNull(find("You have ${updates.installedVersion}."))
             assertNotNull(find("Skip this version")); screenshot("offered")
@@ -66,8 +69,8 @@ class UpdateUiTest {
             val monitor = android.app.Instrumentation.ActivityMonitor(filter, android.app.Instrumentation.ActivityResult(0, null), true)
             ins.addMonitor(monitor)
             try { click("Support on Ko-fi"); await(10000) { monitor.hits == 1 } } finally { ins.removeMonitor(monitor) }
-            assertNotNull(find("Planner 0.0.15 is available")) // the pop-up stays
-            click("Later"); await { find("Planner 0.0.15 is available") == null }
+            assertNotNull(find("Planner $NEWER is available")) // the pop-up stays
+            click("Later"); await { find("Planner $NEWER is available") == null }
 
             // Settings → Updates → Check now offers it again.
             await { find("AGENDA") != null }
@@ -75,7 +78,7 @@ class UpdateUiTest {
             click("Settings"); scrollTo("Check now")
             assertNotNull(find("Check for updates when Planner starts")); assertNotNull(find("Download updates automatically"))
             click("Check now")
-            await { find("Planner 0.0.15 is available") != null }
+            await { find("Planner $NEWER is available") != null }
             click("Update now")
             await(60000) { find("Install now") != null }
             screenshot("ready")
@@ -100,7 +103,7 @@ class UpdateUiTest {
     // restarts the app): a checked download from before the restart is offered at once, and Install now opens Android's
     // own installer (cancelled here). Put the permission back to default afterwards.
     @HarnessStage @Test fun allowedThenInstallerAsks() {
-        val fake = FakeGitHub(apk = File(context.packageCodePath).readBytes())
+        val fake = FakeGitHub(version = "v$NEWER", apk = File(context.packageCodePath).readBytes())
         val updates = app.updates
         Updates.prefs(context).edit().clear().commit()
         updates.api = ReleaseApi(fake.http, fake.base); updates.supported = true

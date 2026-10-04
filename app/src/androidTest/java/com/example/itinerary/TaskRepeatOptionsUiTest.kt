@@ -161,7 +161,9 @@ class TaskRepeatOptionsUiTest {
         fresh()
         for (action in listOf("Add event","Add bill")) {
             click("Add menu");click(action);click("Does not repeat")
-            assertNotNull(find("Fortnightly"));assertNotNull(find("Yearly"))
+            // The menu shows about six rows and scrolls (wish list "scrolling lists").
+            fun scrollMenu() { nodes().lastOrNull { it.isScrollable && it.isVisibleToUser }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); Thread.sleep(300) }
+            for (option in listOf("Fortnightly", "Yearly")) { repeat(3) { if (find(option) == null) scrollMenu() }; assertNotNull("Missing $option", find(option)) }
             screenshot(if(action=="Add bill") "bill-repeat-dropdown" else "event-repeat-dropdown")
             click("Yearly");reveal { find("Yearly")!=null };closeAndDiscard()
         }
