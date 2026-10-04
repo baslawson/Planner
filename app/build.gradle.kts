@@ -129,6 +129,9 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Plain JVM tests (app/src/test), e.g. the agenda ordering and filtering in AgendaTest.
     testImplementation("junit:junit:4.13.2")
+    // A local HTTPS server for NextcloudClient's backup transfers (BackupTransferTest).
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.okhttp.tls)
     androidTestImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.work.testing)
     androidTestImplementation(libs.okhttp.tls)

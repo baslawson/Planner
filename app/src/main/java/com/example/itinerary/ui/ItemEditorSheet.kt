@@ -281,8 +281,18 @@ private fun ItemEditorForm(
     // once when the editor leaves and when Planner goes to the background, before Android might close it.
     DisposableEffect(Unit) { onDispose { disposed = true; runCatching { draftStore.flush() } } }
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_STOP) { runCatching { draftStore.flush() } }
+    // S6-4: this form's files are kept from the unused-file clean-up while it is open, drafted or not (opened without an
+    // edit there is no draft), so a Save after the event was deleted and emptied elsewhere still has them. While it
+    // saves, only the files the saved event will have ([savingFiles]): what the save removes is then free for its clean-up.
+    val fileHolder = remember { Any() }
+    var savingFiles by remember { mutableStateOf<Set<String>?>(null) }
+    val heldFiles by remember(existingAttachments) { derivedStateOf {
+        savingFiles ?: ((existingAttachments + added + removed).mapNotNullTo(hashSetOf()) { it.fileName.takeIf(String::isNotBlank) } + listOfNotNull(pendingPhoto?.name))
+    } }
+    SideEffect { EditorDraftStore.holdFiles(fileHolder, heldFiles) }
+    DisposableEffect(Unit) { onDispose { EditorDraftStore.releaseFiles(fileHolder) } }
 
-    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
+    val takePhoto =rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
         val file = pendingPhoto
         pendingPhoto = null
         if (file != null && captured && file.length() > 0L) {
@@ -543,7 +553,9 @@ private fun ItemEditorForm(
         error = null
         val copy = duplicating || deletedElsewhere
         val item = currentItem(copy)
-        val attachmentsToAdd = if (copy) shownAttachments.map { it.copy(id = 0, itemId = 0) } else added.toList()
+        // S6-4: a copy never points at a file that is gone (a link has none).
+        val attachmentsToAdd = if (copy) shownAttachments.filter { it.fileName.isBlank() || store.fileFor(it.fileName).exists() }
+            .map { it.copy(id = 0, itemId = 0) } else added.toList()
         val remindersToAdd = if (copy) shownReminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) } else addedReminders.toList()
         val attachmentsToRemove = if (copy) emptyList() else removed.toList()
         val remindersToRemove = if (copy) emptyList() else removedReminders.toList()
@@ -564,7 +576,11 @@ private fun ItemEditorForm(
                     // Only commit after the duplicate warning has been accepted, if needed.
                     committed = true
                     duplicateBills = emptyList()
+                    // Until the saved event holds them, only the files it will have stay held (see heldFiles).
+                    savingFiles = attachmentsToAdd.mapNotNullTo(hashSetOf()) { it.fileName.takeIf(String::isNotBlank) }
+                        .also { EditorDraftStore.holdFiles(fileHolder, it) }
                     val savedId = onSave(item, attachmentsToAdd, attachmentsToRemove, remindersToAdd, remindersToRemove, options)
+                    savingFiles = emptySet(); EditorDraftStore.releaseFiles(fileHolder)
                     draftStore.clear()
                     File(context.filesDir, "draft-scan").deleteRecursively()
                     // Save changes? → Save leaves; a plain Save goes on editing the event as stored. That form is new,
@@ -574,6 +590,7 @@ private fun ItemEditorForm(
                     else onSaved(savedId)
                 } catch (e: Exception) {
                     committed = false
+                    savingFiles = null; EditorDraftStore.holdFiles(fileHolder, heldFiles)
                     closeAfterSave = false
                     error = EditorRules.saveError(e, billTask)
                 } finally { busy = false }

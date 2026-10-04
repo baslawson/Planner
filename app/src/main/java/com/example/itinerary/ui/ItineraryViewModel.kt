@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
@@ -43,13 +42,11 @@ class ItineraryViewModel(
 
 
     // Planner's own events plus those of ticked Nextcloud calendars (negative ids; tapping one opens a read-only view).
-    val items: StateFlow<List<ItineraryItem>> = combine(repo.allItems, outside) { own, other ->
+    // Null until both have been read once: until then an empty list isn't "nothing to show" (a selection restored after
+    // Android closed Planner waits for it, L5-2; A6-5: for this list itself, not only Planner's events).
+    val items: StateFlow<List<ItineraryItem>?> = combine(repo.allItems, outside) { own, other ->
         if (other.isEmpty()) own else own + other.values.map { it.event.toItem(it.color) }
-    }.stateInWhileVisible(viewModelScope, emptyList())
-
-    // Whether the events have been read once: until then the empty list isn't "nothing to show" (a selection restored
-    // after Android closed Planner waits for it, L5-2).
-    val itemsLoaded: StateFlow<Boolean> = repo.allItems.map { true }.stateInWhileVisible(viewModelScope, false)
+    }.stateInWhileVisible(viewModelScope, null)
 
     val attachments: StateFlow<List<Attachment>> = repo.allAttachments
         .stateInWhileVisible(viewModelScope, emptyList())

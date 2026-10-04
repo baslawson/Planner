@@ -7,6 +7,12 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="pending_alarms.xml" />
+    <!-- A6-9: alarm_window, how far ahead this phone has set them, goes with pending_alarms: another phone sets its own.
+         delivered_alarms and reminder_zone are kept on purpose: they describe the restored reminders (which already
+         rang, so none rings twice; the zone their times were set in). -->
+    <exclude domain="sharedpref" path="alarm_window.xml" />
+    <!-- A6-9: App lock is this phone's choice (see AppLock): a new phone starts unlocked, as with Planner's own backups. -->
+    <exclude domain="sharedpref" path="app_lock.xml" />
     <!-- support_prompt: "already shown" belongs to this install, so a fresh one (reinstall, new phone) stays quiet.
          updates: a download made on this phone (its file isn't carried over). -->
     <exclude domain="sharedpref" path="support_prompt.xml" />

@@ -35,6 +35,7 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit, showC
     LaunchedEffect(showNextcloud) { if (showNextcloud) vm.loadNextcloud() }
 
     val backupBusy by vm.backupBusy.collectAsStateWithLifecycle()
+    val backupTransfer by vm.backupTransfer.collectAsStateWithLifecycle()
     val stagedImport by vm.stagedImport.collectAsStateWithLifecycle()
     val backupMessage by vm.backupMessage.collectAsStateWithLifecycle()
     val backupNote by vm.backupNote.collectAsStateWithLifecycle()
@@ -100,7 +101,7 @@ fun SettingsHost(vm: TripsViewModel, show: Boolean, onDismiss: () -> Unit, showC
         )
     }
     if (showDeleted) RecentlyDeletedDialog((context.applicationContext as com.example.itinerary.ItineraryApp).repository) { showDeleted = false }
-    backupBusy?.let { BusyDialog(it) }
+    backupBusy?.let { BusyDialog(it, onCancel = if (backupTransfer != null) vm::cancelBackupTransfer else null) }
     stagedImport?.let { staged ->
         ImportConfirmDialog(staged, onConfirm = vm::confirmImport, onCancel = vm::cancelImport)
     }

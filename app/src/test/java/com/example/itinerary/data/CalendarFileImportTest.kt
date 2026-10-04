@@ -139,10 +139,10 @@ class CalendarFileImportTest {
         assertTrue(saved.all { it.repeatRule == "WEEKLY" && it.id == 0L && it.tripId == 0L && it.durationMinutes == 60 })
         val one = CalendarFileImport.events(listOf(old), today, includePast = true).single()
         assertNull(one.seriesId); assertEquals("NONE", one.repeatRule)
-        // A series keeps at most 365 dates: the latest ones.
+        // A series keeps at most 365 dates: from today on first (S6-2), so here the same as without past events.
         val daily = single("DTSTART:20250101T090000\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Daily")
         assertEquals(365, daily.datesFor(today, includePast = true).size)
-        assertEquals(today.plusMonths(12), daily.datesFor(today, includePast = true).last())
+        assertEquals(daily.datesFor(today, includePast = false), daily.datesFor(today, includePast = true))
     }
 
     // RB-1: a daily event since 2010 with no end still reaches today and 12 months ahead; the 5000-date cap keeps the

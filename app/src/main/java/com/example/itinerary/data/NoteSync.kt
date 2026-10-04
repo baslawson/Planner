@@ -170,8 +170,9 @@ interface NoteStore {
 
 fun Repository.asNoteStore(): NoteStore = object : NoteStore {
     override suspend fun all() = allNotes()
-    override suspend fun put(note: PlannerNote, expected: PlannerNote?) = putSyncedNote(note, expected)
-    override suspend fun archive(id: String, expected: PlannerNote) = archiveSyncedNote(id, expected)
+    // Sync's writes, not changes made in Planner (SyncWrite).
+    override suspend fun put(note: PlannerNote, expected: PlannerNote?) = SyncWrite.of { putSyncedNote(note, expected) }
+    override suspend fun archive(id: String, expected: PlannerNote) = SyncWrite.of { archiveSyncedNote(id, expected) }
 }
 
 /**

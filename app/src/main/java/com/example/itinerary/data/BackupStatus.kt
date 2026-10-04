@@ -45,7 +45,8 @@ class BackupStatusStore(context: Context) {
         } catch (e: CancellationException) {
             save(mutable.value.copy(outcome = "INTERRUPTED")); throw e
         } catch (e: Exception) {
-            save(mutable.value.copy(outcome = "FAILED")); throw e
+            // Stopped with Cancel (S6-1): not done, but nothing went wrong either.
+            save(mutable.value.copy(outcome = if (e is TransferCancelledException) "INTERRUPTED" else "FAILED")); throw e
         }
     }
 }

@@ -36,10 +36,13 @@ class TodayWidget : AppWidgetProvider() {
         val pending = goAsync()
         scope.launch {
             try { lock.withLock {
-                if (intent.action == COMPLETE_TASK) {
+                // A6-6: a Done that fails (the task was deleted, or now waits on another) still refreshes the widget, so
+                // it stops showing that row as it was; its message shows after.
+                val done = if (intent.action != COMPLETE_TASK) null else runCatching {
                     intent.getStringExtra("task_id")?.let { (context.applicationContext as ItineraryApp).repository.setTaskDone(it, true) }
                 }
                 updateAll(context)
+                done?.getOrThrow()
             } }
             catch (e: Exception) {
                 Log.e("TodayWidget", "Widget refresh failed", e)

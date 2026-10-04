@@ -53,7 +53,8 @@ import java.time.YearMonth
 fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: () -> Unit, onOpenSettings: () -> Unit, onOpenCalendars: () -> Unit,
                     onOpenNotes: () -> Unit) {
     val today = rememberCurrentDate()
-    val allItems by vm.items.collectAsStateWithLifecycle()
+    val loadedItems by vm.items.collectAsStateWithLifecycle()
+    val allItems = loadedItems.orEmpty()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val month by vm.month.collectAsStateWithLifecycle()
     val calendarCollapsed by vm.calendarCollapsed.collectAsStateWithLifecycle()
@@ -77,8 +78,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
     // Outside events can't be deleted from Planner, so they can't be selected either.
     val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
-    val itemsLoaded by vm.itemsLoaded.collectAsStateWithLifecycle()
-    val selection = rememberEventSelection(selectable, prune = itemsLoaded)
+    // Not before the list it prunes against is read (L5-2, A6-5).
+    val selection = rememberEventSelection(selectable, prune = loadedItems != null)
     val datesWithItems = remember(allItems) {
         buildSet {
             allItems.forEach { event ->

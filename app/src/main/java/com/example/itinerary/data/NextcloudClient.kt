@@ -1,5 +1,6 @@
 package com.example.itinerary.data
 
+import okhttp3.Call
 import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -44,18 +45,33 @@ sealed class WriteResult {
     object Missing : WriteResult()
 }
 
+// S6-1: lets the person stop a backup upload or download. cancel() ends the request under way at once (Call.cancel)
+// and refuses any that would follow; the upload or download then fails with TransferCancelledException.
+class BackupTransfer {
+    @Volatile var cancelled = false
+        private set
+    private var call: Call? = null
+    fun cancel() = synchronized(this) { cancelled = true; call?.cancel() }
+    internal fun begin(next: Call) = synchronized(this) { call = next; if (cancelled) next.cancel() }
+    fun check() { if (cancelled) throw TransferCancelledException() }
+}
+
+class TransferCancelledException : BackupException("Cancelled.")
+
 // Blocking transport; callers run on IO. TLS verification stays enabled, redirects are never followed
 // with credentials. Backups are confined to the selected folder under this account's Files root. Calendar sync reads
 // (PROPFIND and REPORT) inside the account's calendar home; the only writes (step 5) are PUT and DELETE of Planner's own
 // event files in the calendar the user chose, always conditional (If-None-Match / If-Match) so nothing else is replaced.
-class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long = TimeUnit.MINUTES.toMillis(5)) {
+class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long = TimeUnit.MINUTES.toMillis(5),
+                      private val transferTimeoutMs: Long = TimeUnit.MINUTES.toMillis(30)) {
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS)
         .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS).build()
-    // R5-2: a backup's own upload (PUT) and download (GET) take as long as the file and the link need: no limit on the
-    // whole call, only on a stall (the connect, read and write timeouts above still apply).
-    private val transfer = http.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).build()
+    // R5-2: a backup's own upload (PUT) and download (GET) take as long as the file and the link need, within a generous
+    // limit on the whole call (S6-1: 30 minutes, so a link that trickles can't hold it for ever; Cancel stops it sooner).
+    // A stall ends it sooner too (the connect, read and write timeouts above still apply).
+    private val transfer = http.newBuilder().callTimeout(transferTimeoutMs, TimeUnit.MILLISECONDS).build()
 
     fun checkConnection(account: NextcloudAccount) {
         val root = account.filesRoot
@@ -75,12 +91,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         }.distinctBy { it.name }.sortedByDescending { it.name }
     }
 
-    fun upload(account: NextcloudAccount, file: File): String {
+    // [cancel]: see BackupTransfer. The temporary file is still removed after a Cancel.
+    fun upload(account: NextcloudAccount, file: File, cancel: BackupTransfer? = null): String {
         // Create parents in order; MKCOL does not create missing intermediate directories.
         var directory = account.filesRoot
         for (segment in account.folderPath.split('/')) {
             directory = directory.newBuilder().addPathSegment(segment).addPathSegment("").build()
-            request(account, "MKCOL", directory, EMPTY).use { response ->
+            request(account, "MKCOL", directory, EMPTY, cancel = cancel).use { response ->
                 if (response.code != 201 && response.code != 405) fail(response.code)
             }
             // A 405 may mean a file occupies this name. Never overwrite it or continue through it.
@@ -95,9 +112,9 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         val temporary = fileUrl(account, ".upload-$id")
         try {
             request(account, "PUT", temporary, file.asRequestBody("application/zip".toMediaType()),
-                mapOf("If-None-Match" to "*"), transfer = true).use { if (it.code != 201 && it.code != 204) fail(it.code) }
+                mapOf("If-None-Match" to "*"), transfer = true, cancel = cancel).use { if (it.code != 201 && it.code != 204) fail(it.code) }
             request(account, "MOVE", temporary, null,
-                mapOf("Destination" to fileUrl(account, name).toString(), "Overwrite" to "F"))
+                mapOf("Destination" to fileUrl(account, name).toString(), "Overwrite" to "F"), cancel = cancel)
                 .use { if (it.code != 201 && it.code != 204) fail(it.code) }
             return name
         } finally {
@@ -106,11 +123,13 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         }
     }
 
-    fun download(account: NextcloudAccount, backup: NextcloudBackup, target: File) {
+    // [cancel]: see BackupTransfer. Whatever stops it, no part of the file is left at [target].
+    fun download(account: NextcloudAccount, backup: NextcloudBackup, target: File, cancel: BackupTransfer? = null) {
         if (!validName(backup.name)) throw BackupException("Invalid backup filename.")
         val headers = backup.etag?.let { mapOf("If-Match" to it) }.orEmpty()
+        val started = System.nanoTime()
         try {
-            request(account, "GET", fileUrl(account, backup.name), headers = headers, transfer = true).use { response ->
+            request(account, "GET", fileUrl(account, backup.name), headers = headers, transfer = true, cancel = cancel).use { response ->
                 if (response.code != 200) fail(response.code)
                 val body = response.body ?: throw BackupException("The backup download was empty.")
                 if (body.contentLength() > target.parentFile!!.usableSpace) {
@@ -119,13 +138,15 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
                 // The body arrives here, after request(): its errors get the same plain messages.
                 val copied = try {
                     body.byteStream().use { input -> target.outputStream().use { input.copyTo(it) } }
-                } catch (_: SocketTimeoutException) {
-                    throw BackupException("Nextcloud timed out during the backup download. Check your connection and try again.")
-                } catch (_: IOException) {
+                } catch (e: IOException) {
+                    cancel?.check()
+                    if (overLimit(started)) throw BackupException(TOO_LONG)
+                    if (e is SocketTimeoutException) throw BackupException("Nextcloud timed out during the backup download. Check your connection and try again.")
                     throw BackupException(if (target.parentFile!!.usableSpace < 1024 * 1024)
                         "There isn't enough free space on this device to download the backup."
                     else "The backup download was interrupted. Check your connection and try again.")
                 }
+                cancel?.check()
                 if (body.contentLength() >= 0 && copied != body.contentLength()) {
                     throw BackupException("The backup download was interrupted. Try again.")
                 }
@@ -412,21 +433,30 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
     }
 
     private fun request(account: NextcloudAccount, method: String, url: HttpUrl, body: RequestBody? = null,
-                        headers: Map<String, String> = emptyMap(), transfer: Boolean = false): Response {
+                        headers: Map<String, String> = emptyMap(), transfer: Boolean = false, cancel: BackupTransfer? = null): Response {
         val request = Request.Builder().url(url).method(method, body)
             .header("Authorization", Credentials.basic(account.username, account.password, Charsets.UTF_8))
             .header("User-Agent", "Planner/0.1").header("Cache-Control", "no-store")
         headers.forEach { (name, value) -> request.header(name, value) }
+        cancel?.check()
+        val started = System.nanoTime()
         try {
-            return (if (transfer) this.transfer else http).newCall(request.build()).execute()
-        } catch (_: SSLException) {
-            throw BackupException("Couldn't verify the server's HTTPS certificate. Check the address and server certificate.")
-        } catch (_: SocketTimeoutException) {
-            throw BackupException("Nextcloud timed out. Check your connection and try again.")
-        } catch (_: IOException) {
-            throw BackupException("Couldn't reach Nextcloud. Check your connection and server address.")
+            val call = (if (transfer) this.transfer else http).newCall(request.build())
+            cancel?.begin(call)
+            return call.execute()
+        } catch (e: IOException) {
+            // Cancelled, or over the transfer limit: said as such, not as a connection problem.
+            cancel?.check()
+            if (transfer && overLimit(started)) throw BackupException(TOO_LONG)
+            throw BackupException(when (e) {
+                is SSLException -> "Couldn't verify the server's HTTPS certificate. Check the address and server certificate."
+                is SocketTimeoutException -> "Nextcloud timed out. Check your connection and try again."
+                else -> "Couldn't reach Nextcloud. Check your connection and server address."
+            })
         }
     }
+
+    private fun overLimit(started: Long) = System.nanoTime() - started >= TimeUnit.MILLISECONDS.toNanos(transferTimeoutMs)
 
     // [write]: a calendar file's PUT or DELETE, which Nextcloud may refuse for that file alone (RefusedException). A 403
     // there too (E-1: a private event of the owner in a shared calendar): a calendar this login can't write to at all
@@ -460,6 +490,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         ?.let { (0xFF000000L or it.groupValues[1].toLong(16)).toInt() }
 
     companion object {
+        internal const val TOO_LONG = "The backup took too long to transfer (over 30 minutes) and was stopped. Try again on a faster connection."
         private const val DAV = "DAV:"
         private const val CALDAV = "urn:ietf:params:xml:ns:caldav"
         private const val APPLE_ICAL = "http://apple.com/ns/ical/"

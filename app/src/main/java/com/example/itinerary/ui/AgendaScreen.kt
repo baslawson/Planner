@@ -84,7 +84,8 @@ fun AgendaScreen(
     // Wait for the database before showing an empty state.
     val loadedEvents by vm.agendaEvents.collectAsStateWithLifecycle()
     val events = loadedEvents.orEmpty()
-    val tasks by vm.tasks.collectAsStateWithLifecycle()
+    val loadedTasks by vm.tasks.collectAsStateWithLifecycle()
+    val tasks = loadedTasks.orEmpty()
     var showCompleted by rememberSaveable { mutableStateOf(false) }
     var anytimeExpanded by rememberSaveable { mutableStateOf(true) }
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -137,8 +138,9 @@ fun AgendaScreen(
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
     val selectableTasks = remember(shownTasks) { shownTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
-    // Not before the events are read: a selection restored after Android closed Planner would be emptied (L5-2).
-    val selection = rememberEventSelection(selectable, prune = loadedEvents != null, visibleTasks = selectableTasks)
+    // Not before the events and tasks are read: a selection restored after Android closed Planner would be emptied
+    // (L5-2, A6-5).
+    val selection = rememberEventSelection(selectable, prune = loadedEvents != null && loadedTasks != null, visibleTasks = selectableTasks)
 
     // The rows above the days, in the list's order (the list below uses the same flags).
     val showBackupFailed = backupStatus.failed

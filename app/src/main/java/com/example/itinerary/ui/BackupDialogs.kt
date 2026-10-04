@@ -16,10 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.StagedBackup
 
-// Shown while a backup is being written or read; there is nothing to tap until it finishes.
+// Shown while a backup is being written or read; there is nothing to tap until it finishes, except Cancel for a
+// Nextcloud upload or download ([onCancel], S6-1), which can take long on a slow link.
 @Composable
-fun BusyDialog(message: String) {
-    PlannerDialog(title = null, onDismissRequest = {}) {
+fun BusyDialog(message: String, onCancel: (() -> Unit)? = null) {
+    PlannerDialog(title = null, onDismissRequest = {}, dismiss = onCancel?.let { DialogAction("Cancel", onClick = it) }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(28.dp))
             Spacer(Modifier.width(16.dp))

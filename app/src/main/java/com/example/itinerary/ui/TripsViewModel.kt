@@ -8,6 +8,8 @@ import com.example.itinerary.data.AppFont
 import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.BackupException
 import com.example.itinerary.data.BackupManager
+import com.example.itinerary.data.BackupTransfer
+import com.example.itinerary.data.TransferCancelledException
 import com.example.itinerary.data.CalendarSync
 import com.example.itinerary.data.toPlanEvent
 import com.example.itinerary.data.DateFormatChoice
@@ -55,7 +57,8 @@ class TripsViewModel(
     }.await()
 
 
-    val tasks = repo.tasks.stateInWhileVisible(viewModelScope, emptyList())
+    // Null until read once, like agendaEvents (A6-5: a restored task selection waits for it).
+    val tasks: StateFlow<List<com.example.itinerary.data.PlannerTask>?> = repo.tasks.stateInWhileVisible(viewModelScope, null)
     val backupStatus = backup.status.state
     init {
         viewModelScope.launch {
@@ -108,13 +111,14 @@ class TripsViewModel(
         null
     }
 
-    fun uploadNextcloud() = runBackup("Uploading backup...", cloudAction = true, uploading = true) {
+    fun uploadNextcloud() = BackupTransfer().let { transfer -> runBackup("Uploading backup...", cloudAction = true, uploading = true,
+        transfer = transfer, cancelled = "Upload cancelled. Refresh the backup list to see what is on Nextcloud.") {
         val account = cloudAccount ?: throw BackupException("Connect to Nextcloud first.")
-        val updated = nextcloud.upload(account)
+        val updated = nextcloud.upload(account, transfer)
         cloudAccount = updated
         showAccount(updated, "Backup uploaded to ${updated.folderPath}.")
         null
-    }
+    } }
 
     fun listNextcloud() = runBackup("Loading backups...", cloudAction = true) {
         val account = cloudAccount ?: throw BackupException("Connect to Nextcloud first.")
@@ -125,13 +129,14 @@ class TripsViewModel(
         null
     }
 
-    fun importNextcloud(file: NextcloudBackup) = runBackup("Downloading and checking backup...", cloudAction = true) {
+    fun importNextcloud(file: NextcloudBackup) = BackupTransfer().let { transfer -> runBackup("Downloading and checking backup...",
+        cloudAction = true, transfer = transfer, cancelled = "Download cancelled. Nothing was restored.") {
         val account = cloudAccount ?: throw BackupException("Connect to Nextcloud first.")
         _stagedImport.value?.let(backup::discard)
         _stagedImport.value = null
-        _stagedImport.value = nextcloud.stage(account, file)
+        _stagedImport.value = nextcloud.stage(account, file, transfer)
         null
-    }
+    } }
 
     private fun showAccount(account: NextcloudAccount, message: String) {
         _cloud.value = NextcloudUiState(account.server.toString().trimEnd('/'), account.username,
@@ -141,6 +146,16 @@ class TripsViewModel(
     // What the backup is doing right now ("Exporting..."), or null when idle. Blocks the screen while set.
     private val _backupBusy = MutableStateFlow<String?>(null)
     val backupBusy: StateFlow<String?> = _backupBusy.asStateFlow()
+
+    // S6-1: the Nextcloud upload or download under way, which its busy pop-up can stop (Cancel), or null.
+    private val _transfer = MutableStateFlow<BackupTransfer?>(null)
+    val backupTransfer: StateFlow<BackupTransfer?> = _transfer.asStateFlow()
+    fun cancelBackupTransfer() {
+        val transfer = _transfer.value ?: return
+        _backupBusy.value = "Cancelling..."
+        _transfer.value = null
+        transfer.cancel()
+    }
 
     // A chosen backup file waiting for the user to confirm replacing everything.
     private val _stagedImport = MutableStateFlow<StagedBackup?>(null)
@@ -189,10 +204,13 @@ class TripsViewModel(
         _stagedImport.value = null
     }
 
-    private fun runBackup(busy: String, cloudAction: Boolean = false, uploading: Boolean = false, block: suspend () -> String?) {
+    // [transfer]: an upload or download the busy pop-up can stop; [cancelled] is then said in its place.
+    private fun runBackup(busy: String, cloudAction: Boolean = false, uploading: Boolean = false, transfer: BackupTransfer? = null,
+                          cancelled: String? = null, block: suspend () -> String?) {
         // Set synchronously: two fast taps cannot start concurrent exports or replace a staged import.
         if (_backupBusy.value != null || _stagedImport.value != null) return
         _backupBusy.value = busy
+        _transfer.value = transfer
         _backupNote.value = null
         viewModelScope.launch {
             try {
@@ -200,6 +218,9 @@ class TripsViewModel(
                 _backupMessage.value = block()
             } catch (e: CancellationException) {
                 throw e
+            } catch (_: TransferCancelledException) {
+                // Asked for: plainly said, not an error.
+                if (cloudAction) _cloud.value = _cloud.value.copy(error = false, status = cancelled) else _backupMessage.value = cancelled
             } catch (e: BackupException) {
                 if (cloudAction) {
                     _cloud.value = _cloud.value.copy(error = true, status = e.message +
@@ -211,11 +232,14 @@ class TripsViewModel(
                 else _backupMessage.value = "Couldn't complete the backup operation. Please check your data before trying again."
             } finally {
                 _backupBusy.value = null
+                _transfer.value = null
             }
         }
     }
 
     override fun onCleared() {
+        // Nothing left to see it: an upload or download under way stops (its request goes on otherwise).
+        _transfer.value?.cancel()
         _stagedImport.value?.let(backup::discard)
     }
 
