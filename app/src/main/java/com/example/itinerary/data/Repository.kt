@@ -534,13 +534,15 @@ class Repository(
     // deletion in Planner shows; only if [still] holds for it at that moment. True when it was moved.
     suspend fun archiveTask(id: String, still: (PlannerTask) -> Boolean): Boolean = changes.withLock {
         withContext(NonCancellable) {
+            // A converted item gone this way too drops its conversion's Undo (CW-4).
+            val earlier = conversionsMaking(taskIds = setOf(id))
             val moved = archiving { archived ->
                 val task = taskDao.byId(id)?.takeIf(still) ?: return@archiving false
                 archive(PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task)), archived, emptyList())
                 taskDao.delete(id)
                 true
             }
-            if (moved) afterCommit(taskIds = listOf(id))
+            if (moved) { afterCommit(taskIds = listOf(id)); settleConversions(earlier) }
             moved
         }
     }
@@ -737,6 +739,8 @@ class Repository(
 
     suspend fun deleteTrips(trips: List<Trip>) = changes.withLock {
         if (trips.isEmpty()) return@withLock
+        val tripIds = trips.mapTo(hashSetOf()) { it.id }
+        val earlier = conversionsMaking(eventIds = itemDao.all().filter { it.tripId in tripIds }.mapTo(hashSetOf()) { it.id })
         val (files, reminders) = archiving { archived ->
             val selected = tripDao.all().filter { current -> trips.any { it.id == current.id } }
             if (selected.isEmpty()) return@archiving emptyList<String>() to emptyList<Reminder>()
@@ -757,6 +761,7 @@ class Repository(
             candidates.filter { it.isNotBlank() && it !in keep } to alarms
         }
         afterCommit(files, reminders.map { it.id })
+        settleConversions(earlier)
     }
 
     // [added]/[removed] change attachments (added files are already in the store) and
@@ -1012,6 +1017,7 @@ class Repository(
     // Planner meanwhile stays); returns the ids moved.
     suspend fun archiveEvents(ids: Set<Long>, only: (ItineraryItem) -> Boolean = { true }): Set<Long> = changes.withLock {
         withContext(NonCancellable) {
+            val earlier = conversionsMaking(eventIds = ids)
             val (moved, reminders) = archiving { archived ->
                 val selected = readIds(ids, itemDao::byIds).filter(only).sortedBy { it.id }
                 if (selected.isEmpty()) return@archiving emptySet<Long>() to emptyList()
@@ -1024,6 +1030,7 @@ class Repository(
                 selectedIds to bundle.reminders
             }
             afterCommit(reminderIds = reminders.map { it.id })
+            settleConversions(earlier.filter { b -> b.madeInto!!.eventIds.any { e -> e in moved || seriesIds(e).isEmpty() } })
             moved
         }
     }

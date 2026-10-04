@@ -31,7 +31,11 @@ object TaskEventConversion {
         if (task.prerequisiteIds.isNotEmpty()) dropped += "The tasks it waits for."
         if (hasTimeBlocks) dropped += "Its time blocks stay in the calendar, without their task."
         val reminder = task.reminderAt?.let { at ->
-            reminderBefore(date, null, at, zone) ?: null.also { dropped += "The reminder: it is after the event's start (09:00 for an all-day event)." }
+            reminderBefore(date, null, at, zone)?.also { r ->
+                val fires = reminderTrigger(date, null, r.offsetMinutes, zone).toInstant().toEpochMilli()
+                val off = (fires - at) / 60_000
+                if (off != 0L) dropped += "The reminder: ${kotlin.math.abs(off)} min ${if (off < 0) "earlier" else "later"}, as the clock change leaves no way to say its time."
+            } ?: null.also { dropped += "The reminder: it is after the event's start (09:00 for an all-day event)." }
         }
         val event = ItineraryItem(tripId = 0, date = date, startTime = null, title = task.title, notes = task.notes,
             checklist = task.checklist, repeatRule = repeat)
@@ -71,19 +75,32 @@ object TaskEventConversion {
         return Converted(task, dropped = dropped)
     }
 
+    /**
+     * The occurrence a whole series made into a task is due on: the next one (its last, when all have passed), or a later
+     * one when the next one's reminder has passed, so the repeating task keeps a reminder (CV-2, CW-3).
+     */
+    fun dueOccurrence(series: List<ItineraryItem>, reminders: List<Reminder>, today: LocalDate, now: Long,
+                      zone: ZoneId = ZoneId.systemDefault()): ItineraryItem {
+        val coming = series.filter { !(it.endDate ?: it.date).isBefore(today) }.sortedBy { it.date }
+        val first = reminders.minByOrNull { it.offsetMinutes }
+        return coming.firstOrNull { o -> first == null || reminderTrigger(o.date, o.startTime, first.offsetMinutes, zone).toInstant().toEpochMilli() > now }
+            ?: coming.firstOrNull() ?: series.maxBy { it.date }
+    }
+
     /** A reminder [at] as one before the event's start ([time], or 09:00 all day), in its plainest unit; null when after it. */
     fun reminderBefore(date: LocalDate, time: LocalTime?, at: Long, zone: ZoneId): Reminder? {
         // Counted on the clock, then checked against how the event works its reminders out (days, then minutes), so a
         // clock change in between can't move it by an hour (TE-2).
         val wall = ChronoUnit.MINUTES.between(Instant.ofEpochMilli(at).atZone(zone).toLocalDateTime(), date.atTime(time ?: LocalTime.of(9, 0)))
         val elapsed = ChronoUnit.MINUTES.between(Instant.ofEpochMilli(at).atZone(zone), date.atTime(time ?: LocalTime.of(9, 0)).atZone(zone))
-        // When clocks go back some times can't be said exactly ("1 day" is an hour off, 1439 minutes a minute): the nearest
-        // is taken, earlier on a tie (CV-1).
+        // The exact time, said as on the clock when two offsets give it ("1 day", not "23 hours", CW-1). When clocks go back
+        // some times can't be said exactly: the nearest (at most half an hour off), earlier on a tie (CV-1, CW-2); the
+        // caller says it moved.
         if (wall < 0 && elapsed < 0) return null
-        val minutes = (maxOf(0, minOf(wall, elapsed) - 90)..maxOf(wall, elapsed) + 90)
-            .minWith(compareBy({ kotlin.math.abs(reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() - at) },
-                { -reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() }))
-            .takeIf { reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() - at in -60 * 60_000L..60 * 60_000L } ?: return null
+        val offsets = (maxOf(0, minOf(wall, elapsed) - 90)..maxOf(wall, elapsed) + 90)
+            .map { it to reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() }
+        val minutes = offsets.minWith(compareBy({ kotlin.math.abs(it.second - at) }, { it.second }, { kotlin.math.abs(it.first - wall) }))
+            .takeIf { kotlin.math.abs(it.second - at) <= 30 * 60_000L }?.first ?: return null
         return when {
             minutes % 1440 == 0L -> Reminder(itemId = 0, amount = (minutes / 1440).toInt(), unit = ReminderUnit.DAYS)
             minutes % 60 == 0L -> Reminder(itemId = 0, amount = (minutes / 60).toInt(), unit = ReminderUnit.HOURS)

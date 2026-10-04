@@ -127,4 +127,28 @@ class TaskEventConversionTest {
         val nine = LocalDateTime.of(2026, 10, 31, 9, 0).atZone(ny).toInstant().toEpochMilli()
         assertEquals(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS), TaskEventConversion.reminderBefore(day, null, nine, ny))
     }
+
+    // CW-1: when clocks go forward, whole days stay days ("1 day", not "23 hours"); CW-2: a time that can't be said is
+    // the nearest one, and the notice says by how much.
+    @Test fun clockChangesKeepDaysAndNeverFireLate() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        val at = LocalDateTime.of(2026, 10, 3, 9, 0).atZone(sydney).toInstant().toEpochMilli()
+        assertEquals(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS), TaskEventConversion.reminderBefore(LocalDate.of(2026, 10, 4), null, at, sydney))
+        val ny = ZoneId.of("America/New_York")
+        val late = LocalDateTime.of(2026, 10, 31, 9, 45).atZone(ny).toInstant().toEpochMilli()
+        val r = TaskEventConversion.reminderBefore(LocalDate.of(2026, 11, 1), null, late, ny)!!
+        assertEquals(16 * 60_000L, reminderTrigger(LocalDate.of(2026, 11, 1), null, r.offsetMinutes, ny).toInstant().toEpochMilli() - late)
+        val c = TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = LocalDate.of(2026, 11, 1), reminderAt = late), today, ny)
+        assertTrue(c.dropped.toString(), c.dropped.any { it.startsWith("The reminder: 16 min later") })
+    }
+
+    // CW-3: a whole series is due on the first coming occurrence whose reminder is still ahead.
+    @Test fun aSeriesKeepsItsReminder() {
+        val friday = LocalDate.of(2026, 10, 9)
+        val series = (0..2).map { ItineraryItem(id = it.toLong(), tripId = 0, date = friday.plusWeeks(it.toLong()), startTime = null, title = "Bins") }
+        val dayBefore = listOf(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS))
+        assertEquals(friday.plusWeeks(1), TaskEventConversion.dueOccurrence(series, dayBefore, friday, at(friday, 8), zone).date)
+        assertEquals(friday, TaskEventConversion.dueOccurrence(series, emptyList(), friday, at(friday, 8), zone).date)
+        assertEquals(friday.plusWeeks(2), TaskEventConversion.dueOccurrence(series, emptyList(), friday.plusDays(30), at(friday, 8), zone).date)
+    }
 }

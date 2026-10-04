@@ -78,4 +78,19 @@ class TaskEventConversionDataTest {
         assertNotNull(repo.task(task.id)); assertNull(repo.eventDetails(eventAgain)); assertNull(repo.eventDetails(eventId))
         repo.deleteTask(task.id)
     }
+
+    // CV-3, CW-5: deleting the new item during the conversion's Undo drops that Undo, so the two Undos can't bring back
+    // both; the delete's own Undo brings back the new item.
+    @Test fun deletingTheNewItemSettlesTheConversion() = runBlocking {
+        val task = PlannerTask(title = "QA delete made", dueDate = day).also { repo.saveTask(it) }
+        val eventId = repo.saveItemId(ItineraryItem(tripId = 0, date = day, startTime = null, title = "QA delete made"),
+            emptyList(), emptyList(), emptyList(), emptyList(), EventSaveOptions())
+        repo.replaceTaskWithEvent(task.id, eventId)
+        val conversion = repo.pendingDeletions.value.single { it.madeInto?.fromTaskId == task.id }
+        repo.deleteWithUndo(eventId)
+        assertTrue(repo.pendingDeletions.value.none { it.token == conversion.token })
+        repo.undoDeletion(repo.pendingDeletions.value.single { it.items.any { e -> e.id == eventId } }.token)
+        assertNotNull(repo.eventDetails(eventId)); assertNull(repo.task(task.id))
+        repo.deleteWithUndo(eventId)
+    }
 }

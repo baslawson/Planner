@@ -41,6 +41,12 @@ class Conversions {
 
 val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
 
+// Conversion editors open in any Planner window: a conversion's Undo waits for all of them, so a second window (split
+// screen) doesn't show it, and use it up, while the editor is still open in the first (CC-3).
+object OpenConversions {
+    var count by androidx.compose.runtime.mutableIntStateOf(0)
+}
+
 @Composable
 fun rememberConversions(): Conversions {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
@@ -87,6 +93,7 @@ fun ConversionHost(conversions: Conversions) {
     val done = { if (conversions.request == request) conversions.request = null }
     // Rebuilt after its Save, the original is gone: the new item stays, with its draft recovered as any other (TE-5).
     val restored = request == conversions.restored
+    DisposableEffect(request) { OpenConversions.count++; onDispose { OpenConversions.count-- } }
     val parts = request.split(':')
     val toEvent = parts[0] == "task"
     if (restored && conversions.replacedFor == request) {
@@ -100,7 +107,11 @@ fun ConversionHost(conversions: Conversions) {
                     val (taskId, ids) = with.split('|', limit = 2)
                     if (repo.task(taskId) != null) repo.replaceEventsWithTask(ids.split(',').mapNotNull { it.toLongOrNull() }.toSet(), taskId)
                 }
-            } } }
+            } }.onFailure {
+                // As when it fails at the Save itself (CW-5).
+                android.widget.Toast.makeText(app, "Saved, but the original couldn't be moved to Recently deleted. Delete it yourself.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            } }
             done()
         }
         return
@@ -121,8 +132,7 @@ fun ConversionHost(conversions: Conversions) {
                 val series = if (whole) app.repository.seriesEvents(id) else listOf(event)
                 // A whole series is due on its next occurrence (its last, when all have passed), not the one tapped; its
                 // reminder goes with it (CV-2).
-                val occurrence = if (!whole) event else series.filter { !(it.endDate ?: it.date).isBefore(today) }.minByOrNull { it.date }
-                    ?: series.maxBy { it.date }
+                val occurrence = if (!whole) event else TaskEventConversion.dueOccurrence(series, reminders, today, System.currentTimeMillis())
                 Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence,
                     idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
