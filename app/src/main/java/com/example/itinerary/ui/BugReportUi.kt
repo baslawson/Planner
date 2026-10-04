@@ -31,7 +31,7 @@ fun ReportBugDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     var description by rememberSaveable { mutableStateOf("") }
     var withCrash by rememberSaveable { mutableStateOf(false) }
-    val crash = remember { CrashLog(context.filesDir).read() }
+    val crash = remember { CrashLog(context.filesDir).offered() }
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
             ?.let { "${it.versionName} (${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(it)})" } ?: "?"

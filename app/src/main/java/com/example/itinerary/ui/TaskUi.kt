@@ -256,7 +256,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     Track(undo, "notes", notes) { notes = it }
     // The checklist as one field: typing in a row, adding, removing or ticking one, and a template's list are undone
     // together with the rest, so no step is left for a row that has gone (EU-3, EU-4).
-    Track(undo, "checklist", undoChecklist(checklist)) { checklist = undoChecklist(it) }
+    Track(undo, "checklist", undoChecklist(checklist), merge = ::checklistTyping) { checklist = undoChecklist(it) }
     var attachments by remember { mutableStateOf(if (draft != null) DraftCodec.attachments(draft.optJSONArray("attachments")) else initial.attachments) }
     var pendingPhoto by remember { mutableStateOf(draft?.optString("pendingPhoto")?.takeIf { it.isNotBlank() }) }
     var finished by remember { mutableStateOf(false) }

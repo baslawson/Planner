@@ -376,7 +376,7 @@ private fun ItemEditorForm(
     Track(undo, "notes", notes) { notes = it }
     // The checklist as one field: typing in a row, adding, removing or ticking one, and a template's list are undone
     // together with the rest, so no step is left for a row that has gone (EU-3, EU-4).
-    Track(undo, "checklist", undoChecklist(checklist)) { checklist = undoChecklist(it) }
+    Track(undo, "checklist", undoChecklist(checklist), merge = ::checklistTyping) { checklist = undoChecklist(it) }
     var category by remember { mutableStateOf(values.category) }
     val billTask = category == "Bills"
     fun selectCategory(selected: String) {
@@ -554,9 +554,24 @@ private fun ItemEditorForm(
             }
         } catch (_: Exception) { error = draftError }
     }
-    fun applyTemplate(content: TemplateContent) {
+    fun applyTemplate(content: TemplateContent, record: Boolean = true) {
         val item = content.forDate(date)
-        undo.together()
+        // ER-2: one Undo puts the whole form back as it was, not only its text: the other fields are saved here.
+        if (record) {
+            val was = listOf(paymentLink, paymentReference, bpayBillerCode, bpayReference, beforeText, afterText, durationText, billAmountText)
+            val wasTime = time; val wasLastTimed = lastTimedTime; val wasEnd = endDate; val wasCategory = category
+            val wasColor = colorIndex; val wasCustom = customColor; val wasCurrency = billCurrency; val wasPaid = paid
+            val wasRepeat = repeat; val wasCount = repeatCount; val wasEntire = entireSeries
+            val wasAdded = addedReminders.toList(); val wasRemoved = removedReminders.toList()
+            undo.around(undo = {
+                paymentLink = was[0]; paymentReference = was[1]; bpayBillerCode = was[2]; bpayReference = was[3]
+                beforeText = was[4]; afterText = was[5]; durationText = was[6]; billAmountText = was[7]
+                time = wasTime; lastTimedTime = wasLastTimed; endDate = wasEnd; category = wasCategory; colorIndex = wasColor
+                customColor = wasCustom; billCurrency = wasCurrency; paid = wasPaid; repeat = wasRepeat; repeatCount = wasCount
+                entireSeries = wasEntire
+                addedReminders.clear(); addedReminders.addAll(wasAdded); removedReminders.clear(); removedReminders.addAll(wasRemoved)
+            }, redo = { applyTemplate(content, record = false) })
+        }
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
         bpayBillerCode = item.bpayBillerCode; bpayReference = item.bpayReference
         // A time block keeps its own time and length when the template has none.
@@ -689,7 +704,10 @@ private fun ItemEditorForm(
             initial.linkedTaskId?.let { LinkedTaskSection(it) }
             if (initial.skipped && !isNew) Text("This occurrence is skipped. Restore it from its action menu to resume reminders.")
             if (!isNew) {
-                TextButton(enabled = !busy, onClick = { duplicating = true; entireSeries = false; repeat = RepeatRule.NONE; paid = false; payments = emptyList(); checklist = checklist.map { it.copy(done = false) } }) {
+                TextButton(enabled = !busy, onClick = {
+                    // A copy is a new event: what was typed before isn't undone into it (ER-3).
+                    undo.reload()
+                    duplicating = true; entireSeries = false; repeat = RepeatRule.NONE; paid = false; payments = emptyList(); checklist = checklist.map { it.copy(done = false) } }) {
                     Text(if (billTask) "Duplicate bill" else "Duplicate event")
                 }
                 // Wish list #1: the same event as a task instead. From what is saved, so nothing typed is lost.

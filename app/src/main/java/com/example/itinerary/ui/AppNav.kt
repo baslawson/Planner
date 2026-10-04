@@ -169,6 +169,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     nav.navigate("calendar") { launchSingleTop = true }
                     return@collect
                 }
+                // SR9-1: opened over Agenda for a share, reminder, shortcut or file, that isn't where the person left it.
+                if (asked && route == "agenda") return@collect
             }
             when (route) {
                 "agenda" -> app.settings.lastViewCalendar = false
@@ -222,7 +224,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
                 // A conversion's Undo waits until its editor closes: shown under that window, it would run out unseen (TE-4).
-                if (next.madeInto != null) snapshotFlow { conversions.request }.first { it == null }
+                // In every window (CC-3).
+                if (next.madeInto != null) snapshotFlow { conversions.request == null && OpenConversions.count == 0 }.first { it }
                 val result = snackbar.showSnackbar(
                     message = next.madeInto?.let { if (it.taskId != null) "Made into a task" else "Made into an event" }
                         ?: deletedMessage(next.items.size, next.tasks.size, next.notes.size),

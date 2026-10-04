@@ -77,7 +77,8 @@ fun String.takeWhole(n: Int): String = if (n in 1 until length && this[n - 1].is
 /**
  * The last time Planner crashed, kept on this phone only (files/last-crash.txt, left out of Android backup and transfer,
  * SR-5), for a bug report to include if the person ticks it. Written by an uncaught-exception handler just before Android
- * ends the app; the next crash replaces it, and a report that took it clears it.
+ * ends the app; the next crash replaces it. A report that took it marks it sent (AB-1); a sent one is offered for a week
+ * more, in case that issue was never submitted, then no longer (SR9-3).
  */
 class CrashLog(private val dir: File) {
     // [sent]: opened in a report already (AB-1): still kept, as the person may not have submitted it, but not ticked again.
@@ -100,11 +101,15 @@ class CrashLog(private val dir: File) {
 
     fun clear() { runCatching { file.delete(); sentFile.delete() } }
 
+    /** The crash to offer in a report at [now]: a sent one only for [SENT_OFFERED_MS] after it happened (SR9-3). */
+    fun offered(now: Long = System.currentTimeMillis()): Crash? = read()?.takeIf { !it.sent || now - it.at < SENT_OFFERED_MS }
+
     /** The crash of [at] went into a report. */
     fun markSent(at: Long) { runCatching { sentFile.writeText(at.toString()) } }
 
     companion object {
         const val MAX_TEXT = 12_000
+        const val SENT_OFFERED_MS = 7L * 24 * 60 * 60 * 1000
 
         /** Keeps the last crash, then lets Android end the app as it would have. */
         fun install(dir: File, version: () -> String) {

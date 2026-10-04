@@ -90,4 +90,30 @@ class EditorUndoTest {
         while (undo.canUndo) { undo.undo(); steps++ }
         assertTrue(steps in 2 until 30)
     }
+
+    // ER-1: typing in one checklist row is one step; another row, a new row or a tick starts a new one.
+    @Test fun checklistStepsFollowTheRow() {
+        val undo = EditorUndo()
+        var list = listOf(com.example.itinerary.data.ChecklistEntry("a", ""), com.example.itinerary.data.ChecklistEntry("b", ""))
+        fun put(l: List<com.example.itinerary.data.ChecklistEntry>, at: Long) { list = l; undo.report("checklist", undoChecklist(l), { list = undoChecklist(it) }, at, ::checklistTyping) }
+        put(list, 0)
+        put(list.map { if (it.id == "a") it.copy(text = "Pass") else it }, 10)
+        put(list.map { if (it.id == "a") it.copy(text = "Passport") else it }, 20)
+        put(list.map { if (it.id == "b") it.copy(text = "Visa") else it }, 30)
+        put(list.map { if (it.id == "a") it.copy(done = true) else it }, 40)
+        undo.undo(); assertFalse(list.first().done); assertEquals("Visa", list[1].text)
+        undo.undo(); assertEquals("", list[1].text); assertEquals("Passport", list[0].text)
+        undo.undo(); assertEquals("", list[0].text); assertFalse(undo.canUndo)
+        assertEquals(list, undoChecklist(undoChecklist(list)))
+    }
+
+    // ER-2: what the app changes beside the text (a template's other fields) is undone and redone in the same step.
+    @Test fun aRoundStepPutsBackTheRest() {
+        val undo = EditorUndo(); val title = Field("Old"); var category = "Other"
+        undo.report("title", "Old", { title.text = it }, 0)
+        undo.around(undo = { category = "Other" }, redo = { category = "Travel"; title.text = "Flight" }, now = 1_000)
+        category = "Travel"; title.text = "Flight"; undo.report("title", "Flight", { title.text = it }, 1_010)
+        undo.undo(); assertEquals("Old", title.text); assertEquals("Other", category); assertFalse(undo.canUndo)
+        undo.redo(); assertEquals("Flight", title.text); assertEquals("Travel", category)
+    }
 }

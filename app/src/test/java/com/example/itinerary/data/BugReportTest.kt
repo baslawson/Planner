@@ -87,6 +87,9 @@ class BugReportTest {
             assertFalse(log.read()!!.sent)
             log.markSent(1_000L)
             assertTrue(log.read()!!.sent)
+            // SR9-3: a sent one is offered for a week more, then no longer.
+            assertNotNull(log.offered(1_000L + CrashLog.SENT_OFFERED_MS - 1))
+            assertNull(log.offered(1_000L + CrashLog.SENT_OFFERED_MS))
             log.write(2_000L, "0.0.16 (23)", IllegalStateException("second"))
             assertFalse(log.read()!!.sent)
             log.clear(); assertNull(log.read())

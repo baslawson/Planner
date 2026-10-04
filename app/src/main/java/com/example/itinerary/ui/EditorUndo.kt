@@ -19,10 +19,13 @@ import androidx.compose.ui.input.key.type
 class EditorUndo internal constructor() {
     // One step: a field's typing, or several fields the app changed at once (a template, a bill suggestion).
     private data class Part(val field: String, val before: String, val after: String)
-    private data class Step(val parts: List<Part>, val at: Long, val typed: Boolean)
+    // [restore]: what else the app changed in that step and how to put it back and again (a template's other fields, ER-2).
+    private data class Step(val parts: List<Part>, val at: Long, val typed: Boolean, val restore: Pair<() -> Unit, () -> Unit>? = null)
     private val undos = mutableStateListOf<Step>()
     private val redos = mutableStateListOf<Step>()
     private val setters = HashMap<String, (String) -> Unit>()
+    // Whether a field's next text still belongs to the typing step that began with an earlier one (ER-1).
+    private val merges = HashMap<String, (String, String) -> Boolean>()
     // The text each field last reported.
     private val seen = HashMap<String, String>()
     // Changes the app is making: joined into one step until [joinUntil], or not recorded at all when [quiet] (ED-7).
@@ -32,8 +35,10 @@ class EditorUndo internal constructor() {
     val canUndo: Boolean get() = undos.isNotEmpty()
     val canRedo: Boolean get() = redos.isNotEmpty()
 
-    internal fun report(field: String, text: String, set: (String) -> Unit, now: Long = System.currentTimeMillis()) {
+    internal fun report(field: String, text: String, set: (String) -> Unit, now: Long = System.currentTimeMillis(),
+                        merge: ((String, String) -> Boolean)? = null) {
         setters[field] = set
+        if (merge != null) merges[field] = merge
         val before = seen.put(field, text) ?: return
         if (before == text) return
         if (now < joinUntil && quiet) return
@@ -45,7 +50,7 @@ class EditorUndo internal constructor() {
                 undos[undos.lastIndex] = last.copy(parts = last.parts.filterNot { it.field == field } +
                     Part(field, last.parts.find { it.field == field }?.before ?: before, text))
             now >= joinUntil && last != null && last.typed && part!!.field == field && part.after == before &&
-                now - last.at < GROUP_MS && !startsWord(before, text) ->
+                now - last.at < GROUP_MS && !startsWord(before, text) && merges[field]?.invoke(part.before, text) != false ->
                 undos[undos.lastIndex] = Step(listOf(part.copy(after = text)), now, typed = true)
             else -> {
                 undos += Step(listOf(Part(field, before, text)), if (now < joinUntil) joinUntil - JOIN_MS else now, typed = now >= joinUntil)
@@ -65,6 +70,17 @@ class EditorUndo internal constructor() {
     /** The next changes, made by the app in several fields at once, are one step (ED-7). */
     fun together(now: Long = System.currentTimeMillis()) { joinUntil = now + JOIN_MS; quiet = false }
 
+    /**
+     * The app is about to change fields it doesn't track as text: one step with the text fields it changes next, which
+     * [undo] puts back and [redo] does again (ER-2).
+     */
+    fun around(undo: () -> Unit, redo: () -> Unit, now: Long = System.currentTimeMillis()) {
+        together(now)
+        redos.clear()
+        undos += Step(emptyList(), now, typed = false, restore = undo to redo)
+        trim()
+    }
+
     /** The next changes aren't the person's (a sync change loaded): no step, and the history so far goes (ED-7). */
     fun reload(now: Long = System.currentTimeMillis()) { undos.clear(); redos.clear(); joinUntil = now + JOIN_MS; quiet = true }
 
@@ -79,9 +95,10 @@ class EditorUndo internal constructor() {
         while (true) {
             val step = from.removeLastOrNull() ?: return
             val live = step.parts.filter { it.field in setters }
-            if (live.isEmpty()) continue
+            if (live.isEmpty() && step.restore == null) continue
             to += step
             joinUntil = 0
+            step.restore?.let { if (from === undos) it.first() else it.second() }
             live.forEach { part -> seen[part.field] = text(part); setters.getValue(part.field)(text(part)) }
             return
         }
@@ -119,11 +136,11 @@ fun rememberEditorUndo(): EditorUndo {
     return undo
 }
 
-/** Reports [field]'s [text] to [undo]; [set] puts an earlier text back. */
+/** Reports [field]'s [text] to [undo]; [set] puts an earlier text back; [merge], when typing goes on in one step. */
 @Composable
-fun Track(undo: EditorUndo, field: String, text: String, set: (String) -> Unit) {
+fun Track(undo: EditorUndo, field: String, text: String, merge: ((String, String) -> Boolean)? = null, set: (String) -> Unit) {
     val setter by rememberUpdatedState(set)
-    SideEffect { undo.report(field, text, { setter(it) }) }
+    SideEffect { undo.report(field, text, { setter(it) }, merge = merge) }
     DisposableEffect(undo, field) { onDispose { undo.untrack(field) } }
 }
 
@@ -148,12 +165,22 @@ fun undoCursor(before: String, now: String): Int {
     return (now.length - end).coerceIn(start, now.length)
 }
 
-// A checklist as text for [Track], and back (blank rows included, unlike ChecklistCodec).
-fun undoChecklist(entries: List<com.example.itinerary.data.ChecklistEntry>): String = org.json.JSONArray().apply {
-    entries.forEach { put(org.json.JSONObject().put("id", it.id).put("text", it.text).put("done", it.done)) }
-}.toString()
+// A checklist as text for [Track], and back (blank rows included, unlike ChecklistCodec): rows split by the record
+// separator, id / done / text by the unit separator — characters no one types (and taken out if pasted).
+private const val ROW = '\u001E'
+private const val CELL = '\u001F'
+fun undoChecklist(entries: List<com.example.itinerary.data.ChecklistEntry>): String = entries.joinToString(ROW.toString()) {
+    it.id + CELL + (if (it.done) "1" else "0") + CELL + it.text.filterNot { c -> c == ROW || c == CELL }
+}
 
-fun undoChecklist(text: String): List<com.example.itinerary.data.ChecklistEntry> = runCatching {
-    val array = org.json.JSONArray(text)
-    List(array.length()) { i -> array.getJSONObject(i).let { com.example.itinerary.data.ChecklistEntry(it.getString("id"), it.getString("text"), it.getBoolean("done")) } }
-}.getOrDefault(emptyList())
+fun undoChecklist(text: String): List<com.example.itinerary.data.ChecklistEntry> =
+    if (text.isEmpty()) emptyList() else text.split(ROW).mapNotNull { row ->
+        val cells = row.split(CELL, limit = 3)
+        if (cells.size < 3) null else com.example.itinerary.data.ChecklistEntry(cells[0], cells[2], cells[1] == "1")
+    }
+
+// Typing in one checklist row goes on in one step; adding, removing, ticking or moving to another row starts a new one (ER-1).
+fun checklistTyping(start: String, now: String): Boolean {
+    val a = undoChecklist(start); val b = undoChecklist(now)
+    return a.size == b.size && a.zip(b).all { (x, y) -> x.id == y.id && x.done == y.done } && a.zip(b).count { (x, y) -> x.text != y.text } <= 1
+}
