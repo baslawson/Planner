@@ -57,7 +57,7 @@ class NoteReminderOpenUiTest {
         created += note.id
         // Start on the agenda, then post the reminder as it rings and tap it.
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("AGENDA") != null || find("Notes") != null || has("Today") }
+        await { find("AGENDA") != null || find("NOTES") != null || has("Today") }
         com.example.itinerary.reminders.postNoteReminder(context, note.id, System.currentTimeMillis(), note)
         var posted: android.app.Notification? = null
         await { posted = manager.activeNotifications.firstOrNull { it.tag == "note:${note.id}" }?.notification; posted != null }
@@ -69,7 +69,7 @@ class NoteReminderOpenUiTest {
     @Test fun aDeletedNoteOpensTheNotesPage() {
         ins.startActivitySync(NoteReminderReceiver.openIntent(context, "qa-open-note-gone")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await { find("Notes") != null }
+        await { find("NOTES") != null }
         Thread.sleep(800)
         assertNull(find("Edit note"))
     }

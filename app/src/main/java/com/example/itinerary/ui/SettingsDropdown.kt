@@ -1,6 +1,8 @@
 package com.example.itinerary.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -38,7 +40,9 @@ fun <T> SettingsDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
         )
-        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        val scroll = rememberScrollState()
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll), scrollState = scroll) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { entry(option) },

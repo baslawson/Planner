@@ -88,6 +88,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val settings = (context.applicationContext as ItineraryApp).settings
     val showBillsSummary by settings.showBillsSummary.collectAsStateWithLifecycle()
+    val noteOpenView by settings.noteOpenView.collectAsStateWithLifecycle()
     val scheduler = remember { (context.applicationContext as ItineraryApp).reminderScheduler }
     // Re-checked on resume because the user grants this in system settings, outside the app.
     val exactAllowed by rememberExactAlarmsAllowed(scheduler)
@@ -128,6 +129,14 @@ fun SettingsScreen(
                     SettingsHeading("Agenda")
                     SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
+                    SettingsSection(
+                        title = "Notes open in",
+                        options = com.example.itinerary.data.NoteOpenView.entries,
+                        selected = noteOpenView,
+                        label = { it.label },
+                        onSelect = settings::setNoteOpenView,
+                    )
+                    Text("New notes always open ready to type.", style = MaterialTheme.typography.bodySmall)
                     SettingsSection(
                         title = "Appearance",
                         options = ThemeMode.entries,

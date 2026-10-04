@@ -173,6 +173,14 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     }
 
     // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
+    private val _noteOpenView = MutableStateFlow(runCatching { NoteOpenView.valueOf(prefs.getString("note_open_view", null) ?: "") }.getOrDefault(NoteOpenView.LAST))
+    val noteOpenView: StateFlow<NoteOpenView> = _noteOpenView.asStateFlow()
+    fun setNoteOpenView(view: NoteOpenView) { prefs.edit { putString("note_open_view", view.name) }; _noteOpenView.value = view }
+    // Each note's last view (Edit or Preview), by note id; it stays on this phone and isn't synced.
+    private val noteViews = context.getSharedPreferences("note_views", Context.MODE_PRIVATE)
+    fun noteLeftInPreview(id: String): Boolean? = if (noteViews.contains(id)) noteViews.getBoolean(id, false) else null
+    fun setNoteLeftInPreview(id: String, preview: Boolean) { noteViews.edit { putBoolean(id, preview) } }
+
     private val _noteSort = MutableStateFlow(runCatching { NoteSort.valueOf(prefs.getString("note_sort", null) ?: "") }.getOrDefault(NoteSort.MY_ORDER))
     val noteSort: StateFlow<NoteSort> = _noteSort.asStateFlow()
     fun setNoteSort(sort: NoteSort) { prefs.edit { putString("note_sort", sort.name) }; _noteSort.value = sort }

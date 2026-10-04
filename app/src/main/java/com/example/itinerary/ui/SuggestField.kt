@@ -1,6 +1,8 @@
 package com.example.itinerary.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenuItem
@@ -49,7 +51,9 @@ fun SuggestField(
             keyboardActions = keyboardActions,
             trailingIcon = trailingIcon,
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false }) {
+        val scroll = rememberScrollState()
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll), scrollState = scroll) {
             suggestions.forEach { name ->
                 DropdownMenuItem(text = { Text(shown(name)) }, onClick = { onPick(name); open = false })
             }

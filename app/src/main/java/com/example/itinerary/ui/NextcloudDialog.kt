@@ -65,15 +65,20 @@ fun NextcloudDialog(
                 if (!state.connected) {
                     Text("Connect to save all events, tasks, reminders, attachments and settings to your Nextcloud.")
                     Spacer(Modifier.height(8.dp))
+                    // The keyboard is asked not to learn the server, name or password.
+                    PrivateTextInput {
+                    Column(Modifier.fillMaxWidth()) {
                     OutlinedTextField(server, { server = it.filterNot { c -> c == '\n' } }, label = { Text("Server address") },
                         enabled = !busy, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next).private())
                     OutlinedTextField(username, { username = it.filterNot { c -> c == '\n' } }, label = { Text("Username") },
-                        enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
+                        enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next).private())
                     OutlinedTextField(password, { password = it }, label = { Text("App password") },
                         singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth(),
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password).private())
+                    }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text("The password is stored securely on this device and isn't included in backups.",
                         style = MaterialTheme.typography.bodySmall)
@@ -87,8 +92,10 @@ fun NextcloudDialog(
                 } else {
                     Text(state.server)
                     Text("Account: ${state.username}")
-                    OutlinedTextField(folderPath, { folderPath = it.filterNot { c -> c == '\n' } }, label = { Text("Backup folder") },
-                        enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
+                    PrivateTextInput {
+                        OutlinedTextField(folderPath, { folderPath = it.filterNot { c -> c == '\n' } }, label = { Text("Backup folder") },
+                            enabled = !busy, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done).private())
+                    }
                     Text("Path inside your Nextcloud Files, e.g. Backups/Planner. Missing folders are created when you back up.",
                         style = MaterialTheme.typography.bodySmall)
                     if (folderChanged) {

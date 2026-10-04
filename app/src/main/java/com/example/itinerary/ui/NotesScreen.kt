@@ -220,7 +220,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             snackbarHost = { SnackbarHost(duplicatedBar) },
             topBar = {
                 TopAppBar(
-                    title = { HeadingText("Notes", style = MaterialTheme.typography.titleLarge) },
+                    // The same heading as Agenda and Calendar.
+                    title = { HeadingText("NOTES", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true) },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                     actions = {
                         val label = when {

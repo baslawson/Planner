@@ -35,6 +35,23 @@ data class PlannerNote(
 )
 
 /** How the Notes page orders its cards; pinned notes stay on top in every one. */
+/** How a saved note opens in its editor (Settings → Notes). */
+enum class NoteOpenView(val label: String) {
+    LAST("The way I left it"), EDIT("Edit"), PREVIEW("Preview");
+
+    /**
+     * Whether a note opens in Preview. A new note, a recovered draft or an empty note opens in Edit, ready to type, whatever
+     * the setting. [leftInPreview]: how this note was last left, or null when it never was; then a note with words opens
+     * in Preview, as before the setting.
+     */
+    fun opensInPreview(creating: Boolean, recovered: Boolean, hasText: Boolean, leftInPreview: Boolean?): Boolean = when {
+        creating || recovered || !hasText -> false
+        this == EDIT -> false
+        this == PREVIEW -> true
+        else -> leftInPreview ?: true
+    }
+}
+
 enum class NoteSort(val label: String) {
     MY_ORDER("My order"), IMPORTANCE("Importance"), CHANGED("Recently changed"), CREATED("Newest first"), TITLE("Title A–Z"), COLOUR("Colour"),
 }

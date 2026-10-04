@@ -144,7 +144,8 @@ fun SearchScreen(
             bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents, selectableTasks) },
             topBar = {
                 TopAppBar(
-                    title = { HeadingText("Search", style = MaterialTheme.typography.titleLarge) },
+                    // The same heading as Agenda and Calendar.
+                    title = { HeadingText("SEARCH", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

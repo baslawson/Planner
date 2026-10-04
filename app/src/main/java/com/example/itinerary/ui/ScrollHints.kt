@@ -62,6 +62,29 @@ fun LazyScrollHints(modifier: Modifier = Modifier, content: @Composable (LazyLis
     LazyScrollHints(state, modifier) { content(state) }
 }
 
+// The same bar on a pop-up list (a dropdown's menu) that scrolls with [state]: shown while there is more than fits, so a
+// long list of notebooks or tags plainly goes on (wish list #8).
+@Composable
+fun Modifier.scrollBar(state: ScrollState): Modifier {
+    val thumbColor = scrollBarColor()
+    val trackColor = thumbColor.copy(alpha = thumbColor.alpha * TRACK_ALPHA)
+    return drawWithContent {
+        drawContent()
+        if (state.maxValue > 0 && size.height > 0f) {
+            val heightFraction = size.height / (size.height + state.maxValue)
+            val thumbHeight = (size.height * heightFraction).coerceIn(24.dp.toPx().coerceAtMost(size.height), size.height)
+            val top = ((state.value.toFloat() / (size.height + state.maxValue)) * size.height).coerceIn(0f, size.height - thumbHeight)
+            val width = 4.dp.toPx()
+            val x = size.width - width - 2.dp.toPx()
+            drawRoundRect(trackColor, Offset(x, 0f), Size(width, size.height), CornerRadius(width / 2))
+            drawRoundRect(thumbColor, Offset(x, top), Size(width, thumbHeight), CornerRadius(width / 2))
+        }
+    }
+}
+
+/** At most about six rows of a dropdown's list show at once; the rest scroll, with [scrollBar]. */
+val MENU_MAX_HEIGHT = (6 * 48 + 16).dp
+
 @Composable
 private fun ScrollBarFrame(
     modifier: Modifier,

@@ -125,7 +125,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
     var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
     var choosingReminderTime by rememberSaveable { mutableStateOf(false) }
-    var preview by rememberSaveable { mutableStateOf(!creating && recovered == null && initial.content.isNotBlank()) }
+    // Edit or Preview: as Settings → Notes says, by default the way this note was last left.
+    var preview by rememberSaveable { mutableStateOf(app.settings.noteOpenView.value.opensInPreview(creating, recovered != null,
+        initial.content.isNotBlank(), app.settings.noteLeftInPreview(initial.id))) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(if (recovered != null) "Recovered unsaved changes. Save them, or Close and Discard." else null) }
     var askingToSave by rememberSaveable { mutableStateOf(false) }
@@ -306,7 +308,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     // Edit / Preview, and in Edit the Markdown shortcuts.
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf(false to "Edit", true to "Preview").forEachIndexed { index, (isPreview, label) ->
-                            SegmentedButton(selected = preview == isPreview, onClick = { preview = isPreview },
+                            SegmentedButton(selected = preview == isPreview, onClick = { preview = isPreview; app.settings.setNoteLeftInPreview(initial.id, isPreview) },
                                 shape = SegmentedButtonDefaults.itemShape(index, 2),
                                 colors = SegmentedButtonDefaults.colors(activeContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                                     activeContentColor = MaterialTheme.colorScheme.primary)) { Text(label) }
