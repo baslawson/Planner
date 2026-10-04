@@ -432,7 +432,8 @@ private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, c
 // [prefilled]: opened with words the person hasn't typed (a share), which Close mustn't drop without asking.
 // [checkCurrency]: the share's amount had only "$", so the currency shown is a default to check (SH-13).
 fun NewPlanningEventEditor(item: ItineraryItem, onSaved: (Long) -> Unit = {}, prefilled: Boolean = false, checkCurrency: Boolean = false,
-                           onDismiss: () -> Unit) {
+                           initialAddedReminders: List<Reminder> = emptyList(), initialAddedAttachments: List<Attachment> = emptyList(),
+                           notice: String? = null, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val scope = rememberCoroutineScope()
     val categories = remember(app) { CategoryState(app.repository, app.settings, scope) }
@@ -442,7 +443,8 @@ fun NewPlanningEventEditor(item: ItineraryItem, onSaved: (Long) -> Unit = {}, pr
     ItemEditorSheet(item, emptyList(), emptyList(), counts, hidden, categories::remove, categories::show, onDismiss,
         onSave = { event, added, removed, reminders, removedReminders, options ->
             app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also(onSaved) },
-        onDelete = { event, series -> app.repository.deleteWithUndo(event, series) }, prefilled = prefilled, checkCurrency = checkCurrency)
+        onDelete = { event, series -> app.repository.deleteWithUndo(event, series) }, initialAddedReminders = initialAddedReminders,
+        prefilled = prefilled, checkCurrency = checkCurrency, initialAddedAttachments = initialAddedAttachments, notice = notice)
     }
 }
 

@@ -28,7 +28,13 @@ data class PendingDeletion(
     val reminders: List<Reminder>,
     val tasks: List<PlannerTask> = emptyList(),
     val notes: List<PlannerNote> = emptyList(),
+    // A task made into an event, or events into a task: what they became, which Undo takes away again.
+    val madeInto: MadeInto? = null,
 )
+
+/** What a converted task or event became ([eventIds] or [taskId]), and the tasks that stopped waiting on the task. */
+data class MadeInto(val eventIds: List<Long> = emptyList(), val taskId: String? = null, val freed: List<String> = emptyList(),
+                    val fromTaskId: String? = null)
 
 data class PendingMove(
     val token: String = UUID.randomUUID().toString(),
@@ -445,6 +451,44 @@ class Repository(
         }
     }
 
+    // Task → event: once its event ([eventId], a series' first) is saved, the task goes to Recently deleted with an Undo
+    // that also removes the event. Tasks waiting on it stop waiting, rather than staying blocked for good.
+    suspend fun replaceTaskWithEvent(taskId: String, eventId: Long) = changes.withLock {
+        withContext(NonCancellable) {
+            val freed = mutableListOf<String>()
+            deletingWithUndo({ archived ->
+                val task = taskDao.byId(taskId) ?: return@deletingWithUndo null
+                taskDao.all().filter { taskId in it.prerequisiteIds }.forEach { waiting ->
+                    taskDao.update(waiting.copy(prerequisiteIds = waiting.prerequisiteIds - taskId)); freed += waiting.id
+                }
+                val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task),
+                    madeInto = MadeInto(eventIds = listOf(eventId), freed = freed.toList(), fromTaskId = taskId))
+                archive(deleted, archived, emptyList())
+                deleted
+            }) { taskDao.delete(taskId) } ?: return@withContext
+            afterCommit(taskIds = listOf(taskId) + freed)
+        }
+    }
+
+    // Event(s) → task: once the task is saved, the events ([ids]: one occurrence or a whole series) go to Recently deleted
+    // with an Undo that also removes the task.
+    suspend fun replaceEventsWithTask(ids: Set<Long>, taskId: String) = changes.withLock {
+        requirePlannerEvents(ids)
+        withContext(NonCancellable) {
+            val deleted = deletingWithUndo({ archived ->
+                val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
+                if (selected.isEmpty()) return@deletingWithUndo null
+                val selectedIds = selected.mapTo(hashSetOf()) { it.id }
+                val bundle = PendingDeletion(items = selected,
+                    attachments = readIds(selectedIds, attachmentDao::forItems).sortedBy { it.id },
+                    reminders = readIds(selectedIds, reminderDao::forItems).sortedBy { it.id }, madeInto = MadeInto(taskId = taskId))
+                archive(bundle, archived)
+                bundle
+            }) { bundle -> bundle.items.forEach { itemDao.delete(it) } } ?: return@withContext
+            afterCommit(reminderIds = deleted.reminders.map { it.id })
+        }
+    }
+
     // Task sync: [change] made to task [id] as it is at that moment, with no other change in between (null leaves it): the
     // task as saved, or null when nothing was saved (also when it's gone). Done there completes it as here (a repeating
     // task's next one is made), without asking for its prerequisites first: it was already done on Nextcloud.
@@ -494,6 +538,9 @@ class Repository(
 
     // One task as stored, as it changes (null once gone): an open editor notices a sync pull's update, or its deletion.
     fun observeTask(id: String): Flow<PlannerTask?> = taskDao.observe(id).distinctUntilChanged()
+
+    /** The ids of every event in [id]'s series, or just [id] when it doesn't repeat. */
+    suspend fun seriesIds(id: Long): Set<Long> = itemDao.byId(id)?.let { e -> e.seriesId?.let { itemDao.forSeries(it).mapTo(hashSetOf()) { it.id } } ?: setOf(e.id) }.orEmpty()
 
     suspend fun eventDetails(id: Long): Triple<ItineraryItem, List<Attachment>, List<Reminder>>? = db.withTransaction {
         itemDao.byId(id)?.let { Triple(it, attachmentDao.forItem(id), reminderDao.forItem(id)) }
@@ -944,8 +991,28 @@ class Repository(
     }
 
     suspend fun undoDeletion(token: String) = withContext(NonCancellable) { changes.withLock {
+        val madeInto = _pendingDeletions.value.find { it.token == token }?.madeInto
         restoreDeletedLocked(token)
+        if (madeInto != null) takeBackConversion(madeInto)
     } }
+
+    // Undo of a conversion: what the original was made into goes (a series' every event), with no Recently deleted entry
+    // of its own, and the tasks that stopped waiting on the task wait on it again.
+    private suspend fun takeBackConversion(made: MadeInto) {
+        val (reminders, tasks) = db.withTransaction {
+            val events = made.eventIds.mapNotNull { itemDao.byId(it) }.flatMap { e -> e.seriesId?.let { itemDao.forSeries(it) } ?: listOf(e) }.distinctBy { it.id }
+            val reminders = readIds(events.mapTo(hashSetOf()) { it.id }, reminderDao::forItems)
+            events.forEach { itemDao.delete(it) }
+            made.taskId?.let { taskDao.delete(it) }
+            val restored = made.fromTaskId?.takeIf { taskDao.byId(it) != null }?.let { from ->
+                made.freed.mapNotNull { taskDao.byId(it) }.onEach { waiting ->
+                    taskDao.update(waiting.copy(prerequisiteIds = (waiting.prerequisiteIds + from).distinct()))
+                }
+            }.orEmpty()
+            reminders to (listOfNotNull(made.taskId) + restored.map { it.id })
+        }
+        afterCommit(reminderIds = reminders.map { it.id }, taskIds = tasks)
+    }
 
     suspend fun finishDeletion(token: String) = changes.withLock {
         val bundle = _pendingDeletions.value.find { it.token == token } ?: return@withLock

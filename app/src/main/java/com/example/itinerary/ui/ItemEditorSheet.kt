@@ -145,6 +145,9 @@ fun ItemEditorSheet(
     // Opened filled in from a share: unsaved until saved, so Close asks "Save changes?" rather than dropping it.
     prefilled: Boolean = false,
     checkCurrency: Boolean = false,
+    // A new event's files to start with (a task's, when it is made into an event), and what to say above the form.
+    initialAddedAttachments: List<Attachment> = emptyList(),
+    notice: String? = null,
 ) {
     val repository = (LocalContext.current.applicationContext as ItineraryApp).repository
     // One open editor for the widget's wait (D10) for the whole visit, saves included.
@@ -163,7 +166,8 @@ fun ItemEditorSheet(
     val current = saved
     if (current == null) ItemEditorForm(initial, existingAttachments, existingReminders, categoryCounts, hiddenCategories,
         onRemoveCategories, onShowCategory, onDismiss, onSave, onSaved, onDelete, startWithScan, startWithBillScan,
-        initialAddedReminders, initialRepeatCount, prefilled = prefilled, checkCurrency = checkCurrency)
+        initialAddedReminders, initialRepeatCount, prefilled = prefilled, checkCurrency = checkCurrency,
+        initialAddedAttachments = initialAddedAttachments, notice = notice)
     else key(current.first) {
         val (item, attachments, reminders) = current.second
         ItemEditorForm(item, attachments, reminders, categoryCounts, hiddenCategories, onRemoveCategories, onShowCategory,
@@ -193,6 +197,8 @@ private fun ItemEditorForm(
     justSaved: Boolean = false,
     prefilled: Boolean = false,
     checkCurrency: Boolean = false,
+    initialAddedAttachments: List<Attachment> = emptyList(),
+    notice: String? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -212,6 +218,7 @@ private fun ItemEditorForm(
     var askingToSave by remember { mutableStateOf(false) }
     // Set by "Save changes?" → Save: leave once saved (also after a duplicate-bill warning) instead of editing on.
     var closeAfterSave by remember { mutableStateOf(false) }
+    var askingMakeTask by remember { mutableStateOf(false) }
     var duplicateBills by remember { mutableStateOf<List<ItineraryItem>>(emptyList()) }
     var viewingDuplicate by remember { mutableStateOf<Long?>(null) }
     var readingText by remember { mutableStateOf(false) }
@@ -233,7 +240,10 @@ private fun ItemEditorForm(
 
     // Attachment changes are held here until Save, because a new event has no id to link to yet.
     // Files added during this edit are deleted again unless the edit is saved.
-    val added = remember { mutableStateListOf<Attachment>().apply { addAll(DraftCodec.attachments(recovered?.optJSONArray("added"))) } }
+    val added = remember { mutableStateListOf<Attachment>().apply {
+        if (recovered != null) addAll(DraftCodec.attachments(recovered.optJSONArray("added")))
+        else if (initial.id == 0L) addAll(initialAddedAttachments)
+    } }
     val removed = remember { mutableStateListOf<Attachment>().apply { addAll(DraftCodec.attachments(recovered?.optJSONArray("removed"))) } }
     fun discardAddedFile(attachment: Attachment) {
         // Reading text changes metadata only; an existing/shared document still belongs to its saved event.
@@ -646,6 +656,7 @@ private fun ItemEditorForm(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
+            if (isNew && !duplicating) notice?.let { ConversionNotice(it) }
             if (changedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                 FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                     verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -664,6 +675,15 @@ private fun ItemEditorForm(
                 TextButton(enabled = !busy, onClick = { duplicating = true; entireSeries = false; repeat = RepeatRule.NONE; paid = false; payments = emptyList(); checklist = checklist.map { it.copy(done = false) } }) {
                     Text(if (billTask) "Duplicate bill" else "Duplicate event")
                 }
+                // Wish list #1: the same event as a task instead. From what is saved, so nothing typed is lost.
+                val conversions = LocalConversions.current
+                if (conversions != null && !billTask && !duplicating && !deletedElsewhere) TextButton(enabled = !busy, onClick = {
+                    if (unsaved) error = "Save or discard your changes first, then make it a task."
+                    else if (initial.seriesId != null) askingMakeTask = true
+                    else { conversions.eventToTask(initial.id, false); onDismiss() }
+                }) { Text("Make it a task") }
+                if (askingMakeTask) MakeTaskSeriesChoice(onChoose = { whole -> askingMakeTask = false; conversions?.eventToTask(initial.id, whole); onDismiss() },
+                    onDismiss = { askingMakeTask = false })
             }
             if (recovered != null) Text("Unfinished draft recovered. Save to keep your changes.")
             if (duplicating) Text("Edit this copy, then Save to add it. The original is kept.")

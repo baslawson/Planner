@@ -17,6 +17,8 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
     val exportCalendar = rememberCalendarExporter(eventId)
     var history by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var makingTask by remember { mutableStateOf(false) }
+    val conversions = LocalConversions.current
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -56,6 +58,10 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
             }
         })
         if (billId != null) DropdownMenuItem(text = { Text("Bill history") }, onClick = { close(); history = true })
+        // Wish list #1: this event as a task instead (not a bill: that is its own kind).
+        if (conversions != null && billId == null) DropdownMenuItem(text = { Text("Make it a task") }, enabled = !busy, onClick = {
+            close(); if (repeating) makingTask = true else conversions.eventToTask(eventId, false)
+        })
         DropdownMenuItem(text = { Text("Export to calendar (.ics)") }, onClick = { close(); exportCalendar() })
         DropdownMenuItem(text = { Text(if (billId != null) "Share bill" else "Share event") }, onClick = { close(); onShare() })
         DropdownMenuItem(text = { Text(if (date == today.plusDays(1)) "Already tomorrow" else if (billId != null) "Due tomorrow" else "Move to tomorrow") },
@@ -77,6 +83,8 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
             enabled = !busy, onClick = { close(); if (deleteAsks(billId != null, repeating)) deleting = true else delete(false) })
     })
     if (history && billId != null) BillHistoryDialog(billId) { history = false }
+    if (makingTask) MakeTaskSeriesChoice(onChoose = { whole -> makingTask = false; conversions?.eventToTask(eventId, whole) },
+        onDismiss = { makingTask = false })
     if (deleting) DeleteEventDialog(bill = billId != null, repeating = repeating, onDismiss = { deleting = false },
         onDelete = { deleting = false; delete(it) })
 }

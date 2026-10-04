@@ -69,7 +69,9 @@ private fun NavController.openCalendar(entry: NavBackStackEntry, date: LocalDate
 @Composable
 fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}, noteId: String? = null, onNoteOpened: () -> Unit = {}) {
     val windowEditors = remember { WindowEditors() }
-    CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
+    // Task ↔ event conversions asked for from a card's ⋮ or an editor (wish list #1), opened by ConversionHost below.
+    val conversions = rememberConversions()
+    CompositionLocalProvider(LocalWindowEditors provides windowEditors, LocalConversions provides conversions) {
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
     // A share made into a note, handed to the Notes page, which opens it in a new note's editor. Kept with its words
@@ -147,7 +149,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     var recovered by remember { mutableStateOf(runCatching {
         // Q-2: a share restored as a new event (after process death) reopens its own editor on its draft: not here too.
         draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value,
-            ownedElsewhere = { sharedEvent != null && runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")) == sharedEvent }.getOrDefault(false) }) {
+            // A task being made into an event after Android closed Planner reopens its own editor on its draft too.
+            ownedElsewhere = { conversions.request?.startsWith("task:") == true ||
+                sharedEvent != null && runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")) == sharedEvent }.getOrDefault(false) }) {
             com.example.itinerary.data.EditorDraftStore(app).read()
         }
     }.getOrNull()) }
@@ -188,7 +192,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
                 val result = snackbar.showSnackbar(
-                    message = deletedMessage(next.items.size, next.tasks.size, next.notes.size),
+                    message = next.madeInto?.let { if (it.taskId != null) "Made into a task" else "Made into an event" }
+                        ?: deletedMessage(next.items.size, next.tasks.size, next.notes.size),
                     actionLabel = "Undo",
                     withDismissAction = true,
                     duration = SnackbarDuration.Long,
@@ -390,6 +395,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 onEntryOpened()
             }
         }
+        ConversionHost(conversions)
         shortcutItem?.let { item ->
             val vm: TripsViewModel = viewModel(key = "shortcut-editor", factory = tripsFactory)
             val counts by vm.categoryCounts.collectAsStateWithLifecycle()

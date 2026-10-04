@@ -118,8 +118,9 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
 // [closeRequested]: something else wants this editor closed (a second task tapped on the widget, E4). It closes like
 // Close: at once with nothing unsaved, otherwise after "Save changes?"; Keep editing there calls [onCloseCancelled].
 // [prefilled]: a new task filled in from a share, unsaved until saved, so Close asks rather than dropping it.
+// [notice]: shown above the form (what a conversion leaves behind); [afterSave]: run once its first Save has stored it.
 fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
-               prefilled: Boolean = false, onDismiss: () -> Unit) {
+               prefilled: Boolean = false, notice: String? = null, afterSave: suspend (String) -> Unit = {}, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val store = remember { TaskDraftStore(context) }
     val draftKey = if (creating) "new" else initial.id
@@ -190,7 +191,7 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
         }
         CompositionLocalProvider(LocalEditingTaskId provides source.id) {
             TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved, closeRequested, onCloseCancelled,
-                prefilled = prefilled)
+                prefilled = prefilled, notice = notice, afterSave = afterSave)
         }
     }
 }
@@ -227,7 +228,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                               draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit,
                               closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
                               // Opened again right after a Save: the Save button says "Saved" until something changes.
-                              justSaved: Boolean = false, prefilled: Boolean = false) {
+                              justSaved: Boolean = false, prefilled: Boolean = false, notice: String? = null,
+                              afterSave: suspend (String) -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -338,7 +340,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         } else action(keepOpen = !close) { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt,
             repeat = repeat, repeatDays = repeatDays.toIntOrNull()?.coerceIn(1, 3650) ?: 7,
             repeatAnchorDay = if (date != initial.dueDate?.toString() || repeat != initial.repeat) 0 else initial.repeatAnchorDay,
-            checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating) }
+            checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating)
+            afterSave(initial.id) }
     }
     // Close (and Back) leaves at once when nothing is unsaved; otherwise it asks first. A task deleted elsewhere can't be
     // saved: Close leaves, keeping anything unsaved as its draft for when it is restored.
@@ -397,6 +400,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 HeadingText(if (creating) "Add task" else "Edit task", style = MaterialTheme.typography.headlineSmall)
+                notice?.let { ConversionNotice(it) }
                 if (changedElsewhere || deletedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                     FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -418,6 +422,12 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             error = "Close your current event editor before scheduling another block."
                         else schedule = true
                     }) { Text("Schedule time") }
+                    // Wish list #1: the same task as an event instead. From what is saved, so nothing typed is lost.
+                    val conversions = LocalConversions.current
+                    if (conversions != null && TaskEventConversion.canMakeEvent(initial)) TextButton(enabled = !busy, onClick = {
+                        if (unsaved) error = "Save or discard your changes first, then make it an event."
+                        else { conversions.taskToEvent(initial.id); onDismiss() }
+                    }) { Text("Make it an event") }
                     TaskTimeBlocks(initial.id)
                 }
                 Text("Due date (optional)", style = MaterialTheme.typography.labelLarge)
@@ -584,6 +594,7 @@ private fun TaskActionsMenu(task: PlannerTask, today: LocalDate) {
         }
     }
     val tomorrow = today.plusDays(1)
+    val conversions = LocalConversions.current
     OverlayMenuAnchor(title = "Actions for ${task.title}", button = { open ->
         IconButton(enabled = !busy, onClick = open) {
             Icon(androidx.compose.material.icons.Icons.Default.MoreVert, contentDescription = "Actions for ${task.title}")
@@ -592,6 +603,8 @@ private fun TaskActionsMenu(task: PlannerTask, today: LocalDate) {
         DropdownMenuItem(text = { Text(if (task.dueDate == tomorrow) "Already tomorrow" else "Due tomorrow") },
             enabled = !busy && task.dueDate != tomorrow,
             onClick = { close(); act("Couldn't change the date. Please try again.") { repo.moveTaskToTomorrow(task.id, today) } })
+        if (conversions != null && TaskEventConversion.canMakeEvent(task))
+            DropdownMenuItem(text = { Text("Make it an event") }, enabled = !busy, onClick = { close(); conversions.taskToEvent(task.id) })
         DropdownMenuItem(text = { Text("Share task") }, onClick = { close(); shareTask(context, task.title, task.dueDate, task.notes) })
         DropdownMenuItem(text = { Text("Delete task", color = MaterialTheme.colorScheme.error) }, enabled = !busy,
             onClick = { close(); act("Couldn't delete this task. Please try again.") { repo.deleteTask(task.id) } })
