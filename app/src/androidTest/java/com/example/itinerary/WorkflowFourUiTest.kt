@@ -145,8 +145,10 @@ class WorkflowFourUiTest {
             ins.runOnMainSync { activity.recreate() }
             click("Add task")
             await { find("https://example.test/recover") != null }
-            click("Close") // the shared text is what the editor opened with, so nothing is unsaved
-            await { find("Add to Planner") == null }
+            click("Close") // what the share filled in counts as unsaved, so Close asks first
+            await { find("Save changes?") != null }
+            click("Discard")
+            await { find("Add to Planner") == null && find("Save changes?") == null }
             assertFalse(data().tasks.any { it.notes == "https://example.test/recover" })
         } finally { TaskDraftStore(context).clear("new") }
     }

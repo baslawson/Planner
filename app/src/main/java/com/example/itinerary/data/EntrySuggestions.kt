@@ -47,6 +47,38 @@ object BillSuggestions {
         }
         return BillSuggestion(title, dates.singleOrNull(), amounts.singleOrNull()?.first, amounts.singleOrNull()?.second, warnings)
     }
+    // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP").
+    private val number = "[0-9](?:[0-9.,]*[0-9])?"
+    private val looseMoney = Regex("(?i)(?<![A-Za-z])(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)(?![A-Za-z])")
+    private fun looseAmount(text: String): Long? = when {
+        Regex("[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(",", ""))
+        Regex("[0-9]{1,3}(?:\\.[0-9]{3})+(?:,[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(".", ""))
+        else -> Bills.parse(text)
+    }
+
+    /**
+     * A bill from an email's wording: the labelled lines [parse] reads, else one amount with a currency written anywhere
+     * and [due], the one day the email names ([SharedDates]). Several different amounts are left for the person.
+     */
+    fun parseMessage(text: String, due: LocalDate?): BillSuggestion {
+        val labelled = parse(text)
+        val loose = looseMoney.findAll(text.take(200_000)).mapNotNull { m ->
+            val g = m.groupValues
+            val amount = looseAmount(g[2].ifEmpty { g[4] }.ifEmpty { g[5] }) ?: return@mapNotNull null
+            val code = g[1].ifEmpty { g[6] }.uppercase(Locale.ROOT).ifEmpty {
+                when (g[3]) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+            }.ifEmpty { null }
+            amount to code
+        }.toList()
+        val amounts = loose.map { it.first }.distinct()
+        val amount = labelled.amount ?: amounts.singleOrNull()
+        val currency = if (labelled.amount != null) labelled.currency
+            else loose.filter { it.first == amount }.mapNotNull { it.second }.distinct().singleOrNull()
+        return BillSuggestion(null, labelled.date ?: due, amount, currency, buildMap {
+            if (amount == null && amounts.size > 1) put("amount", "Several amounts found")
+        })
+    }
+
     fun parseDate(text: String): LocalDate? {
         val value = text.trim()
         runCatching { LocalDate.parse(value) }.getOrNull()?.let { return it }

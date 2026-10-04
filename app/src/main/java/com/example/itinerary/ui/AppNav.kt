@@ -72,7 +72,14 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
-    val sharedEvent = if (sharedText != null) key(sharedText, sharedSubject) { SharedTextReview(sharedText, sharedSubject, onSharedOpened) } else null
+    // A share made into a note, handed to the Notes page, which opens it in a new note's editor.
+    var sharedNote by remember { mutableStateOf<com.example.itinerary.data.PlannerNote?>(null) }
+    val sharedEvent = if (sharedText != null) key(sharedText, sharedSubject) {
+        SharedTextReview(sharedText, sharedSubject, onSharedOpened, onNote = { note ->
+            sharedNote = note
+            if (nav.currentDestination?.route != "notes") nav.navigate("notes") { launchSingleTop = true }
+        })
+    } else null
     // The task open from the widget. A second widget task (a new [widgetTaskId]) waits until this one's editor has
     // closed the usual way, "Save changes?" included; Keep editing there drops it (E4: the editor used to be reused).
     var widgetTaskOpen by remember { mutableStateOf<String?>(null) }
@@ -257,7 +264,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
-            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null }) }
+            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null },
+                newNote = sharedNote, onNewNoteOpened = { sharedNote = null }) }
             composable("search") { entry ->
                 val vm: SearchViewModel = viewModel(
                     factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings, app.calendarSync.shown) } },

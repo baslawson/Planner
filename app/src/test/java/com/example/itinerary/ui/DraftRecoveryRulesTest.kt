@@ -37,4 +37,17 @@ class DraftRecoveryRulesTest {
         assertEquals("You have an unfinished task. Close this share, then resume or discard that draft before sharing again.",
             sharedDraftBlock("task", draftExists = true, eventEditorOpen = true))
     }
+
+    // A share made into a note opens on the Notes page: an open note, or an event or task editor the page would drop, comes first.
+    @Test fun sharingANoteNamesWhatIsOpen() {
+        assertEquals("A note is open in Planner. Close this share, then save or close that note before sharing again.",
+            sharedDraftBlock("note", draftExists = true, eventEditorOpen = false, noteEditorOpen = true, otherEditorOpen = true))
+        assertEquals("An event or task is open in Planner. Close this share, then save or close it before sharing again.",
+            sharedDraftBlock("note", draftExists = false, eventEditorOpen = true, noteEditorOpen = false, otherEditorOpen = true))
+        assertEquals("You have an unfinished note. Close this share, then resume or discard that draft before sharing again.",
+            sharedDraftBlock("note", draftExists = true, eventEditorOpen = false))
+        assertNull(sharedDraftBlock("note", draftExists = false, eventEditorOpen = false))
+        // An open note doesn't block an event or task.
+        assertNull(sharedDraftBlock("event", draftExists = false, eventEditorOpen = false, noteEditorOpen = true))
+    }
 }

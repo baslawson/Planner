@@ -142,6 +142,8 @@ fun ItemEditorSheet(
     startWithBillScan: Boolean = false,
     initialAddedReminders: List<Reminder> = emptyList(),
     initialRepeatCount: Int = 12,
+    // Opened filled in from a share: unsaved until saved, so Close asks "Save changes?" rather than dropping it.
+    prefilled: Boolean = false,
 ) {
     val repository = (LocalContext.current.applicationContext as ItineraryApp).repository
     // One open editor for the widget's wait (D10) for the whole visit, saves included.
@@ -160,7 +162,7 @@ fun ItemEditorSheet(
     val current = saved
     if (current == null) ItemEditorForm(initial, existingAttachments, existingReminders, categoryCounts, hiddenCategories,
         onRemoveCategories, onShowCategory, onDismiss, onSave, onSaved, onDelete, startWithScan, startWithBillScan,
-        initialAddedReminders, initialRepeatCount)
+        initialAddedReminders, initialRepeatCount, prefilled = prefilled)
     else key(current.first) {
         val (item, attachments, reminders) = current.second
         ItemEditorForm(item, attachments, reminders, categoryCounts, hiddenCategories, onRemoveCategories, onShowCategory,
@@ -188,6 +190,7 @@ private fun ItemEditorForm(
     initialRepeatCount: Int = 12,
     // Opened again right after a Save: the Save button says "Saved" until something changes.
     justSaved: Boolean = false,
+    prefilled: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -488,7 +491,7 @@ private fun ItemEditorForm(
     fun edit() = EditorRules.EventEdit(currentItem(), added.toList(), removed.toList(), shownReminders, repeat.name,
         if (creatingSeries && repeat != RepeatRule.NONE) repeatCount else "", duplicating, listOf(durationText, beforeText, afterText, billAmountText))
     val openedWith = remember { edit() }
-    val unsaved = EditorRules.eventUnsaved(openedWith, edit(), recovered = recovered != null)
+    val unsaved = EditorRules.eventUnsaved(openedWith, edit(), recovered = recovered != null || prefilled)
     // Changed underneath this form (a sync pull): a banner offers Reload, and Save asks first. Not once this form has
     // saved (its own write) or is on its way out; a copy being made (Duplicate) isn't affected.
     val changedElsewhere = !committed && !duplicating && EditorRules.changedElsewhere(initial, stored)

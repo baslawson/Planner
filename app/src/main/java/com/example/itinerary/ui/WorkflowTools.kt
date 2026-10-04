@@ -101,42 +101,90 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
     }
 }
 
-// Why shared text can't go to [value] ("event" or "task") now, or null when it can. An event editor open in this or
-// another Planner window (U3) holds the one event draft, so it is named rather than an unfinished draft to resume.
-internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOpen: Boolean): String? = when {
+// Why shared text can't go to [value] ("event", "task" or "note") now, or null when it can. An event editor open in this
+// or another Planner window (U3) holds the one event draft, so it is named rather than an unfinished draft to resume. A
+// note opens on the Notes page, which would drop an event or task editor open here ([otherEditorOpen]).
+internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOpen: Boolean,
+                              noteEditorOpen: Boolean = false, otherEditorOpen: Boolean = false): String? = when {
     value == "event" && eventEditorOpen -> "An event is open in Planner. Close this share, then save or close that event before sharing again."
+    value == "note" && noteEditorOpen -> "A note is open in Planner. Close this share, then save or close that note before sharing again."
+    value == "note" && otherEditorOpen -> "An event or task is open in Planner. Close this share, then save or close it before sharing again."
     draftExists -> "You have an unfinished $value. Close this share, then resume or discard that draft before sharing again."
     else -> null
 }
 
-// Returns the new event its editor is open on, or null, so AppNav leaves that editor's draft to it (Q-2).
+// Returns the new event (or bill) its editor is open on, or null, so AppNav leaves that editor's draft to it (Q-2).
+// A note goes to [onNote], which opens it on the Notes page. Each editor opens filled in from the share and counts it as
+// unsaved, so Close asks before dropping it.
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit): ItineraryItem? {
+fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNote: (PlannerNote) -> Unit = {}): ItineraryItem? {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val content = remember(text, subject) { runCatching { SharedText.draft(text, subject) } }
+    val today = remember(text, subject) { LocalDate.now() }
+    // What the message says: the one day (and time) it names, and for a bill one amount.
+    val found = remember(content) { content.getOrNull()?.let { SharedDates.find(it.body, today) } }
+    val bill = remember(content, found) { content.getOrNull()?.let { BillSuggestions.parseMessage(it.body, found?.date) } }
     var destination by rememberSaveable(text, subject) { mutableStateOf("") }
+    // "10:30": morning or evening, picked here; null leaves the time to the editor.
+    var pickedTime by rememberSaveable(text, subject) { mutableStateOf<String?>(null) }
     val id = rememberSaveable(text, subject) { java.util.UUID.randomUUID().toString() }
     var error by remember { mutableStateOf<String?>(null) }
     fun choose(value: String) {
-        val check = runCatching { if (value == "event") EditorDraftStore(app).read() != null else TaskDraftStore(app).read("new") != null }
+        val editor = if (value == "bill") "event" else value
+        val check = runCatching { when (editor) {
+            "event" -> EditorDraftStore(app).read() != null
+            "note" -> NoteDraftStore(app).read() != null
+            else -> TaskDraftStore(app).read("new") != null
+        } }
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }
-        val blocked = sharedDraftBlock(value, check.getOrThrow(), EditorDraftStore.openEditors.value > 0)
-        if (blocked != null) error = blocked else destination = value
+        val blocked = sharedDraftBlock(editor, check.getOrThrow(), EditorDraftStore.openEditors.value > 0,
+            NoteDraftStore.openEditors.value > 0, EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value > 0)
+        if (blocked != null) error = blocked
+        else if (value == "note") content.getOrNull()?.let { onNote(PlannerNote(title = it.title, content = it.notes)); onDismiss() }
+        else destination = value
     }
+    val dateFormat = LocalDateFormat.current
+    val is24Hour = LocalTimeFormat.current.is24Hour(LocalContext.current)
     if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
         primary = DialogAction("Add task", enabled = content.isSuccess) { choose("task") },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
-        extra = listOf(DialogAction("Add event", enabled = content.isSuccess) { choose("event") })) {
+        extra = listOf(DialogAction("Add event", enabled = content.isSuccess) { choose("event") },
+            DialogAction("Add bill", enabled = content.isSuccess) { choose("bill") },
+            DialogAction("Add note", enabled = content.isSuccess) { choose("note") })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
+            found?.date?.let { date ->
+                Text("Date in the text: " + date.dayLabel(dateFormat) + (found.time?.let { ", " + it.label(is24Hour) }.orEmpty()))
+                if (found.timeChoices.isNotEmpty()) {
+                    Text("Which time? Pick one, or set it in the editor.")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        found.timeChoices.forEach { time ->
+                            FilterChip(selected = pickedTime == time.toString(),
+                                onClick = { pickedTime = if (pickedTime == time.toString()) null else time.toString() },
+                                label = { Text(time.label(is24Hour)) })
+                        }
+                    }
+                }
+            }
+            if (found != null && found.dates.size > 1)
+                Text("Several dates in the text (" + found.dates.joinToString(", ") { it.dayLabel(dateFormat) } + "). Set the date in the editor.")
+            bill?.amount?.let { amount -> Text("Amount for a bill: " +
+                (bill.currency?.let { Bills.format(amount, it) } ?: (Bills.input(amount) + " (check the currency)"))) }
+            bill?.warnings?.get("amount")?.let { Text("$it in the text. Enter the bill's amount in the editor.") }
             Text("Choose where to put this text, then review and save.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     val shared = content.getOrNull() ?: return null
+    val time = found?.time ?: pickedTime?.let(java.time.LocalTime::parse)
     if (destination == "task") PlanningOverlay(onDismiss) {
-        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes), true, onDismiss = onDismiss)
+        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes, dueDate = found?.date), true, prefilled = true, onDismiss = onDismiss)
     }
-    if (destination != "event") return null
-    val event = ItineraryItem(tripId = 0, date = LocalDate.now(), startTime = null, title = shared.title, notes = shared.notes)
-    NewPlanningEventEditor(event, onDismiss = onDismiss)
+    if (destination != "event" && destination != "bill") return null
+    val event = remember(destination, time) {
+        if (destination == "bill") ItineraryItem(tripId = 0, date = bill?.date ?: today, startTime = null, title = shared.title,
+            notes = shared.notes, category = "Bills", billAmountMinor = bill?.amount).let { b -> bill?.currency?.let { b.copy(billCurrency = it) } ?: b }
+        else ItineraryItem(tripId = 0, date = found?.date ?: today, startTime = found?.date?.let { time }, title = shared.title, notes = shared.notes)
+    }
+    NewPlanningEventEditor(event, prefilled = true, onDismiss = onDismiss)
     return event
 }

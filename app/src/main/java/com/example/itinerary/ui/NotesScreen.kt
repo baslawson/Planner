@@ -55,7 +55,9 @@ private fun filterOf(key: String): NoteFilter = when {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: () -> Unit = {}) {
+// [newNote]: a note not saved yet (made from a share) to open in the editor, once; [onNewNoteOpened] says it was taken.
+fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: () -> Unit = {},
+                newNote: PlannerNote? = null, onNewNoteOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -181,6 +183,15 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             else -> { editingNew = false; editingId = id }
         }
         onNoteOpened()
+    }
+    // A share made into a note: it opens like a duplicate, as a new note that is only saved by Save. The share checked
+    // that no note was open; one opened meanwhile (a draft recovered) stays, and the share is dropped with a message.
+    LaunchedEffect(newNote, notes != null, draftChecked) {
+        val note = newNote ?: return@LaunchedEffect
+        if (notes == null || !draftChecked) return@LaunchedEffect
+        if (editingId != null) android.widget.Toast.makeText(context, "A note is already open. Close it, then share again.", android.widget.Toast.LENGTH_LONG).show()
+        else { pendingCopy = note; editingNew = true; editingId = note.id }
+        onNewNoteOpened()
     }
     LaunchedEffect(editingId, waitingNoteId, notes) {
         val waiting = waitingNoteId ?: return@LaunchedEffect

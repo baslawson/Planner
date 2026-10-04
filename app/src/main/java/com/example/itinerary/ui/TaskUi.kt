@@ -117,8 +117,9 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
 @Composable
 // [closeRequested]: something else wants this editor closed (a second task tapped on the widget, E4). It closes like
 // Close: at once with nothing unsaved, otherwise after "Save changes?"; Keep editing there calls [onCloseCancelled].
+// [prefilled]: a new task filled in from a share, unsaved until saved, so Close asks rather than dropping it.
 fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
-               onDismiss: () -> Unit) {
+               prefilled: Boolean = false, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val store = remember { TaskDraftStore(context) }
     val draftKey = if (creating) "new" else initial.id
@@ -188,7 +189,8 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
             if (creating && draft != null) initial.copy(id = draft.getString("id")) else initial
         }
         CompositionLocalProvider(LocalEditingTaskId provides source.id) {
-            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved, closeRequested, onCloseCancelled)
+            TaskEditorContent(source, creating, draft, draftKey, store, onDismiss, onSaved, closeRequested, onCloseCancelled,
+                prefilled = prefilled)
         }
     }
 }
@@ -217,7 +219,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                               draftStore: TaskDraftStore, onDismiss: () -> Unit, onSaved: suspend (String) -> Unit,
                               closeRequested: Boolean = false, onCloseCancelled: () -> Unit = {},
                               // Opened again right after a Save: the Save button says "Saved" until something changes.
-                              justSaved: Boolean = false) {
+                              justSaved: Boolean = false, prefilled: Boolean = false) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -303,7 +305,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         reminderAt = reminderAt, repeat = repeat, repeatDays = repeatDays.toIntOrNull() ?: -1, checklist = checklist,
         attachments = attachments, prerequisiteIds = prerequisiteIds)
     val openedWith = remember { currentTask() }
-    val unsaved = EditorRules.taskUnsaved(openedWith, currentTask(), recovered = draft != null)
+    val unsaved = EditorRules.taskUnsaved(openedWith, currentTask(), recovered = draft != null || prefilled)
     // U-N1/U-N2: the task as stored, watched while this form is open (each form after a Save or Reload watches afresh from
     // its own [initial], so its own save isn't taken for a change from elsewhere). Changed underneath (a sync pull): a
     // banner offers Reload and Save asks first, as the event editor does. Gone (deleted by sync): the form stays with what
