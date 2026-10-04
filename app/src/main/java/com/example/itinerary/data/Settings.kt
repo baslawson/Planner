@@ -181,7 +181,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _continueLists.value = on
     }
 
-    // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
+    // Device-local: whether a saved note opens in Edit, Preview or as it was left (Settings → Notes open in); not in
+    // backups, like the Notes page's own choices below (SR-9).
     private val _noteOpenView = MutableStateFlow(runCatching { NoteOpenView.valueOf(prefs.getString("note_open_view", null) ?: "") }.getOrDefault(NoteOpenView.LAST))
     val noteOpenView: StateFlow<NoteOpenView> = _noteOpenView.asStateFlow()
     fun setNoteOpenView(view: NoteOpenView) { prefs.edit { putString("note_open_view", view.name) }; _noteOpenView.value = view }
@@ -190,6 +191,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     fun noteLeftInPreview(id: String): Boolean? = if (noteViews.contains(id)) noteViews.getBoolean(id, false) else null
     fun setNoteLeftInPreview(id: String, preview: Boolean) { noteViews.edit { putBoolean(id, preview) } }
 
+    // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
     private val _noteSort = MutableStateFlow(runCatching { NoteSort.valueOf(prefs.getString("note_sort", null) ?: "") }.getOrDefault(NoteSort.MY_ORDER))
     val noteSort: StateFlow<NoteSort> = _noteSort.asStateFlow()
     fun setNoteSort(sort: NoteSort) { prefs.edit { putString("note_sort", sort.name) }; _noteSort.value = sort }
@@ -201,7 +203,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         get() = prefs.getString("note_filter", null) ?: "all"
         set(value) { prefs.edit { putString("note_filter", value) } }
 
-    // Settings → Open Planner on (wish list #10).
+    // Settings → Open Planner on (wish list #10). Device-local, like the last view it can follow; not in backups (SR-9).
     private val _startScreen = MutableStateFlow(runCatching { StartScreen.valueOf(prefs.getString("start_screen", null) ?: "") }.getOrDefault(StartScreen.LAST))
     val startScreen: StateFlow<StartScreen> = _startScreen.asStateFlow()
     fun setStartScreen(screen: StartScreen) { prefs.edit { putString("start_screen", screen.name) }; _startScreen.value = screen }
