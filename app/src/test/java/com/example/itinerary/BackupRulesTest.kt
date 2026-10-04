@@ -20,7 +20,9 @@ class BackupRulesTest {
     private val leftOut = listOf(ledger, Triple("exclude", "sharedpref", "alarm_window.xml"),
         Triple("exclude", "sharedpref", "${com.example.itinerary.ui.AppLock.PREFS}.xml"),
         Triple("exclude", "sharedpref", "${com.example.itinerary.ui.SupportPrompt.PREFS}.xml"),
-        Triple("exclude", "sharedpref", "updates.xml"))
+        Triple("exclude", "sharedpref", "updates.xml"),
+        // SR-5: this phone's last crash, for its own bug report.
+        Triple("exclude", "file", "last-crash.txt"))
 
     @Test fun theManifestUsesBothRuleFiles() {
         val manifest = File("src/main/AndroidManifest.xml").readText()
