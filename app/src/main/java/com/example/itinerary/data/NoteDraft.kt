@@ -111,7 +111,14 @@ class NoteDraftStore(context: Context) {
         // note would share its draft (and its Discard would clear the first one's), and the Notes page leaves its draft be.
         private val owners = HashMap<String, Any>()
         fun claim(noteId: String, editor: Any): Boolean = synchronized(owners) { owners.getOrPut(noteId) { editor } === editor }
-        fun release(noteId: String, editor: Any) { synchronized(owners) { if (owners[noteId] === editor) owners.remove(noteId) } }
+        fun release(noteId: String, editor: Any) {
+            if (synchronized(owners) { (owners[noteId] === editor).also { if (it) owners.remove(noteId) } }) _changes.value++
+        }
+
+        // Bumped when an editor lets a note go or a window goes: a Notes page then looks for drafts again. Android resumes
+        // the window left on screen before the finished one is destroyed, so its own look comes too early (NT-2).
+        private val _changes = kotlinx.coroutines.flow.MutableStateFlow(0)
+        val changes: kotlinx.coroutines.flow.StateFlow<Int> = _changes
         fun isOpen(noteId: String): Boolean = synchronized(owners) { noteId in owners }
 
         // NT-2: the Planner windows (AppNav ids) this process has shown (see [NoteWindows]).
@@ -121,7 +128,7 @@ class NoteDraftStore(context: Context) {
         fun windowStarted(id: String, fromSavedState: Boolean): Boolean = windows.started(id, fromSavedState)
         fun windowOpened(id: String) = windows.opened(id)
         /** NO-1: [gone] when the window is finishing (its task swiped away, Back); otherwise Android may rebuild it. */
-        fun windowClosed(id: String, gone: Boolean) = windows.closed(id, gone)
+        fun windowClosed(id: String, gone: Boolean) { windows.closed(id, gone); if (gone) _changes.value++ }
         /** NO-3: whether [id] is a window of this process that is shown or may come back. */
         fun windowLive(id: String?): Boolean = windows.live(id)
         private fun anotherWindows(owner: String?, page: String?, pageRestored: Boolean) = windows.another(owner, page, pageRestored)

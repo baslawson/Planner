@@ -1,5 +1,6 @@
 package com.example.itinerary.ui
 
+import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -199,6 +200,10 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     val draftScope = rememberCoroutineScope()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         if (draftChecked && editingId == null) draftScope.launch { if (editingId == null) lookForDraft() }
+    }
+    // NT-2: and again when another window's editor lets its note go or that window goes, which comes after this resume.
+    LaunchedEffect(Unit) {
+        com.example.itinerary.data.NoteDraftStore.changes.drop(1).collect { if (draftChecked && editingId == null) lookForDraft() }
     }
     // NW-1: a note opened here (its card, a reminder, Open) with a draft on disk, from another window or left from before,
     // opens with that draft rather than over it. The editor waits for this read.

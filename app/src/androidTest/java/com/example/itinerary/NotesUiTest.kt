@@ -376,9 +376,12 @@ class NotesUiTest {
                 click("Edit"); type(1, "typed in the second window")
                 await { NoteDraftStore(context).read(id)?.note?.content == "typed in the second window" }
             } finally { ins.runOnMainSync { second.finish() } }
-            await { !NoteDraftStore.isOpen(id) }
+            // Not "the note is free": this window may already have it open again with its draft.
+            await { second.isDestroyed }
             // NT-2: back in the first window the draft reopens by itself, with no tap (CC-2: the card's path is the next test).
-            await { find("Recovered unsaved changes. Save them, or Close and Discard.") != null && noteText() == "typed in the second window" }
+            // The notice sits further down the editor, maybe below the screen's edge: looked for in the whole editor.
+            await { nodes().any { it.text?.toString() == "Recovered unsaved changes. Save them, or Close and Discard." } &&
+                noteText() == "typed in the second window" }
             screenshot("draft-of-a-window-that-went")
             assertNull(find("A note in another Planner window has unsaved changes"))
             assertNull(find("A note has unsaved changes"))
