@@ -50,7 +50,9 @@ object BillSuggestions {
         return BillSuggestion(title, dates.singleOrNull(), amounts.singleOrNull()?.first, amounts.singleOrNull()?.second, warnings)
     }
     // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP").
-    private val number = "[0-9](?:[0-9.,]*[0-9])?"
+    // Tried only from the start of a run of digits, dots and commas: from every digit of a long run ("12.50,13.20,…") it
+    // read the rest of the run again each time (SQ9-10).
+    private val number = "(?<![0-9.,])[0-9](?:[0-9.,]*[0-9])?"
     private val looseMoney = Regex("(?i)(?<![A-Za-z])(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)(?![A-Za-z])")
     // Things counted under a "total": "Items in total: 3" (SQ8-8).
     private val countWord = Regex("(?i)\\b(?:items?|articles?|pieces?|units?|products?|parcels?|packages?|tickets?|guests?|people|persons?|qty|quantity)\\b")

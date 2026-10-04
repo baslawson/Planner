@@ -670,19 +670,25 @@ object QuickEntry {
             if (oneMonth && day(if (g[4].isNotEmpty()) g[4] else g[10]).toInt() < day(if (g[4].isNotEmpty()) g[1] else g[8]).toInt())
                 return error("End the date range after it starts.")
             val hasYear = re("\\d{4}").containsMatchIn(match.value)
-            // "20 Oct to 10 Oct", "20 Nov to 10 Oct": written backwards, the end on an earlier day of the start's month or
-            // the month before, not a stay of most of a year (nor one that began last year, SQ-14). Other ranges without a
-            // year cross New Year forwards, long ones too: "School year 1 Sep to 30 Jun", "Lease 1 Jul to 30 Jun" (SQ8-2).
-            if (!hasYear && g[12].isEmpty() && java.time.MonthDay.from(end) < java.time.MonthDay.from(start) &&
-                end.dayOfMonth < start.dayOfMonth && end.monthValue >= start.monthValue - 1)
-                return error("End the date range after it starts.")
-            // "28 Dec – 3 Jan 2027": a year on the end only, across New Year, starts the range the year before.
+            // One rule for an end that comes before the start in the calendar, with no year on the start (SQ9-4): it is
+            // written backwards when it falls in the start's month or the month before ("20 Oct to 10 Oct", "4 Oct to 3
+            // Oct", "10 Nov to 20 Oct", "20 Oct to 25 Sep", "7 Oct to 3 Oct 2026", SQ-14), whatever the days; otherwise the
+            // range crosses New Year, long ones too ("School year 1 Sep to 30 Jun", "28 Dec to 3 Jan", "28 Dec to 3 Jan
+            // 2027", SQ8-2). Only a year from the 1st, the end on the last day of the month before ("Lease 1 Jul to 30
+            // Jun"), crosses New Year from there.
+            val startDay = java.time.MonthDay.from(start)
+            val endDay = java.time.MonthDay.from(end)
+            val backwards = endDay < startDay && (end.month == start.month ||
+                end.month == start.month.minus(1) && !(start.dayOfMonth == 1 && end.dayOfMonth >= end.month.minLength()))
+            if (!hasYear && g[12].isEmpty() && backwards) return error("End the date range after it starts.")
+            // A year on the end only, across New Year: the range starts the year before.
             val endYearOnly = g[4].isNotEmpty() && g[3].isEmpty() && g[6].isNotEmpty() || g[7].isNotEmpty() && g[11].isNotEmpty()
-            if (endYearOnly && start.monthValue > end.monthValue) start = start.minusYears(1)
+            if (endYearOnly && endDay < startDay && !backwards) start = start.minusYears(1)
             // "28 Dec – 3 Jan" without years ends in the next year.
             var last = if (end < start && !hasYear) end.plusYears(1) else end
-            // "30 Sep – 4 Oct" on 1 October: the range under way, not next year's.
-            if (!hasYear && g[12].isEmpty() && start > today && start.minusYears(1) <= today) {
+            // "30 Sep – 4 Oct" on 1 October: the range under way, not next year's. Only one that began at most half a year
+            // ago: "Lease 1 Nov to 31 Oct" on 5 October is next month's, not one that began last November (SQ9-4).
+            if (!hasYear && g[12].isEmpty() && start > today && start.minusYears(1) <= today && start.minusYears(1) >= today.minusMonths(6)) {
                 val earlierLast = if (end < start.minusYears(1)) end.plusYears(1) else end
                 if (earlierLast >= today && earlierLast < start) { start = start.minusYears(1); last = earlierLast }
             }
@@ -1245,8 +1251,10 @@ object QuickEntry {
             else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:/-]|\\.+[\\w:/-])").findAll(remaining).firstOrNull { m ->
                 m.value.toInt() in 1..12 &&
                     phrases.any { (it.kind == QuickPhraseKind.DATE || it.kind == QuickPhraseKind.REPEAT && rx("(?:$weekdays|$pluralWeekdays)$").containsMatchIn(text.substring(it.start, it.end))) && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(re("[\\s,]*")) } &&
-                    // Before "!", "?" or "." and a new sentence: "Gym Friday 6. Bring towel", "Gym Friday 6..." (SQ8-9).
-                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("(?s)\\s*[!?.]+(?:\\s+\\p{Lu}.*)?\\s*")) ||
+                    // Before "!", "?" or "." and a new sentence: "Gym Friday 6. Bring towel", "Gym Friday 6..." (SQ8-9). Not
+                    // an ordinal before a month ("Friday 9. October") or a numbered list ("Friday 1. Budget 2. Hiring", SQ9-5).
+                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() ||
+                        after.matches(re("(?s)\\s*[!?.]+(?:\\s+(?!(?i:$months)\\b)\\p{Lu}(?!.*(?<![\\w.])\\d{1,2}\\.(?!\\d)).*)?\\s*")) ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
         var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)

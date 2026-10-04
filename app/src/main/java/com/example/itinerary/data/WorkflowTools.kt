@@ -67,11 +67,15 @@ object SharedText {
         // An email shared with its headers on top (Thunderbird): its subject is the title, and of the headers only who
         // sent it stays, above the message.
         val email = EmailHeaders.read(body)
-        // Dates are read from the message alone, not a quoted earlier one or a signature (SH-4).
-        val message = EmailHeaders.message(email?.body ?: body)
+        // Dates are read from the message alone, not a quoted earlier one or a signature (SH-4); a share whose subject says
+        // it's a forward reads the forwarded message (SQ9-7).
+        val message = EmailHeaders.message(email?.body ?: body, forwarded = EmailHeaders.forwardSubject(subject ?: email?.subject))
+        val first = body.lineSequence().first()
         val title = subject?.trim()?.takeIf { it.isNotBlank() } ?: email?.subject
             ?: email?.let { e -> e.body.lineSequence().firstOrNull { it.isNotBlank() } ?: e.from }
-            ?: body.lineSequence().first()
+            // A forward with no subject: the forwarded message's, else its first line, not the marker (SQ9-8).
+            ?: first.takeUnless { EmailHeaders.startsAnEarlierMessage(it) }
+            ?: EmailHeaders.forwardedSubject(body) ?: message.lineSequence().firstOrNull { it.isNotBlank() } ?: first
         val notes = email?.let { listOf(it.from, it.body).filter(String::isNotBlank).joinToString("\n\n") } ?: body
         return SharedDraft(title.trim().replace('\n', ' ').take(MAX_TITLE), notes, message)
     }

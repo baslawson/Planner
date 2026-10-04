@@ -1,0 +1,1912 @@
+@today
+2026-10-04
+# h8-c0.txt
+====
+qe
+Book a table for 4.
+====
+find
+Dinner is on 14 October at 7pm.
+====
+@today
+2026-10-04
+# h8-c1.txt
+====
+find
+Sounds good, see you then.
+
+On Fri, Oct 2, 2026 at 10:00 AM Sam Smith <sam@example.com> wrote:
+> Lunch on 20 October at 1pm?
+> Sam
+====
+find
+Yes, 14 October at 7pm works.
+
+On Fri, Oct 2, 2026 at 10:00 AM Sam Smith <sam@example.com>
+wrote:
+> Lunch on 20 October at 1pm?
+====
+find
+Yes, 14 October at 7pm works.
+
+On Fri, Oct 2, 2026 at 10:00 AM Sam Smith <
+sam@example.com> wrote:
+
+> Lunch on 20 October at 1pm?
+====
+find
+FYI, see below.
+
+---------- Forwarded message ---------
+From: Clinic <bookings@clinic.example>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+FYI
+
+-------- Forwarded Message --------
+Subject: 	Appointment confirmation
+Date: 	Fri, 2 Oct 2026 10:00:00 +1000
+From: 	Clinic <bookings@clinic.example>
+To: 	Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+The meeting is on 14 October 2026 at 10:00. Agenda:
+1. Budget
+2. Hiring
+====
+find
+Hi Jo,
+Your appointment on 20.10.2026 at 10:30 is confirmed. Please bring:
+- your card
+====
+find
+Hi Jo,
+Reminder for Tuesday 20/10/26 10:30, please bring the following:
+- your card
+====
+find
+Hi Jo,
+
+Thanks
+Monday works for me.
+See you on 14 October at 2pm.
+====
+find
+Hi Jo,
+
+Thanks,
+Sounds good.
+Dinner on 14 October at 7pm then.
+====
+find
+Hello,
+Cheers
+Jo
+Dinner on 14 October at 7pm.
+====
+find
+Dinner on 14 October at 7pm.
+
+Best regards,
+Sam Smith
+Acme Pty Ltd
+Open Monday to Friday
+Closed 25 December
+====
+find
+Dinner on 14 October at 7pm.
+
+Best regards,
+
+SAM SMITH | Senior Manager
+Acme Pty Ltd | +61 400 000 000
+Office hours: Saturday at 10am
+====
+find
+Dinner on 14 October at 7pm.
+
+Mit freundlichen Grüßen
+Sam Schmidt
+Sprechzeiten: Samstag 10 Uhr, 24. Dezember geschlossen
+Closed 25 December
+====
+find
+Dinner on 14 October at 7pm.
+
+Regards
+--
+Sam
+Closed 25 December
+====
+find
+Yes 14 October at 7pm.
+
+De : Sam <sam@example.com>
+Envoyé : vendredi 2 octobre 2026 10:00
+À : Me <me@example.org>
+Objet : Lunch on 20 October at 1pm
+====
+find
+Ja, 14 October at 7pm.
+
+Von: Sam <sam@example.com>
+Gesendet: Freitag, 2. Oktober 2026 10:00
+An: Me <me@example.org>
+Betreff: Lunch on 20 October at 1pm
+====
+find
+Si, 14 October at 7pm.
+
+De: Sam <sam@example.com>
+Enviado el: viernes, 2 de octubre de 2026 10:00
+Para: Me <me@example.org>
+Asunto: Lunch on 20 October at 1pm
+====
+find
+Kyllä, 14 October at 7pm.
+
+Lähettäjä: Sam <sam@example.com>
+Lähetetty: perjantai 2. lokakuuta 2026 10.00
+Vastaanottaja: Me <me@example.org>
+Aihe: Lunch on 20 October at 1pm
+====
+find
+Yes 14 October at 7pm.
+
+From: Sam <sam@example.com>
+Sent: Friday, October 2, 2026 10:00 AM
+To: Me <me@example.org>; Jo <jo@example.org>; Kim <kim@example.org>;
+ Lee <lee@example.org>
+Subject: Lunch on 20 October at 1pm
+====
+find
+Yes 14 October at 7pm.
+
+________________________________
+From: Sam <sam@example.com>
+Sent: Friday, October 2, 2026 10:00 AM
+To: Me <me@example.org>
+Subject: Lunch on 20 October at 1pm
+====
+find
+Yes 14 October at 7pm.
+> On 2 Oct 2026, at 10:00, Sam <sam@example.com> wrote:
+>
+> Lunch on 20 October at 1pm?
+====
+@today
+2026-10-04
+# h8-c2.txt
+====
+msg
+Hi Jo,
+
+Thanks
+Monday works for me.
+See you on 14 October at 2pm.
+====
+msg
+Hi Jo,
+
+Thanks,
+Sounds good.
+Dinner on 14 October at 7pm then.
+====
+msg
+The meeting is on 14 October 2026 at 10:00. Agenda:
+1. Budget
+====
+find
+Your booking:
+Date: 20 October 2026, 10:30
+Location: Main St
+====
+find
+Booking confirmed for 2026-10-20 at 10:30:
+Table for 4
+====
+find
+Hi,
+
+> Can you do the 20th?
+No, but 21 October at 3pm works.
+> And the venue?
+The café.
+
+On Fri, 2 Oct 2026 at 10:00, Sam <sam@example.com> wrote:
+> earlier stuff 25 October at 1pm
+====
+find
+Please see the details below:
+
+> Event: Party
+> When: 14 October at 7pm
+
+Thanks
+====
+find
+Sam wrote on 2 Oct 2026:
+Party on 14 October at 7pm.
+====
+find
+Hi,
+At 10:30 on 2026-10-20 the plumber comes. Notes:
+Bring keys.
+====
+bill
+FYI, see below.
+
+---------- Forwarded message ---------
+From: Power Co <bills@power.example>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Your bill
+To: Me <me@example.org>
+
+Amount due: EUR 84.20
+Due date: 20 October 2026
+====
+bill
+Your electricity bill.
+Total: 85
+Previous balance: $120.50
+====
+bill
+Amount due: 85
+Your credit limit is AUD 5,000.
+====
+bill
+Total due: 84.20 EUR
+Thanks for paying 79.10 EUR last month.
+====
+bill
+Hi, your invoice total is $84.20 and is due 20 October 2026.
+====
+bill
+Total: 3
+Amount EUR 84.20
+====
+bill
+Grand total: 1,234
+Deposit paid: EUR 200.00
+====
+@today
+2026-10-04
+# h8-c3.txt
+====
+sent
+Meet at 5 Main St. Kilda Rd entrance on 14 October at 7pm.
+====
+sent
+See you Sat. Oct 10 at 7pm.
+====
+sent
+The answer is no. at 7pm we eat.
+====
+sent
+Thanks for coming on Sat.
+====
+find
+See you on Sat. 10 October at 7pm.
+====
+find
+See you on Sat. October 10 at 7pm.
+====
+find
+Party is at 7 p.m. Saturday 10 October.
+====
+find
+Party is at 7 P.M. Saturday 10 October.
+====
+find
+Party is at 7pm Sat. Bring a plate.
+====
+find
+I'll be there Sat. Dinner on 14 October at 7pm.
+====
+find
+We met in Jan. Next meeting 14 October at 7pm.
+====
+find
+Ski trip 28 December to 3 January.
+====
+find
+Dinner on 31 December at 8pm.
+====
+find
+Dinner on 2 January at 8pm.
+====
+find
+Dinner on 02/01/2027 at 8pm.
+====
+find
+Dinner Saturday at 8pm. Bring wine.
+====
+find
+Dinner on 14 Oktober um 19 Uhr.
+====
+find
+Rendez-vous le 14 octobre à 19h.
+====
+findnow
+Today at 9am: 4 October at 9am.
+====
+@today
+2026-10-04
+# h8-c4.txt
+====
+find
+Meeting Oct. 12 at 2pm
+====
+find
+Meeting 12 Oct. at 2pm
+====
+find
+Dr. Jones will see you on 12 October at 2pm.
+====
+draft
+Subject: Re: Dinner 12:30
+Date: 01.10.2026, 14:30
+From: Sam <sam@example.com>
+To: me@example.org
+
+See you 14 October at 7pm.
+====
+draft
+Betreff: Essen
+Datum: 01.10.2026, 14:30
+Von: Sam <sam@example.com>
+An: Ich <me@example.org>
+Kopie: Jo <jo@example.org>
+
+Hallo
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: me@example.org
+====
+draft
+Subject: Lunch
+Date: Thu, 01 Oct 2026 14:30:00 +1000
+From: Sam Smith (Work) <sam@example.com>
+To: me@example.org
+
+Hi
+====
+draft
+Subject: Lunch
+Date: Thu, 01 Oct 2026 14:30:00 +1000
+From: sam@example.com (Sam Smith)
+To: me@example.org
+
+Hi
+====
+draft
+Subject: Lunch
+Date: Thu, 01 Oct 2026 14:30:00 +1000
+From: Sam <sam@example.com>
+To: undisclosed-recipients:;
+
+Hi
+====
+draft
+Subject: Lunch
+Date: Thu, 01 Oct 2026 14:30:00 +1000
+From: Smith, Sam <sam@example.com>
+To: me@example.org
+
+Hi
+====
+draft
+Subject: Lunch
+Date: Thu, 01 Oct 2026 14:30:00 +1000
+From: Sam <sam@example.com>
+To: me@example.org, "Jo, B" <jo@example.org>,
+ kim@example.org
+Cc: Lee <lee@example.org>
+
+Hi
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: Me <me@example.org>
+Reply-To: list@example.org
+
+Hi
+====
+draft
+Name: Sam
+Email: sam@example.com
+Phone: 0400 000 000
+Work email: s@example.com
+
+Met at the conference
+====
+draft
+Contact: Sam <sam@example.com>
+Email: sam@example.com
+Work email: s@example.com
+
+Met
+====
+draft
+Subject: Lunch
+From: sam@example.com
+E-Mail: me@example.org
+
+Hi
+====
+draft
+Date: 01/10/26 14:30
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hello there
+====
+draft
+Subject: Meeting 12/10/26 10:30
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hello there
+====
+@today
+2026-10-04
+# h8-q1.txt
+====
+qe
+Book a table for 4.
+====
+qe
+Book a table for 4
+====
+qe
+Study for 30.
+====
+qe
+Study for 30
+====
+qe
+Run for 5.
+====
+qe
+Run for 5
+====
+qe
+Call Mum in 2.
+====
+qe
+Call Mum in 2
+====
+qe
+Meet at 5.
+====
+qe
+Meet at 5
+====
+qe
+Lunch on 12.
+====
+qe
+Lunch on 12
+====
+qe
+Work until 5.
+====
+qe
+Gym from 6.
+====
+qe
+Call Mum in 2...
+====
+qe
+Run for 4.5 hours tomorrow
+====
+qe
+Run for 4.5 tomorrow
+====
+qe
+Dinner for 2. Friday 7pm
+====
+qe
+Dinner for 2.5 Friday 7pm
+====
+qe
+Table for 4. Saturday 7pm
+====
+qe
+Party for 12. Saturday 7pm
+====
+qe
+Study for 1.5
+====
+qe
+Study for 1.5.
+====
+qe
+Meet at 10.30.
+====
+qe
+Meet at 10.
+====
+qe
+Pay rent on 1.
+====
+qe
+Pay rent on 1.10.
+====
+qe
+Pay rent on 1.10
+====
+@today
+2026-10-04
+# h8-q2.txt
+====
+qe
+Call Mum tomorrow. Ask about Xmas
+====
+qe
+Call Mum tomorrow at 5pm. Ask about Xmas
+====
+qe
+Meet Friday at 5pm. Bring wine
+====
+qe
+Bins tonight!
+====
+qe
+Dentist tomorrow 3pm!
+====
+qe
+Dentist tomorrow 3pm! Bring card
+====
+qe
+Pick up kids at 3pm. then shop
+====
+qe
+Lunch tomorrow at 1pm. "Café Rio"
+====
+qe
+Tomorrow at 9am. Call Sam
+====
+qe
+Call Sam tomorrow, 9am. Then email
+====
+qe
+Pay $5 tomorrow. Bring change
+====
+qe
+Meet Sam at 5pm.Bring keys
+====
+qe
+Gym Friday 6. Bring towel
+====
+qe
+Gym Friday 6.
+====
+qe
+Gym Friday 6.30
+====
+qe
+Gym Friday 6.5
+====
+qe
+Gym Friday 6...
+====
+qe
+Brekkie Sunday 9. Pancakes
+====
+qe
+Hotel 3-3 nights
+====
+qe
+Hotel 2-2 nights from Friday
+====
+qe
+Hotel 0-0 nights
+====
+qe
+Trip 20 Oct to 10 Oct
+====
+qe
+Trip 28 Dec to 3 Jan
+====
+qe
+Trip 20 Dec to 10 Jan
+====
+qe
+Season 1 Nov to 30 Apr
+====
+qe
+Season 1 Oct to 30 Apr
+====
+qe
+Trip 2 Oct to 1 Oct
+====
+qe
+Trip 5 Jan to 3 Jan
+====
+qe
+Trip Oct 20 - Oct 10
+====
+qe
+Trip 20/10 - 10/10
+====
+qe
+Trip 30 Sep to 2 Oct
+====
+qe
+Trip 3 Oct to 2 Oct
+====
+qe
+Trip 28 Dec 2026 to 3 Jan
+====
+qe
+Trip 28 Dec to 3 Jan 2027
+====
+qe
+Trip 20 Oct 2026 to 10 Oct 2026
+====
+qe
+Trip 1 Jun to 30 May
+====
+qe
+Course 1 Sep to 1 Mar
+====
+@today
+2026-10-04
+# h8-q3.txt
+====
+qe
+School year 1 Sep to 30 Jun
+====
+qe
+Lease 1 Jul to 30 Jun
+====
+qe
+School year 1 Sep to 30 Jun 2027
+====
+qe
+Winter season Oct 1 - Apr 30
+====
+qe
+Ski season 1 Dec to 30 Jun
+====
+@today
+2026-10-05
+# h9-c1.txt
+====
+find
+Sent from my iPhone
+
+Begin forwarded message:
+
+From: Clinic <clinic@example.com>
+Subject: Appointment
+Date: 2 October 2026 at 10:00:00 CEST
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+Hi Jo, see below.
+
+Thanks,
+Sam
+
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+FYI
+
+-- 
+Sam Smith
+Acme Ltd
+
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+FYI
+
+________________________________
+From: Clinic <clinic@example.com>
+Sent: Friday, 2 October 2026 10:00
+To: Me <me@example.org>
+Subject: FW: Appointment confirmation
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+FYI
+
+From: Clinic <clinic@example.com>
+Sent: Friday, 2 October 2026 10:00
+To: Me <me@example.org>
+Subject: Appointment confirmation
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+-------- Original message --------
+From: Clinic <clinic@example.com>
+Date: 02/10/2026 10:00 (GMT+01:00)
+To: Me <me@example.org>
+Subject: Appointment confirmation
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+Verzonden vanaf mijn iPhone
+
+Begin doorgestuurd bericht:
+
+Van: Kliniek <kliniek@example.com>
+Onderwerp: Afspraak
+Datum: 2 oktober 2026 om 10:00:00 CEST
+Aan: Ik <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+Inicio del mensaje reenviado:
+
+De: Clinic <clinic@example.com>
+Asunto: Cita
+Fecha: 2 de octubre de 2026, 10:00:00 CEST
+Para: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+draft
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+Details for your visit on 20.10.2026 at 10:30 AM:
+- bring your card
+====
+find
+Your booking on 2026-10-20 at 10:30 PM:
+Table for 4
+====
+find
+Ihr Termin am 20.10.2026 um 10:30 Uhr:
+- Versichertenkarte mitbringen
+====
+find
+Your appointment on 20.10.2026 with Dr Smith:
+- bring your card
+====
+find
+Afspraak op 20.10.2026 bij Tandarts Jansen:
+- neem je pas mee
+====
+bill
+Rechnung vom 20.10.2026 für Max Mustermann:
+Betrag: EUR 84.20
+====
+find
+Flight to London on 20/10/2026 10:30 from Sydney:
+Seat 14A
+====
+find
+Hi,
+
+Thanks,
+Tuesday, October 20 at 10am works for me.
+====
+find
+See you then, dinner on 14 October at 7pm.
+
+Thanks,
+Sam x
+
+Office hours: Saturday at 10am
+====
+find
+See you then.
+
+Cheers,
+Sam
+
+PS: dinner is on 14 October at 7pm.
+====
+find
+See you then, dinner on 14 October at 7pm.
+
+Cheers,
+Sam - Acme
+
+Office hours: Saturday at 10am
+====
+find
+New enquiry
+From: Jane <jane@example.com>
+To: Sales
+Subject: Quote
+Your message: Can you come on 20 October at 10am?
+====
+@today
+2026-10-05
+# h9-c2.txt
+====
+qe
+Gym Friday 6.
+====
+qe
+Gym Friday 6. Bring towel
+====
+qe
+Gym Friday 6. bring towel
+====
+qe
+Meet at 5.
+====
+qe
+Meet Friday at 5.
+====
+qe
+Meet Friday at 5. Bring wine
+====
+qe
+Run Friday 6.5 km
+====
+qe
+Run 6.5 km Friday
+====
+qe
+Party Friday 9. October
+====
+qe
+Meeting Friday 1. Budget 2. Hiring
+====
+qe
+Gym Friday 6.30
+====
+qe
+Gym Friday 6. 30 min
+====
+qe
+Pay rent Friday 2. Then call Sam
+====
+qe
+Gym Friday 6.!
+====
+qe
+Gym Friday 6?
+====
+qe
+Gym Friday 6.
+Bring towel
+====
+qe
+Gym Friday 6. Bring towel at 7pm
+====
+qe
+Gym every Monday 6. Bring towel
+====
+qe
+Lunch Friday 12. Café Rio
+====
+qe
+Trip 15 Jul to 14 Jul
+====
+qe
+Lease 15 Jul to 14 Jul
+====
+qe
+Lease 1 Aug to 31 Jul
+====
+qe
+Trip 10 Nov to 20 Oct
+====
+qe
+Trip 20 Nov to 10 Oct
+====
+qe
+Trip 20 Oct to 25 Sep
+====
+qe
+Lease 15 Feb to 14 Jan
+====
+qe
+Lease 1 Feb to 31 Jan
+====
+qe
+Trip 28 Dec to 3 Jan
+====
+qe
+Trip 20 Dec to 10 Jan
+====
+qe
+Trip 3 Jan to 28 Dec
+====
+qe
+Trip 30 Sep to 10 Oct
+====
+qe
+Trip 1 Oct to 3 Oct
+====
+qe
+Trip 1 Oct to 30 Sep
+====
+qe
+Trip 4 Oct to 3 Oct
+====
+qe
+Trip 5 Oct to 4 Oct
+====
+qe
+Trip 6 Oct to 5 Oct
+====
+qe
+Trip 15 Jul to 14 Jul 2027
+====
+qe
+Trip 15 Jul 2027 to 14 Jul
+====
+qe
+Trip 1 Sep 2026 to 30 Jun
+====
+qe
+School year 1 Sep to 30 Jun
+====
+qe
+Trip 28 Dec 2026 to 3 Jan
+====
+qe
+Trip 20 Oct 2026 to 10 Oct
+====
+qe
+Trip 20 Oct to 10 Oct 2027
+====
+qe
+Trip Oct 20 - Sep 25
+====
+qe
+Trip Nov 20 - Oct 10
+====
+qe
+Trip 28-3 Jan
+====
+qe
+Trip Dec 28-3
+====
+qe
+Dinner tomorrow at 7.
+====
+qe
+Dinner Sat 7. Sam's place
+====
+qe
+Book a table for 4.
+====
+qe
+Table for 4. Saturday 7pm
+====
+qe
+Run for 4.5 hours tomorrow
+====
+qe
+Pay rent on 1.10.
+====
+@today
+2026-10-05
+# h9-c3.txt
+====
+bill
+Amount due: 85
+Your credit limit is AUD 5,000.
+====
+bill
+Your electricity bill.
+Total: 85
+Previous balance: $120.50
+====
+bill
+Items in total: 3
+Amount EUR 84.20
+====
+bill
+Total: 3
+Amount EUR 84.20
+====
+bill
+Total: 5
+Deposit paid: EUR 20.00
+====
+bill
+Total: 12
+Amount EUR 84.20
+====
+bill
+Total:
+3
+Amount EUR 84.20
+====
+bill
+Order summary
+Total (3 items): EUR 84.20
+====
+bill
+Order summary
+Items: 3
+Total: EUR 84.20
+Shipping: EUR 4.95
+====
+bill
+Your order of 3 items
+Total: 84.20
+You saved EUR 10.00
+====
+bill
+Total: 9
+Tip: $15.00
+====
+bill
+Total due: 84.20 EUR
+Last month: 79.10 EUR
+Due date: 20 October 2026
+====
+bill
+Grand total: 1,234
+Deposit EUR 200.00
+====
+bill
+Total: 1200
+Tickets: 4 x EUR 300.00
+====
+bill
+Hi,
+your invoice total is $84.20 and is due 20 October 2026.
+Thanks,
+Acme Billing
+ABN 12 345
+====
+bill
+Rechnung
+Gesamtbetrag: 84,20 EUR
+Fällig am 20.10.2026
+====
+bill
+Total: 3
+Amount EUR 8.20
+====
+bill
+Total: 9.50
+Amount EUR 84.20
+====
+find
+Dinner is on 14 October at 7pm.
+
+Von: Sam <sam@example.com>
+Gesendet: Freitag, 2. Oktober 2026 10:00
+An: Ich <me@example.org>
+Betreff: Mittag am 20 October at 1pm
+
+Lunch?
+====
+find
+Dinner is on 14 October at 7pm.
+
+De : Sam <sam@example.com>
+Envoyé : vendredi 2 octobre 2026 10:00
+À : Moi <me@example.org>
+Objet : Lunch on 20 October at 1pm
+
+Lunch?
+====
+find
+Dinner is on 14 October at 7pm.
+
+Van: Sam <sam@example.com>
+Verzonden: vrijdag 2 oktober 2026 10:00
+Aan: Ik <me@example.org>
+Onderwerp: Lunch on 20 October at 1pm
+
+Lunch?
+====
+find
+Dinner is on 14 October at 7pm.
+
+From: Sam <sam@example.com>
+Date: Friday, 2 October 2026 10:00
+To: Me <me@example.org>
+Cc: Jo <jo@example.org>
+Subject: Lunch on 20 October at 1pm
+
+Lunch?
+====
+find
+Dinner is on 14 October at 7pm.
+
+*From:* Sam <sam@example.com>
+*Sent:* Friday, 2 October 2026 10:00
+*To:* Me <me@example.org>
+*Subject:* Lunch on 20 October at 1pm
+
+Lunch?
+====
+find
+Sure, 14 October at 7pm works.
+
+On Fri, 2 Oct 2026 at 10:00, Sam Smith <sam@example.com> wrote:
+> How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+On Fri, 2 Oct 2026 at 10:00, Sam Smith <sam@example.com> wrote:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Am Fr., 2. Okt. 2026 um 10:00 Uhr schrieb Sam Smith <sam@example.com>:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Le ven. 2 oct. 2026 à 10:00, Sam Smith <sam@example.com> a écrit :
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Op vr 2 okt 2026 om 10:00 schreef Sam Smith <sam@example.com>:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+El vie, 2 oct 2026 a las 10:00, Sam Smith (<sam@example.com>) escribió:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+On 2 Oct 2026, at 10:00, Sam Smith <sam@example.com> wrote:
+
+﻿How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Dne pá 2. 10. 2026 10:00 uživatel Sam Smith <sam@example.com> napsal:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+2 Eki 2026 Cum, 10:00 tarihinde Sam Smith <sam@example.com> şunu yazdı:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+On 02/10/2026 10:00, Sam Smith wrote:
+How about 20 October at 6pm?
+====
+find
+Hi Jo,
+
+Thanks
+Monday works for me.
+See you on 14 October at 2pm.
+====
+find
+Dinner is on 14 October at 7pm.
+
+Kind regards,
+
+Sam Smith
+Senior Manager | Acme Ltd
+Open Saturday at 10am
+====
+find
+Dinner is on 14 October at 7pm.
+
+Kind regards,
+Sam Smith, Ph.D.
+Open Saturday at 10am
+====
+find
+Dinner is on 14 October at 7pm.
+
+Kind regards,
+Sam Smith (she/her)
+Open Saturday at 10am
+====
+find
+Dinner is on 14 October at 7pm.
+
+Met vriendelijke groet,
+
+Jan de Vries
+Open zaterdag 10 oktober om 10:00
+====
+find
+Dinner is on 14 October at 7pm.
+
+Thanks,
+sam
+Open Saturday at 10am
+====
+find
+Dinner is on 14 October at 7pm.
+
+Best,
+J.
+Open Saturday at 10am
+====
+find
+Dinner is on 14 October at 7pm.
+
+Best,
+SAM
+Open Saturday at 10am
+====
+find
+Hi Jo,
+
+Thanks,
+Friday, October 14 at 7pm then
+====
+find
+Hi Jo,
+
+Thanks
+Saturday At 7pm
+====
+find
+Hi team,
+the offsite is on 14 October at 9am.
+Thanks
+All Hands Agenda | Room 4
+- 9am: intro
+- 10am: talks
+====
+draft
+Subject: Lunch
+From: Smith, Sam <sam@example.com>
+To: me@example.org
+
+See you
+====
+draft
+Subject: Lunch
+Date: Fri, 2 Oct 2026 10:00
+From: Sam <sam@example.com>
+To: undisclosed-recipients:;
+
+See you
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: "Jo (work)" <jo@example.org>
+
+See you
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: Jo (work) <jo@example.org>
+
+See you
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: <jo@example.org>
+
+See you
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: jo@example.org, 
+
+See you
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: Me <me@example.org>; 
+
+See you
+====
+draft
+Datum: Fr., 2. Okt. 2026, 10:00
+Von: Sam <sam@example.com>
+An: me@example.org
+
+Hallo
+====
+draft
+Date: Fri, 02 Oct 2026 10:00:00 +0200
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Date: 2026-10-02T10:00:00+02:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Re: 2 Oct 2026 10:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Party 14.10.2026
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: 14.10.2026 Party
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Mai 2026 10:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Agenda 14.10.2026
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Dinner on 14.10.2026 at 19.00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Mars 14.03.2027 10:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Am 14.10.2026 um 19:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+draft
+Subject: Sunday 18 October 2026 10:00
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hallo
+====
+@today
+2026-10-05
+# h9-c4.txt
+====
+find
+Sure, 14 October at 7pm works.
+
+pt., 2 paź 2026 o 10:00 Sam Smith <sam@example.com> napisał(a):
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Sam Smith <sam@example.com> ezt írta (időpont: 2026. okt. 2., P, 10:00):
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Den fre 2 okt. 2026 kl 10:00 skrev Sam Smith <sam@example.com>:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Il giorno ven 2 ott 2026 alle ore 10:00 Sam Smith <sam@example.com> ha scritto:
+How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Am Fr., 2. Okt. 2026 um 10:00 Uhr schrieb Sam Smith <sam@example.com>:
+> How about 20 October at 6pm?
+====
+find
+Sure, 14 October at 7pm works.
+
+Am 02.10.2026 um 10:00 schrieb Sam Smith:
+How about 20 October at 6pm?
+====
+find
+Hi Jo, see below.
+
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+
+Kind regards,
+Clinic Reception
+Open Saturday at 9am
+====
+find
+See you on 14 October at 7pm.
+
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+---------- Forwarded message ---------
+From: Sam <sam@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Re: Dinner
+To: Me <me@example.org>
+
+Yes, 14 October at 7pm.
+
+On Thu, 1 Oct 2026 at 09:00, Jo <jo@example.org> wrote:
+> 20 October at 6pm?
+====
+find
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+Cc: Reception <rec@example.com>, Dr Lee <lee@example.com>, Nurse Kim <kim@example.com>, Admin <admin@example.com>
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Subject: Appointment confirmation
+
+Your appointment is on 20 October at 10:30am.
+====
+find
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+Your appointment is on 20 October at 10:30am.
+====
+find
+FYI
+---------- Forwarded message ---------
+From: Clinic <clinic@example.com>
+Date: Fri, 2 Oct 2026 at 10:00
+Subject: Appointment confirmation
+To: Me <me@example.org>
+
+From: Sydney
+To: Melbourne
+Flight on 20 October at 10:30am.
+====
+msg
+Our trip.
+From: Sydney
+To: Melbourne
+Subject: to change
+Flight on 20 October at 10:30am.
+====
+find
+Hi,
+your booking:
+From: Sydney (SYD)
+To: Melbourne (MEL)
+Subject: Flight QF1
+Departs 20 October at 10:30am.
+====
+find
+Hi Jo,
+Thanks
+Saturday 14 October at 7pm, Sam's place
+====
+@today
+2026-10-05
+# h9-c5.txt
+====
+msg
+Hi Jo,
+Thanks
+Saturday 14 October at 7pm, Sam's place
+====
+qe
+Saturday 14 October at 7pm, Sam's place
+====
+find
+Saturday 14 October at 7pm, at Sam's place
+====
+find
+Dinner Saturday 14 October at 7pm
+====
+qe
+Saturday 14 October at 7pm
+====
+@today
+2026-10-05
+# h9-c6.txt
+====
+msg
+Hi Jo,
+
+Thanks,
+Wednesday, October 14 at 7pm then
+====
+find
+Hi Jo,
+
+Thanks,
+Wednesday, October 14 at 7pm then
+====
+msg
+Hi Jo,
+
+Thanks,
+Wednesday, October 14 at 7pm works for me
+====
+@today
+2026-10-05
+# x-extra.txt
+====
+find
+Meeting Oct. 12 at 2pm
+====
+find
+Meeting 12 Oct. at 2pm
+====
+find
+See you at 10 a.m. on Friday 9 October.
+====
+find
+Ms. Smith will see you on 12 October at 2pm.
+====
+find
+Meeting on Mon. 12 Oct at 2pm.
+====
+find
+Office closed 12-14 October. Your appointment is on 20 October.
+====
+find
+Office closed 12-14 October and your appointment is on 20 October.
+====
+findnow
+14:30
+====
+findnow
+See you today at 8am.
+====
+find
+Let's meet tomorrow at 10am.
+====
+find
+Next Friday at 7pm is good.
+====
+find
+Thanks for coming on Sat. See you at 7pm.
+====
+find
+We had fun on Fri. Next time 7pm works.
+====
+find
+Great to see you on Mon. The party is 14 October at 7pm.
+====
+find
+Agenda:
+> item one
+Dinner is on 14 October at 7pm.
+====
+find
+Am 30.09.2026 um 10:00 schrieb Jo:
+> Wie wäre es am 20 October at 6pm?
+Ja, 14 October at 7pm.
+====
+find
+Dinner on 14 October at 7pm.
+Am 30.09.2026 um 10:00 schrieb Jo:
+Wie wäre es am 20 October at 6pm?
+====
+find
+Hi, dinner is on 14 October at 7pm.
+
+-----Original Message-----
+From: Sam
+Lunch on 20 October at 1pm?
+====
+draft
+Subject: Dinner
+Date: Fri, 2 Oct 2026 10:00
+From: Sam <sam@example.com>
+To: me@example.org
+Cc: Jo <jo@example.org>
+
+Dinner on 14 October at 7pm.
+====
+draft
+Betreff: Essen
+Datum: Fr., 2. Okt. 2026, 10:00
+Von: Sam <sam@example.com>
+An: Ich <me@example.org>
+
+Essen am 14 October at 7pm.
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: me@example.org
+====
+draft
+Subject: Re: Dinner 12:30
+From: Sam <sam@example.com>
+To: me@example.org
+
+Hi
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: Me <me@example.org>,
+ Jo <jo@example.org>
+
+Hi
+====
+draft
+Subject: Lunch
+From: Sam <sam@example.com>
+To: me@example.org
+
+Dinner on 14 October at 7pm.
+====
+qe
+Tickets at $5.
+====
+qe
+Meet at 5.30 tomorrow
+====
+qe
+Meet at 5.5 tomorrow
+====
+qe
+Lunch: Sam tomorrow
+====
+qe
+Meeting: Friday 3pm
+====
+qe
+Dinner tonight 8 pm
+====
+qe
+Dinner tonight 8 PM
+====
+qe
+Dinner tonight 8 p.m.
+====
+qe
+Dinner tonight 8 Amy
+====
+qe
+Dinner tonight 8 Pam
+====
+qe
+Dinner Friday night 8 Friends
+====
+qe
+Halloween party from Friday
+====
+qe
+Book table for Saturday.
+====
+qe
+Book table for Saturday?
+====
+qe
+Book table for Saturday...
+====
+qe
+Work until 5pm!
+====
+qe
+Study for 30.
+====
+qe
+Run for 5.
+====
+qe
+Call Mum in 2.
+====
+qe
+Lunch on 12.
+====
+qe
+Work until 5.
+====
+qe
+Gym from 6.
+====
+qe
+Dinner for 2. Friday 7pm
+====
+qe
+Party for 12. Saturday 7pm
+====
+qe
+Hotel 2-2 nights from Friday
+====
+qe
+Hotel 0-0 nights
+====
+qe
+Hotel 3-2 nights
+====
+qe
+Meet Friday at 5pm. Bring wine
+====
+qe
+Coffee at 5. Friday
+====
+qe
+Meet Sam at 5pm.Bring keys
+====
+qe
+Tomorrow at 9am. Call Sam
+====
+qe
+Dentist tomorrow 3pm!
+====
+qe
+Call Sam tomorrow, 9am. Then email
+====
+qe
+Pick up at 5.Bring keys
+====
+qe
+Brekkie Sunday 9. Pancakes
+====
+qe
+Gym Friday 6...
+====
+qe
+Trip 9 Oct to 7 Oct
+====
+qe
+Trip 5 Jan to 3 Jan
+====
+qe
+Trip Oct 20 - Oct 10
+====
+qe
+Trip 20 Oct 2026 to 10 Oct 2026
+====
+qe
+Trip 20 Oct to 10 Oct
+====
+qe
+Trip 28 Dec to 3 Jan 2027
+====
+qe
+Lease 1 Jul to 30 Jun
+====
+qe
+Season 1 Oct to 30 Apr
+====
+qe
+Winter season Oct 1 - Apr 30
+====
+qe
+Ski season 1 Dec to 30 Jun
+====
+qe
+Season 1 Nov to 30 Apr
+====
+qe
+Course 1 Sep to 1 Mar
+====
+qe
+School year 1 Sep to 30 Jun 2027
+====
+qe
+Trip 4 Oct to 3 Oct
+====
+qe
+Trip 5 Nov to 3 Oct
+====
+qe
+Trip 9-7 Oct
+====
+qe
+Pay rent on 1.10
+====
+qe
+Lease 1 Nov to 31 Oct
+====
+qe
+Season 1 Dec to 30 Oct
+====
+qe
+Trip 1 Jan to 31 Oct
+====
+qe
+Trip 1 Mar to 2 Mar
+====
+qe
+Trip 20 Oct to 10 Oct 2027
+====
+qe
+Lease 15 Jul to 14 Jul 2027
+====
+qe
+Meeting Friday 1. Budget
+====
+qe
+Party Friday 9. Oct
+====
+qe
+Party Friday 9. October 2026
+====
+qe
+Gym Friday 6. Bring towel 2.5 kg
+====
+qe
+Gym Friday 6. Monday too
+====
+qe
+Gym Friday 6. May bring Sam

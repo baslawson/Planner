@@ -103,26 +103,47 @@ object EmailHeaders {
         return Parsed(subject, block[from], lines.drop(blank + 1).joinToString("\n").trim())
     }
 
-    // An earlier message quoted without ">": "-----Original Message-----", a line of underscores, or "… wrote:" in a
-    // mail app's language (SH-4, SQ-4).
+    // An earlier message quoted without ">": "-----Original Message-----", a line of underscores (SH-4, SQ-4).
     private val quoteIntro = Regex("^\\s*(?:-{2,}\\s*Original Message\\s*-{2,}|_{5,})\\s*$", RegexOption.IGNORE_CASE)
-    // With a date in it ("Am 30.09.2026 um 10:00 schrieb Jo:"), or Gmail's "On … wrote:": "Sam wrote:" alone may be the
-    // person quoting a line into their own message.
-    private val wroteIntro = Regex("^(?=.*\\d).{0,200}\\b(?:wrote|writes|schrieb|a écrit|escribió|escribio|scrisse|ha scritto|schreef|skrev|" +
-        "kirjoitti|napisał|napisal|escreveu|написал|написала)\\s*:\\s*$|^\\s*On .{1,200} wrote:\\s*$", RegexOption.IGNORE_CASE)
-    // In a language not listed above: a sent date, then who wrote it, a name or an address, just before the ":", and no
-    // sentence ending inside. "Booking confirmed for 2026-10-20 at 10:30:", "… at 10:00. Agenda:" and "… 10:30, please
-    // bring the following:" are the person's own words (SQ8-1).
+    // "… wrote:" in a mail app's language, with a date in the line, or Gmail's "On … wrote:": "Sam wrote:" alone may be the
+    // person quoting a line into their own message. Who wrote it may follow the verb: "schrieb Sam Smith <sam@…>:",
+    // "napisał(a):", "ezt írta (időpont: …):" (SQ9-3).
+    private val wroteIntro = Regex("^(?=.*\\d).{0,200}(?<!\\p{L})(?i:wrote|writes|schrieb|a écrit|escribió|escribio|scrisse|ha scritto|" +
+        "schreef|skrev|kirjoitti|napisał(?:\\(a\\))?|napisal|napsal(?:\\(a\\))?|napsala|escreveu|написал|написала|yazdı|írta)" +
+        "(?:\\s*\\([^()]{0,80}\\))?(?:\\s+(?:\\p{Lu}[\\p{L}.'-]*|\"[^\"]{0,80}\"|\\(?<[^<>\\s]{1,100}>\\)?|[^\\s<>@()]+@[^\\s<>@()]+)){0,6}" +
+        "\\s*:\\s*$|^\\s*On .{1,200} wrote:\\s*$")
+    // In a language not listed above: the line starts with the sent date (at most two short or date words before it), has
+    // a year and a clock time, and ends in who wrote it, a name or an address, just before the ":": "Den 30.09.2026 kl.
+    // 10:00 ritade Jo:", "2026-09-30 10:00 GMT+02:00 Jo <jo@…>:". The person's own "Booking confirmed for 2026-10-20 at
+    // 10:30:", "Ihr Termin am 20.10.2026 um 10:30 Uhr:" and "Your appointment on 20.10.2026 with Dr Smith:" start with
+    // their own words; "AM:" or "Uhr:" is no writer, and the "20.10" of a date no clock time (SQ8-1, SQ9-2).
     private val sentenceInside = Regex("[.!?]\\s+\\p{Lu}")
-    private val writerBeforeColon = Regex("(?:(?<![\\p{L}'-])\\p{Lu}[\\p{L}'-]*|>|$ADDRESS)\\s*:\\s*$")
-    private fun dateIntro(line: String) = line.length <= 300 && line.trimEnd().endsWith(":") && sentDate.containsMatchIn(line) &&
-        !sentenceInside.containsMatchIn(line) && writerBeforeColon.containsMatchIn(line)
+    private val introYear = Regex("(?<!\\d)(?:19|20)\\d\\d(?!\\d)|\\b\\d{1,2}[./-]\\d{1,2}[./-]\\d{2}\\b")
+    private val introClock = Regex("(?<![\\d.:])\\d{1,2}(?::\\d\\d|\\.\\d\\d(?![\\d.]))")
+    private val writerBeforeColon = Regex("(?:(?<![\\p{L}'-])(\\p{Lu}[\\p{L}'-]*)|>|$ADDRESS)\\s*:\\s*$")
+    private fun dateIntro(line: String): Boolean {
+        if (line.length > 300 || !line.trimEnd().endsWith(":") || !introYear.containsMatchIn(line) || !introClock.containsMatchIn(line) ||
+            sentenceInside.containsMatchIn(line)) return false
+        val opening = word.findAll(line.takeWhile { !it.isDigit() }).toList()
+        if (opening.size > 2 || opening.any { it.value.length > 4 && it.value.lowercase() !in dateWords }) return false
+        val writer = writerBeforeColon.find(line) ?: return false
+        return writer.groupValues[1].lowercase().let { it.isEmpty() || it !in dateWords && it != "uhr" && it != "h" }
+    }
     private val signature = Regex("^(?:-- ?|Sent from my .*|Get Outlook for .*)$")
-    // A forwarded message's marker: what follows it is what the person shares (SQ8-3).
+    // A forwarded message's marker: what follows it is what the person shares (SQ8-3), Apple Mail's in other languages too
+    // (SQ9-7).
     private val forwardMarker = Regex("^\\s*(?:-{2,}\\s*(?:Forwarded message|Weitergeleitete Nachricht|Message transféré|" +
         "Mensaje reenviado|Messaggio inoltrato|Doorgestuurd bericht|Mensagem encaminhada|Vidarebefordrat meddelande|" +
         "Videresendt (?:meddelelse|melding)|Välitetty viesti|Wiadomość przekazana)\\s*-{2,}|Begin forwarded message:|" +
-        "Anfang der weitergeleiteten Nachricht:|Début du message réexpédié\\s*:?)\\s*$", RegexOption.IGNORE_CASE)
+        "Anfang der weitergeleiteten Nachricht:|Début du message réexpédié\\s*:?|Begin doorgestuurd bericht:|" +
+        "Inicio del mensaje reenviado:|Inizio messaggio inoltrato:|Início da mensagem reencaminhada:)\\s*$", RegexOption.IGNORE_CASE)
+    // A forward's subject, Outlook's prefixes in a few languages: "Fwd:", "FW:", "WG:", "TR:", "RV:", "I:", "Doorst:", "VB:",
+    // "ENC:", "PD:" (SQ9-7). "VS:" is left out: Danish forwards with it, Finnish replies.
+    private val forwardPrefix = Regex("^\\s*(?:fwd?|wg|tr|rv|i|doorst|vb|vl|enc|pd|ilt)\\s*:", RegexOption.IGNORE_CASE)
+    /** Whether a share's [subject] says it is a forward ("Fwd: …", "FW: …"). */
+    fun forwardSubject(subject: String?) = subject != null && forwardPrefix.containsMatchIn(subject)
+    // A P.S. under the signature is the person's own again (SQ9-9).
+    private val postscript = Regex("^\\s*(?i:p\\.?\\s?(?:p\\.?\\s?)?s)(?:[.:\\s]|$)")
     // Outlook's header block above a forwarded or quoted message, no ">" (SQ-4): From, To and Subject among a few lines
     // of "Label: value", labels in a mail app's language (SQ8-10: Finnish and a few more). A travel plan's "From: … To: …"
     // has no Subject; a web form's notification has its "Message:" in the block (SQ8-3).
@@ -133,84 +154,138 @@ object EmailHeaders {
         RegexOption.IGNORE_CASE)
     private val formLabel = Regex("message|comments?|enquiry|inquiry|details|nachricht|mitteilung|bericht|mensaje|messaggio|mensagem|" +
         "meddelande|besked|viesti|kommentar|opmerkingen?|commentaire", RegexOption.IGNORE_CASE)
-    // A name on its own line under a sign-off: "Sam", "Jo van Dijk", "Dr. A. Smith", "SAM SMITH | Senior Manager" (SQ8-10).
-    // Each word capitalised but a name's particle, and no sentence: "Monday works for me." and "Sounds good." aren't one
-    // (SQ8-4).
+    private const val calendarWords = "january|february|march|april|may|june|july|august|september|october|november|december|" +
+        "jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|saturday|sunday|" +
+        "mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun"
+    // A title after a name: capitalised words ("Senior Manager", "Ph.D.", "Head of Sales"), no digit, not a month or a
+    // weekday: "Wednesday, October 14 at 7pm then" is a sentence (SQ9-6).
+    private const val nameTitle = "(?!(?i:$calendarWords)\\b)\\p{Lu}[\\p{L}'&/-]*(?:\\.\\p{L}+)*\\.?" +
+        "(?:\\s+(?:\\p{Lu}[\\p{L}'&/-]*(?:\\.\\p{L}+)*\\.?|of|and|for|&|und|en|et|y|e|de)){0,5}"
+    // A name on its own line under a sign-off: "Sam", "Jo van Dijk", "Dr. A. Smith", "SAM SMITH | Senior Manager" (SQ8-10),
+    // "Sam x", "Sam - Acme", "Sam Smith (she/her)", "Sam Smith, Ph.D." (SQ9-6). Each word capitalised but a name's
+    // particle, and no sentence: "Monday works for me." and "Sounds good." aren't one (SQ8-4).
     private val nameLine = Regex("^\\s*\\p{Lu}[\\p{L}'.-]*(?:\\s+(?:\\p{Lu}[\\p{L}'.-]*|van|von|de|der|den|du|da|di|del|della|le|la|" +
-        "ten|ter|bin|al)){0,3}\\s*(?:[|•·]\\s*\\S.*|,\\s*\\p{Lu}[^.!?]*)?$")
+        "ten|ter|bin|al)){0,3}(?:\\s*\\([^()]{1,30}\\))?(?:\\s+x{1,3})?\\s*(?:[|•·]\\s*\\S.*|(?:,|\\s[-–—])\\s*$nameTitle)?\\s*$")
     // A sign-off on its own line, the signature block under it (SQ-5).
     private val signOff = Regex("^\\s*(?:kind regards|best regards|warm regards|regards|many thanks|thanks|thank you|cheers|best|" +
         "best wishes|all the best|groeten|met vriendelijke groet(?:en)?|vriendelijke groet(?:en)?|mit freundlichen grüßen|viele grüße|" +
         "liebe grüße|cordialement|bien à vous|saludos|un saludo|atentamente|cordiali saluti|saluti|med vänlig hälsning|hälsningar|" +
         "med venlig hilsen|hilsen|mvh)\\s*,?\\s*$", RegexOption.IGNORE_CASE)
 
+    /** A header block: where it ends (the index after it) and its Subject's value. */
+    private class Block(val end: Int, val subject: String?)
+
     /**
-     * Where the header block starting at line [i] ends (the index after it), or -1 when none starts there: Outlook's, From
-     * first, or under a forward marker ([forwarded]) a From and a Subject in any order (Gmail: From, Date, Subject, To). A
-     * line starting with a space goes on the header above it: a To list wrapped onto the next line (SQ8-10). Reads a few
-     * lines at most, so [message] stays in step with the body's length (SQ8-7).
+     * The header block starting at line [i], or null when none starts there: Outlook's, From first, or under a forward
+     * marker ([forwarded]) a From and a Subject in any order (Gmail: From, Date, Subject, To). A line starting with a space
+     * goes on the header above it: a To list wrapped onto the next line (SQ8-10). Reads a few lines at most, so [message]
+     * stays in step with the body's length (SQ8-7).
      */
-    private fun headerBlock(lines: List<String>, i: Int, forwarded: Boolean): Int {
+    private fun headerBlock(lines: List<String>, i: Int, forwarded: Boolean): Block? {
         val labels = mutableListOf<String>()
+        var subject: String? = null
         var j = i
         while (j < lines.size && labels.size < 8 && lines[j].length <= 2_000) {
             val label = headerLine.matchEntire(lines[j])?.groupValues?.get(1)?.trim()
             if (label == null && labels.isNotEmpty() && lines[j].isNotBlank() && lines[j].first().isWhitespace()) { j++; continue }
             labels += label ?: break
+            if (subject == null && subjectLabel.matches(label)) subject = lines[j].substringAfter(':').trim().removePrefix("*").trim()
             j++
         }
         val block = labels.any(subjectLabel::matches) && labels.none(formLabel::matches) &&
             if (forwarded) labels.any(fromLabel::matches) else labels.firstOrNull()?.let(fromLabel::matches) == true && labels.any(toLabel::matches)
-        return if (block) j else -1
+        return if (block) Block(j, subject) else null
     }
+
+    /**
+     * A forward shared with its marker on top: the forwarded message's subject, so the marker line isn't the title when
+     * the share has no subject of its own (SQ9-8). Null when [body] doesn't start with a forward or an earlier message.
+     */
+    fun forwardedSubject(body: String): String? {
+        val lines = body.replace("\r\n", "\n").replace('\r', '\n').lines()
+        val first = lines.indexOfFirst { it.isNotBlank() }.takeIf { it >= 0 } ?: return null
+        if (!startsAnEarlierMessage(lines[first])) return null
+        val start = (first + 1 until lines.size).firstOrNull { lines[it].isNotBlank() } ?: return null
+        return headerBlock(lines, start, forwarded = true)?.subject?.ifBlank { null }
+    }
+    /** Whether [line] marks a forward, or an earlier message ("Original Message", a line of underscores). */
+    fun startsAnEarlierMessage(line: String) = forwardMarker.matches(line) || quoteIntro.matches(line)
 
     /**
      * The words of [body] that are the message itself. Left out: quoted lines (">") and the line introducing them; from an
      * earlier message quoted without ">" ("… wrote:" with no ">" under it, "Original Message", Outlook's From/To/Subject
      * block) onwards; and a signature ("-- ", or the lines under a sign-off such as "Kind regards"). The person's own lines
      * between and after quoted ones are kept (SQ-3), and so is a forwarded message under its marker, less its header block
-     * (SQ8-3). Only these are read for a date: an earlier message's sent date or a signature's opening hours aren't this
-     * message's appointment (SH-4). Each line is looked at a bounded number of times (SQ8-7).
+     * (SQ8-3). An earlier message's block is a forward, read on below its headers, when nothing of the person's own comes
+     * before it, when the share's subject says so ([forwarded], "Fwd: …") or the block's own Subject does (SQ9-7). Below a
+     * signature, a forward or a P.S. is the person's again (SQ9-1, SQ9-9). Only these are read for a date: an earlier
+     * message's sent date or a signature's opening hours aren't this message's appointment (SH-4). Each line is looked at
+     * a bounded number of times (SQ8-7).
      */
-    fun message(body: String): String {
+    fun message(body: String, forwarded: Boolean = false): String {
         val lines = body.replace("\r\n", "\n").replace('\r', '\n').lines()
         fun quoted(i: Int) = lines.getOrNull(i)?.trimStart()?.startsWith(">") == true
-        // For each line, the next one from it on with words, and the next with words that isn't quoted.
+        // For each line: the next one from it on with words; the next with words that isn't quoted; and where the
+        // person's words start again below a signature, the next forward marker or P.S., unless an earlier message comes
+        // first.
         val nextWords = IntArray(lines.size + 1) { lines.size }
         val nextOwn = IntArray(lines.size + 1) { lines.size }
+        val resume = IntArray(lines.size + 1) { lines.size }
         for (i in lines.indices.reversed()) {
-            nextWords[i] = if (lines[i].isNotBlank()) i else nextWords[i + 1]
-            nextOwn[i] = if (lines[i].isNotBlank() && !quoted(i)) i else nextOwn[i + 1]
+            val line = lines[i]
+            nextWords[i] = if (line.isNotBlank()) i else nextWords[i + 1]
+            nextOwn[i] = if (line.isNotBlank() && !quoted(i)) i else nextOwn[i + 1]
+            resume[i] = when {
+                forwardMarker.matches(line) || postscript.containsMatchIn(line) -> i
+                quoted(i) || quoteIntro.matches(line) || wroteIntro.matches(line) || dateIntro(line) ||
+                    line.length <= 2_000 && headerLine.matchEntire(line)?.groupValues?.get(1)?.trim()?.let(fromLabel::matches) == true -> lines.size
+                else -> resume[i + 1]
+            }
         }
         // The next line with words starts a quote: "On … wrote:", "Agenda:" before "> item one".
         fun introducesQuote(i: Int) = lines[i].trimEnd().endsWith(":") && quoted(nextWords[i + 1])
+        // A sign-off after the message, then a name on its own line and a short block up to where the person's words
+        // start again: the signature.
+        fun signedOff(i: Int): Boolean {
+            if (!signOff.matches(lines[i])) return false
+            val first = nextOwn[i + 1]
+            val stop = resume[i + 1]
+            var rest = 0
+            var j = first
+            while (j < stop && rest <= 10) { rest++; j = nextOwn[j + 1] }
+            return rest in 1..10 && lines[first].length <= 200 && nameLine.matches(lines[first])
+        }
         val kept = mutableListOf<String>()
         var ownWords = false
         var afterForward = false
+        var forwardRead = false
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
             if (quoted(i) || introducesQuote(i)) { i++; continue }
-            if (forwardMarker.matches(line)) { afterForward = true; i++; continue }
+            if (forwardMarker.matches(line)) { afterForward = true; forwardRead = true; i++; continue }
             // A header block under a forward marker is the forwarded message's: read on below it (SQ8-3).
             if (afterForward && line.isNotBlank()) {
                 afterForward = false
-                val end = headerBlock(lines, i, forwarded = true)
-                if (end >= 0) { i = end; continue }
+                val block = headerBlock(lines, i, forwarded = true)
+                if (block != null) { i = block.end; continue }
             }
-            // A line ending in ":" with a year and a clock time and then who wrote it introduces an earlier message in any
-            // language (SQ-4, SQ8-1).
-            if (quoteIntro.matches(line) || wroteIntro.matches(line) || dateIntro(line) ||
-                // Outlook's block under the person's own words; at the very top it is what was shared.
-                ownWords && line.isNotBlank() && headerBlock(lines, i, forwarded = false) >= 0 ||
-                signature.matches(line.trimEnd().let { if (it == "--") "-- " else it })) break
-            // A sign-off after the message, then a name on its own line and a short block: the rest is the signature.
-            if (ownWords && signOff.matches(line)) {
-                val first = nextOwn[i + 1]
-                var rest = 0
-                var j = first
-                while (j < lines.size && rest <= 10) { rest++; j = nextOwn[j + 1] }
-                if (rest in 1..10 && lines[first].length <= 200 && nameLine.matches(lines[first])) break
+            // "Original Message", a line of underscores, or Outlook's block under the person's own words (at the very top
+            // it is what was shared): an earlier message, unless it is a forward (SQ9-7).
+            val intro = quoteIntro.matches(line)
+            if (intro || ownWords && line.isNotBlank() && headerBlock(lines, i, forwarded = false) != null) {
+                val block = headerBlock(lines, if (intro) nextWords[i + 1] else i, forwarded = true)
+                if (block != null && (!ownWords || forwarded && !forwardRead || forwardSubject(block.subject))) {
+                    forwardRead = true; i = block.end; continue
+                }
+                break
+            }
+            // "… wrote:", or a line ending in ":" with a year and a clock time and then who wrote it, introduces an earlier
+            // message in any language (SQ-4, SQ8-1).
+            if (wroteIntro.matches(line) || dateIntro(line)) break
+            if (signature.matches(line.trimEnd().let { if (it == "--") "-- " else it }) || ownWords && signedOff(i)) {
+                if (resume[i + 1] < lines.size) { i = resume[i + 1]; continue }
+                break
             }
             kept += line
             if (line.isNotBlank()) ownWords = true
@@ -256,15 +331,19 @@ object SharedDates {
 
     private data class Found(val date: LocalDate, val time: LocalTime?, val choices: List<LocalTime>)
 
+    // Whether the words just before [end] in [line] (not before [start]) end in [regex]: only its last few characters are
+    // looked at, so a long line of ". " that don't split takes time in step with its length (SQ9-10).
+    private fun endsIn(regex: Regex, line: String, start: Int, end: Int) =
+        regex.toPattern().matcher(line).region(maxOf(start, end - 12), end).useTransparentBounds(true).find()
+
     // The message's sentences: lines, split after . ! ? except after an abbreviation; a long one also at , and ; (Q6-12).
     internal fun sentences(text: String): List<String> = text.lines().flatMap { line ->
         val parts = mutableListOf<String>()
         var start = 0
         for (end in sentenceEnd.findAll(line)) {
-            val before = line.substring(start, end.range.first)
             val next = line.getOrNull(end.range.last + 1)
-            if (abbreviation.containsMatchIn(before) ||
-                shortBeforeNumber.containsMatchIn(before) && next != null && (next.isDigit() || next.isLowerCase())) continue
+            if (endsIn(abbreviation, line, start, end.range.first) ||
+                endsIn(shortBeforeNumber, line, start, end.range.first) && next != null && (next.isDigit() || next.isLowerCase())) continue
             parts += line.substring(start, end.range.first + 1); start = end.range.last + 1
         }
         parts += line.substring(start)
