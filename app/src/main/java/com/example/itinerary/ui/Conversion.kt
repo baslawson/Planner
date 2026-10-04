@@ -27,10 +27,13 @@ import java.time.LocalDate
 class Conversions {
     // "task:<id>" or "event:<id>:<whole series>", kept when the window is rebuilt.
     var request by mutableStateOf<String?>(null)
-    // The request the window was rebuilt with: its editor's draft is its own, not one in the way.
+    // The request whose new item has been saved (its original replaced): rebuilt after that, nothing is left to convert,
+    // and the new item's editor draft is recovered the usual way (TE-5).
+    var replacedFor by mutableStateOf<String?>(null)
+    // The request the window was rebuilt with, until its editor opens: its draft is its own, not one in the way (TE-6).
     internal var restored: String? = null
-    fun taskToEvent(taskId: String) { request = "task:$taskId" }
-    fun eventToTask(eventId: Long, wholeSeries: Boolean) { request = "event:$eventId:$wholeSeries" }
+    fun taskToEvent(taskId: String) { replacedFor = null; request = "task:$taskId" }
+    fun eventToTask(eventId: Long, wholeSeries: Boolean) { replacedFor = null; request = "event:$eventId:$wholeSeries" }
 }
 
 val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
@@ -38,8 +41,10 @@ val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
 @Composable
 fun rememberConversions(): Conversions {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
-    val conversions = remember { Conversions().also { it.request = saved; it.restored = saved } }
+    var savedReplaced by rememberSaveable { mutableStateOf<String?>(null) }
+    val conversions = remember { Conversions().also { it.request = saved; it.restored = saved; it.replacedFor = savedReplaced } }
     LaunchedEffect(conversions.request) { saved = conversions.request }
+    LaunchedEffect(conversions.replacedFor) { savedReplaced = conversions.replacedFor }
     return conversions
 }
 
@@ -73,31 +78,43 @@ private sealed interface Prepared {
 fun ConversionHost(conversions: Conversions) {
     val request = conversions.request ?: return
     val app = LocalContext.current.applicationContext as ItineraryApp
-    val scope = rememberCoroutineScope()
-    val done = { conversions.request = null }
-    // The original is replaced once, at the new one's first Save.
-    var replaced by rememberSaveable(request) { mutableStateOf(false) }
+    // Only this request's own close ends it: "Make it a task" in this editor asks for the next one first (TE-3).
+    val done = { if (conversions.request == request) conversions.request = null }
+    // Rebuilt after its Save, the original is gone: the new item stays, with its draft recovered as any other (TE-5).
+    val restored = request == conversions.restored
+    if (restored && conversions.replacedFor == request) { LaunchedEffect(request) { done() }; return }
     val today = LocalDate.parse(rememberSaveable(request) { LocalDate.now().toString() })
+    // The new task's id, kept with the request so a rebuilt window knows the new-task draft as its own (TE-6).
+    val taskSeed = rememberSaveable(request) { java.util.UUID.randomUUID().toString() }
     val parts = request.split(':')
     val toEvent = parts[0] == "task"
     // Read once: what the original is now, made into the other kind; or why it can't be.
     val prepared by produceState<Result<Prepared>?>(null, request) {
         value = runCatching {
-            // An editor this one came from (with nothing unsaved) may still be closing: give it a moment.
-            if (request != conversions.restored) kotlinx.coroutines.delay(300)
-            if (request != conversions.restored) conversionBlock(toEvent, runCatching { EditorDraftStore(app).read() }.getOrNull() != null,
-                EditorDraftStore.openEditors.value > 0, runCatching { TaskDraftStore(app).read("new") }.getOrNull() != null)
-                ?.let { error(it) }
-            if (toEvent) {
+            val ready = if (toEvent) {
                 val task = app.repository.task(parts[1]) ?: error("This task no longer exists.")
-                Prepared.ToEvent(TaskEventConversion.toEvent(task, today), task.attachments)
+                Prepared.ToEvent(TaskEventConversion.toEvent(task, today, hasTimeBlocks = app.repository.hasTimeBlocks(task.id)), task.attachments)
             } else {
                 val id = parts[1].toLong()
                 val whole = parts[2].toBoolean()
                 val (event, attachments, reminders) = app.repository.eventDetails(id) ?: error("This event no longer exists.")
-                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole), if (whole) app.repository.seriesIds(id) else setOf(id))
+                val series = if (whole) app.repository.seriesEvents(id) else listOf(event)
+                // A whole series is due on its next occurrence (its last, when all have passed), not the one tapped.
+                val due = if (whole) (series.map { it.date }.filter { !it.isBefore(today) }.minOrNull() ?: series.maxOf { it.date }) else null
+                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, due = due,
+                    idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
+            val eventDraft = runCatching { EditorDraftStore(app).read() }.getOrNull()
+            val taskDraft = runCatching { TaskDraftStore(app).read("new") }.getOrNull()
+            // Rebuilt with this request, a draft is in the way only when it isn't this conversion's own.
+            val ownDraft = restored && when (ready) {
+                is Prepared.ToEvent -> eventDraft != null && runCatching { DraftCodec.item(eventDraft.getJSONObject("initial")) == ready.converted.result }.getOrDefault(false)
+                is Prepared.ToTask -> taskDraft?.optString("id") == ready.converted.result.id
+            }
+            if (!ownDraft) conversionBlock(toEvent, eventDraft != null, EditorDraftStore.openEditors.value > 0, taskDraft != null)?.let { error(it) }
+            ready
         }
+        conversions.restored = null
     }
     val result = prepared ?: return
     result.exceptionOrNull()?.let { e ->
@@ -106,14 +123,18 @@ fun ConversionHost(conversions: Conversions) {
         }
         return
     }
+    // The original is replaced once, at the new one's first Save, in the app's own scope: closing the editor straight
+    // after ("Save changes?" → Save) mustn't cancel it and leave both (TE-8).
     fun replace(block: suspend () -> Unit) {
-        if (replaced) return
-        replaced = true
-        scope.launch {
+        if (conversions.replacedFor == request) return
+        conversions.replacedFor = request
+        app.appScope.launch {
             withContext(NonCancellable) {
                 try { block() } catch (e: Exception) {
-                    android.widget.Toast.makeText(app, "Saved, but the original couldn't be moved to Recently deleted. Delete it yourself.",
-                        android.widget.Toast.LENGTH_LONG).show()
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(app, "Saved, but the original couldn't be moved to Recently deleted. Delete it yourself.",
+                            android.widget.Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }

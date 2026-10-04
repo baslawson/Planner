@@ -119,4 +119,22 @@ class TaskEventConversionUiTest {
         assertEquals("WEEKLY", data().tasks.single { it.title == "QA make series" }.repeat)
         click("Close")
     }
+
+    // TE-1: closing the conversion without saving leaves the task's own files on disk.
+    @Test fun discardingATaskToEventKeepsTheTasksFiles() = runBlocking {
+        val store = app.attachmentStore
+        store.fileFor("qa-make-keep.txt").apply { parentFile!!.mkdirs(); writeText("Keep me") }
+        val task = PlannerTask(title = "QA make keep", dueDate = day,
+            attachments = listOf(Attachment(itemId = 0, name = "keep.txt", fileName = "qa-make-keep.txt", mimeType = "text/plain"))).also { repo.saveTask(it) }
+        open()
+        click("Actions for QA make keep"); click("Make it an event")
+        await { find("New event") != null && has("Saving makes this event") }
+        click("Close")
+        await { find("Discard") != null }
+        click("Discard")
+        await { find("New event") == null }
+        assertTrue(data().tasks.any { it.id == task.id })
+        assertTrue(store.fileFor("qa-make-keep.txt").exists())
+        assertTrue(data().items.none { it.title == "QA make keep" })
+    }
 }

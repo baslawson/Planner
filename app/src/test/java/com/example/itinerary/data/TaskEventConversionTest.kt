@@ -49,7 +49,7 @@ class TaskEventConversionTest {
         val event = ItineraryItem(id = 3, tripId = 1, date = day, startTime = LocalTime.of(14, 0), durationMinutes = 60, title = "Dentist",
             notes = "bring card", location = "Clinic", repeatRule = "MONTHLY", seriesId = "s")
         val reminders = listOf(Reminder(itemId = 3, amount = 1, unit = ReminderUnit.DAYS), Reminder(itemId = 3, amount = 2, unit = ReminderUnit.HOURS, ringUntilDismissed = true))
-        val one = TaskEventConversion.toTask(event, reminders, listOf(file), wholeSeries = false, zone = zone)
+        val one = TaskEventConversion.toTask(event, reminders, listOf(file), wholeSeries = false, zone = zone, now = at(today, 0))
         assertEquals("Dentist", one.result.title); assertEquals("bring card", one.result.notes); assertEquals(day, one.result.dueDate)
         assertEquals("NONE", one.result.repeat)
         assertEquals(listOf(file.copy(id = 0, itemId = 0)), one.result.attachments)
@@ -75,5 +75,36 @@ class TaskEventConversionTest {
         assertFalse(TaskEventConversion.canMakeEvent(PlannerTask(title = "x", done = true)))
         assertTrue(TaskEventConversion.canMakeEvent(PlannerTask(title = "x")))
         assertFalse(TaskEventConversion.canMakeTask(ItineraryItem(tripId = 0, date = today, startTime = null, title = "Power", category = "Bills")))
+    }
+
+    // TE-2: across a clock change the event's reminder still fires when the task's did (Sydney goes forward on 4 Oct 2026).
+    @Test fun aClockChangeDoesNotMoveTheReminder() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        val day = LocalDate.of(2026, 10, 5)
+        listOf(LocalDateTime.of(2026, 10, 3, 8, 0), LocalDateTime.of(2026, 10, 2, 9, 0), LocalDateTime.of(2026, 10, 2, 20, 0)).forEach { time ->
+            val at = time.atZone(sydney).toInstant().toEpochMilli()
+            val r = TaskEventConversion.reminderBefore(day, null, at, sydney)!!
+            assertEquals(time.toString(), at, reminderTrigger(day, null, r.offsetMinutes, sydney).toInstant().toEpochMilli())
+        }
+    }
+
+    // TE-10, TE-12: a reminder already gone is left out and said; a whole series says what goes; the id can be fixed.
+    @Test fun whatAnEventToTaskSays() {
+        val day = LocalDate.of(2026, 10, 9)
+        val event = ItineraryItem(id = 3, tripId = 1, date = day, startTime = null, title = "Bins", repeatRule = "WEEKLY", seriesId = "s",
+            linkedTaskId = "t1")
+        val reminders = listOf(Reminder(itemId = 3, amount = 1, unit = ReminderUnit.DAYS))
+        val late = TaskEventConversion.toTask(event, reminders, emptyList(), wholeSeries = true, zone = zone, now = at(day, 0),
+            seriesCount = 4, due = day.plusDays(7), idSeed = "seed")
+        assertNull(late.result.reminderAt)
+        assertTrue(late.dropped.contains("The reminder: its time has passed."))
+        assertTrue(late.dropped.contains("All 4 events of the series go to Recently deleted, past ones too."))
+        assertTrue(late.dropped.contains("Its link to the task it was time for."))
+        assertEquals(day.plusDays(7), late.result.dueDate)
+        assertEquals(late.result.id, TaskEventConversion.toTask(event, reminders, emptyList(), true, zone = zone, idSeed = "seed").result.id)
+        val early = TaskEventConversion.toTask(event, reminders, emptyList(), wholeSeries = false, zone = zone, now = at(today, 0))
+        assertEquals(at(day.minusDays(1), 9), early.result.reminderAt)
+        assertTrue(TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = day), today, zone, hasTimeBlocks = true).dropped
+            .contains("Its time blocks stay in the calendar, without their task."))
     }
 }

@@ -92,6 +92,9 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE seriesId = :seriesId ORDER BY date, id")
     suspend fun forSeries(seriesId: String): List<ItineraryItem>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM items WHERE linkedTaskId = :taskId)")
+    suspend fun hasTimeBlocks(taskId: String): Boolean
+
     @Query("SELECT * FROM items WHERE category = 'Bills' AND billAmountMinor = :amount AND billCurrency = :currency AND date IN (:dates)")
     suspend fun billCandidates(amount: Long, currency: String, dates: List<LocalDate>): List<ItineraryItem>
 

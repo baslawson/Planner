@@ -47,4 +47,35 @@ class TaskEventConversionDataTest {
         assertNull(repo.task(task.id))
         repo.snapshot().items.filter { it.title == "QA convert series" }.forEach { repo.deleteWithUndo(it.id) }
     }
+
+    // TE-9: Undo also takes back what the new task was used for meanwhile: its next occurrence, and tasks set to wait on it.
+    @Test fun undoAfterTheNewTaskWasUsed() = runBlocking {
+        val eventId = repo.saveItemId(ItineraryItem(tripId = 0, date = day, startTime = null, title = "QA used event"),
+            emptyList(), emptyList(), emptyList(), emptyList(), EventSaveOptions())
+        val task = PlannerTask(title = "QA used event", dueDate = day, repeat = "WEEKLY").also { repo.saveTask(it) }
+        repo.replaceEventsWithTask(setOf(eventId), task.id)
+        val next = repo.saveTaskIf(task.id) { it.copy(done = true) }!!.nextTaskId!!
+        val waiting = PlannerTask(title = "QA waits on new", dueDate = day, prerequisiteIds = listOf(next)).also { repo.saveTask(it) }
+        repo.undoDeletion(repo.pendingDeletions.value.single { it.madeInto?.taskId == task.id }.token)
+        assertNull(repo.task(task.id)); assertNull(repo.task(next))
+        assertEquals(emptyList<String>(), repo.task(waiting.id)!!.prerequisiteIds)
+        assertNotNull(repo.eventDetails(eventId))
+        repo.deleteTask(waiting.id); repo.deleteWithUndo(eventId)
+    }
+
+    // TE-9: converting the new item onward drops the first conversion's Undo, which would bring back a duplicate.
+    @Test fun convertingOnwardSettlesTheFirstUndo() = runBlocking {
+        val eventId = repo.saveItemId(ItineraryItem(tripId = 0, date = day, startTime = null, title = "QA onward"),
+            emptyList(), emptyList(), emptyList(), emptyList(), EventSaveOptions())
+        val task = PlannerTask(title = "QA onward", dueDate = day).also { repo.saveTask(it) }
+        repo.replaceEventsWithTask(setOf(eventId), task.id)
+        val first = repo.pendingDeletions.value.single { it.madeInto?.taskId == task.id }
+        val eventAgain = repo.saveItemId(ItineraryItem(tripId = 0, date = day, startTime = null, title = "QA onward"),
+            emptyList(), emptyList(), emptyList(), emptyList(), EventSaveOptions())
+        repo.replaceTaskWithEvent(task.id, eventAgain)
+        assertTrue(repo.pendingDeletions.value.none { it.token == first.token })
+        repo.undoDeletion(repo.pendingDeletions.value.single { it.madeInto?.fromTaskId == task.id }.token)
+        assertNotNull(repo.task(task.id)); assertNull(repo.eventDetails(eventAgain)); assertNull(repo.eventDetails(eventId))
+        repo.deleteTask(task.id)
+    }
 }

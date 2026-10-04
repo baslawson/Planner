@@ -245,9 +245,15 @@ private fun ItemEditorForm(
         else if (initial.id == 0L) addAll(initialAddedAttachments)
     } }
     val removed = remember { mutableStateListOf<Attachment>().apply { addAll(DraftCodec.attachments(recovered?.optJSONArray("removed"))) } }
+    // Files this form was handed rather than made (a task's, when it is made into an event): still the task's, so a
+    // Discard or ✕ here mustn't delete them (TE-1). Kept in the draft for a form reopened after Android closed Planner.
+    val inheritedFiles = remember {
+        recovered?.optJSONArray("inherited")?.let { a -> List(a.length()) { a.getString(it) }.toSet() }
+            ?: if (initial.id == 0L) initialAddedAttachments.mapTo(HashSet()) { it.fileName } else emptySet()
+    }
     fun discardAddedFile(attachment: Attachment) {
         // Reading text changes metadata only; an existing/shared document still belongs to its saved event.
-        if (existingAttachments.none { it.fileName == attachment.fileName }) store.delete(attachment.fileName)
+        if (existingAttachments.none { it.fileName == attachment.fileName } && attachment.fileName !in inheritedFiles) store.delete(attachment.fileName)
     }
     var committed by remember { mutableStateOf(value = false) }
     var disposed by remember { mutableStateOf(false) }
@@ -368,7 +374,7 @@ private fun ItemEditorForm(
     Track(undo, "title", title) { title = it }
     Track(undo, "location", location) { location = it }
     Track(undo, "notes", notes) { notes = it }
-    checklist.forEach { entry -> Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } }
+    checklist.forEach { entry -> key(entry.id) { Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } } }
     var category by remember { mutableStateOf(values.category) }
     val billTask = category == "Bills"
     fun selectCategory(selected: String) {
@@ -462,6 +468,7 @@ private fun ItemEditorForm(
                         paymentLink = paymentLink, paymentReference = paymentReference, bpayBillerCode = bpayBillerCode, bpayReference = bpayReference,
                         customColor = customColor, checklist = checklist, paid = paid, payments = payments, billAmountMinor = Bills.parse(billAmountText), billCurrency = billCurrency)))
                     .put("added", DraftCodec.attachments(added.toList())).put("removed", DraftCodec.attachments(removed.toList()))
+                    .put("inherited", org.json.JSONArray(inheritedFiles.toList()))
                     .put("addedReminders", DraftCodec.reminders(addedReminders.toList()))
                     .put("removedReminders", DraftCodec.reminders(removedReminders.toList()))
                     .put("state", JSONObject().put("duplicating", duplicating).put("repeat", repeat.name)
@@ -547,6 +554,7 @@ private fun ItemEditorForm(
     }
     fun applyTemplate(content: TemplateContent) {
         val item = content.forDate(date)
+        undo.together()
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
         bpayBillerCode = item.bpayBillerCode; bpayReference = item.bpayReference
         // A time block keeps its own time and length when the template has none.
@@ -647,7 +655,7 @@ private fun ItemEditorForm(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
-                .undoKeys(undo)
+                .undoKeys(undo, enabled = !busy)
         ) {
             ScrollHints(editorScroll, Modifier.weight(1f),
                 overlay = { ChecklistJumpButton(checklist, checklistAnchor, editorScroll) }) { Column(
@@ -1020,7 +1028,7 @@ private fun ItemEditorForm(
                 onClose = ::close, onSave = { save() },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 8.dp),
                 deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
-                saveEnabled = canSave && (unsaved || isNew || deletedElsewhere), undo = undo,
+                saveEnabled = canSave && (unsaved || isNew || deletedElsewhere), undo = undo, undoEnabled = !busy,
             ) { SaveLabel(busy, saved = justSaved && !unsaved) }
         }
     }
@@ -1086,6 +1094,7 @@ private fun ItemEditorForm(
     (billSuggestion ?: scannedBillSuggestion?.takeIf { billReviewRequested })?.let { attachment ->
         BillSuggestionDialog(attachment, title, billAmountText, billCurrency,
             onDismiss = { billSuggestion = null; billReviewFiles = emptyList(); billReviewRequested = false }, onApply = { suggestedTitle, suggestedDate, suggestedAmount, suggestedCurrency ->
+                undo.together()
                 suggestedTitle?.let { title = it }
                 suggestedDate?.let { date = it }
                 suggestedAmount?.let {

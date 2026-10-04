@@ -14,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -159,7 +160,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         // Q-2: a share restored as a new event (after process death) reopens its own editor on its draft: not here too.
         draftToRecover(com.example.itinerary.data.EditorDraftStore.openEditors.value,
             // A task being made into an event after Android closed Planner reopens its own editor on its draft too.
-            ownedElsewhere = { conversions.request?.startsWith("task:") == true ||
+            ownedElsewhere = { conversions.request?.startsWith("task:") == true && conversions.replacedFor != conversions.request ||
                 sharedEvent != null && runCatching { com.example.itinerary.data.DraftCodec.item(it.getJSONObject("initial")) == sharedEvent }.getOrDefault(false) }) {
             com.example.itinerary.data.EditorDraftStore(app).read()
         }
@@ -200,6 +201,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     LaunchedEffect(next?.token) {
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
+                // A conversion's Undo waits until its editor closes: shown under that window, it would run out unseen (TE-4).
+                if (next.madeInto != null) snapshotFlow { conversions.request }.first { it == null }
                 val result = snackbar.showSnackbar(
                     message = next.madeInto?.let { if (it.taskId != null) "Made into a task" else "Made into an event" }
                         ?: deletedMessage(next.items.size, next.tasks.size, next.notes.size),
