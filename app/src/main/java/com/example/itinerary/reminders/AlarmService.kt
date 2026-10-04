@@ -37,6 +37,10 @@ class AlarmService : Service() {
     private var player: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var ringing: Bundle? = null
+    // R6-2: the start that brought the ringing alarm. Android keeps every start to deliver again after it ends the
+    // process, until that start is stopped by its id: so one that gave way or gave up is never rung again, and stopping it
+    // leaves the starts after it (another alarm) to run.
+    private var ringingStart = 0
     private val handler = Handler(Looper.getMainLooper())
     private val giveUp = Runnable { onGiveUp() }
 
@@ -53,7 +57,7 @@ class AlarmService : Service() {
                 stopRinging()
             }
             else -> {
-                startRinging(intent?.extras, redelivered = flags and START_FLAG_REDELIVERY != 0)
+                startRinging(intent?.extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
                 // Android ending the process (low memory, seen right after an unlock) must not end the alarm without anyone
                 // stopping it: the start is delivered again and it rings on (Stop and Snooze end it for good).
                 return START_REDELIVER_INTENT
@@ -62,9 +66,10 @@ class AlarmService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startRinging(extras: Bundle?, redelivered: Boolean = false) {
+    private fun startRinging(extras: Bundle?, startId: Int, redelivered: Boolean = false) {
         // A second alarm can arrive while one is ringing; keep the first one as a normal notification.
         val previous = ringing
+        val previousStart = ringingStart
         if (previous != null && extras != null) {
             reminderContent(this, previous)?.let {
                 postReminderNotification(
@@ -75,11 +80,42 @@ class AlarmService : Service() {
             }
         }
         ringing = extras
+        ringingStart = startId
         currentReminderId = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
         ringingSince = SystemClock.elapsedRealtime()
+        stopToken = RingToken.new()
 
+        // Must be called promptly after startForegroundService, even if there is nothing to ring for.
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification(extras),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+        )
+        // The one that gave way is a notification now: its start is done with, not to be delivered again.
+        if (previous != null && extras != null) stopSelfResult(previousStart)
+        if (extras == null) {
+            stopRinging()
+            return
+        }
+        // R6-5: started before the first unlock, Mark paid may be left out (addDataAction, Android 11 and lower). Once
+        // unlocked, the notification is built again with it.
+        if (!DirectBoot.isUnlocked(this)) rebuildAtUnlock()
+
+        // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
+        // alarm long past that is left as missed.
+        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis())
+        if (ringFor == null) { onGiveUp(); return }
+        startSound()
+        startVibration()
+        handler.removeCallbacks(giveUp)
+        handler.postDelayed(giveUp, ringFor)
+    }
+
+    // The ringing notification for [extras]. [quiet]: built again, without popping up a second time.
+    private fun notification(extras: Bundle?, quiet: Boolean = false): android.app.Notification {
         val content = reminderContent(this, extras)
-        val notification = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
+        return NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(content?.title ?: "Alarm")
             .setContentText(content?.text.orEmpty())
@@ -87,7 +123,8 @@ class AlarmService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
-            .setContentIntent(openAndStop())
+            .setOnlyAlertOnce(quiet)
+            .setContentIntent(openAndStop(stopToken))
             // Android 14+ lets the user swipe even this ongoing notification away (not on the lock screen). Swiping it is
             // the only thing left to do, so it counts as Stop: otherwise it would ring on with nothing to stop it.
             .setDeleteIntent(serviceAction(ACTION_STOP))
@@ -104,26 +141,29 @@ class AlarmService : Service() {
             }
             .addAction(0, "Stop", serviceAction(ACTION_STOP))
             .build()
-        // Must be called promptly after startForegroundService, even if there is nothing to ring for.
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-        )
-        if (extras == null) {
-            stopRinging()
-            return
-        }
+    }
 
-        // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
-        // alarm long past that is left as missed.
-        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis())
-        if (ringFor == null) { onGiveUp(); return }
-        startSound()
-        startVibration()
-        handler.removeCallbacks(giveUp)
-        handler.postDelayed(giveUp, ringFor)
+    private var unlockWatch: android.content.BroadcastReceiver? = null
+
+    private fun rebuildAtUnlock() {
+        if (unlockWatch != null) return
+        val watch = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                stopUnlockWatch()
+                val extras = ringing ?: return
+                runCatching { getSystemService(android.app.NotificationManager::class.java).notify(NOTIFICATION_ID, notification(extras, quiet = true)) }
+                    .onFailure { android.util.Log.w("AlarmService", "Couldn't show the alarm's buttons again", it) }
+            }
+        }
+        unlockWatch = watch
+        ContextCompat.registerReceiver(this, watch, android.content.IntentFilter(Intent.ACTION_USER_UNLOCKED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        // Unlocked in the meantime: the broadcast may have gone before the receiver was there.
+        if (DirectBoot.isUnlocked(this)) watch.onReceive(this, Intent(Intent.ACTION_USER_UNLOCKED))
+    }
+
+    private fun stopUnlockWatch() {
+        unlockWatch?.let { runCatching { unregisterReceiver(it) } }
+        unlockWatch = null
     }
 
     private fun startSound() {
@@ -215,7 +255,9 @@ class AlarmService : Service() {
         }
     }
 
+    // Given up on, it ends its own start only: an alarm started after it still rings (R6-2).
     private fun onGiveUp() {
+        val start = ringingStart
         ringing?.let { extras ->
             reminderContent(this, extras)?.let {
                 postReminderNotification(
@@ -225,10 +267,11 @@ class AlarmService : Service() {
                 )
             }
         }
-        stopRinging()
+        stopRinging(start)
     }
 
-    private fun stopRinging() {
+    // [startId]: only that start (and the ones before it) is done with; without it, all of them (Stop, Snooze).
+    private fun stopRinging(startId: Int? = null) {
         handler.removeCallbacks(giveUp)
         releasePlayer()
         vibrator?.cancel()
@@ -236,8 +279,10 @@ class AlarmService : Service() {
         wakeLock = null
         ringing = null
         currentReminderId = null
+        stopToken = null
+        stopUnlockWatch()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (startId == null) stopSelf() else stopSelf(startId)
     }
 
     private fun releasePlayer() {
@@ -253,6 +298,8 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         currentReminderId = null
+        stopToken = null
+        stopUnlockWatch()
         handler.removeCallbacks(giveUp)
         releasePlayer()
         vibrator?.cancel()
@@ -268,20 +315,22 @@ class AlarmService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    // Tapping the notification counts as acknowledging: MainActivity stops the alarm when it sees the extra.
-    private fun openAndStop(): PendingIntent =
+    // Tapping the notification counts as acknowledging: MainActivity stops the alarm when it sees the extra. A6-7: the
+    // extra is this ring's own [token], so another app starting Planner (it's exported) can't stop a ringing alarm.
+    private fun openAndStop(token: String?): PendingIntent =
         PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
             Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                .putExtra(EXTRA_STOP_ALARM, true),
+                .putExtra(EXTRA_STOP_ALARM, token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
     companion object {
         @Volatile private var currentReminderId: Long? = null
         @Volatile private var ringingSince = 0L
+        @Volatile private var stopToken: String? = null
         fun stopIfRinging(context: Context, id: Long) {
             if (currentReminderId == id) context.stopService(Intent(context, AlarmService::class.java))
         }
@@ -295,6 +344,10 @@ class AlarmService : Service() {
                 context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == NOTIFICATION_ID }
             }.getOrDefault(true)
             if (!shown) context.stopService(Intent(context, AlarmService::class.java))
+        }
+        /** A tap on the ringing notification ([EXTRA_STOP_ALARM]): stops it only with the ringing alarm's own token. */
+        fun stopFromTap(context: Context, token: String?) {
+            if (RingToken.matches(stopToken, token)) context.stopService(Intent(context, AlarmService::class.java))
         }
         const val ACTION_STOP = "com.example.itinerary.alarm.STOP"
         const val ACTION_SNOOZE = "com.example.itinerary.alarm.SNOOZE"
@@ -334,4 +387,10 @@ internal object AlarmRestart {
             else -> left.coerceIn(60_000L, full)
         }
     }
+}
+
+// A6-7: what a tap on the ringing notification must carry to stop it, new for each ring, so no other app can guess it.
+internal object RingToken {
+    fun new(): String = java.util.UUID.randomUUID().toString()
+    fun matches(current: String?, given: String?): Boolean = current != null && given == current
 }

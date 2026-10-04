@@ -145,11 +145,9 @@ class MainActivity : ComponentActivity() {
         stopAlarmIfRequested(intent)
     }
 
-    // Tapping a ringing alarm's notification acknowledges it.
+    // Tapping a ringing alarm's notification acknowledges it (with that ring's own token, A6-7).
     private fun stopAlarmIfRequested(intent: Intent?) {
-        if (intent?.getBooleanExtra(AlarmService.EXTRA_STOP_ALARM, false) == true) {
-            stopService(Intent(this, AlarmService::class.java))
-        }
+        AlarmService.stopFromTap(this, intent?.getStringExtra(AlarmService.EXTRA_STOP_ALARM))
     }
 
     // While Planner is on screen, changes to the phone's calendars are read in (see CalendarSync.refreshPhone).
