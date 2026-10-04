@@ -84,8 +84,12 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     )) { mutableStateOf<com.example.itinerary.data.PlannerNote?>(null) }
     // SH-10: the share on screen. A second share reaching this window meanwhile waits until this one is closed the usual
     // way, "Save changes?" included, as a second widget task does: it used to replace it at once, dropping its editor
-    // and leaving that editor's draft to block the new share.
-    var shareOpen by remember { mutableStateOf(sharedText?.let { it to sharedSubject }) }
+    // and leaving that editor's draft to block the new share. Saved, as the window keeps only the newest share: rebuilt
+    // after Android closed Planner, the open one comes back and the other still waits (SQ-6).
+    var shareOpen by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<Pair<String, String?>?, ArrayList<String?>>(
+        save = { open -> open?.let { arrayListOf(it.first, it.second) } },
+        restore = { (it[0] ?: return@Saver null) to it[1] },
+    )) { mutableStateOf(sharedText?.let { it to sharedSubject }) }
     val shareWanted by rememberUpdatedState(sharedText?.let { it to sharedSubject })
     LaunchedEffect(sharedText, sharedSubject, shareOpen) {
         val wanted = sharedText?.let { it to sharedSubject } ?: return@LaunchedEffect

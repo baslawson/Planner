@@ -131,7 +131,7 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
         value = content.getOrNull()?.let { shared -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val now = java.time.LocalTime.now().takeIf { LocalDate.now() == today }
             val found = SharedDates.find(shared.body, today, now)
-            found to BillSuggestions.parseMessage(shared.body.take(SharedDates.MAX_READ), found.date, today)
+            found to BillSuggestions.parseMessage(SharedDates.opening(shared.body), found.date, today)
         } }
     }
     val found = read?.first
