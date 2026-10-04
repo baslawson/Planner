@@ -30,7 +30,7 @@ class TaskEventConversionTest {
         // 10:00 is after an all-day event's 09:00, so the reminder can't come along.
         assertTrue(c.reminders.isEmpty())
         assertEquals(5, c.dropped.size)
-        assertTrue(c.dropped.first().startsWith("No due date"))
+        assertTrue(c.dropped.first().startsWith("The due date (there was none)"))
         assertTrue(c.dropped.any { it.startsWith("The repeat (Days after completion (5))") })
         assertTrue(c.dropped.any { it == "The high priority." })
     }
@@ -113,6 +113,9 @@ class TaskEventConversionTest {
         assertEquals(at(day.minusDays(1), 9), early.result.reminderAt)
         assertTrue(TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = day), today, zone, hasTimeBlocks = true).dropped
             .contains("Its time blocks stay in the calendar, without their task."))
+        // RS-3: tasks waiting for it are said.
+        assertTrue(TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = day), today, zone, waiting = 2).dropped
+            .contains("2 tasks that wait for it stop waiting."))
     }
 
     // CV-1: when clocks go back, a time that can't be said exactly takes the nearest offset, not one an hour early.
@@ -130,7 +133,7 @@ class TaskEventConversionTest {
 
     // CW-1: when clocks go forward, whole days stay days ("1 day", not "23 hours"); CW-2: a time that can't be said is
     // the nearest one, and the notice says by how much.
-    @Test fun clockChangesKeepDaysAndNeverFireLate() {
+    @Test fun clockChangesKeepDaysAndTakeTheNearestEitherWay() {
         val sydney = ZoneId.of("Australia/Sydney")
         val at = LocalDateTime.of(2026, 10, 3, 9, 0).atZone(sydney).toInstant().toEpochMilli()
         assertEquals(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS), TaskEventConversion.reminderBefore(LocalDate.of(2026, 10, 4), null, at, sydney))
@@ -150,5 +153,11 @@ class TaskEventConversionTest {
         assertEquals(friday.plusWeeks(1), TaskEventConversion.dueOccurrence(series, dayBefore, friday, at(friday, 8), zone).date)
         assertEquals(friday, TaskEventConversion.dueOccurrence(series, emptyList(), friday, at(friday, 8), zone).date)
         assertEquals(friday.plusWeeks(2), TaskEventConversion.dueOccurrence(series, emptyList(), friday.plusDays(30), at(friday, 8), zone).date)
+        // CX-2: the one passed over is said.
+        val c = TaskEventConversion.toTask(series[0], dayBefore, emptyList(), wholeSeries = true, zone = zone, now = at(friday, 8),
+            seriesCount = 3, occurrence = series[1], firstComing = series[0])
+        assertTrue(c.dropped.toString(), c.dropped.any { it.contains("its reminder has passed, so the task is due from") })
+        assertTrue(TaskEventConversion.toTask(series[0], dayBefore, emptyList(), true, zone = zone, occurrence = series[1], firstComing = series[1])
+            .dropped.none { it.contains("its reminder has passed, so") })
     }
 }

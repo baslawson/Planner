@@ -41,10 +41,21 @@ class Conversions {
 
 val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
 
-// Conversion editors open in any Planner window: a conversion's Undo waits for all of them, so a second window (split
-// screen) doesn't show it, and use it up, while the editor is still open in the first (CC-3).
+// The conversions with an editor open, in any Planner window: a conversion's Undo waits for its own editor to close, so
+// a second window (split screen) doesn't show it, and use it up, while that editor is still open (CC-3). Only its own:
+// another conversion's editor left open elsewhere holds back nothing else (CX-1).
 object OpenConversions {
-    var count by androidx.compose.runtime.mutableIntStateOf(0)
+    val requests = androidx.compose.runtime.mutableStateListOf<String>()
+}
+
+/** Whether this deletion is a conversion whose editor is still open in some window (CX-1). */
+fun com.example.itinerary.data.PendingDeletion.heldByOpenConversion(): Boolean {
+    val made = madeInto ?: return false
+    return OpenConversions.requests.any { r ->
+        val parts = r.split(':')
+        if (parts[0] == "task") parts.getOrNull(1) == made.fromTaskId
+        else parts.getOrNull(1)?.toLongOrNull()?.let { id -> items.any { it.id == id } } == true
+    }
 }
 
 @Composable
@@ -93,7 +104,7 @@ fun ConversionHost(conversions: Conversions) {
     val done = { if (conversions.request == request) conversions.request = null }
     // Rebuilt after its Save, the original is gone: the new item stays, with its draft recovered as any other (TE-5).
     val restored = request == conversions.restored
-    DisposableEffect(request) { OpenConversions.count++; onDispose { OpenConversions.count-- } }
+    DisposableEffect(request) { OpenConversions.requests += request; onDispose { OpenConversions.requests.remove(request) } }
     val parts = request.split(':')
     val toEvent = parts[0] == "task"
     if (restored && conversions.replacedFor == request) {
@@ -108,7 +119,8 @@ fun ConversionHost(conversions: Conversions) {
                     if (repo.task(taskId) != null) repo.replaceEventsWithTask(ids.split(',').mapNotNull { it.toLongOrNull() }.toSet(), taskId)
                 }
             } }.onFailure {
-                // As when it fails at the Save itself (CW-5).
+                // As when it fails at the Save itself (CW-5); not when this was only cancelled after the move (CX-3).
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 android.widget.Toast.makeText(app, "Saved, but the original couldn't be moved to Recently deleted. Delete it yourself.",
                     android.widget.Toast.LENGTH_LONG).show()
             } }
@@ -124,7 +136,8 @@ fun ConversionHost(conversions: Conversions) {
         value = runCatching {
             val ready = if (toEvent) {
                 val task = app.repository.task(parts[1]) ?: error("This task no longer exists.")
-                Prepared.ToEvent(TaskEventConversion.toEvent(task, today, hasTimeBlocks = app.repository.hasTimeBlocks(task.id)), task.attachments)
+                Prepared.ToEvent(TaskEventConversion.toEvent(task, today, hasTimeBlocks = app.repository.hasTimeBlocks(task.id),
+                    waiting = app.repository.waitingOn(task.id)), task.attachments)
             } else {
                 val id = parts[1].toLong()
                 val whole = parts[2].toBoolean()
@@ -133,7 +146,8 @@ fun ConversionHost(conversions: Conversions) {
                 // A whole series is due on its next occurrence (its last, when all have passed), not the one tapped; its
                 // reminder goes with it (CV-2).
                 val occurrence = if (!whole) event else TaskEventConversion.dueOccurrence(series, reminders, today, System.currentTimeMillis())
-                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence,
+                val firstComing = if (!whole) null else series.filter { !(it.endDate ?: it.date).isBefore(today) }.minByOrNull { it.date }
+                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence, firstComing = firstComing,
                     idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
             val eventDraft = runCatching { EditorDraftStore(app).read() }.getOrNull()

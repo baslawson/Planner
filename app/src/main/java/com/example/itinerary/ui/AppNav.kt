@@ -14,7 +14,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.first
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -146,6 +145,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     // U-13: the note a reminder's tap asked for, handed to the Notes page (see below).
     var noteToOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
+    // SX-1: opened over Agenda for a share, reminder, shortcut or file: that Agenda isn't recorded as where the person left
+    // Planner, also when Android rebuilds this window later, until they go somewhere themselves.
+    var openedForSomething by rememberSaveable { mutableStateOf(false) }
     // The intent that opened this window, before anything replaced it: a notification tap is not a plain start (SR-1).
     val launchIntent = LocalContext.current.findActivity()?.intent
     // Reopened from Recents, the intent is the task's first one, whatever that was: a plain start too (AB-3).
@@ -174,8 +176,10 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     return@collect
                 }
                 // SR9-1: opened over Agenda for a share, reminder, shortcut or file, that isn't where the person left it.
-                if (asked && route == "agenda") return@collect
+                if (asked && route == "agenda") { openedForSomething = true; return@collect }
             }
+            if (route == "agenda" && openedForSomething) return@collect
+            openedForSomething = false
             when (route) {
                 "agenda" -> app.settings.lastViewCalendar = false
                 "calendar?date={date}" -> app.settings.lastViewCalendar = true
@@ -223,13 +227,12 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
 
     val pending by app.repository.pendingDeletions.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val next = pending.firstOrNull()
+    // A conversion whose editor is still open waits, without holding back the deletions after it (TE-4, CC-3, CX-1).
+    val shown = pending.filterNot { it.heldByOpenConversion() }
+    val next = shown.firstOrNull()
     LaunchedEffect(next?.token) {
         while (next != null && app.repository.pendingDeletions.value.any { it.token == next.token }) {
             try {
-                // A conversion's Undo waits until its editor closes: shown under that window, it would run out unseen (TE-4).
-                // In every window (CC-3).
-                if (next.madeInto != null) snapshotFlow { conversions.request == null && OpenConversions.count == 0 }.first { it }
                 val result = snackbar.showSnackbar(
                     message = next.madeInto?.let { if (it.taskId != null) "Made into a task" else "Made into an event" }
                         ?: deletedMessage(next.items.size, next.tasks.size, next.notes.size),
@@ -252,8 +255,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     val moves by app.repository.pendingMoves.collectAsStateWithLifecycle()
     val nextMove = moves.firstOrNull()
     // Deletion Undo gets priority. Cancelling this effect leaves a move available until it can be shown.
-    LaunchedEffect(nextMove?.token, pending.isNotEmpty()) {
-        if (pending.isEmpty() && nextMove != null) {
+    LaunchedEffect(nextMove?.token, shown.isNotEmpty()) {
+        if (shown.isEmpty() && nextMove != null) {
             while (app.repository.pendingMoves.value.any { it.token == nextMove.token }) {
                 try {
                     val result = snackbar.showSnackbar("Moved ${nextMove.title} to tomorrow", actionLabel = "Undo",
@@ -271,8 +274,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     }
     val payments by app.repository.pendingPayments.collectAsStateWithLifecycle()
     val payment = payments.firstOrNull()
-    LaunchedEffect(payment?.token, pending.isNotEmpty(), moves.isNotEmpty()) {
-        if (payment != null && pending.isEmpty() && moves.isEmpty()) {
+    LaunchedEffect(payment?.token, shown.isNotEmpty(), moves.isNotEmpty()) {
+        if (payment != null && shown.isEmpty() && moves.isEmpty()) {
             val result = snackbar.showSnackbar(
                 "${payment.before.title} marked ${if (payment.paid) "paid" else "unpaid"}",
                 actionLabel = "Undo", withDismissAction = true, duration = SnackbarDuration.Long)

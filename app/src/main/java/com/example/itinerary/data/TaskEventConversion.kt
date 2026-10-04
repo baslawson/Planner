@@ -20,9 +20,11 @@ object TaskEventConversion {
     fun canMakeEvent(task: PlannerTask) = !task.done
     fun canMakeTask(event: ItineraryItem) = event.category != "Bills"
 
-    fun toEvent(task: PlannerTask, today: LocalDate, zone: ZoneId = ZoneId.systemDefault(), hasTimeBlocks: Boolean = false): Converted<ItineraryItem> {
+    fun toEvent(task: PlannerTask, today: LocalDate, zone: ZoneId = ZoneId.systemDefault(), hasTimeBlocks: Boolean = false,
+                waiting: Int = 0): Converted<ItineraryItem> {
         val dropped = mutableListOf<String>()
-        val date = task.dueDate ?: today.also { dropped += "No due date: it goes on today. Change the day before saving." }
+        // RS-5: said as what is missing, as the other lines are.
+        val date = task.dueDate ?: today.also { dropped += "The due date (there was none): it goes on today. Change the day before saving." }
         val repeat = if (TaskRepeat.of(task.repeat) == TaskRepeat.AFTER_COMPLETION) {
             dropped += "The repeat (${TaskRepeat.label(task.repeat, task.repeatDays)}): events can't repeat after completion."
             RepeatRule.NONE.name
@@ -30,6 +32,8 @@ object TaskEventConversion {
         if (task.priority != TaskPriority.NORMAL) dropped += "The ${task.priority.label.lowercase()} priority."
         if (task.prerequisiteIds.isNotEmpty()) dropped += "The tasks it waits for."
         if (hasTimeBlocks) dropped += "Its time blocks stay in the calendar, without their task."
+        // RS-3: tasks waiting for it stop waiting (a plain delete leaves them blocked), so it is said.
+        if (waiting > 0) dropped += if (waiting == 1) "1 task that waits for it stops waiting." else "$waiting tasks that wait for it stop waiting."
         val reminder = task.reminderAt?.let { at ->
             reminderBefore(date, null, at, zone)?.also { r ->
                 val fires = reminderTrigger(date, null, r.offsetMinutes, zone).toInstant().toEpochMilli()
@@ -49,7 +53,7 @@ object TaskEventConversion {
      */
     fun toTask(event: ItineraryItem, reminders: List<Reminder>, attachments: List<Attachment>, wholeSeries: Boolean,
                zone: ZoneId = ZoneId.systemDefault(), now: Long = System.currentTimeMillis(), seriesCount: Int = 1,
-               occurrence: ItineraryItem = event, idSeed: String? = null): Converted<PlannerTask> {
+               occurrence: ItineraryItem = event, idSeed: String? = null, firstComing: ItineraryItem? = null): Converted<PlannerTask> {
         val dropped = mutableListOf<String>()
         if (event.startTime != null) dropped += "The time" + (if (event.durationMinutes != null) " and length" else "") + ": tasks have a due day only."
         if (event.endDate != null) dropped += "The days before the last: the task is due on the last day."
@@ -58,6 +62,11 @@ object TaskEventConversion {
         if (event.bufferBeforeMinutes > 0 || event.bufferAfterMinutes > 0) dropped += "The travel or setup time around it."
         if (event.linkedTaskId != null) dropped += "Its link to the task it was time for."
         if (wholeSeries && seriesCount > 1) dropped += "All $seriesCount events of the series go to Recently deleted, past ones too."
+        // CX-2: a coming one passed over because its reminder has gone is said, not left out quietly.
+        if (firstComing != null && firstComing.date != occurrence.date) {
+            val day = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM")
+            dropped += "The one on ${firstComing.date.format(day)}: its reminder has passed, so the task is due from ${occurrence.date.format(day)}."
+        }
         val sorted = reminders.sortedBy { it.offsetMinutes }
         val first = sorted.firstOrNull()
         if (sorted.size > 1) dropped += "${sorted.size - 1} more reminder${if (sorted.size > 2) "s" else ""}: a task has one."

@@ -566,6 +566,9 @@ class Repository(
     /** Every event in [id]'s series, by date, or just that event when it doesn't repeat. */
     suspend fun seriesEvents(id: Long): List<ItineraryItem> = itemDao.byId(id)?.let { e -> e.seriesId?.let { itemDao.forSeries(it) } ?: listOf(e) }.orEmpty()
 
+    // How many tasks wait for task [taskId] (RS-3).
+    suspend fun waitingOn(taskId: String): Int = taskDao.all().count { taskId in it.prerequisiteIds }
+
     // Whether any event is a time block for task [taskId].
     suspend fun hasTimeBlocks(taskId: String): Boolean = itemDao.hasTimeBlocks(taskId)
 
@@ -1030,7 +1033,8 @@ class Repository(
                 selectedIds to bundle.reminders
             }
             afterCommit(reminderIds = reminders.map { it.id })
-            settleConversions(earlier.filter { b -> b.madeInto!!.eventIds.any { e -> e in moved || seriesIds(e).isEmpty() } })
+            // Any occurrence of a made series, as a delete in Planner does (CX-4).
+            if (moved.isNotEmpty()) settleConversions(earlier)
             moved
         }
     }
@@ -1043,8 +1047,8 @@ class Repository(
         // (TE-7, CV-4).
         lateinit var taken: TakenBack
         lateinit var again: List<String>
-        val restored = db.withTransaction {
-            taken = takeBackRows(madeInto)
+        val restored = archiving { archived ->
+            taken = takeBackRows(madeInto, archived)
             restoreDeletedRows(token).also { again = waitAgainRows(madeInto) }
         }
         finishRestore(token, restored)
@@ -1052,20 +1056,23 @@ class Repository(
     } }
 
     // Undo of a conversion: what the original was made into goes (a series' every event; a repeating task's next ones,
-    // made by completing it meanwhile), with no Recently deleted entry of its own. Tasks made to wait on it meanwhile
-    // stop waiting (TE-9).
+    // made by completing it meanwhile) to Recently deleted, with no Undo of its own: edits and files added to it after
+    // its first Save can still be found there (RS-2). Tasks made to wait on it meanwhile stop waiting (TE-9).
     private class TakenBack(val reminderIds: List<Long>, val taskIds: Set<String>, val files: List<String>)
-    private suspend fun takeBackRows(made: MadeInto): TakenBack {
+    private suspend fun takeBackRows(made: MadeInto, archived: MutableList<DeletedEntry>): TakenBack {
         val result = db.withTransaction {
             val events = made.eventIds.mapNotNull { itemDao.byId(it) }.flatMap { e -> e.seriesId?.let { itemDao.forSeries(it) } ?: listOf(e) }.distinctBy { it.id }
             val eventIds = events.mapTo(hashSetOf()) { it.id }
             val reminders = readIds(eventIds, reminderDao::forItems)
             val files = readIds(eventIds, attachmentDao::forItems).map { it.fileName }.toMutableList()
-            events.forEach { itemDao.delete(it) }
             val tasks = mutableListOf<PlannerTask>()
             var next = made.taskId
             while (next != null && tasks.size < 1000) { val t = taskDao.byId(next) ?: break; tasks += t; next = t.nextTaskId }
             val goneIds = tasks.mapTo(hashSetOf()) { it.id }
+            if (events.isNotEmpty() || tasks.isNotEmpty()) archive(PendingDeletion(items = events,
+                attachments = readIds(eventIds, attachmentDao::forItems).sortedBy { it.id }, reminders = reminders.sortedBy { it.id },
+                tasks = tasks), archived, if (events.isEmpty()) emptyList() else null)
+            events.forEach { itemDao.delete(it) }
             tasks.forEach { files += it.attachments.map { a -> a.fileName }; taskDao.delete(it.id) }
             val unblocked = taskDao.all().filter { t -> t.prerequisiteIds.any { it in goneIds } }
                 .onEach { taskDao.update(it.copy(prerequisiteIds = it.prerequisiteIds - goneIds)) }
