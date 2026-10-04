@@ -26,4 +26,55 @@ class BugReportTest {
         assertTrue(body.contains("Last crash:")); assertTrue(body.contains("Frame1("))
         assertTrue(body.contains("…"))
     }
+
+    // SR-2: the preview is what the link sends; a cut crash keeps its root cause and says so.
+    @Test fun thePreviewIsWhatTheLinkSends() {
+        val crash = "Planner 0.0.16\njava.lang.RuntimeException: wrapped\n" +
+            (1..2_000).joinToString("\n") { "    at com.example.Frame$it(Frame.kt:$it)" } + "\nCaused by: java.io.IOException: root\n    at x.Y(Y.kt:1)"
+        val r = BugReport.report("Crashed on save", "0.0.16", "15", "Pixel", crash)
+        assertTrue(r.url.length <= BugReport.MAX_URL)
+        assertEquals(r.body, query(r.url, "body"))
+        assertTrue(r.crashCut); assertFalse(r.crashLeftOut); assertFalse(r.descriptionCut)
+        assertTrue(r.body.contains("Frame1(")); assertTrue(r.body.contains("…\nCaused by: java.io.IOException: root"))
+        val short = BugReport.report("Crashed", "0.0.16", "15", "Pixel", "Planner 0.0.16\nboom")
+        assertFalse(short.crashCut); assertFalse(short.crashLeftOut); assertTrue(short.body.endsWith("boom\n```"))
+    }
+
+    // SR-2, SR-3: with a long non-Latin text the crash goes first, then the text itself is cut to fit; both are said.
+    @Test fun aLongNonLatinTextStillFitsTheLink() {
+        val crash = (1..200).joinToString("\n") { "    at com.example.Frame$it(Frame.kt:$it)" }
+        for (text in listOf("Привет мир ".repeat(273), "😀".repeat(1_500))) {
+            val r = BugReport.report(text, "0.0.16", "15", "Pixel", crash)
+            assertTrue(r.url.length <= BugReport.MAX_URL)
+            assertEquals(r.body, query(r.url, "body"))
+            assertFalse(r.body.contains("Last crash:"))
+            assertTrue(r.crashLeftOut)
+            assertFalse(query(r.url, "body").contains('?'))
+        }
+        val emoji = BugReport.report("😀".repeat(1_500), "0.0.16", "15", "Pixel", null)
+        assertTrue(emoji.descriptionCut); assertFalse(emoji.crashLeftOut)
+        assertTrue(emoji.body.startsWith("😀")); assertTrue(emoji.body.contains("…\n\n---\nPlanner"))
+    }
+
+    // SR-3: a cut never splits an emoji (its half would go in the link as "?").
+    @Test fun cutsKeepWholeCharacters() {
+        assertEquals("a", "a😀".takeWhole(2))
+        assertEquals("a😀", "a😀".takeWhole(3))
+        assertEquals("", "😀".takeWhole(1))
+        assertEquals(79, BugReport.title("a" + "😀".repeat(100)).length)
+    }
+
+    // SR-6: a crash caused by a failed lookup (offline) keeps its trace; Log.getStackTraceString gave "" for it.
+    @Test fun anOfflineCrashKeepsItsTrace() {
+        val dir = kotlin.io.path.createTempDirectory("crash").toFile()
+        try {
+            val log = CrashLog(dir)
+            log.write(1_000L, "0.0.16 (23)", IllegalStateException("sync", java.net.UnknownHostException("cloud.example")))
+            val crash = log.read()!!
+            assertEquals(1_000L, crash.at)
+            assertTrue(crash.text.startsWith("Planner 0.0.16 (23)\njava.lang.IllegalStateException: sync"))
+            assertTrue(crash.text.contains("Caused by: java.net.UnknownHostException"))
+            log.clear(); assertNull(log.read())
+        } finally { dir.deleteRecursively() }
+    }
 }

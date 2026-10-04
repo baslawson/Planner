@@ -108,13 +108,18 @@ class ItineraryApp : Application() {
 
     val nextcloudBackups: NextcloudBackups by lazy { NextcloudBackups(this, backup, client = com.example.itinerary.data.NextcloudClient(http)) }
 
-    override fun onCreate() {
-        super.onCreate()
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
         // Wish list #6: the last crash is kept on this phone for a bug report (only sent if the person chooses). Before the
-        // first unlock the app's files can't be written, so a crash then isn't kept.
+        // first unlock the app's files can't be written, so a crash then isn't kept. Installed here, not in onCreate, so a
+        // crash while the app's content providers start (WorkManager's among them) is kept too (SR-8).
         com.example.itinerary.data.CrashLog.install(filesDir) {
             runCatching { packageManager.getPackageInfo(packageName, 0).let { "${it.versionName} (${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(it)})" } }.getOrDefault("?")
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
         createReminderChannel(this)
         // RB-3: started by a reminder or the boot before the phone is first unlocked, the app's own storage (settings,
         // database) can't be read yet, so the rest waits for the unlock.

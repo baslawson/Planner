@@ -17,4 +17,7 @@
          updates: a download made on this phone (its file isn't carried over). -->
     <exclude domain="sharedpref" path="support_prompt.xml" />
     <exclude domain="sharedpref" path="updates.xml" />
+    <!-- SR-5: the last crash (data/BugReport CrashLog) is this phone's, for its own bug report; another phone, or a later
+         version, would offer it as its own. -->
+    <exclude domain="file" path="last-crash.txt" />
 </full-backup-content>
