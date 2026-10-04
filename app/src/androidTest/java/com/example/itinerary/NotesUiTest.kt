@@ -352,6 +352,42 @@ class NotesUiTest {
             assertEquals("typed in the first window", NoteDraftStore(context).read(firstId)?.note?.content)
             assertTrue("the first window's editor is still open", NoteDraftStore.isOpen(firstId))
         } finally { ins.runOnMainSync { second.finish() } }
+        // Its draft goes the usual way, so no later test finds it (NT-2: a window that has gone leaves its drafts to the next).
+        await { find("QA first window") != null }
+        click("Close"); click("Discard")
+        await { NoteDraftStore(context).readAll().isEmpty() }
+    }
+
+    // Bug hunt #8 NT-1 / NT-2: a second window (a share in the mail app's task) edits a saved note and goes (its task swiped
+    // away) while Planner runs on. The first window then opens that note with the typed text, not as stored, and only its
+    // Discard removes the draft.
+    @Test fun aNoteTypedInAWindowThatWentOpensWithItsDraft() {
+        runBlocking { app.repository.saveNote(PlannerNote(title = "QA shared note", content = "as stored"), create = true) }
+        val id = notes().single().id
+        try {
+            openNotes()
+            await { find("QA shared note") != null }
+            val second = ins.startActivitySync(Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
+            try {
+                await { find("AGENDA") != null }
+                click("More options"); click("Notes")
+                click("QA shared note"); await { find("Edit note") != null }
+                click("Edit"); type(1, "typed in the second window")
+                await { NoteDraftStore(context).read(id)?.note?.content == "typed in the second window" }
+            } finally { ins.runOnMainSync { second.finish() } }
+            await { !NoteDraftStore.isOpen(id) }
+            // NT-2: back in the first window the draft reopens by itself; else its card opens it (NT-1).
+            Thread.sleep(1500)
+            if (find("Recovered unsaved changes. Save them, or Close and Discard.") == null) click("QA shared note")
+            await { find("Recovered unsaved changes. Save them, or Close and Discard.") != null && noteText() == "typed in the second window" }
+            screenshot("draft-of-a-window-that-went")
+            assertNull(find("A note in another Planner window has unsaved changes"))
+            click("Close"); await { find("Save changes?") != null }
+            click("Discard")
+            await { find("Search notes") != null && NoteDraftStore(context).read(id) == null }
+            assertEquals("as stored", notes().single().content)
+        } finally { NoteDraftStore(context).clearAll() }
     }
 
     @Test fun gridLooksInTheDarkTheme() {
