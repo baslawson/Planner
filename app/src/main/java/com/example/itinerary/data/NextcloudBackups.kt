@@ -30,11 +30,13 @@ class NextcloudBackups(
 
     suspend fun list(account: NextcloudAccount): List<NextcloudBackup> = withContext(Dispatchers.IO) { client.list(account) }
 
-    suspend fun upload(account: NextcloudAccount): NextcloudAccount = backup.status.track("Nextcloud") { withContext(Dispatchers.IO) {
+    // [cancel] (S6-1): Cancel in the pop-up; nothing is uploaded once it is pressed before the upload starts.
+    suspend fun upload(account: NextcloudAccount, cancel: BackupTransfer? = null): NextcloudAccount = backup.status.track("Nextcloud") { withContext(Dispatchers.IO) {
         val file = File.createTempFile("nextcloud-export-", ".zip", context.cacheDir)
         try {
             backup.export(Uri.fromFile(file), trackStatus = false)
-            client.upload(account, file)
+            cancel?.check()
+            client.upload(account, file, cancel)
             val updated = account.backedUpAt(Instant.now().toString())
             // The upload is successful even if recording its time on the device fails.
             runCatching { store.save(updated) }
@@ -44,11 +46,14 @@ class NextcloudBackups(
         }
     } }
 
-    suspend fun stage(account: NextcloudAccount, remote: NextcloudBackup): StagedBackup = withContext(Dispatchers.IO) {
+    // [cancel] (S6-1): after Cancel nothing is kept, not even a backup already checked, so no restore is offered.
+    suspend fun stage(account: NextcloudAccount, remote: NextcloudBackup, cancel: BackupTransfer? = null): StagedBackup = withContext(Dispatchers.IO) {
         val file = File.createTempFile("nextcloud-download-", ".zip", context.cacheDir)
         try {
-            client.download(account, remote, file)
-            backup.stage(Uri.fromFile(file))
+            client.download(account, remote, file, cancel)
+            backup.stage(Uri.fromFile(file)).also { staged ->
+                if (cancel != null && cancel.cancelled) { backup.discard(staged); cancel.check() }
+            }
         } finally {
             file.delete()
         }
