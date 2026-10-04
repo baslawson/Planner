@@ -52,6 +52,8 @@ object BillSuggestions {
     // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP").
     private val number = "[0-9](?:[0-9.,]*[0-9])?"
     private val looseMoney = Regex("(?i)(?<![A-Za-z])(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)(?![A-Za-z])")
+    // Things counted under a "total": "Items in total: 3" (SQ8-8).
+    private val countWord = Regex("(?i)\\b(?:items?|articles?|pieces?|units?|products?|parcels?|packages?|tickets?|guests?|people|persons?|qty|quantity)\\b")
     private fun looseAmount(text: String): Long? = when {
         Regex("[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(",", ""))
         Regex("[0-9]{1,3}(?:\\.[0-9]{3})+(?:,[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(".", ""))
@@ -76,9 +78,16 @@ object BillSuggestions {
             // A labelled count without a currency ("Items in total: 3") gives way to an amount with one (SH-6): a whole
             // number written without cents, below every amount with a currency. A total without a currency ("Total:
             // 120.00", "Total: 120") stays, whatever fee or earlier amount the text also names (SQ-1). A labelled due date
-            // already past isn't this bill's next one (SH-7).
+            // already past isn't this bill's next one (SH-7). Only under a plain "total", with a word for things counted on
+            // its line or below 10: "Amount due: 85" or "Total: 85" beside a credit limit or last balance is the amount (SQ8-8).
             val count = l.currency == null && amounts.isNotEmpty() && l.amount != null && amounts.all { it > l.amount } &&
-                values(lines(text), amountLabel).any { it.matches(Regex("[0-9]{1,9}")) && Bills.parse(it) == l.amount }
+                lines(text).let { all -> all.indices.any { i ->
+                    val label = amountLabel.find(all[i]) ?: return@any false
+                    val value = all[i].substring(label.range.last + 1).trim().ifEmpty { all.getOrNull(i + 1).orEmpty() }
+                    label.value.trim().trimEnd(':', '=', '-').trim().equals("total", ignoreCase = true) &&
+                        value.matches(Regex("[0-9]{1,9}")) && Bills.parse(value) == l.amount &&
+                        (l.amount < 1_000 || countWord.containsMatchIn(all[i]))
+                } }
             l.copy(amount = l.amount.takeUnless { count }, date = l.date?.takeUnless { today != null && it.isBefore(today) })
         }
         val amount = labelled.amount ?: amounts.singleOrNull()
