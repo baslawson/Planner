@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -112,6 +114,8 @@ fun OverlayMenuAnchor(title: String, items: @Composable ColumnScope.(close: () -
 /** The ⋮ menu in the Agenda and Calendar top bars. */
 @Composable
 fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit, onNotes: () -> Unit) {
+    var reporting by rememberSaveable { mutableStateOf(false) }
+    if (reporting) ReportBugDialog { reporting = false }
     OverlayMenuAnchor(title = "More options", items = { close ->
         DropdownMenuItem(text = { Text("Notes") },
             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
@@ -125,6 +129,9 @@ fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, o
             onClick = { close(); onSettings() })
         HorizontalDivider()
         val context = androidx.compose.ui.platform.LocalContext.current
+        DropdownMenuItem(text = { Text("Report a bug") },
+            leadingIcon = { Icon(Icons.Filled.Warning, contentDescription = null) },
+            onClick = { close(); reporting = true })
         DropdownMenuItem(text = { Text("Support Planner on Ko-fi") },
             leadingIcon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
             onClick = {

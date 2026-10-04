@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -235,6 +236,12 @@ fun SettingsScreen(
                     )
                     StackedButton("Open app settings") { openAppSettings(context) }
                     UpdatesSettingsSection()
+                    SettingsHeading("Help")
+                    Text("Something not working? Report it on Planner's GitHub. You see exactly what is sent first.",
+                        style = MaterialTheme.typography.bodySmall)
+                    var reporting by rememberSaveable { mutableStateOf(false) }
+                    StackedButton("Report a bug") { reporting = true }
+                    if (reporting) ReportBugDialog { reporting = false }
                 }
             }
         }

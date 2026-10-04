@@ -110,6 +110,11 @@ class ItineraryApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Wish list #6: the last crash is kept on this phone for a bug report (only sent if the person chooses). Before the
+        // first unlock the app's files can't be written, so a crash then isn't kept.
+        com.example.itinerary.data.CrashLog.install(filesDir) {
+            runCatching { packageManager.getPackageInfo(packageName, 0).let { "${it.versionName} (${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(it)})" } }.getOrDefault("?")
+        }
         createReminderChannel(this)
         // RB-3: started by a reminder or the boot before the phone is first unlocked, the app's own storage (settings,
         // database) can't be read yet, so the rest waits for the unlock.
