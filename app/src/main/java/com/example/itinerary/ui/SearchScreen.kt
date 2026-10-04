@@ -73,7 +73,7 @@ internal fun shownOutcome(request: SearchRequest, last: Pair<SearchRequest, Sear
 internal fun rememberSearchOutcome(
     query: String,
     categories: Set<String>,
-    index: Search.Index,
+    index: Search.Index?,
     today: LocalDate = rememberCurrentDate(),
 ): SearchOutcome {
     val request = SearchRequest(query, categories, today)
@@ -81,6 +81,8 @@ internal fun rememberSearchOutcome(
     // Restarted (the old run cancelled) whenever the request or the index changes, so a slow obsolete result can never
     // replace a newer one.
     LaunchedEffect(request, index) {
+        // Not read yet: still loading, not "no results" (AS-3).
+        if (index == null) return@LaunchedEffect
         val result = withContext(Dispatchers.Default) {
             val workerContext = coroutineContext
             index.run(query, categories, today) { workerContext.ensureActive() }

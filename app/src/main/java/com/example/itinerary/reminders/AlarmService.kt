@@ -26,7 +26,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.itinerary.ItineraryApp
-import com.example.itinerary.MainActivity
 import com.example.itinerary.R
 import java.time.LocalDate
 import java.time.LocalTime
@@ -85,6 +84,9 @@ class AlarmService : Service() {
         ringingSince = SystemClock.elapsedRealtime()
         stopToken = RingToken.new()
 
+        // AS-7: read before the notification is built (an unlock is for good), so an unlock landing in between still
+        // gets its rebuild below.
+        val builtLocked = !DirectBoot.isUnlocked(this)
         // Must be called promptly after startForegroundService, even if there is nothing to ring for.
         ServiceCompat.startForeground(
             this,
@@ -100,7 +102,7 @@ class AlarmService : Service() {
         }
         // R6-5: started before the first unlock, Mark paid may be left out (addDataAction, Android 11 and lower). Once
         // unlocked, the notification is built again with it.
-        if (!DirectBoot.isUnlocked(this)) rebuildAtUnlock()
+        if (builtLocked) rebuildAtUnlock()
 
         // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
         // alarm long past that is left as missed.
@@ -321,8 +323,7 @@ class AlarmService : Service() {
         PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
-            Intent(this, MainActivity::class.java)
-                .addFlags(OPEN_PLANNER_FLAGS)
+            openPlannerIntent(this)
                 .putExtra(EXTRA_STOP_ALARM, token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

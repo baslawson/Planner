@@ -6,7 +6,7 @@
     A6-9: so do alarm_window (how far ahead this phone has set them) and app_lock (App lock is this phone's choice, see
     AppLock). delivered_alarms and reminder_zone go on purpose: they describe the restored reminders (which already rang,
     the zone their times were set in). support_prompt and updates stay too: a fresh install asks nothing, and a download
-    made here isn't carried over.
+    made here isn't carried over. SR-5: nor is last-crash.txt, this phone's last crash for its own bug report.
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -15,6 +15,7 @@
         <exclude domain="sharedpref" path="app_lock.xml" />
         <exclude domain="sharedpref" path="support_prompt.xml" />
         <exclude domain="sharedpref" path="updates.xml" />
+        <exclude domain="file" path="last-crash.txt" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="pending_alarms.xml" />
@@ -22,5 +23,6 @@
         <exclude domain="sharedpref" path="app_lock.xml" />
         <exclude domain="sharedpref" path="support_prompt.xml" />
         <exclude domain="sharedpref" path="updates.xml" />
+        <exclude domain="file" path="last-crash.txt" />
     </device-transfer>
 </data-extraction-rules>

@@ -92,4 +92,27 @@ class BackupTransferTest {
             .download(account, NextcloudBackup("Planner-backup-x.zip", null, null, null), target, BackupTransfer())
         assertArrayEquals(bytes, target.readBytes())
     }
+
+    // AS-1: the limit grows with the file, so a large backup on a modest link isn't refused every time.
+    @Test fun theLimitGrowsWithTheFile() {
+        val client = NextcloudClient(trusted)
+        assertEquals(TimeUnit.MINUTES.toMillis(30), client.transferLimitMs(null))
+        assertEquals(TimeUnit.MINUTES.toMillis(30) + 1000, client.transferLimitMs(32 * 1024))
+        // 2 GB of attachments: about 18 hours more at the slowest link it allows.
+        assertTrue(client.transferLimitMs(2L shl 30) > TimeUnit.HOURS.toMillis(18))
+        val slow = MockResponse().setBody(Buffer().write(bytes)).throttleBody(4 * 1024, 100, TimeUnit.MILLISECONDS) // about 1.6 s
+        server.enqueue(slow)
+        val target = File(folder, "download.zip")
+        NextcloudClient(trusted, transferTimeoutMs = 300, minBytesPerSecond = 16 * 1024)
+            .download(account, NextcloudBackup("Planner-backup-x.zip", bytes.size.toLong(), null, null), target, BackupTransfer())
+        assertArrayEquals(bytes, target.readBytes())
+        // The same file with no size listed has only the base limit.
+        server.enqueue(MockResponse().setBody(Buffer().write(bytes)).throttleBody(4 * 1024, 100, TimeUnit.MILLISECONDS))
+        val e = assertThrows(BackupException::class.java) {
+            NextcloudClient(trusted, transferTimeoutMs = 300, minBytesPerSecond = 16 * 1024)
+                .download(account, NextcloudBackup("Planner-backup-x.zip", null, null, null), target)
+        }
+        assertEquals(NextcloudClient.TOO_LONG, e.message)
+        assertFalse(target.exists())
+    }
 }

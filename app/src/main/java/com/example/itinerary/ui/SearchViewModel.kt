@@ -35,7 +35,8 @@ class SearchViewModel(
     val categoryCounts: StateFlow<Map<String, Int>> = categories.counts
     val hiddenCategories: StateFlow<Set<String>> = categories.hidden
 
-    val index: StateFlow<Search.Index> = combine(
+    // Null until the stored data has been read, so a restored selection isn't checked against nothing (AS-3).
+    val index: StateFlow<Search.Index?> = combine(
         repo.trips.distinctUntilChanged(),
         combine(repo.allItems.distinctUntilChanged(), outside) { own, other -> own to other.values.map { it.event.toItem(it.color) } },
         repo.allAttachments.distinctUntilChanged(),
@@ -47,5 +48,5 @@ class SearchViewModel(
         Search.prepare(trips + outsideTrip, items + other, attachments, tasks)
     }
         .flowOn(Dispatchers.Default)
-        .stateInWhileVisible(viewModelScope, Search.Index.EMPTY)
+        .stateInWhileVisible(viewModelScope, null)
 }

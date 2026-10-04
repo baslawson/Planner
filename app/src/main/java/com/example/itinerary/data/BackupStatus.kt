@@ -39,14 +39,23 @@ class BackupStatusStore(context: Context) {
             save(mutable.value.copy(lastSuccess = time, destination = "Nextcloud"))
     }
     suspend fun <T> track(destination: String, action: suspend () -> T): T {
-        save(mutable.value.copy(outcome = "RUNNING", attemptDestination = destination))
+        val before = mutable.value
+        save(before.copy(outcome = "RUNNING", attemptDestination = destination))
         return try {
             action().also { save(BackupStatus(Instant.now().toString(), destination, "SUCCESS", destination)) }
-        } catch (e: CancellationException) {
-            save(mutable.value.copy(outcome = "INTERRUPTED")); throw e
         } catch (e: Exception) {
-            // Stopped with Cancel (S6-1): not done, but nothing went wrong either.
-            save(mutable.value.copy(outcome = if (e is TransferCancelledException) "INTERRUPTED" else "FAILED")); throw e
+            save(mutable.value.afterFailure(before, e)); throw e
         }
     }
+}
+
+/**
+ * The status after a backup that didn't finish, from [before] it started. Stopped with Cancel (S6-1): nothing went
+ * wrong, so it is as before, not shown as a failed backup (AS-2). Ended with the app (a coroutine cancelled):
+ * interrupted. Anything else: failed.
+ */
+internal fun BackupStatus.afterFailure(before: BackupStatus, error: Exception): BackupStatus = when (error) {
+    is TransferCancelledException -> before
+    is CancellationException -> copy(outcome = "INTERRUPTED")
+    else -> copy(outcome = "FAILED")
 }

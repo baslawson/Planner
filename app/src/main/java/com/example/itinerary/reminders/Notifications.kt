@@ -26,7 +26,17 @@ private const val TEST_NOTIFICATION_ID = 0
 
 // A6-4: a notification tap opens Planner as the widget and shortcuts do: in its open window (onNewIntent), clearing
 // the App lock screen above it (MainActivity locks again on start), never as one more Planner window on top.
+// AS-6: accepted, the same as the widget's: it also ends a camera or file picker Planner opened in its own task (a photo
+// being framed is lost). The PendingIntent is made when the reminder posts, so it can't tell what will be on top then.
 internal const val OPEN_PLANNER_FLAGS = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+
+// Marks a notification tap, which opens Planner where it already was (Agenda on a fresh start), never on the chosen
+// start screen: that one is only for opening Planner itself (SR-1).
+internal const val EXTRA_FROM_NOTIFICATION = "from_notification"
+
+/** What tapping an event, task, missed-reminders or ringing-alarm notification opens. */
+internal fun openPlannerIntent(context: Context): Intent =
+    Intent(context, MainActivity::class.java).addFlags(OPEN_PLANNER_FLAGS).putExtra(EXTRA_FROM_NOTIFICATION, true)
 
 // Ringing alarms play their own looping sound from AlarmService, so the channel itself is silent.
 const val ALARM_CHANNEL_ID = "alarms"
@@ -106,7 +116,7 @@ fun postReminderNotification(
     val open = PendingIntent.getActivity(
         context,
         notificationId,
-        Intent(context, MainActivity::class.java).addFlags(OPEN_PLANNER_FLAGS),
+        openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)

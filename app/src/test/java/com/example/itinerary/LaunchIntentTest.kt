@@ -29,4 +29,13 @@ class LaunchIntentTest {
         assertFalse(opensCalendarFile("https"))
         assertFalse(opensCalendarFile(null))
     }
+    // SR-1: Open Planner on applies to opening Planner itself, not to a reminder or alarm tap after Android closed it.
+    @Test fun onlyAPlainStartOpensOnTheStartScreen() {
+        assertTrue(opensOnStartScreen(Intent.ACTION_MAIN, fromNotification = false))
+        assertTrue(opensOnStartScreen(null, fromNotification = false))
+        assertFalse(opensOnStartScreen(null, fromNotification = true))
+        assertFalse(opensOnStartScreen(Intent.ACTION_MAIN, fromNotification = true))
+        assertFalse(opensOnStartScreen(Intent.ACTION_SEND, fromNotification = false))
+        assertFalse(opensOnStartScreen(com.example.itinerary.widget.TodayWidget.OPEN_TODAY, fromNotification = false))
+    }
 }

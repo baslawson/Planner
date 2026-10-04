@@ -150,7 +150,9 @@ internal object Ics {
                         stack.subList(stack.lastIndexOf(component), stack.size).clear()
                     }
                     if (name == component) { require(current == null); current = mutableListOf(); broken = false }
-                    stack += name; justRead = false
+                    // AS-4: a raw "Begin:Lunch" after a raw "End:Vevent" is more of the same text, so the event just read
+                    // is still the one its real END:VEVENT skips.
+                    stack += name; if (name == component || name == "VCALENDAR") justRead = false
                 }
                 "END" -> {
                     val name = p.value.uppercase()

@@ -74,9 +74,15 @@ object LockedAlarmSelection {
         alarms.filter { it.trigger > now }.sortedBy { it.trigger }
             .filterIndexed { i, alarm -> i < MIN_KEPT || alarm.trigger <= now + HORIZON_MS }.take(MAX)
 
-    /** When a snapshot written at [now] from [alarms] is to be written again: null when it kept every alarm ahead. */
-    fun rewriteAt(alarms: Collection<LockedAlarm>, now: Long): Long? =
-        if (select(alarms, now).size < alarms.count { it.trigger > now }) now + REWRITE_AFTER_MS else null
+    /**
+     * When a snapshot written at [now] from [alarms] is to be written again: null when it kept every alarm ahead. AS-5:
+     * when [MAX] is what cut it short, no later than the last alarm it kept, which may be well within the two weeks.
+     */
+    fun rewriteAt(alarms: Collection<LockedAlarm>, now: Long): Long? {
+        val kept = select(alarms, now)
+        if (kept.size >= alarms.count { it.trigger > now }) return null
+        return if (kept.size == MAX) minOf(now + REWRITE_AFTER_MS, kept.last().trigger) else now + REWRITE_AFTER_MS
+    }
 }
 
 /**

@@ -134,7 +134,11 @@ class TripsViewModel(
         val account = cloudAccount ?: throw BackupException("Connect to Nextcloud first.")
         _stagedImport.value?.let(backup::discard)
         _stagedImport.value = null
-        _stagedImport.value = nextcloud.stage(account, file, transfer)
+        val staged = nextcloud.stage(account, file, transfer)
+        // AS-7: a Cancel that came after the download had finished (both on the main thread, so none falls in between)
+        // still offers nothing to restore.
+        if (transfer.cancelled) { backup.discard(staged); transfer.check() }
+        _stagedImport.value = staged
         null
     } }
 
