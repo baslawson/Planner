@@ -15,7 +15,11 @@ class BackupRulesTest {
     private fun org.w3c.dom.Element.children() = (0 until childNodes.length).map { childNodes.item(it) }.filterIsInstance<org.w3c.dom.Element>()
     private fun org.w3c.dom.Element.rules() = children().map { Triple(it.tagName, it.getAttribute("domain"), it.getAttribute("path")) }
     private val ledger = Triple("exclude", "sharedpref", "${AlarmLedger.PREFS}.xml")
-    private val leftOut = listOf(ledger, Triple("exclude", "sharedpref", "${com.example.itinerary.ui.SupportPrompt.PREFS}.xml"),
+    // A6-9: also how far ahead this phone set its alarms, and App lock (this phone's choice). Which reminders already
+    // rang (delivered_alarms) and their zone (reminder_zone) go with the restored data on purpose.
+    private val leftOut = listOf(ledger, Triple("exclude", "sharedpref", "alarm_window.xml"),
+        Triple("exclude", "sharedpref", "${com.example.itinerary.ui.AppLock.PREFS}.xml"),
+        Triple("exclude", "sharedpref", "${com.example.itinerary.ui.SupportPrompt.PREFS}.xml"),
         Triple("exclude", "sharedpref", "updates.xml"))
 
     @Test fun theManifestUsesBothRuleFiles() {
