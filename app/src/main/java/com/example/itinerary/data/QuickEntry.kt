@@ -194,15 +194,16 @@ object QuickEntry {
     private val durationParts = rx("($amount)\\s*($hours|$minutes)(?![a-z])")
     private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)")
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
-    // A full stop alone is no number: "for Tuesday 13 October at 2pm." ends a sentence (Q6-1).
-    private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-.]*\\d[-\\d.]*|$countWords|half|a quarter))?\\s*$")
+    // A full stop alone is no number: "for Tuesday 13 October at 2pm." ends a sentence (Q6-1). Nor is one after a number:
+    // "Book a table for 4." is a party size at a sentence end, read as "for 4" (SQ-7).
+    private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-.]*\\d(?:[-\\d.]*\\d)?\\.*|$countWords|half|a quarter))?\\s*$")
     // "Table for 4 Saturday", "Dinner for two Friday": a whole number after "for", with the when after it, is how many people:
     // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed,
     // unless a booking or meal word comes before it ("Dinner tonight for two").
     // Only 1–20: a larger number ("Study for 45 Monday") may be a length still missing its unit, so it keeps asking. 10–20 as
     // digits only after a booking or meal word ("Party for 20", "BBQ for 12"): "Practice for 15 tomorrow" may be minutes.
-    private val partySize = rx("for\\s+(?:[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s*")
-    private val largePartySize = rx("for\\s+(?:1\\d|20)\\s*")
+    private val partySize = rx("for\\s+(?:[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\.*\\s*")
+    private val largePartySize = rx("for\\s+(?:1\\d|20)\\.*\\s*")
     private val bookingWord = rx("\\b(?:table|booking|book|reservation|reserve|restaurant|dinner|lunch|breakfast|brunch|party|bbq|barbecue|catering|cook|pizza|tickets?)\\s+$")
     private val quote = Regex("\"[^\"]*\"")
     private val at = rx(atWord)
@@ -669,6 +670,11 @@ object QuickEntry {
             if (oneMonth && day(if (g[4].isNotEmpty()) g[4] else g[10]).toInt() < day(if (g[4].isNotEmpty()) g[1] else g[8]).toInt())
                 return error("End the date range after it starts.")
             val hasYear = re("\\d{4}").containsMatchIn(match.value)
+            // "20 Oct to 10 Oct", "20 Nov to 10 Oct": written backwards, not a stay of most of a year (nor one that began
+            // last year, SQ-14). Across New Year ("28 Dec – 3 Jan") a range without a year is a short one.
+            if (!hasYear && g[12].isEmpty() && java.time.MonthDay.from(end) < java.time.MonthDay.from(start) &&
+                java.time.temporal.ChronoUnit.DAYS.between(start, end.withYear(start.year).let { if (it <= start) it.plusYears(1) else it }) > 182)
+                return error("End the date range after it starts.")
             // "28 Dec – 3 Jan 2027": a year on the end only, across New Year, starts the range the year before.
             val endYearOnly = g[4].isNotEmpty() && g[3].isEmpty() && g[6].isNotEmpty() || g[7].isNotEmpty() && g[11].isNotEmpty()
             if (endYearOnly && start.monthValue > end.monthValue) start = start.minusYears(1)
@@ -852,8 +858,8 @@ object QuickEntry {
             found.firstOrNull()?.let { match ->
                 val said = match.groupValues[1].ifEmpty { match.groupValues[2] }.lowercase(Locale.ROOT)
                 val pair = re("\\d+").findAll(said).map { it.value.toDouble() }.toList().takeIf { it.size == 2 }
-                // "3-2 nights": a range written backwards is asked about rather than read (Q6-13).
-                if (pair != null && pair[0] >= pair[1]) return error("Write the shorter stay first, for example 2-3 nights.")
+                // "3-2 nights": a range written backwards is asked about rather than read (Q6-13); "3-3 nights" is 3 (SQ-10).
+                if (pair != null && pair[0] > pair[1]) return error("Write the shorter stay first, for example 2-3 nights.")
                 val count = pair?.max() ?: readAmount(said)
                 if (!count.isFinite() || count % 1 != 0.0 || count < 1 || count + 1 > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS - 1} nights.")
@@ -1235,10 +1241,10 @@ object QuickEntry {
         // "Brekkie Sunday 9", "Gym every Monday 6": an hour right after the date or a weekday repeat, when nothing else follows
         // but schedule words. Not after "daily": "Pills daily 2" may be a count.
         val bareHour = if (rs.isNotEmpty() || timePrompt != null || endOfDaySaid || times.containsMatchIn(remaining)) null
-            else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:./-])").findAll(remaining).firstOrNull { m ->
+            else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:/-]|\\.[\\w.:/-])").findAll(remaining).firstOrNull { m ->
                 m.value.toInt() in 1..12 &&
                     phrases.any { (it.kind == QuickPhraseKind.DATE || it.kind == QuickPhraseKind.REPEAT && rx("(?:$weekdays|$pluralWeekdays)$").containsMatchIn(text.substring(it.start, it.end))) && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(re("[\\s,]*")) } &&
-                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("\\s*[!?]+\\s*")) ||
+                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("\\s*[!?.]+\\s*")) ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
         var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
@@ -1390,9 +1396,11 @@ object QuickEntry {
         val gone = BooleanArray(text.length).also { flags -> consumed.forEach { r -> r.forEach { if (it in flags.indices) flags[it] = true } } }
         var title = text.indices.filter { !gone[it] || it == 0 || !gone[it - 1] }.joinToString("") { if (gone[it]) "\uE002" else text[it].toString() }
             // Punctuation the removed phrase ended with: dropped at the end ("Bins tonight!"), else kept on the word before
-            // ("Call Mum tomorrow. Ask about Xmas").
-            .replace(re("^\\s*\uE002\\s*[!?.]+(?=\\s|$)"), "").replace(re("\\s*\uE002\\s*[!?.]+(?=\\s*$)"), "")
-            .replace(re("(?<=\\S)\\s*\uE002\\s*([!?.]+)(?=\\s)"), "$1")
+            // ("Call Mum tomorrow. Ask about Xmas"). Removed phrases side by side count as one, and only removed phrases
+            // after it are still the end: "Meet Friday at 5. Bring wine", "Coffee at 5. Friday" (SQ-9).
+            .replace(re("\uE002(?:\\s+\uE002)+"), "\uE002")
+            .replace(re("^\\s*\uE002\\s*[!?.]+(?=\\s|$)"), "").replace(re("\\s*\uE002\\s*[!?.]+(?=[\\s\uE002]*$)"), "")
+            .replace(re("(?<=\\S)\\s*\uE002\\s*([!?.]+)(?=\\s|\\p{Lu})"), "$1")
             .replace('\uE002', ' ')
         // "Book 2night club", "Watch tonight show": a part of the day before a word that names a show or club may be part of
         // the title. A task then asks rather than take it silently as the due day; see quickProblem. Other words after it
