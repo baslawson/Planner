@@ -12,15 +12,17 @@ object BillSuggestions {
     private val amountLabel = Regex("(?i)\\b(?:total\\s+amount\\s+due|amount\\s+due|balance\\s+due|total\\s+due|grand\\s+total|total)\\b\\s*[:=-]?\\s*")
     private val dueLabel = Regex("(?i)\\b(?:payment\\s+due(?:\\s+date)?|due\\s+date|pay\\s+by|due\\s+by|due)\\b\\s*[:=-]?\\s*")
     private val money = Regex("(?i)^(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s*)?([£€$])?\\s*([0-9]{1,9}(?:\\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?)(?:\\s*(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR))?$")
-    fun parse(text: String): BillSuggestion {
-        val lines = text.take(200_000).lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        fun values(label: Regex): List<String> = lines.mapIndexedNotNull { i, line ->
-            if (label == dueLabel && amountLabel.containsMatchIn(line)) return@mapIndexedNotNull null
-            label.find(line)?.let {
+    private fun lines(text: String) = text.take(200_000).lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+    private fun values(lines: List<String>, label: Regex): List<String> = lines.mapIndexedNotNull { i, line ->
+        if (label == dueLabel && amountLabel.containsMatchIn(line)) return@mapIndexedNotNull null
+        label.find(line)?.let {
             line.substring(it.range.last + 1).trim().ifEmpty { lines.getOrNull(i + 1).orEmpty() }
-        } }
-        val amountValues = values(amountLabel)
-        val dateValues = values(dueLabel)
+        }
+    }
+    fun parse(text: String): BillSuggestion {
+        val lines = lines(text)
+        val amountValues = values(lines, amountLabel)
+        val dateValues = values(lines, dueLabel)
         val amounts = amountValues.mapNotNull { value -> money.matchEntire(value)?.let { match ->
             val amount = Bills.parse(match.groupValues[3].replace(",", "")) ?: return@let null
             val code = match.groupValues[1].ifEmpty { match.groupValues[4] }.uppercase(Locale.ROOT).ifEmpty {
@@ -61,12 +63,6 @@ object BillSuggestions {
      * and [due], the one day the email names ([SharedDates]). Several different amounts are left for the person.
      */
     fun parseMessage(text: String, due: LocalDate?, today: LocalDate? = null): BillSuggestion {
-        val labelled = parse(text).let { l ->
-            // A labelled number without a currency ("Items in total: 3") gives way to an amount with one (SH-6); a labelled
-            // due date already past isn't this bill's next one (SH-7).
-            l.copy(amount = l.amount.takeIf { l.currency != null || !looseMoney.containsMatchIn(text) },
-                date = l.date?.takeUnless { today != null && it.isBefore(today) })
-        }
         val loose = looseMoney.findAll(text.take(200_000)).mapNotNull { m ->
             val g = m.groupValues
             val amount = looseAmount(g[2].ifEmpty { g[4] }.ifEmpty { g[5] }) ?: return@mapNotNull null
@@ -76,6 +72,15 @@ object BillSuggestions {
             amount to code
         }.toList()
         val amounts = loose.map { it.first }.distinct()
+        val labelled = parse(text).let { l ->
+            // A labelled count without a currency ("Items in total: 3") gives way to an amount with one (SH-6): a whole
+            // number written without cents, below every amount with a currency. A total without a currency ("Total:
+            // 120.00", "Total: 120") stays, whatever fee or earlier amount the text also names (SQ-1). A labelled due date
+            // already past isn't this bill's next one (SH-7).
+            val count = l.currency == null && amounts.isNotEmpty() && l.amount != null && amounts.all { it > l.amount } &&
+                values(lines(text), amountLabel).any { it.matches(Regex("[0-9]{1,9}")) && Bills.parse(it) == l.amount }
+            l.copy(amount = l.amount.takeUnless { count }, date = l.date?.takeUnless { today != null && it.isBefore(today) })
+        }
         val amount = labelled.amount ?: amounts.singleOrNull()
         val currency = if (labelled.amount != null) labelled.currency
             else loose.filter { it.first == amount }.mapNotNull { it.second }.distinct().singleOrNull()

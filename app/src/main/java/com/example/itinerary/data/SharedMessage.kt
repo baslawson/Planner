@@ -13,9 +13,17 @@ object EmailHeaders {
     data class Parsed(val subject: String?, val from: String, val body: String)
 
     private val header = Regex("^([^:\\s][^:]{0,39}):[ \\t]*(.*)$")
-    private val address = Regex("[^\\s<>@,;]+@[^\\s<>@,;]+\\.[^\\s<>@,;]+")
-    // Thunderbird's sent date, in any of its formats: a year and a clock time.
-    private val sentDate = Regex("(?:19|20)\\d\\d.*\\d{1,2}[:.]\\d\\d|\\d{1,2}[:.]\\d\\d.*(?:19|20)\\d\\d")
+    private const val ADDRESS = "[^\\s<>@,;]+@[^\\s<>@,;]+\\.[^\\s<>@,;]+"
+    // "Name <address>", "\"Doe, Jane\" <address>" or the address alone.
+    private const val ONE_ADDRESS = "(?:(?:\"[^\"]*\"|[^<>,;\"])*<$ADDRESS>|$ADDRESS)"
+    // Thunderbird's sent date, in any of its formats: a year and a clock time, the year in two digits too ("01.10.26, 14:30",
+    // SQ-12).
+    private val sentDate = Regex("(?:19|20)\\d\\d.*\\d{1,2}[:.]\\d\\d|\\d{1,2}[:.]\\d\\d.*(?:19|20)\\d\\d|" +
+        "\\b\\d{1,2}[./-]\\d{1,2}[./-]\\d{2}\\b.*\\b\\d{1,2}[:.]\\d\\d\\b")
+    // A header's addresses: "Name <a@b.c>" or a bare address, one or a list. "Subject: Meet sam@example.com" isn't one (SQ-13).
+    private val addressValue = Regex("^$ONE_ADDRESS(?:\\s*[,;]\\s*$ONE_ADDRESS)*$")
+    private val emailHeaderShape = Regex("<$ADDRESS>|[,;]")
+    private val contactLabel = Regex("mail", RegexOption.IGNORE_CASE)
 
     /** The headers and body of [text], or null when it doesn't start with an email's header block. */
     fun read(text: String): Parsed? {
@@ -27,10 +35,15 @@ object EmailHeaders {
         for (line in lines.take(blank)) {
             if (line.first().isWhitespace() && block.isNotEmpty()) block[block.size - 1] += " " + line.trim() else block += line.trim()
         }
-        val values = block.map { header.matchEntire(it)?.groupValues?.get(2)?.trim() ?: return null }
-        // From, To and Cc: the trailing run of lines with an address (SH-1: one address is a contact card, not an email).
-        val from = values.indices.reversed().takeWhile { address.containsMatchIn(values[it]) }.lastOrNull() ?: return null
+        val matches = block.map { header.matchEntire(it) ?: return null }
+        val values = matches.map { it.groupValues[2].trim() }
+        // From, To and Cc: the trailing run of lines that are addresses (SH-1: one address is a contact card, not an email).
+        val from = values.indices.reversed().takeWhile { addressValue.matches(values[it]) }.lastOrNull() ?: return null
         if (values.size - from < 2 || from > 2) return null
+        // SQ-13: a contact card's "Email: … / Work email: …" is no header block: an email has a "Name <address>" or a list,
+        // and no label naming mail.
+        val run = from until values.size
+        if (run.none { emailHeaderShape.containsMatchIn(values[it]) } && run.any { contactLabel.containsMatchIn(matches[it].groupValues[1]) }) return null
         val subject = when (from) {
             2 -> values[0]
             // One line before From: the subject, unless it is the sent date (a message without a subject, SH-2).
@@ -40,22 +53,63 @@ object EmailHeaders {
         return Parsed(subject, block[from], lines.drop(blank + 1).joinToString("\n").trim())
     }
 
-    private val quoteIntro = Regex("^\\s*(?:-{2,}\\s*Original Message\\s*-{2,}|_{5,}|On .{1,200} wrote:)\\s*$", RegexOption.IGNORE_CASE)
+    // An earlier message quoted without ">": "-----Original Message-----", a line of underscores, or "… wrote:" in a
+    // mail app's language (SH-4, SQ-4).
+    private val quoteIntro = Regex("^\\s*(?:-{2,}\\s*Original Message\\s*-{2,}|_{5,})\\s*$", RegexOption.IGNORE_CASE)
+    // With a date in it ("Am 30.09.2026 um 10:00 schrieb Jo:"), or Gmail's "On … wrote:": "Sam wrote:" alone may be the
+    // person quoting a line into their own message.
+    private val wroteIntro = Regex("^(?=.*\\d).{0,200}\\b(?:wrote|writes|schrieb|a écrit|escribió|escribio|scrisse|ha scritto|schreef|skrev|" +
+        "kirjoitti|napisał|napisal|escreveu|написал|написала)\\s*:\\s*$|^\\s*On .{1,200} wrote:\\s*$", RegexOption.IGNORE_CASE)
     private val signature = Regex("^(?:-- ?|Sent from my .*|Get Outlook for .*)$")
+    // Outlook's header block above a forwarded or quoted message, no ">" (SQ-4): From, To and Subject among a few lines
+    // of "Label: value", labels in a mail app's language. A travel plan's "From: … To: …" has no Subject.
+    private val headerLine = Regex("^\\s*\\*?([\\p{L}][\\p{L} .-]{0,24}?)\\*?\\s*:\\*?\\s*\\S.*$")
+    private val fromLabel = Regex("from|von|de|van|da|fra|från|od|от", RegexOption.IGNORE_CASE)
+    private val toLabel = Regex("to|an|à|a|aan|para|til|till|do|кому", RegexOption.IGNORE_CASE)
+    private val subjectLabel = Regex("subject|betreff|objet|onderwerp|asunto|oggetto|assunto|emne|ämne|temat|aihe|тема", RegexOption.IGNORE_CASE)
+    // A name on its own line under a sign-off: "Sam", "Jo van Dijk", "Dr. A. Smith".
+    private val nameLine = Regex("^\\s*\\p{Lu}[\\p{L}'.-]*(?:\\s+[\\p{L}'.-]+){0,3}\\s*$")
+    // A sign-off on its own line, the signature block under it (SQ-5).
+    private val signOff = Regex("^\\s*(?:kind regards|best regards|warm regards|regards|many thanks|thanks|thank you|cheers|best|" +
+        "best wishes|all the best|groeten|met vriendelijke groet(?:en)?|vriendelijke groet(?:en)?|mit freundlichen grüßen|viele grüße|" +
+        "liebe grüße|cordialement|bien à vous|saludos|un saludo|atentamente|cordiali saluti|saluti|med vänlig hälsning|hälsningar|" +
+        "med venlig hilsen|hilsen|mvh)\\s*,?\\s*$", RegexOption.IGNORE_CASE)
+
+    private fun outlookHeaders(lines: List<String>, i: Int): Boolean {
+        val labels = lines.drop(i).take(6).takeWhile { headerLine.matches(it) }.map { headerLine.matchEntire(it)!!.groupValues[1].trim() }
+        return labels.firstOrNull()?.let(fromLabel::matches) == true && labels.any(toLabel::matches) && labels.any(subjectLabel::matches)
+    }
 
     /**
-     * The words of [body] that are the message itself: without a quoted earlier message (the "On … wrote:" line, any line
-     * before the first ">" line that ends in a colon, and what follows) or a signature ("-- "). Only these are read for a
-     * date: an earlier message's sent date or a signature's opening hours aren't this message's appointment (SH-4).
+     * The words of [body] that are the message itself. Left out: quoted lines (">") and the line introducing them; from an
+     * earlier message quoted without ">" ("… wrote:" with no ">" under it, "Original Message", Outlook's From/To/Subject
+     * block) onwards; and a signature ("-- ", or the lines under a sign-off such as "Kind regards"). The person's own lines
+     * between and after quoted ones are kept (SQ-3). Only these are read for a date: an earlier message's sent date or a
+     * signature's opening hours aren't this message's appointment (SH-4).
      */
     fun message(body: String): String {
-        val lines = body.replace("\r\n", "\n").lines()
-        val cut = lines.indices.firstOrNull { i ->
+        val lines = body.replace("\r\n", "\n").replace('\r', '\n').lines()
+        fun quoted(i: Int) = lines.getOrNull(i)?.trimStart()?.startsWith(">") == true
+        // The next line with words starts a quote: "On … wrote:", "Agenda:" before "> item one".
+        fun introducesQuote(i: Int) = lines[i].trimEnd().endsWith(":") &&
+            quoted((i + 1 until lines.size).firstOrNull { lines[it].isNotBlank() } ?: -1)
+        val kept = mutableListOf<String>()
+        for (i in lines.indices) {
             val line = lines[i]
-            line.trimStart().startsWith(">") || quoteIntro.matches(line) || signature.matches(line.trimEnd().let { if (it == "--") "-- " else it }) ||
-                line.trimEnd().endsWith(":") && lines.getOrNull(i + 1)?.trimStart()?.startsWith(">") == true
-        } ?: lines.size
-        return lines.take(cut).joinToString("\n").trim()
+            if (quoted(i) || introducesQuote(i)) continue
+            // A line ending in ":" with a year and a clock time introduces an earlier message in any language (SQ-4).
+            if (quoteIntro.matches(line) || wroteIntro.matches(line) || line.trimEnd().endsWith(":") && sentDate.containsMatchIn(line) ||
+                // Outlook's block under the person's own words; at the very top it is what was shared.
+                kept.any { it.isNotBlank() } && outlookHeaders(lines, i) ||
+                signature.matches(line.trimEnd().let { if (it == "--") "-- " else it })) break
+            // A sign-off after the message, then a name on its own line and a short block: the rest is the signature.
+            if (signOff.matches(line) && kept.any { it.isNotBlank() }) {
+                val rest = lines.drop(i + 1).filter { it.isNotBlank() && !it.trimStart().startsWith(">") }
+                if (rest.isNotEmpty() && rest.size <= 10 && nameLine.matches(rest.first())) break
+            }
+            kept += line
+        }
+        return kept.joinToString("\n").trim()
     }
 }
 
@@ -85,7 +139,10 @@ object SharedDates {
     private val until = Regex("\\b(?:until|till|til|through|thru|ends?|valid|expires?)\\b", RegexOption.IGNORE_CASE)
     // A full stop after these is no sentence end: "Oct. 12", "Mon. 12 Oct", "10 a.m. on Friday", "Dr. Smith" (Q6-7).
     private const val shortNames = "jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun"
-    private val abbreviation = Regex("(?:\\b(?:$shortNames|dr|mr|mrs|ms|st|no|approx|incl)|\\b[ap]\\.m|\\b[ap])$", RegexOption.IGNORE_CASE)
+    private val abbreviation = Regex("(?:\\b(?:dr|mr|mrs|ms|approx|incl)|\\b[ap]\\.m)$", RegexOption.IGNORE_CASE)
+    // These only before a number or a word in lower case ("Sat. 12", "No. 5", "a. m."): "on Sat. See you", "Plan A. Then",
+    // "5 Main St. The …" end a sentence (SQ-2).
+    private val shortBeforeNumber = Regex("\\b(?:$shortNames|st|no|[ap])$", RegexOption.IGNORE_CASE)
     // Quick entry reads "Oct 12" but not "Oct. 12".
     private val shortNameDot = Regex("\\b($shortNames)\\.(?=\\s)", RegexOption.IGNORE_CASE)
     private val sentenceEnd = Regex("[.!?]+\\s+")
@@ -97,15 +154,31 @@ object SharedDates {
         val parts = mutableListOf<String>()
         var start = 0
         for (end in sentenceEnd.findAll(line)) {
-            if (abbreviation.containsMatchIn(line.substring(start, end.range.first))) continue
+            val before = line.substring(start, end.range.first)
+            val next = line.getOrNull(end.range.last + 1)
+            if (abbreviation.containsMatchIn(before) ||
+                shortBeforeNumber.containsMatchIn(before) && next != null && (next.isDigit() || next.isLowerCase())) continue
             parts += line.substring(start, end.range.first + 1); start = end.range.last + 1
         }
         parts += line.substring(start)
         parts.flatMap { if (it.length > QuickEntry.MAX_LENGTH) it.split(Regex("[,;]\\s+")) else listOf(it) }
     }.map { it.trim() }.filter { it.length in 3..QuickEntry.MAX_LENGTH }
 
+    /**
+     * The first [MAX_READ] characters of [text], ending at a line or sentence end before that: cut inside a word, "at
+     * 10:30am" would read as "at 1" and "EUR 84.20" as "EUR 8" (SQ-11).
+     */
+    fun opening(text: String): String {
+        if (text.length <= MAX_READ) return text
+        val head = text.take(MAX_READ + 1)
+        val end = (MAX_READ - 1 downTo MAX_READ / 2).firstOrNull { i ->
+            head[i] == '\n' || head[i] in ".!?" && head[i + 1].isWhitespace()
+        } ?: (MAX_READ downTo MAX_READ / 2).firstOrNull { head[it].isWhitespace() }?.minus(1) ?: (MAX_READ - 1)
+        return head.take(end + 1)
+    }
+
     fun find(text: String, today: LocalDate, now: LocalTime? = null): SharedWhen {
-        val found = sentences(text.take(MAX_READ)).asSequence().take(MAX_SENTENCES).mapNotNull { said ->
+        val found = sentences(opening(text)).asSequence().take(MAX_SENTENCES).mapNotNull { said ->
             val sentence = said.replace(shortNameDot, "$1")
             val s = runCatching { QuickEntry.parse(sentence, today) }.getOrNull() ?: return@mapNotNull null
             if (!s.dateSpecified || s.pastDate || s.dateChoices.isNotEmpty() || s.date.isBefore(today) || s.error == QuickEntry.TOO_LONG ||
