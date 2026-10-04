@@ -41,9 +41,9 @@ class ShareQuickHuntNineTest {
             "Flight to London on 20/10/2026 10:30 from Sydney:\nSeat 14A")) assertEquals(text, oct20, found(text).date)
         val bill = SharedText.draft("Rechnung vom 20.10.2026 für Max Mustermann:\nBetrag: EUR 84.20").body
         assertEquals(8420L to "EUR", BillSuggestions.parseMessage(bill, null).let { it.amount to it.currency })
-        // Attributions in a language not listed still start an earlier message (SQ8-1).
-        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10:00 ritade Jo:\nWhat about 20 October at 6pm?"))
-        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10.00 ritade Jo:\nWhat about 20 October at 6pm?"))
+        // Attributions in a language not listed still start an earlier message, with the address (SQ8-1, SQX-3).
+        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10:00 ritade Jo <jo@example.com>:\nWhat about 20 October at 6pm?"))
+        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10.00 ritade Jo <jo@example.com>:\nWhat about 20 October at 6pm?"))
         assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\n2026-09-30 10:00 GMT+02:00 Jo <jo@example.com>:\nWhat about 20 October at 6pm?"))
     }
 
@@ -61,27 +61,47 @@ class ShareQuickHuntNineTest {
         assertTrue(EmailHeaders.message("Sam wrote:\nDinner on 14 October at 7pm.").contains("14 October"))
     }
 
-    // SQ9-4: one rule for a range whose end comes before its start in the calendar, and both sides of it.
+    // SQ9-4, SQX-4, SQX-6: one rule for a range whose end comes before its start in the calendar, one for a range under
+    // way, and both sides of each.
     @Test fun aRangeAcrossNewYearOrBackwards() {
         fun range(text: String) = parse(text).let { assertNull(text, it.error); it.date to it.endDate }
         fun refused(text: String) = assertEquals(text, "End the date range after it starts.", parse(text).error)
-        // The end in the start's month or the month before: written backwards, whatever the days.
-        listOf("Trip 20 Oct to 10 Oct", "Trip 4 Oct to 3 Oct", "Trip 6 Oct to 5 Oct", "Trip 20 Nov to 10 Oct", "Trip 10 Nov to 20 Oct",
-            "Trip 20 Oct to 25 Sep", "Trip Oct 20 - Sep 25", "Lease 15 Jul to 14 Jul", "Lease 15 Feb to 14 Jan", "Trip 5 Jan to 3 Jan").forEach(::refused)
-        // Earlier: across New Year, long ones too, and a year from the 1st.
+        // The end in the start's month or the month before: written backwards, whatever the days, unless a year less a day.
+        listOf("Trip 20 Oct to 10 Oct", "Trip 20 Nov to 10 Oct", "Trip 10 Nov to 20 Oct", "Trip 20 Oct to 25 Sep", "Trip Oct 20 - Sep 25",
+            "Lease 15 Feb to 14 Jan", "Trip 5 Jan to 3 Jan", "Lease 1 Nov to 30 Oct", "Trip 6 Oct to 4 Oct").forEach(::refused)
+        // Earlier: across New Year, long ones too, and a year less a day ("Lease 15 Nov to 14 Nov", SQX-6).
         assertEquals(LocalDate.of(2026, 9, 1) to LocalDate.of(2027, 6, 30), range("School year 1 Sep to 30 Jun"))
         assertEquals(LocalDate.of(2026, 12, 28) to LocalDate.of(2027, 1, 3), range("Trip 28 Dec to 3 Jan"))
-        assertEquals(LocalDate.of(2026, 8, 1) to LocalDate.of(2027, 7, 31), range("Lease 1 Aug to 31 Jul")) // under way
-        assertEquals(LocalDate.of(2027, 2, 1) to LocalDate.of(2028, 1, 31), range("Lease 1 Feb to 31 Jan"))
-        assertEquals(LocalDate.of(2027, 3, 1) to LocalDate.of(2028, 2, 28), range("Lease 1 Mar to 28 Feb"))
-        // Under way, when it began at most half a year ago; else next time round.
+        assertEquals(LocalDate.of(2026, 10, 6) to LocalDate.of(2027, 10, 5), range("Course 6 Oct to 5 Oct"))
+        assertEquals(LocalDate.of(2026, 10, 5) to LocalDate.of(2027, 10, 4), range("Contract 5 Oct to 4 Oct"))
+        // Under way, however long ago it began (SQX-4)...
         assertEquals(LocalDate.of(2026, 9, 30) to LocalDate.of(2026, 10, 10), range("Trip 30 Sep to 10 Oct"))
+        assertEquals(LocalDate.of(2026, 10, 4) to LocalDate.of(2027, 10, 3), range("Trip 4 Oct to 3 Oct"))
+        assertEquals(LocalDate.of(2026, 1, 1) to LocalDate.of(2026, 10, 31), range("Trip 1 Jan to 31 Oct"))
+        assertEquals(LocalDate.of(2026, 4, 1) to LocalDate.of(2026, 10, 31), range("Exhibition 1 Apr to 31 Oct"))
+        assertEquals(LocalDate.of(2026, 8, 1) to LocalDate.of(2027, 7, 31), range("Lease 1 Aug to 31 Jul"))
+        assertEquals(LocalDate.of(2026, 2, 1) to LocalDate.of(2027, 1, 31), range("Lease 1 Feb to 31 Jan"))
+        assertEquals(LocalDate.of(2026, 3, 1) to LocalDate.of(2027, 2, 28), range("Lease 1 Mar to 28 Feb"))
+        assertEquals(LocalDate.of(2025, 11, 15) to LocalDate.of(2026, 11, 14), range("Lease 15 Nov to 14 Nov 2026"))
+        assertEquals(LocalDate.of(2026, 1, 1) to LocalDate.of(2026, 12, 31), range("Contract 1 Jan to 31 Dec"))
+        assertEquals(LocalDate.of(2025, 12, 15) to LocalDate.of(2026, 12, 14), range("Lease 15 Dec to 14 Dec"))
+        // ...unless the next one starts within two months: the coming lease, not the one ending soon.
+        assertEquals(LocalDate.of(2026, 12, 1) to LocalDate.of(2027, 11, 30), range("Lease 1 Dec to 30 Nov"))
+        assertEquals(LocalDate.of(2026, 11, 15) to LocalDate.of(2027, 11, 14), range("Lease 15 Nov to 14 Nov"))
+        assertEquals(LocalDate.of(2026, 12, 1) to LocalDate.of(2027, 10, 30), range("Season 1 Dec to 30 Oct"))
         assertEquals(LocalDate.of(2026, 11, 1) to LocalDate.of(2027, 10, 31), range("Lease 1 Nov to 31 Oct"))
-        assertEquals(LocalDate.of(2027, 1, 1) to LocalDate.of(2027, 10, 31), range("Trip 1 Jan to 31 Oct"))
-        // A year on the end only: the same rule, the start the year before when the range crosses New Year.
+        assertEquals(LocalDate.of(2026, 10, 15) to LocalDate.of(2027, 10, 14), range("Contract 15 Oct to 14 Oct"))
+        // Ended: next time round. Not begun: this time.
+        assertEquals(LocalDate.of(2027, 9, 1) to LocalDate.of(2027, 10, 3), range("Trip 1 Sep to 3 Oct"))
+        assertEquals(LocalDate.of(2026, 11, 1) to LocalDate.of(2026, 11, 5), range("Trip 1 Nov to 5 Nov"))
+        // A year on the end only: the start the year before when the range crosses New Year or is a year less a day; written
+        // backwards, only when that start isn't past (SQX-6).
         assertEquals(LocalDate.of(2026, 8, 1) to LocalDate.of(2027, 7, 31), range("Lease 1 Aug to 31 Jul 2027"))
         assertEquals(LocalDate.of(2026, 12, 28) to LocalDate.of(2027, 1, 3), range("Trip 28 Dec to 3 Jan 2027"))
-        listOf("Lease 15 Jul to 14 Jul 2027", "Trip 20 Oct to 10 Oct 2027", "Trip 7 Oct to 3 Oct 2026", "Trip 20 Oct 2026 to 10 Oct 2026").forEach(::refused)
+        assertEquals(LocalDate.of(2026, 7, 15) to LocalDate.of(2027, 7, 14), range("Lease 15 Jul to 14 Jul 2027"))
+        assertEquals(LocalDate.of(2026, 11, 15) to LocalDate.of(2027, 11, 14), range("Lease 15 Nov to 14 Nov 2027"))
+        assertEquals(LocalDate.of(2026, 10, 20) to LocalDate.of(2027, 10, 10), range("Trip 20 Oct to 10 Oct 2027"))
+        listOf("Trip 7 Oct to 3 Oct 2026", "Trip 20 Oct 2026 to 10 Oct 2026").forEach(::refused)
     }
 
     // SQ9-5: an ordinal before a month or a numbered list is no bare hour; a new sentence still is (SQ8-9).
@@ -89,7 +109,12 @@ class ShareQuickHuntNineTest {
         parse("Party Friday 9. October").let { assertTrue(it.timeChoices.isEmpty()); assertEquals("Party 9. October", it.title) }
         parse("Meeting Friday 1. Budget 2. Hiring").let { assertTrue(it.timeChoices.isEmpty()); assertEquals("Meeting 1. Budget 2. Hiring", it.title) }
         for (text in listOf("Gym Friday 6. Bring towel", "Dinner Sat 7. Sam's place", "Gym every Monday 6. Bring towel", "Gym Friday 6...",
-            "Lunch Friday 12. Café Rio", "Gym Friday 6. Bring towel 2.5 kg")) assertEquals(text, 2, parse(text).timeChoices.size)
+            "Lunch Friday 12. Café Rio", "Gym Friday 6. Bring towel 2.5 kg",
+            // SQX-5: a name that is a month, and a number ending a sentence, are no ordinal or list.
+            "Gym Friday 6. May bring Sam", "Dinner Sat 7. August's place", "Lunch Friday 12. Jan is coming", "Dinner Sat 7. Table for 4.",
+            "Gym Friday 6. Room 3.")) assertEquals(text, 2, parse(text).timeChoices.size)
+        for (text in listOf("Party Friday 9. October 2026", "Party Friday 9. Oct", "Gym Friday 6. May 2027", "Meeting Friday 2. Agenda: 1. budget"))
+            assertTrue(text, parse(text).timeChoices.isEmpty())
         assertTrue(parse("Run Friday 6.5 km").timeChoices.isEmpty())
     }
 
@@ -108,8 +133,10 @@ class ShareQuickHuntNineTest {
     @Test fun moreForwardsAreRead() {
         val outlook = "From: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\n" +
             "Subject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am."
-        // The block's own subject, or the share's, says it's a forward.
-        assertEquals(listOf(oct20), days("FYI\n\n________________________________\n" + outlook.replace("Subject: ", "Subject: FW: ")))
+        // The share's subject says it's a forward. The block's own "FW:" doesn't: that is a reply to a forward (SQX-1).
+        assertEquals(listOf(oct14), days("See you 14 October at 7pm.\n\n________________________________\n" + outlook.replace("Subject: ", "Subject: FW: ")))
+        assertEquals(listOf(oct14), days("See you 14 October at 7pm.\n\n________________________________\n" +
+            outlook.replace("Subject: ", "Subject: FW: "), subject = "RE: FW: Appointment confirmation"))
         assertEquals(listOf(oct20), days("FYI\n\n________________________________\n$outlook", subject = "FW: Appointment confirmation"))
         assertEquals(listOf(oct20), days("FYI\n\n$outlook", subject = "Fwd: Appointment confirmation"))
         // Nothing of the person's own above it: what was shared.

@@ -73,8 +73,10 @@ object SharedText {
         val first = body.lineSequence().first()
         val title = subject?.trim()?.takeIf { it.isNotBlank() } ?: email?.subject
             ?: email?.let { e -> e.body.lineSequence().firstOrNull { it.isNotBlank() } ?: e.from }
-            // A forward with no subject: the forwarded message's, else its first line, not the marker (SQ9-8).
-            ?: first.takeUnless { EmailHeaders.startsAnEarlierMessage(it) }
+            // A forward with no subject: the forwarded message's, else its first line, not the marker (SQ9-8) or a
+            // signature above it ("Sent from my iPhone", SQX-10).
+            ?: body.lineSequence().firstOrNull { it.isNotBlank() && !EmailHeaders.signatureLine(it) }
+                ?.takeUnless { EmailHeaders.startsAnEarlierMessage(it) }
             ?: EmailHeaders.forwardedSubject(body) ?: message.lineSequence().firstOrNull { it.isNotBlank() } ?: first
         val notes = email?.let { listOf(it.from, it.body).filter(String::isNotBlank).joinToString("\n\n") } ?: body
         return SharedDraft(title.trim().replace('\n', ' ').take(MAX_TITLE), notes, message)

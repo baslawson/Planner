@@ -389,7 +389,7 @@
    -> title=Season date=2026-10-01..2027-04-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 2 Oct to 1 Oct
-   -> title=Trip 2 Oct to 1 Oct date=2026-10-04 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-02..2027-10-01 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 5 Jan to 3 Jan
    -> title=Trip 5 Jan to 3 Jan date=2026-10-04 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
@@ -404,7 +404,7 @@
    -> title=Trip date=2027-09-30..2027-10-02 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 3 Oct to 2 Oct
-   -> title=Trip 3 Oct to 2 Oct date=2026-10-04 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-03..2027-10-02 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 28 Dec 2026 to 3 Jan
    -> title=Trip date=2026-12-28..2027-01-03 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -446,7 +446,7 @@
    -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
 
 [find] FYI\n\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: FW: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
-   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
 
 [find] FYI\n\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
    -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
@@ -497,7 +497,7 @@
    -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
 
 [find] New enquiry\nFrom: Jane <jane@example.com>\nTo: Sales\nSubject: Quote\nYour message: Can you come on 20 October at 10am?
-   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+   -> SharedWhen(date=2026-10-20, time=10:00, dates=[2026-10-20], timeChoices=[])
 
 [qe] Gym Friday 6.
    -> title=Gym date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -557,10 +557,10 @@
    -> title=Lunch. Café Rio date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[00:00, 12:00] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 15 Jul to 14 Jul
-   -> title=Trip 15 Jul to 14 Jul date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-07-15..2027-07-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Lease 15 Jul to 14 Jul
-   -> title=Lease 15 Jul to 14 Jul date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Lease date=2026-07-15..2027-07-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Lease 1 Aug to 31 Jul
    -> title=Lease date=2026-08-01..2027-07-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -578,7 +578,7 @@
    -> title=Lease 15 Feb to 14 Jan date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
 
 [qe] Lease 1 Feb to 31 Jan
-   -> title=Lease date=2027-02-01..2028-01-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+   -> title=Lease date=2026-02-01..2027-01-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 28 Dec to 3 Jan
    -> title=Trip date=2026-12-28..2027-01-03 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -587,7 +587,7 @@
    -> title=Trip date=2026-12-20..2027-01-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 3 Jan to 28 Dec
-   -> title=Trip date=2027-01-03..2027-12-28 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+   -> title=Trip date=2026-01-03..2026-12-28 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 30 Sep to 10 Oct
    -> title=Trip date=2026-09-30..2026-10-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -599,16 +599,16 @@
    -> title=Trip date=2026-10-01..2027-09-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 4 Oct to 3 Oct
-   -> title=Trip 4 Oct to 3 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-04..2027-10-03 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 5 Oct to 4 Oct
-   -> title=Trip 5 Oct to 4 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-05..2027-10-04 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 6 Oct to 5 Oct
-   -> title=Trip 6 Oct to 5 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-06..2027-10-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 15 Jul to 14 Jul 2027
-   -> title=Trip 15 Jul to 14 Jul 2027 date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-07-15..2027-07-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 15 Jul 2027 to 14 Jul
    -> title=Trip 15 Jul 2027 to 14 Jul date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
@@ -626,7 +626,7 @@
    -> title=Trip 20 Oct 2026 to 10 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
 
 [qe] Trip 20 Oct to 10 Oct 2027
-   -> title=Trip 20 Oct to 10 Oct 2027 date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-20..2027-10-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip Oct 20 - Sep 25
    -> title=Trip Oct 20 - Sep 25 date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
@@ -1139,7 +1139,7 @@
    -> title=School year date=2026-09-01..2027-06-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 4 Oct to 3 Oct
-   -> title=Trip 4 Oct to 3 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-04..2027-10-03 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 5 Nov to 3 Oct
    -> title=Trip 5 Nov to 3 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
@@ -1157,16 +1157,16 @@
    -> title=Season date=2026-12-01..2027-10-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 1 Jan to 31 Oct
-   -> title=Trip date=2027-01-01..2027-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+   -> title=Trip date=2026-01-01..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 1 Mar to 2 Mar
    -> title=Trip date=2027-03-01..2027-03-02 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Trip 20 Oct to 10 Oct 2027
-   -> title=Trip 20 Oct to 10 Oct 2027 date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Trip date=2026-10-20..2027-10-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Lease 15 Jul to 14 Jul 2027
-   -> title=Lease 15 Jul to 14 Jul 2027 date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Lease date=2026-07-15..2027-07-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
 
 [qe] Meeting Friday 1. Budget
    -> title=Meeting. Budget date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[01:00, 13:00] dateChoices=[] specified=true repeat=NONE minutes=null
@@ -1184,4 +1184,592 @@
    -> title=Gym Friday 6. Monday too date=2026-10-05 time=null error=Use one date. Remove the extra date or keep literal words in the title. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
 
 [qe] Gym Friday 6. May bring Sam
-   -> title=Gym 6. May bring Sam date=2026-10-09 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+   -> title=Gym. May bring Sam date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. May bring Sam
+   -> title=Gym. May bring Sam date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 1 Jan to 31 Oct
+   -> title=Trip date=2026-01-01..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[find] Sent from my iPhone\n\nBegin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nSubject: Appointment\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[qe] dentist tue 3pm
+   -> title=dentist date=2026-10-06 time=15:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dentist Tuesday 3pm
+   -> title=Dentist date=2026-10-06 time=15:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] lunch with Sam next friday 12:30
+   -> title=lunch with Sam date=2026-10-16 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[00:30, 12:30] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lunch with Sam next Friday at 12.30
+   -> title=Lunch with Sam date=2026-10-16 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[00:30, 12:30] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] coffee w/ Jo tmrw 10am
+   -> title=coffee w/ Jo date=2026-10-06 time=10:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Call mum every monday
+   -> title=Call mum date=2026-10-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=WEEKLY minutes=null
+
+[qe] Gym every monday 7am
+   -> title=Gym date=2026-10-05 time=07:00 error=null choices=[] dateChoices=[] specified=true repeat=WEEKLY minutes=null
+
+[qe] Yoga every Tue and Thu 6pm
+   -> title=Yoga date=2026-10-06 time=18:00 error=null choices=[] dateChoices=[] specified=true repeat=DAYS_OF_WEEK minutes=null
+
+[qe] Standup every weekday 9:15
+   -> title=Standup date=2026-10-05 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[09:15, 21:15] dateChoices=[] specified=true repeat=WEEKDAYS minutes=null
+
+[qe] Pay rent every month on the 1st
+   -> title=Pay rent date=2026-11-01 time=null error=null choices=[] dateChoices=[] specified=true repeat=MONTHLY minutes=null
+
+[qe] Bins every other Thursday
+   -> title=Bins date=2026-10-08 time=null error=null choices=[] dateChoices=[] specified=true repeat=FORTNIGHTLY minutes=null
+
+[qe] Haircut 14/10 4pm
+   -> title=Haircut date=2026-10-14 time=16:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Haircut 14 Oct 4pm
+   -> title=Haircut date=2026-10-14 time=16:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Flight 20 Oct 6:45am
+   -> title=Flight date=2026-10-20 time=06:45 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Conference 12-14 Nov
+   -> title=Conference date=2026-11-12..2026-11-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Holiday 21 Dec - 4 Jan
+   -> title=Holiday date=2026-12-21..2027-01-04 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Camping 24 to 27 Oct
+   -> title=Camping date=2026-10-24..2026-10-27 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. Table for 4.
+   -> title=Dinner. Table for 4. date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. Table for 4
+   -> title=Dinner. Table for 4 date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. Bring 2 towels.
+   -> title=Gym. Bring 2 towels. date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. Room 3.
+   -> title=Gym. Room 3. date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lunch Friday 12. Jan is coming
+   -> title=Lunch. Jan is coming date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[00:00, 12:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. June is cooking
+   -> title=Dinner. June is cooking date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. April and Sam
+   -> title=Dinner. April and Sam date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. August's place
+   -> title=Dinner. August's place date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. March on
+   -> title=Gym Friday 6. March on date=2026-10-05 time=null error=Finish the date, time or duration, or put literal title text in quotes. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Gym Friday 6. Dec the halls
+   -> title=Gym. Dec the halls date=2026-10-09 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[06:00, 18:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Party Saturday 8. Mar and Jo
+   -> title=Party. Mar and Jo date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[08:00, 20:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Brunch Sunday 11. May I bring Sam?
+   -> title=Brunch. May I bring Sam? date=2026-10-11 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[11:00, 23:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. Sept is next
+   -> title=Gym Friday 6. Sept is next date=2026-10-05 time=null error=Finish the date, time or duration, or put literal title text in quotes. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. Bring wine. Sam 2. Jo 3.
+   -> title=Dinner 7. Bring wine. Sam 2. Jo 3. date=2026-10-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. Bring 1.5 L of wine.
+   -> title=Dinner. Bring 1.5 L of wine. date=2026-10-10 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[07:00, 19:00] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Meeting Friday 2. Agenda: 1. budget
+   -> title=Meeting 2. Agenda: 1. budget date=2026-10-09 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Coffee Monday 10. Then 11. Sam
+   -> title=Coffee 10. Then 11. Sam date=2026-10-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Call Sam tomorrow, 9am. Then email
+   -> title=Call Sam ,. Then email date=2026-10-06 time=09:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Call Sam tomorrow, 9am
+   -> title=Call Sam date=2026-10-06 time=09:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dinner Friday, 7pm, Sam's
+   -> title=Dinner Sam's date=2026-10-09 time=19:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Dentist on 20 Oct, 3pm
+   -> title=Dentist date=2026-10-20 time=15:00 error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 1 Apr to 31 Oct
+   -> title=Trip date=2026-04-01..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Exhibition 1 Apr to 31 Oct
+   -> title=Exhibition date=2026-04-01..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Exhibition 10 Apr to 31 Oct
+   -> title=Exhibition date=2026-04-10..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Exhibition 6 Apr to 31 Oct
+   -> title=Exhibition date=2026-04-06..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Exhibition 5 Apr to 31 Oct
+   -> title=Exhibition date=2026-04-05..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 15 Nov to 14 Nov
+   -> title=Lease date=2026-11-15..2027-11-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 15 Nov to 14 Nov 2027
+   -> title=Lease date=2026-11-15..2027-11-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 15 Nov 2026 to 14 Nov 2027
+   -> title=Lease date=2026-11-15..2027-11-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 25 Oct to 5 Sep
+   -> title=Trip 25 Oct to 5 Sep date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Trip 25 Oct to 5 Aug
+   -> title=Trip date=2026-10-25..2027-08-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Contract 1 Jan to 31 Dec
+   -> title=Contract date=2026-01-01..2026-12-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Contract 2 Jan to 1 Jan
+   -> title=Contract date=2026-01-02..2027-01-01 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 1 Mar to 28 Feb
+   -> title=Lease date=2026-03-01..2027-02-28 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 1 Mar to 29 Feb
+   -> title=Lease date=2027-03-01..2028-02-29 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 1 Dec to 30 Nov
+   -> title=Lease date=2026-12-01..2027-11-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 1 Nov to 30 Oct
+   -> title=Lease 1 Nov to 30 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Course 6 Oct to 5 Oct
+   -> title=Course date=2026-10-06..2027-10-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Semester 1 Feb to 30 Jun
+   -> title=Semester date=2027-02-01..2027-06-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 3 Oct to 7 Oct
+   -> title=Trip date=2026-10-03..2026-10-07 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 1 Oct to 4 Oct
+   -> title=Trip date=2027-10-01..2027-10-04 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip Oct 1 - Oct 4
+   -> title=Trip date=2027-10-01..2027-10-04 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Vacation Dec 20 - Jan 5
+   -> title=Vacation date=2026-12-20..2027-01-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 30 Oct to 2 Nov
+   -> title=Trip date=2026-10-30..2026-11-02 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 2 Nov to 30 Oct
+   -> title=Trip 2 Nov to 30 Oct date=2026-10-05 time=null error=End the date range after it starts. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[S:RE: FW: Hotel booking|find] Sounds good, let's do dinner on 14 October at 7pm.\n\n________________________________\nFrom: Jo Bloggs <jo@example.org>\nSent: Friday, 2 October 2026 10:00\nTo: Sam <sam@example.com>\nSubject: FW: Hotel booking\n\nCan we meet on 20 October at 6pm instead?\n\n________________________________\nFrom: Hotel <res@hotel.example>\nSent: Thursday, 1 October 2026 09:00\nTo: Jo Bloggs <jo@example.org>\nSubject: Hotel booking\n\nCheck-in 22 October from 3pm.
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[find] Sounds good, let's do dinner on 14 October at 7pm.\n\n________________________________\nFrom: Jo Bloggs <jo@example.org>\nSent: Friday, 2 October 2026 10:00\nTo: Sam <sam@example.com>\nSubject: FW: Hotel booking\n\nCan we meet on 20 October at 6pm instead?
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[find] Sounds good, see you 14 October at 7pm.\n\n-------- Original message --------\nFrom: Jo <jo@example.org>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Fwd: Dinner\n\nHow about 20 October at 6pm?
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[find] Yes, 14 October at 7pm.\n\nFrom: Jo <jo@example.org>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: TR: Dîner\n\nWhat about 20 October at 6pm?
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[S:Fwd: Dinner|find] Sounds good, see you 14 October at 7pm.\n\n________________________________\nFrom: Jo <jo@example.org>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: RE: Dinner\n\nHow about 20 October at 6pm?
+   -> SharedWhen(date=null, time=null, dates=[2026-10-14, 2026-10-20], timeChoices=[])
+
+[find] FYI\n\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: FW: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.\n\n________________________________\nFrom: Me <me@example.org>\nSent: Thursday, 1 October 2026 10:00\nTo: Clinic <clinic@example.com>\nSubject: Appointment\n\nCan I come on 21 October at 9am?
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[find] Thanks!\n\nSent from my iPhone\n\n> On 2 Oct 2026, at 10:00, Sam <sam@example.com> wrote:\n>\n> Dinner 14 October at 7pm?
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[find] See you on 14 October at 7pm.\n\nCheers,\nSam\n\nP.S. Please consider the environment before printing this email.\nOur office is closed on 25 December.
+   -> SharedWhen(date=null, time=null, dates=[2026-10-14, 2026-12-25], timeChoices=[])
+
+[find] See you on 14 October at 7pm.\n\nKind regards,\nSam Smith\nPS Consulting Ltd\nOpen Saturday at 10am
+   -> SharedWhen(date=null, time=null, dates=[2026-10-10, 2026-10-14], timeChoices=[])
+
+[find] See you on 14 October at 7pm.\n\n--\nSam Smith\nAcme Ltd\nPS: we're closed 25 December.
+   -> SharedWhen(date=null, time=null, dates=[2026-10-14, 2026-12-25], timeChoices=[])
+
+[find] Dinner on 14 October at 7pm.\n\nThanks,\nSam\n\nBegin forwarded message:\n\nFrom: Jo <jo@example.org>\nSubject: Re: Dinner\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Sam <sam@example.com>\n\nSorry, I'm away until 20 October.
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[find] Sounds good.\n\nThanks,\nSam\n\nOn Fri, 2 Oct 2026 at 10:00, Jo <jo@example.org> wrote:\n> Dinner 14 October at 7pm?\n> PS: bring wine
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[S:Your booking confirmation - Hotel Aurora|find] Dear Mr Smith,\n\nThank you for choosing Hotel Aurora.\n\nBooking number: 4821-993\nCheck-in: Thursday, 22 October 2026 (from 15:00)\nCheck-out: Sunday, 25 October 2026 (until 11:00)\nRoom: Deluxe Double\nTotal price: EUR 412.00\n\nWe look forward to welcoming you.\n\nKind regards,\nFront Office Team\nHotel Aurora | Main Street 1 | Open 24/7
+   -> SharedWhen(date=2026-10-22, time=15:00, dates=[2026-10-22], timeChoices=[])
+
+[S:Your e-ticket receipt|find] Booking reference: XK7P2L\n\nFlight QF 401\nSydney (SYD) - Melbourne (MEL)\nTue, 20 Oct 2026\nDeparts 06:45  Arrives 08:20\nTerminal 3\n\nPlease arrive at the airport at least 90 minutes before departure.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[])
+
+[S:Your tickets for Coldplay|find] Hi Sam,\n\nYou're going to Coldplay!\n\nDate: Saturday 14 November 2026\nDoors open: 6:00 PM\nShow starts: 7:30 PM\nVenue: Marvel Stadium, Melbourne\n\nYour tickets are attached.
+   -> SharedWhen(date=2026-11-14, time=null, dates=[2026-11-14], timeChoices=[])
+
+[S:Reservation confirmed|find] Your table for 4 at Café Rio is confirmed for Friday, October 16 at 7:30 PM.\n\nNeed to make changes? Reply to this email.
+   -> SharedWhen(date=2026-10-16, time=19:30, dates=[2026-10-16], timeChoices=[])
+
+[S:Terminbestätigung|find] Sehr geehrte Frau Müller,\n\nhiermit bestätigen wir Ihren Termin am Dienstag, 20.10.2026 um 10:30 Uhr.\n\nMit freundlichen Grüßen\nPraxis Dr. Weber
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[10:30, 22:30])
+
+[S:Afspraakbevestiging|find] Beste Jan,\n\nUw afspraak staat gepland op 20-10-2026 om 14:15.\n\nMet vriendelijke groet,\nTandartspraktijk Smile
+   -> SharedWhen(date=2026-10-20, time=14:15, dates=[2026-10-20], timeChoices=[])
+
+[S:Your appointment|find] Hi Sam,\nThis is a reminder of your appointment with Dr Lee on Tue 20/10/2026 at 2:15pm.\nReply C to confirm.
+   -> SharedWhen(date=2026-10-20, time=14:15, dates=[2026-10-20], timeChoices=[])
+
+[S:Delivery|find] Your parcel will be delivered tomorrow between 9am and 1pm.
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[S:Re: Dinner|find] Great, see you then!\n\nIl giorno ven 2 ott 2026 alle ore 10:00 Sam Smith <sam@example.com> ha scritto:\n\n> Dinner on 14 October at 7pm?
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nLe 02/10/2026 à 10:00, Sam Smith a écrit :\n> Dinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nAm 02.10.26 um 10:00 schrieb Sam Smith:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nOp 02-10-2026 om 10:00 schreef Sam Smith:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nOn October 2, 2026 10:00:00 AM GMT+02:00, Sam Smith <sam@example.com> wrote:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nSam Smith <sam@example.com> schrieb am Fr., 2. Okt. 2026, 10:00:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nEl 2 oct 2026, a las 10:00, Sam Smith <sam@example.com> escribió:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nEm 2 de out. de 2026, à(s) 10:00, Sam Smith <sam@example.com> escreveu:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n2 okt. 2026 kl. 10:00 skrev Sam Smith <sam@example.com>:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nOp 2 okt 2026 om 10:00 heeft Sam Smith <sam@example.com> het volgende geschreven:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nAm 02.10.2026 um 10:00 schrieb Sam Smith <sam@example.com>:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nLe 2 oct. 2026 à 10:00, Sam Smith <sam@example.com> a écrit :\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n-----Ursprüngliche Nachricht-----\nVon: Sam Smith <sam@example.com>\nGesendet: Freitag, 2. Oktober 2026 10:00\nAn: Me <me@example.org>\nBetreff: Dinner\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n-----Oorspronkelijk bericht-----\nVan: Sam Smith <sam@example.com>\nVerzonden: vrijdag 2 oktober 2026 10:00\nAan: Me <me@example.org>\nOnderwerp: Dinner\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n-------- Message d'origine --------\nDe : Sam Smith <sam@example.com>\nDate : 02/10/2026 10:00 (GMT+01:00)\nÀ : Me <me@example.org>\nObjet : Dinner\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n-------- Ursprüngliche Nachricht --------\nVon: Sam Smith <sam@example.com>\nDatum: 02.10.26 10:00 (GMT+01:00)\nAn: Me <me@example.org>\nBetreff: Dinner\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n-------- Original Message --------\nSubject: Dinner\nDate: 2026-10-02 10:00\nFrom: Sam Smith <sam@example.com>\nTo: Me <me@example.org>\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nOn 2026-10-02 10:00, Sam Smith wrote:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Your Origin Energy bill|bill] Hi Sam,\nYour electricity bill is ready.\nAmount due: $142.35\nDue date: 21 October 2026
+   -> SharedWhen(date=2026-10-21, time=null, dates=[2026-10-21], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-21, amount=14235, currency=null, warnings={})
+
+[S:Your invoice|bill] Invoice INV-2026-0042\nTotal: £1,250.00\nPayment due by 30/10/2026
+   -> SharedWhen(date=2026-10-30, time=null, dates=[2026-10-30], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-30, amount=125000, currency=GBP, warnings={})
+
+[S:Rechnung|bill] Ihre Rechnung Nr. 12345\nRechnungsbetrag: 1.234,56 €\nZahlbar bis 20.10.2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=123456, currency=EUR, warnings={})
+
+[S:Factuur|bill] Te betalen: € 84,20\nVervaldatum: 20-10-2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Invoice|bill] Amount: USD 1,299.99\nDue: Oct 20, 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=129999, currency=USD, warnings={})
+
+[S:Bill|bill] Your water bill of 84.20 EUR is due on 20 October.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Total amount due 2 450,00 € before 20/10/2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=245000, currency=EUR, warnings={})
+
+[S:Bill|bill] Amount due: CHF 120.00\nDue date: 20.10.2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=null, currency=null, warnings={})
+
+[S:Bill|bill] Amount due: ¥12,000\nDue date: 20 October 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=null, currency=null, warnings={})
+
+[S:Bill|bill] Amount due: 84.20 AUD\nDue date: 20 October 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=AUD, warnings={})
+
+[S:Bill|bill] Amount due: A$84.20\nDue date: 20 October 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=null, warnings={})
+
+[S:Bill|bill] Amount due: €84.20\nDue date: 20 October 2026\nLate fee after due date: €10.00
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Your account balance is $0.00.\nNext bill: 20 October 2026, estimated $95.00.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=null, currency=null, warnings={amount=Several amounts found})
+
+[S:Bill|bill] Amount due $1,234.5
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=123450, currency=null, warnings={})
+
+[S:Bill|bill] Minimum payment: $25.00\nClosing balance: $1,240.33\nDue date: 20 October 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=null, currency=null, warnings={amount=Several amounts found})
+
+[S:Bill|bill] Subtotal: $80.00\nGST: $8.00\nTotal: $88.00\nDue 20 October 2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8800, currency=null, warnings={})
+
+[S:Bill|bill] Totaal: €84,20\nVervaldatum: 20 oktober 2026
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Amount due: EUR84.20 by 20.10.2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Please pay 1,234 SEK by 20 October 2026.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=null, currency=null, warnings={})
+
+[S:Trip plan|draft] Our plan:\n20.10.2026 10:30 Flight to London:\n- Terminal 3\n21.10.2026 09:00 Hotel Check-out:\n- leave keys
+   -> title=Trip plan | body=Our plan:\n20.10.2026 10:30 Flight to London:\n- Terminal 3\n21.10.2026 09:00 Hotel Check-out:\n- leave keys | notes=Our plan:\n20.10.2026 10:30 Flight to London:\n- Terminal 3\n21.10.2026 09:00 Hotel Check-out:\n- leave keys
+
+[S:Reminder|find] Tue 20/10/2026 10:30 Dentist Dr Lee:\nBring your Medicare card.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[10:30, 22:30])
+
+[S:Agenda|draft] Hi all,\nTuesday 20.10.2026, 10:00 Kick-off Meeting:\n1. Budget\n2. Hiring
+   -> title=Agenda | body=Hi all,\nTuesday 20.10.2026, 10:00 Kick-off Meeting:\n1. Budget\n2. Hiring | notes=Hi all,\nTuesday 20.10.2026, 10:00 Kick-off Meeting:\n1. Budget\n2. Hiring
+
+[S:Plan|draft] 2026-10-20 10:30 Pickup at Sam:\nbring the box
+   -> title=Plan | body=2026-10-20 10:30 Pickup at Sam:\nbring the box | notes=2026-10-20 10:30 Pickup at Sam:\nbring the box
+
+[S:Plan|draft] On 20/10/2026 at 10:30 with Dr Smith:\nbring your card
+   -> title=Plan | body=On 20/10/2026 at 10:30 with Dr Smith:\nbring your card | notes=On 20/10/2026 at 10:30 with Dr Smith:\nbring your card
+
+[S:Re: Lunch|find] Works for me, 21 October at 7pm.\n\nOp 2 okt 2026 om 10:00 heeft Sam Smith <sam@example.com> het volgende geschreven:\n\n> Dinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Lunch|find] Hi,\n\nLunch Friday 16 October at 12:30?\n\nThanks,\nJo - Sales Manager, Acme\nM: +61 400 000 000\nOpen Saturday at 10am
+   -> SharedWhen(date=2026-10-16, time=null, dates=[2026-10-16], timeChoices=[00:30, 12:30])
+
+[S:Lunch|find] Lunch Friday 16 October at 12:30?\n\nBest,\nSam Smith | Acme\nsam@acme.example | +61 400 000 000\n\n-- \nAcme Pty Ltd, closed 25 December
+   -> SharedWhen(date=2026-10-16, time=null, dates=[2026-10-16], timeChoices=[00:30, 12:30])
+
+[S:Lunch|find] Lunch is on Friday 16 October at 12:30.\n\nThanks!\nSam\n\nSent from my Galaxy
+   -> SharedWhen(date=2026-10-16, time=null, dates=[2026-10-16], timeChoices=[00:30, 12:30])
+
+[S:Lunch|find] Lunch is on Friday 16 October at 12:30.\n\nThanks,\nSam\n\nPS – we could also do 23 October at 1pm.
+   -> SharedWhen(date=null, time=null, dates=[2026-10-16, 2026-10-23], timeChoices=[])
+
+[S:Fwd: Concert|draft] Thought you'd like this!\n\n---------- Forwarded message ---------\nFrom: Ticketek <noreply@ticketek.example>\nDate: Mon, 5 Oct 2026 at 09:00\nSubject: Your tickets\nTo: Jo <jo@example.org>\n\nYour event: 14 November at 7:30pm.
+   -> title=Fwd: Concert | body=Thought you'd like this!\n\n\nYour event: 14 November at 7:30pm. | notes=Thought you'd like this!\n\n---------- Forwarded message ---------\nFrom: Ticketek <noreply@ticketek.example>\nDate: Mon, 5 Oct 2026 at 09:00\nSubject: Your tickets\nTo: Jo <jo@example.org>\n\nYour event: 14 November at 7:30pm.
+
+[S:|draft] -----Original Message-----\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
+   -> title=Appointment confirmation | body=Your appointment is on 20 October at 10:30am. | notes=-----Original Message-----\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
+
+[S:|draft] ________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
+   -> title=Appointment confirmation | body=Your appointment is on 20 October at 10:30am. | notes=________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.
+
+[S:|draft] Begin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+   -> title=From: Clinic <clinic@example.com> | body=From: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am. | notes=Begin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+
+[msg] 2026-10-20 10:30 Pickup at Sam:\nbring the box
+   -> 2026-10-20 10:30 Pickup at Sam:\nbring the box
+
+[msg] Hi,\n2026-10-20 10:30 Pickup at Sam:\nbring the box
+   -> Hi,\n2026-10-20 10:30 Pickup at Sam:\nbring the box
+
+[msg] Hi,\n20/10/2026 10:30 Team Meeting:\n- budget
+   -> Hi,\n20/10/2026 10:30 Team Meeting:\n- budget
+
+[msg] Hi,\nMon 19.10.2026 09:00 Standup:\n- updates
+   -> Hi,\nMon 19.10.2026 09:00 Standup:\n- updates
+
+[msg] Hi,\nMonday 19 October 2026, 9:00 Standup:\n- updates
+   -> Hi,\nMonday 19 October 2026, 9:00 Standup:\n- updates
+
+[msg] Hi,\n19 October 2026 9:00 – 10:00 Workshop:\n- bring laptop
+   -> Hi,\n19 October 2026 9:00 – 10:00 Workshop:\n- bring laptop
+
+[msg] Hi,\nFriday 16 October 2026 at 12:30 Lunch with Jo:\n- Café Rio
+   -> Hi,\nFriday 16 October 2026 at 12:30 Lunch with Jo:\n- Café Rio
+
+[draft] \n\nSent from my iPhone\n\nBegin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nSubject: Appointment\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+   -> title=Appointment | body=Your appointment is on 20 October at 10:30am. | notes=Sent from my iPhone\n\nBegin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nSubject: Appointment\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+
+[S:Fwd: Appointment|find] FYI\n\n\n\nSent from my Galaxy\n\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[S:FW: Appointment|find] FYI\n\nGet Outlook for Android\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, October 2, 2026 10:00:00 AM\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[find] FYI\n\nGet Outlook for Android\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, October 2, 2026 10:00:00 AM\nTo: Me <me@example.org>\nSubject: FW: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[S:Fwd: Appointment|find] FYI\n\nThanks,\nSam\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[S:Fwd: Appointment|find] FYI\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[S:FW: Appointment|find] FYI\n\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, October 2, 2026 10:00:00 AM\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[qe] Work until 5pm
+   -> title=Work until 5pm date=2026-10-05 time=null error=Finish the date, time or duration, or put literal title text in quotes. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Gym Friday 6. Monday
+   -> title=Gym Friday 6. Monday date=2026-10-05 time=null error=Use one date. Remove the extra date or keep literal words in the title. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Dinner Sat 7. Booked for 2.
+   -> title=Dinner Sat 7. Booked for 2. date=2026-10-05 time=null error=Finish the date, time or duration, or put literal title text in quotes. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nSam Smith <sam@example.com> 於 2026年10月2日 週五 上午10:00 寫道：\n> Dinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nOn Fri, Oct 2, 2026 at 10:00 AM Sam Smith <sam@example.com> wrote:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Rechnung|bill] Gesamtbetrag: 84,20 €\nFällig am 20.10.2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Facture|bill] Montant à payer : 84,20 €\nDate d'échéance : 20/10/2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Your bill of 84,20 € is due on 20 October.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:New enquiry|find] New enquiry\nFrom: Jane <jane@example.com>\nTo: Sales\nSubject: Quote\nMessage: Can you come on 20 October at 10am?
+   -> SharedWhen(date=2026-10-20, time=10:00, dates=[2026-10-20], timeChoices=[])
+
+[S:RE: Dinner|find] Sounds good, see you 14 October at 7pm.\n\n-------- Original message --------\nFrom: Jo <jo@example.org>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Fwd: Dinner\n\nHow about 20 October at 6pm?
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[S:Re: FW: Hotel booking|find] Sounds good, see you 14 October at 7pm.\n\nThanks,\nSam\n\n________________________________\nFrom: Jo <jo@example.org>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: FW: Hotel booking\n\nHow about 20 October at 6pm?
+   -> SharedWhen(date=2026-10-14, time=19:00, dates=[2026-10-14], timeChoices=[])
+
+[S:FW: Appointment|find] FYI\n\n________________________________\nFrom: Clinic <clinic@example.com>\nSent: Friday, 2 October 2026 10:00\nTo: Me <me@example.org>\nSubject: Appointment confirmation\n\nYour appointment is on 20 October at 10:30am.\n\n________________________________\nFrom: Me <me@example.org>\nSent: Thursday, 1 October 2026 10:00\nTo: Clinic <clinic@example.com>\nSubject: Appointment\n\nCan I come on 21 October at 9am?
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[S:Fwd: Appointment|find] FYI\n\nSent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.\n\n-------- Original message --------\nFrom: Me <me@example.org>\nDate: 01/10/2026 10:00 (GMT+01:00)\nTo: Clinic <clinic@example.com>\nSubject: Appointment\n\nCan I come on 21 October at 9am?
+   -> SharedWhen(date=2026-10-20, time=10:30, dates=[2026-10-20], timeChoices=[])
+
+[S:Re: Appointment|find] Thanks, see you then.\n\nSent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\n2026-09-30 10:00 GMT+02:00 Sam Smith <sam@example.com>:\n\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=2026-10-21, time=19:00, dates=[2026-10-21], timeChoices=[])
+
+[S:Re: Dinner|find] Works for me, 21 October at 7pm.\n\nDen 30.09.2026 kl. 10:00 ritade Jo:\nDinner on 14 October at 7pm?
+   -> SharedWhen(date=null, time=null, dates=[2026-10-14, 2026-10-21], timeChoices=[])
+
+[msg] Hi,\nFriday 16 October 2026 at 12:30 Lunch with Jo:\n- Café Rio
+   -> Hi,\nFriday 16 October 2026 at 12:30 Lunch with Jo:\n- Café Rio
+
+[msg] Hi,\n2026-10-20 10:30 Jo <jo@example.org>:\nDinner on 14 October at 7pm?
+   -> Hi,
+
+[qe] Season 1 Dec to 30 Oct
+   -> title=Season date=2026-12-01..2027-10-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 1 Nov to 31 Oct
+   -> title=Lease date=2026-11-01..2027-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Exhibition 1 Sep to 31 Oct
+   -> title=Exhibition date=2026-09-01..2026-10-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Course 1 Feb to 30 Nov
+   -> title=Course date=2026-02-01..2026-11-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 1 Sep to 3 Oct
+   -> title=Trip date=2027-09-01..2027-10-03 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Trip 1 Nov to 5 Nov
+   -> title=Trip date=2026-11-01..2026-11-05 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Contract 1 Oct to 30 Sep
+   -> title=Contract date=2026-10-01..2027-09-30 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Contract 5 Oct to 4 Oct
+   -> title=Contract date=2026-10-05..2027-10-04 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Lease 15 Nov to 14 Nov 2027
+   -> title=Lease date=2026-11-15..2027-11-14 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Course 1 Jan to 31 Dec 2027
+   -> title=Course date=2027-01-01..2027-12-31 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Brunch Sunday 11. May.
+   -> title=Brunch 11. May. date=2026-10-11 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Party Friday 9. October
+   -> title=Party 9. October date=2026-10-09 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Meeting Friday 1. Budget 2. Hiring
+   -> title=Meeting 1. Budget 2. Hiring date=2026-10-09 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Gym Friday 6. May 2027
+   -> title=Gym 6. May 2027 date=2026-10-09 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=null
+
+[qe] Work until 5pm!
+   -> title=Work until date=2026-10-05 time=17:00 error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[S:New enquiry|find] New enquiry\nFrom: Jane <jane@example.com>\nTo: Sales\nSubject: Quote\nYour message: Can you come on 20 October at 10am?
+   -> SharedWhen(date=2026-10-20, time=10:00, dates=[2026-10-20], timeChoices=[])
+
+[S:New enquiry|find] New enquiry\nFrom: Jane <jane@example.com>\nTo: Sales\nSubject: Quote\nMessage body: Can you come on 20 October at 10am?
+   -> SharedWhen(date=2026-10-20, time=10:00, dates=[2026-10-20], timeChoices=[])
+
+[S:New enquiry|find] New enquiry\nFrom: Jane <jane@example.com>\nTo: Sales\nSubject: Quote\nAdditional comments: Can you come on 20 October at 10am?
+   -> SharedWhen(date=2026-10-20, time=10:00, dates=[2026-10-20], timeChoices=[])
+
+[S:Bill|bill] Total amount due 2 450,00 € before 20/10/2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=245000, currency=EUR, warnings={})
+
+[S:Bill|bill] Montant dû : 2 450,00 € avant le 20/10/2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=245000, currency=EUR, warnings={})
+
+[S:Bill|bill] Gesamtbetrag: 84,20 €\nFällig am 20.10.2026
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
+
+[S:Bill|bill] Your bill of 12 € is due on 20 October.
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=1200, currency=EUR, warnings={})
+
+[S:Bill|bill] Total: 5\nDeposit paid: EUR 20.00
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=2000, currency=EUR, warnings={})
+
+[S:Bill|bill] Total: 9\nTip: $15.00
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=1500, currency=null, warnings={})
+
+[S:Lunch|find] Hi,\n\nLunch Friday 16 October at 12:30?\n\nThanks,\nJo Bloggs - Sales Manager, Acme Pty Ltd\nOpen Saturday at 10am
+   -> SharedWhen(date=2026-10-16, time=null, dates=[2026-10-16], timeChoices=[00:30, 12:30])
+
+[S:Lunch|find] Hi,\n\nLunch Friday 16 October at 12:30?\n\nThanks,\nJo, Head of Sales, Acme\nOpen Saturday at 10am
+   -> SharedWhen(date=2026-10-16, time=null, dates=[2026-10-16], timeChoices=[00:30, 12:30])
+
+[draft] \n\nSent from my iPhone\n\nBegin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+   -> title=From: Clinic <clinic@example.com> | body=From: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am. | notes=Sent from my iPhone\n\nBegin forwarded message:\n\nFrom: Clinic <clinic@example.com>\nDate: 2 October 2026 at 10:00:00 CEST\nTo: Me <me@example.org>\n\nYour appointment is on 20 October at 10:30am.
+
+[draft] Sent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+   -> title=Appointment | body=Your appointment is on 20 October at 10:30am. | notes=Sent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
