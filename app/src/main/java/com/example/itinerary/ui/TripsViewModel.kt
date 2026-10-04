@@ -57,7 +57,8 @@ class TripsViewModel(
     }.await()
 
 
-    val tasks = repo.tasks.stateInWhileVisible(viewModelScope, emptyList())
+    // Null until read once, like agendaEvents (A6-5: a restored task selection waits for it).
+    val tasks: StateFlow<List<com.example.itinerary.data.PlannerTask>?> = repo.tasks.stateInWhileVisible(viewModelScope, null)
     val backupStatus = backup.status.state
     init {
         viewModelScope.launch {
