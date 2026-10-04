@@ -126,7 +126,7 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
         return "Missed · due $day$time"
     }
     fun open(code: Int) = PendingIntent.getActivity(context, code,
-        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        Intent(context, MainActivity::class.java).addFlags(OPEN_PLANNER_FLAGS),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     fun builder(title: String, text: String, code: Int) = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text)

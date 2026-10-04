@@ -50,7 +50,7 @@ internal fun postTaskReminder(context: Context, id: String, title: String, trigg
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0,
         Intent(context, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            .addFlags(OPEN_PLANNER_FLAGS),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)

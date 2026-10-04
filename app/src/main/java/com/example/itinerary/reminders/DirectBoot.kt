@@ -143,7 +143,7 @@ class LockedAlarmManager(private val context: Context) : LockedAlarmSetter {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pending = when (alarm) {
             is LockedAlarm.Event -> PendingIntent.getBroadcast(context, alarm.reminderId.toInt(),
-                eventIntent(context, alarm).putExtra(ReminderScheduler.EXTRA_TRIGGER, alarm.trigger), flags)
+                eventIntent(context, alarm), flags)
             is LockedAlarm.Task -> PendingIntent.getBroadcast(context, 0, TaskReminderReceiver.intent(context, alarm.id)
                 .putExtra("trigger", alarm.trigger).putExtra(TaskReminderReceiver.EXTRA_LOCKED_TITLE, alarm.title), flags)
             is LockedAlarm.Note -> PendingIntent.getBroadcast(context, 0, NoteReminderReceiver.intent(context, alarm.id)

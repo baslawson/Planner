@@ -38,7 +38,23 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     // RB-3: every alarm set here, with what it shows, for a reboot that stays locked (LockedAlarm). Kept beside the ledger.
     private val locked = LockedAlarmMirror(read = { DirectBoot.store(context).read() }, write = { DirectBoot.store(context).write(it) },
         timeFormat = { (context.applicationContext as? com.example.itinerary.ItineraryApp)?.settings?.timeFormat?.value?.name })
-    override fun saveLockedAlarms(force: Boolean) = locked.save(System.currentTimeMillis(), force)
+    override fun saveLockedAlarms(force: Boolean) {
+        locked.save(System.currentTimeMillis(), force)?.let(::setLockedRefresh)
+    }
+
+    // R6-3: a snapshot that left later alarms out is written again before its two weeks run out (BootReceiver), even if
+    // no reminder rings and Planner isn't opened by then. Inexact (a day to spare), and cleared when nothing was left out.
+    private fun setLockedRefresh(at: Long) {
+        val intent = Intent(context, BootReceiver::class.java).setAction(BootReceiver.ACTION_REFRESH_LOCKED)
+        if (at == Long.MAX_VALUE) {
+            PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+                ?.let { alarmManager.cancel(it); it.cancel() }
+            return
+        }
+        val pending = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        try { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending) }
+        catch (e: Exception) { android.util.Log.w("ReminderScheduler", "Couldn't set the locked-boot refresh", e) }
+    }
     private fun armed(alarm: LockedAlarm) { ledger.set(alarm.key, alarm.trigger); locked.put(alarm) }
     private fun disarmed(key: String) { ledger.remove(key); locked.remove(key) }
     override fun markDelivered(key: String, trigger: Long) = delivered.record(key, trigger)
@@ -156,7 +172,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
 
         // Everything the notification shows travels in the intent; each save reschedules with fresh values.
         val shown = LockedAlarm.Event.of(item, reminder, triggerAt)
-        val intent = eventIntent(context, shown).putExtra(EXTRA_TRIGGER, triggerAt)
+        val intent = eventIntent(context, shown)
         val pending = PendingIntent.getBroadcast(
             context,
             reminder.id.toInt(),
@@ -171,14 +187,16 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     // removing the reminder in the meantime doesn't tangle with it.
     fun snooze(extras: Bundle, minutes: Long) {
         val reminderId = extras.getLong(EXTRA_REMINDER_ID)
-        val intent = Intent(context, ReminderReceiver::class.java).putExtras(extras)
+        val at = System.currentTimeMillis() + minutes * 60_000L
+        // Its own time, so a ringing snooze that Android restarts rings only for what is left of it (AlarmRestart).
+        val intent = Intent(context, ReminderReceiver::class.java).putExtras(extras).putExtra(EXTRA_TRIGGER, at)
         val pending = PendingIntent.getBroadcast(
             context,
             snoozeCode(reminderId),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        setAlarm(System.currentTimeMillis() + minutes * 60_000L, pending)
+        setAlarm(at, pending)
     }
 
     override fun cancel(reminderId: Long) {
@@ -222,13 +240,16 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     }
 }
 
-fun reminderIntent(context: Context, item: ItineraryItem, reminder: Reminder): Intent =
-    eventIntent(context, LockedAlarm.Event.of(item, reminder, 0L))
+// [trigger]: the time its alarm was set for (0: not known), handed on to a ringing alarm (AlarmRestart).
+fun reminderIntent(context: Context, item: ItineraryItem, reminder: Reminder, trigger: Long = 0L): Intent =
+    eventIntent(context, LockedAlarm.Event.of(item, reminder, trigger))
 
 // What an event reminder's notification shows, in its alarm's intent: from the database, or from the locked snapshot.
+// R6-1: with its time, which goes on to AlarmService, so a ringing alarm Android restarts rings only for what is left.
 internal fun eventIntent(context: Context, e: LockedAlarm.Event): Intent =
     Intent(context, ReminderReceiver::class.java)
         .putExtra(ReminderScheduler.EXTRA_REMINDER_ID, e.reminderId)
+        .putExtra(ReminderScheduler.EXTRA_TRIGGER, e.trigger)
         .putExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN, e.snoozeToken)
         .putExtra(ReminderScheduler.EXTRA_TITLE, e.title)
         .putExtra(ReminderScheduler.EXTRA_BILL, e.bill)

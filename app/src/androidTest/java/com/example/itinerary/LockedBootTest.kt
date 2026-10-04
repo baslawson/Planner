@@ -176,4 +176,16 @@ class LockedBootTest {
             app.repository.deleteTask(planned.id)
         }
     }
+
+    // R6-1: an event reminder's intent, the one handed on to AlarmService, carries its alarm's time: from the snapshot,
+    // and from the database once unlocked, so a ringing alarm Android restarts rings only for what is left of it.
+    @Test fun anEventIntentCarriesItsTrigger() {
+        assertEquals(event.trigger, com.example.itinerary.reminders.eventIntent(context, event).getLongExtra(EXTRA_TRIGGER, 0L))
+        val item = com.example.itinerary.data.ItineraryItem(id = 3, tripId = 1, date = java.time.LocalDate.of(2026, 10, 5),
+            startTime = java.time.LocalTime.of(9, 30), title = "QA trigger")
+        val reminder = com.example.itinerary.data.Reminder(id = 11, itemId = 3, amount = 1,
+            unit = com.example.itinerary.data.ReminderUnit.values().first(), ringUntilDismissed = true)
+        assertEquals(event.trigger, com.example.itinerary.reminders.reminderIntent(context, item, reminder, event.trigger)
+            .getLongExtra(EXTRA_TRIGGER, -1L))
+    }
 }

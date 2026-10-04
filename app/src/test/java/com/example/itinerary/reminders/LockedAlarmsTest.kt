@@ -48,12 +48,38 @@ class LockedAlarmsTest {
         val past = LockedAlarm.Note("past", now)
         val far = LockedAlarm.Note("far", now + LockedAlarmSelection.HORIZON_MS + 1)
         val edge = LockedAlarm.Note("edge", now + LockedAlarmSelection.HORIZON_MS)
-        val soon = LockedAlarm.Note("soon", now + 1)
-        assertEquals(listOf(soon, edge), LockedAlarmSelection.select(listOf(far, edge, past, soon), now))
+        val soon = (1..LockedAlarmSelection.MIN_KEPT).map { LockedAlarm.Note("soon$it", now + it) }
+        assertEquals(soon + edge, LockedAlarmSelection.select(listOf(far, edge, past) + soon.reversed(), now))
         val many = (1..LockedAlarmSelection.MAX + 10).map { LockedAlarm.Note("n$it", now + it * 1000L) }.shuffled()
         val chosen = LockedAlarmSelection.select(many, now)
         assertEquals(LockedAlarmSelection.MAX, chosen.size)
         assertEquals((1..LockedAlarmSelection.MAX).map { "n$it" }, chosen.map { (it as LockedAlarm.Note).id })
+    }
+
+    // R6-3: a monthly bill reminder, a month off, is kept although it's past the two weeks: the nearest few always are.
+    @Test fun theNearestFewAreKeptHoweverFar() {
+        val day = 24 * hour
+        val monthly = LockedAlarm.Note("monthly", now + 31 * day)
+        assertEquals(listOf(monthly), LockedAlarmSelection.select(listOf(monthly), now))
+        assertNull("nothing left out: no rewrite needed", LockedAlarmSelection.rewriteAt(listOf(monthly), now))
+        // With the nearest few close by, one further off than two weeks is left out, and the snapshot is due to be
+        // written again before its two weeks run out.
+        val near = (1..LockedAlarmSelection.MIN_KEPT).map { LockedAlarm.Note("near$it", now + it * hour) }
+        assertEquals(near, LockedAlarmSelection.select(near + monthly, now))
+        val again = LockedAlarmSelection.rewriteAt(near + monthly, now)!!
+        assertTrue(again > now + LockedAlarmSelection.REFRESH_MS && again < now + LockedAlarmSelection.HORIZON_MS)
+        // Written again then (the near ones have rung), the far one is kept.
+        assertEquals(listOf(monthly), LockedAlarmSelection.select(near + monthly, again))
+    }
+
+    @Test fun mirrorSaysWhenTheSnapshotIsDueAgain() {
+        val near = (1..LockedAlarmSelection.MIN_KEPT).map { LockedAlarm.Note("near$it", now + it * hour) }
+        val mirror = LockedAlarmMirror(read = { null }, write = {}, timeFormat = { null })
+        near.forEach(mirror::put)
+        assertEquals("all kept: no refresh", Long.MAX_VALUE, mirror.save(now))
+        assertNull("nothing changed: not written", mirror.save(now))
+        mirror.put(LockedAlarm.Note("far", now + 40 * 24 * hour))
+        assertEquals(now + LockedAlarmSelection.REWRITE_AFTER_MS, mirror.save(now))
     }
 
     @Test fun eventCarriesWhatTheNotificationShowsAndABillTokenOnlyForAnUnpaidBill() {

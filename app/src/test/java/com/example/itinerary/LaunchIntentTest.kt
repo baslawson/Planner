@@ -10,6 +10,13 @@ class LaunchIntentTest {
         assertTrue(actsOnLaunchIntent(0, savedStateNull = true))
         assertTrue(actsOnLaunchIntent(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP, savedStateNull = true))
     }
+    // A6-4: a notification tap opens Planner as a shortcut does (its open window, clearing the App lock screen above it),
+    // and is still acted on.
+    @Test fun notificationTapsOpenThePlannerWindowThatIsOpen() {
+        val flags = com.example.itinerary.reminders.OPEN_PLANNER_FLAGS
+        assertEquals(EntryShortcuts.FORWARD_FLAGS, flags or Intent.FLAG_ACTIVITY_NEW_TASK)
+        assertTrue(actsOnLaunchIntent(flags or Intent.FLAG_ACTIVITY_NEW_TASK, savedStateNull = true))
+    }
     @Test fun rotationDoesNot() = assertFalse(actsOnLaunchIntent(0, savedStateNull = false))
     @Test fun reopenedFromRecentsDoesNot() {
         assertFalse(actsOnLaunchIntent(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY, savedStateNull = true))
