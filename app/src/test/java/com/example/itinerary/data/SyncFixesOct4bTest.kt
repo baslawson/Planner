@@ -72,6 +72,12 @@ class SyncFixesOct4bTest {
         CalendarFileImport.read(early, ZoneOffset.UTC, today).let {
             assertEquals(listOf("Next"), it.entries.map { e -> e.item.title }); assertEquals(1, it.skipped)
         }
+        // AS-4: so does a raw "Begin:Lunch" further on in the same text.
+        val earlyThenBegin = ics("DTSTART:20261005T100000\r\nDESCRIPTION:line1\r\nEnd:Vevent\r\nBegin:Lunch\r\nLOCATION:Canteen",
+            "DTSTART:20261006T100000\r\nSUMMARY:Next")
+        CalendarFileImport.read(earlyThenBegin, ZoneOffset.UTC, today).let {
+            assertEquals(listOf("Next"), it.entries.map { e -> e.item.title }); assertEquals(1, it.skipped)
+        }
         // A subscribed calendar link is read the same way.
         assertEquals(listOf("Good"), CalendarFileImport.window(unfinished, ZoneOffset.UTC, today, today.plusDays(5)).events.map { it.title })
         // A file cut off before its END:VCALENDAR is still incomplete, and a server's reply is still strict.
