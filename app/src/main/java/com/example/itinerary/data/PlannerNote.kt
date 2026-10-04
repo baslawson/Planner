@@ -63,8 +63,9 @@ interface NoteDao {
     @Insert suspend fun insert(note: PlannerNote)
     @Insert suspend fun insertAll(notes: List<PlannerNote>)
     @Update suspend fun update(note: PlannerNote)
-    // Room for a note placed at [from] (Duplicate): every note there or after it moves down one place.
+    // Room for a note placed at [from] (Duplicate): every note there or after it moves down one place, or [by] places.
     @Query("UPDATE notes SET position = position + 1 WHERE position >= :from") suspend fun makeRoomAt(from: Long)
+    @Query("UPDATE notes SET position = position + :by WHERE position >= :from") suspend fun makeRoomAt(from: Long, by: Long)
     @Query("DELETE FROM notes WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM notes") suspend fun deleteAll()
 }
@@ -112,6 +113,16 @@ object Notes {
     // of the unpinned notes. 0 never comes back (it means "not placed").
     fun copyPosition(original: PlannerNote, notes: Collection<PlannerNote>): Long =
         if (original.pinned) topPosition(notes) else (original.position + 1).let { if (it == 0L) 1L else it }
+
+    // N6-3: the order Duplicate makes copies in. A pinned note's copy goes above every note, so those are made last and
+    // last first, and so show in the order of [ids] like the others.
+    fun duplicateOrder(ids: List<String>, pinned: (String) -> Boolean): List<String> =
+        ids.filterNot(pinned) + ids.filter(pinned).asReversed()
+
+    // N6-4: the notes at [original]'s place that show after it (a restored note keeps its old place, which another can
+    // hold by then), in the order they show: a copy put right after it goes before them too.
+    fun tiedAfter(original: PlannerNote, notes: Collection<PlannerNote>): List<PlannerNote> =
+        notes.filter { it.id != original.id && it.position == original.position && order.compare(original, it) < 0 }.sortedWith(order)
 
     /** The place for a note going to the top: above every note there is. */
     fun topPosition(notes: Collection<PlannerNote>): Long = (notes.minOfOrNull { it.position } ?: 0L).coerceAtMost(0L) - 1

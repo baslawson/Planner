@@ -47,10 +47,11 @@ import kotlinx.coroutines.launch
 internal val NOTE_COLOR_NAMES = listOf("Green", "Teal", "Blue", "Purple", "Pink", "Red", "Orange", "Brown")
 
 /**
- * The open note editor's body, attachments and starting version, kept in memory rather than in the saved-instance
+ * Each open note editor's body, attachments and starting version, kept in memory rather than in the saved-instance
  * Bundle: a long note with recognised text could pass the Bundle's size limit (TransactionTooLargeException). They
  * outlive a rotation here; when Android closes Planner they go, and the on-disk draft (NoteDraftStore) has them.
- * One note editor is open at a time. Its key is in the Bundle, so only that editor, recreated, finds them again.
+ * One per editor, by a key kept in its Bundle, so only that editor, recreated, finds them again: each Planner window can
+ * have a note editor (N6-1). One note has one editor, so a new one for a note replaces what an old one left.
  */
 internal object NoteEditorMemory {
     class Body(content: TextFieldValue, attachments: List<Attachment>, base: PlannerNote?) {
@@ -58,17 +59,22 @@ internal object NoteEditorMemory {
         var attachments by mutableStateOf(attachments)
         var base by mutableStateOf(base)
     }
-    private var key: String? = null
-    private var noteId: String? = null
-    private var body: Body? = null
+    private class Kept(val noteId: String, val body: Body)
+    // An editor whose window went without closing it never forgets its own: the oldest go past a few.
+    private const val MAX = 8
+    private val kept = LinkedHashMap<String, Kept>()
 
-    fun keep(key: String, noteId: String, body: Body) { this.key = key; this.noteId = noteId; this.body = body }
-    fun restore(key: String, noteId: String): Body? = body?.takeIf { this.key == key && this.noteId == noteId }
+    fun keep(key: String, noteId: String, body: Body) {
+        kept.values.removeAll { it.noteId == noteId }
+        kept[key] = Kept(noteId, body)
+        while (kept.size > MAX) kept.remove(kept.keys.first())
+    }
+    fun restore(key: String, noteId: String): Body? = kept[key]?.takeIf { it.noteId == noteId }?.body
     /** Whether an editor of [noteId] left its state here: recreated after a rotation, not after Android closed Planner. */
-    fun holds(noteId: String) = body != null && this.noteId == noteId
-    fun forget(key: String) { if (this.key == key) forgetAll() }
+    fun holds(noteId: String) = kept.values.any { it.noteId == noteId }
+    fun forget(key: String) { kept.remove(key) }
     // What Android closing Planner does to it; also for tests.
-    fun forgetAll() { key = null; noteId = null; body = null }
+    fun forgetAll() { kept.clear() }
 }
 
 /**
@@ -85,6 +91,15 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val repo = app.repository
     val scope = rememberCoroutineScope()
     val draftStore = remember { NoteDraftStore(context) }
+    // N6-1: one editor per note. A second one (the note is open in another Planner window) says so instead of opening
+    // on the same draft, where its Discard would clear the first one's.
+    val claim = remember { NoteEditorClaim(initial.id) }
+    if (!claim.owner) {
+        PlannerDialog("Note already open", onDismissRequest = onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) {
+            Text("This note is open in another Planner window. Save or close it there first.")
+        }
+        return
+    }
     // What the fields start from: a recovered draft (Android closed Planner mid-edit), else the note.
     val start = recovered?.note ?: initial
     // The body, attachments and base live in NoteEditorMemory, not in the saved state (see there).
@@ -142,8 +157,13 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val deletedElsewhere = base != null && seenStored && stored == null
     val canSave = !busy && Notes.hasContent(current)
     val attachmentStore = app.attachmentStore
-    // Counted as an open editor (a widget day waits for it), and its state kept on disk shortly after each change.
-    DisposableEffect(Unit) { NoteDraftStore.editorOpened(); onDispose { NoteDraftStore.editorClosed() } }
+    // Counted as an open editor (a widget day in this window waits for it), and its state kept on disk shortly after
+    // each change.
+    val windowEditors = LocalWindowEditors.current
+    DisposableEffect(Unit) {
+        NoteDraftStore.editorOpened(); windowEditors?.let { it.notes++ }
+        onDispose { NoteDraftStore.editorClosed(); windowEditors?.let { it.notes-- } }
+    }
     // E5-5: the draft goes to the shared draft writer (on its thread, in order with clear), from the main thread: once
     // the editor has closed (Discard, Save and close, Delete) nothing more is sent, and clear drops what was waiting.
     val closed = remember { booleanArrayOf(false) }
@@ -153,7 +173,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         runCatching {
             if (unsaved || pendingPhoto != null) draftStore.schedule(NoteDraftStore.Draft(current, base == null, base, pendingPhoto)) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post { if (!closed[0]) error = draftError }
-            } else draftStore.clear()
+            } else draftStore.clear(initial.id)
         }
     }
     LaunchedEffect(current, base, pendingPhoto, unsaved) {
@@ -167,7 +187,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // in a saved note, Recently deleted or elsewhere stays). The draft is cleared first, here, so no write lands after it.
     fun releaseFiles() {
         val files = (initial.attachments + start.attachments + attachments + base?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
-        runCatching { draftStore.clear() }
+        runCatching { draftStore.clear(initial.id) }
         app.appScope.launch { runCatching { repo.releaseTaskFiles(files) } }
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
@@ -188,6 +208,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             else attachmentStore.delete(name)
         }
         pendingPhoto = null
+    }
+    // SH-9: a photo still being taken when this editor was last open (Android closed Planner with the camera open): its
+    // result has come (above, as the launcher is set up) or never will. Attached if it was taken, so Take photo isn't
+    // left waiting for it.
+    LaunchedEffect(Unit) {
+        val name = pendingPhoto ?: return@LaunchedEffect
+        pendingPhoto = null
+        leftoverPhoto(attachmentStore.fileFor(name), "Note photo.jpg", attachments)?.let { setAttachments(attachments + it) }
     }
     fun addTag() {
         // A tag that exists in other capitals is that tag ("Errands" adds #errands).
@@ -269,7 +297,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     // editor takes over this one's files, so they aren't released here.
                     if (base != null && onDuplicate != null) MatrixTextButton(enabled = !busy && Notes.hasContent(current), onClick = {
                         val copy = Notes.copyOf(current)
-                        runCatching { draftStore.clear() }
+                        runCatching { draftStore.clear(initial.id) }
                         dismiss(); onDuplicate(copy)
                     }) { Text("Duplicate note") }
                     OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
@@ -490,4 +518,12 @@ internal fun ColorChoices(selected: Int?, onCustom: () -> Unit, onSelect: (Int?)
             Icon(Icons.Filled.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
         }
     }
+}
+
+// Holds [noteId] for one note editor from when it is first composed until it leaves (or its composition is dropped).
+private class NoteEditorClaim(val noteId: String) : RememberObserver {
+    val owner = NoteDraftStore.claim(noteId, this)
+    override fun onRemembered() {}
+    override fun onForgotten() = NoteDraftStore.release(noteId, this)
+    override fun onAbandoned() = NoteDraftStore.release(noteId, this)
 }

@@ -58,7 +58,7 @@ class CleanStart : RunListener() {
         EditorDraftStore(context).clear()
         QuickDraftStore(context).clear()
         TaskDraftStore(context).clear("new")
-        com.example.itinerary.data.NoteDraftStore(context).clear()
+        com.example.itinerary.data.NoteDraftStore(context).clearAll()
         // Every test opens Planner as if for the first time in the process: its alarms are set again (RescheduleOnOpen).
         com.example.itinerary.data.RescheduleOnOpen.forget()
         val app = context.applicationContext as ItineraryApp

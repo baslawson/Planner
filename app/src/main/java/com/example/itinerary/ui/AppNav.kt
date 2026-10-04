@@ -78,12 +78,26 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         save = { it?.let { note -> com.example.itinerary.data.NoteCodec.encode(listOf(note)).toString() } ?: "" },
         restore = { text -> text.takeIf { it.isNotEmpty() }?.let { runCatching { com.example.itinerary.data.NoteCodec.decodeLenient(org.json.JSONArray(it)).firstOrNull() }.getOrNull() } },
     )) { mutableStateOf<com.example.itinerary.data.PlannerNote?>(null) }
-    val sharedEvent = if (sharedText != null) key(sharedText, sharedSubject) {
-        SharedTextReview(sharedText, sharedSubject, onSharedOpened, onNote = { note ->
+    // SH-10: the share on screen. A second share reaching this window meanwhile waits until this one is closed the usual
+    // way, "Save changes?" included, as a second widget task does: it used to replace it at once, dropping its editor
+    // and leaving that editor's draft to block the new share.
+    var shareOpen by remember { mutableStateOf(sharedText?.let { it to sharedSubject }) }
+    val shareWanted by rememberUpdatedState(sharedText?.let { it to sharedSubject })
+    LaunchedEffect(sharedText, sharedSubject, shareOpen) {
+        val wanted = sharedText?.let { it to sharedSubject } ?: return@LaunchedEffect
+        if (shareOpen == null) shareOpen = wanted
+        else if (shareOpen != wanted) Toast.makeText(app, "Close this share first. Then the new one opens.", Toast.LENGTH_LONG).show()
+    }
+    val sharedEvent = shareOpen?.let { open -> key(open) {
+        // With another share waiting it opens next; otherwise the share is done.
+        SharedTextReview(open.first, open.second, onDismiss = {
+            shareOpen = null
+            if (shareWanted == null || shareWanted == open) onSharedOpened()
+        }, onNote = { note ->
             sharedNote = note
             if (nav.currentDestination?.route != "notes") nav.navigate("notes") { launchSingleTop = true }
         })
-    } else null
+    } }
     // The task open from the widget. A second widget task (a new [widgetTaskId]) waits until this one's editor has
     // closed the usual way, "Save changes?" included; Keep editing there drops it (E4: the editor used to be reused).
     var widgetTaskOpen by remember { mutableStateOf<String?>(null) }
@@ -333,8 +347,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         // stays where it is. Snapshot state: the tap that brings Planner back sees the current count at once.
         val openEventEditors = windowEditors.events
         val openTaskEditors = windowEditors.tasks
-        // A note being written counts too (Q-1): moving to the day would close the Notes page with it.
-        val openNoteEditors by com.example.itinerary.data.NoteDraftStore.openEditors.collectAsStateWithLifecycle()
+        // A note being written here counts too (Q-1): moving to the day would close the Notes page with it (N6-6: one in
+        // another window doesn't).
+        val openNoteEditors = windowEditors.notes
         val openEditors = openEventEditors + openTaskEditors + openNoteEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
@@ -438,6 +453,7 @@ internal fun shortcutBlockedMessage(windowEventEditors: Int, allEventEditors: In
 internal class WindowEditors {
     var events by mutableIntStateOf(0)
     var tasks by mutableIntStateOf(0)
+    var notes by mutableIntStateOf(0)
 }
 internal val LocalWindowEditors = compositionLocalOf<WindowEditors?> { null }
 

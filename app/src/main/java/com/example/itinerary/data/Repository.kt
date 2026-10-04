@@ -332,15 +332,23 @@ class Repository(
     suspend fun duplicateNotes(ids: List<String>): List<PlannerNote> = changes.withLock {
         withContext(NonCancellable) {
             val copies = db.withTransaction {
-                ids.mapNotNull { id ->
+                val pinned = ids.filter { noteDao.byId(it)?.pinned == true }.toSet()
+                val made = Notes.duplicateOrder(ids, pinned::contains).mapNotNull { id ->
                     val original = noteDao.byId(id) ?: return@mapNotNull null
-                    val place = Notes.copyPosition(original, noteDao.all())
-                    if (!original.pinned) noteDao.makeRoomAt(place)
+                    val all = noteDao.all()
+                    val place = Notes.copyPosition(original, all)
+                    if (!original.pinned) {
+                        // N6-4: a note sharing the original's place that shows after it goes after the copy too.
+                        val tied = Notes.tiedAfter(original, all)
+                        noteDao.makeRoomAt(place, 1L + tied.size)
+                        tied.forEachIndexed { i, note -> noteDao.update(note.copy(position = place + 1 + i)) }
+                    }
                     val copy = Notes.clean(Notes.copyOf(original).copy(position = place))
                     Notes.validate(copy)
                     noteDao.insert(copy)
-                    copy
-                }
+                    id to copy
+                }.toMap()
+                ids.mapNotNull(made::get)
             }
             afterCommit(noteIds = copies.map { it.id })
             copies
