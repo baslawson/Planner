@@ -78,6 +78,12 @@ class SyncFixesOct4bTest {
         CalendarFileImport.read(earlyThenBegin, ZoneOffset.UTC, today).let {
             assertEquals(listOf("Next"), it.entries.map { e -> e.item.title }); assertEquals(1, it.skipped)
         }
+        // AB-2: a good event followed by a to-do whose text has a raw "End:Vevent" keeps the event.
+        val thenTodo = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261005T100000\r\nSUMMARY:Dentist\r\nEND:VEVENT\r\n" +
+            "BEGIN:VTODO\r\nSUMMARY:Call\r\nDESCRIPTION:x\r\nEnd:Vevent\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+        CalendarFileImport.read(thenTodo, ZoneOffset.UTC, today).let {
+            assertEquals(listOf("Dentist"), it.entries.map { e -> e.item.title }); assertEquals(0, it.skipped)
+        }
         // A subscribed calendar link is read the same way.
         assertEquals(listOf("Good"), CalendarFileImport.window(unfinished, ZoneOffset.UTC, today, today.plusDays(5)).events.map { it.title })
         // A file cut off before its END:VCALENDAR is still incomplete, and a server's reply is still strict.

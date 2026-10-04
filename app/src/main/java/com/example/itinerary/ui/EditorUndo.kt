@@ -147,3 +147,13 @@ fun undoCursor(before: String, now: String): Int {
     val end = before.drop(start).commonSuffixWith(now.drop(start)).length
     return (now.length - end).coerceIn(start, now.length)
 }
+
+// A checklist as text for [Track], and back (blank rows included, unlike ChecklistCodec).
+fun undoChecklist(entries: List<com.example.itinerary.data.ChecklistEntry>): String = org.json.JSONArray().apply {
+    entries.forEach { put(org.json.JSONObject().put("id", it.id).put("text", it.text).put("done", it.done)) }
+}.toString()
+
+fun undoChecklist(text: String): List<com.example.itinerary.data.ChecklistEntry> = runCatching {
+    val array = org.json.JSONArray(text)
+    List(array.length()) { i -> array.getJSONObject(i).let { com.example.itinerary.data.ChecklistEntry(it.getString("id"), it.getString("text"), it.getBoolean("done")) } }
+}.getOrDefault(emptyList())

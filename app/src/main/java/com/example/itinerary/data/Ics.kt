@@ -15,6 +15,8 @@ import java.time.temporal.ChronoUnit
 // sync): folded lines, properties with parameters, escaped text, date-times, the VEVENTs in a file, and how an event's
 // start and end become Planner's date, time, duration and span.
 internal object Ics {
+    // The components RFC 5545 defines (AB-2): a BEGIN of one of these is real structure, not text from a broken line.
+    private val COMPONENTS = setOf("VCALENDAR", "VEVENT", "VTODO", "VJOURNAL", "VFREEBUSY", "VTIMEZONE", "STANDARD", "DAYLIGHT", "VALARM")
     class Property(val name: String, val params: Map<String, String>, val value: String)
 
     // Unfolded, non-blank content lines.
@@ -152,7 +154,8 @@ internal object Ics {
                     if (name == component) { require(current == null); current = mutableListOf(); broken = false }
                     // AS-4: a raw "Begin:Lunch" after a raw "End:Vevent" is more of the same text, so the event just read
                     // is still the one its real END:VEVENT skips.
-                    stack += name; if (name == component || name == "VCALENDAR") justRead = false
+                    // AB-2: another real component (a to-do, a journal…) ends what was read before too.
+                    stack += name; if (name == component || name in COMPONENTS) justRead = false
                 }
                 "END" -> {
                     val name = p.value.uppercase()

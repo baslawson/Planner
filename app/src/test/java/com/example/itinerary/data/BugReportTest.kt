@@ -77,4 +77,19 @@ class BugReportTest {
             log.clear(); assertNull(log.read())
         } finally { dir.deleteRecursively() }
     }
+
+    // AB-1: a crash that went in a report is marked, not deleted; a new crash isn't marked.
+    @Test fun aSentCrashIsMarkedAndKept() {
+        val dir = kotlin.io.path.createTempDirectory("crash").toFile()
+        try {
+            val log = CrashLog(dir)
+            log.write(1_000L, "0.0.16 (23)", IllegalStateException("first"))
+            assertFalse(log.read()!!.sent)
+            log.markSent(1_000L)
+            assertTrue(log.read()!!.sent)
+            log.write(2_000L, "0.0.16 (23)", IllegalStateException("second"))
+            assertFalse(log.read()!!.sent)
+            log.clear(); assertNull(log.read())
+        } finally { dir.deleteRecursively() }
+    }
 }

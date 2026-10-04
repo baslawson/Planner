@@ -73,7 +73,9 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
     // limit on the whole call (S6-1, so a link that trickles can't hold it for ever; Cancel stops it sooner). AS-1: the
     // limit grows with the file (see [transferLimitMs]), so a large backup on a modest link isn't refused every time. A
     // stall ends it sooner too (the connect, read and write timeouts above still apply).
-    internal fun transferLimitMs(bytes: Long?): Long = transferTimeoutMs + (bytes ?: 0).coerceAtLeast(0) * 1000 / minBytesPerSecond
+    // AB-5: a size no server really has (over about 9 PB) can't overflow it.
+    internal fun transferLimitMs(bytes: Long?): Long =
+        transferTimeoutMs + (bytes ?: 0).coerceIn(0, Long.MAX_VALUE / 2000) * 1000 / minBytesPerSecond
 
     fun checkConnection(account: NextcloudAccount) {
         val root = account.filesRoot

@@ -40,8 +40,10 @@ fun <T> SettingsDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
         )
-        // A fresh one each time it opens, so it starts at the top rather than where it was left (ED-14).
-        val scroll = remember(open) { androidx.compose.foundation.ScrollState(0) }
+        // Back to the top each time it opens rather than where it was left (ED-14); not as it closes, which would flick
+        // the fading list (EU-5).
+        val scroll = remember { androidx.compose.foundation.ScrollState(0) }
+        androidx.compose.runtime.LaunchedEffect(open) { if (open) scroll.scrollTo(0) }
         ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false },
             modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp), scrollState = scroll) {
             options.forEach { option ->

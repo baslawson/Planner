@@ -109,10 +109,12 @@ class AttachmentStore(private val context: Context) {
         file.inputStream().use { input -> ByteArray(5).let { head -> input.read(head) == 5 && String(head, Charsets.US_ASCII) == "%PDF-" } }
     }.getOrDefault(false)
 
-    private fun pdfFirstPage(file: File, maxPx: Int): Bitmap? = runCatching {
+    private fun pdfFirstPage(file: File, maxPx: Int): Bitmap? = run {
         // The descriptor is closed by its own use {} too: PdfRenderer's constructor failing (a locked or damaged file)
         // would leave it open (ED-8).
-        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> android.graphics.pdf.PdfRenderer(fd).use { pdf ->
+        // A locked or damaged PDF is no preview for good (remembered); other failures are thrown, to be tried again (EU-6).
+        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> (try { android.graphics.pdf.PdfRenderer(fd) }
+            catch (e: java.io.IOException) { return null } catch (e: SecurityException) { return null }).use { pdf ->
             if (pdf.pageCount == 0) return@use null
             pdf.openPage(0).use { page ->
                 val scale = maxPx.toFloat() / maxOf(page.width, page.height)
@@ -122,7 +124,7 @@ class AttachmentStore(private val context: Context) {
                 }
             }
         } }
-    }.getOrNull()
+    }
 
     // Small preview decoded at reduced size, rotated per the photo's EXIF orientation. Not one lock for all: a slow PDF
     // doesn't hold up every other preview (ED-8); the cache is safe to share.
@@ -132,7 +134,10 @@ class AttachmentStore(private val context: Context) {
         val key = ThumbKey(fileName, maxPx, file.length(), file.lastModified())
         thumbnails.get(key)?.let { return it }
         if (key in noThumbnail) return null
-        return decodeThumbnail(file, maxPx)?.also { thumbnails.put(key, it) } ?: null.also {
+        // A file that can't give one (locked, damaged, not a picture) is remembered; a failure that may pass (out of
+        // memory, a read error) is tried again next time (EU-6).
+        val decoded = try { decodeThumbnail(file, maxPx) } catch (e: Throwable) { return null }
+        return decoded?.also { thumbnails.put(key, it) } ?: null.also {
             if (noThumbnail.size > 200) noThumbnail.clear()
             noThumbnail += key
         }

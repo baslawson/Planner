@@ -138,8 +138,10 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     var viewRestored by rememberSaveable { mutableStateOf(false) }
     // The intent that opened this window, before anything replaced it: a notification tap is not a plain start (SR-1).
     val launchIntent = LocalContext.current.findActivity()?.intent
+    // Reopened from Recents, the intent is the task's first one, whatever that was: a plain start too (AB-3).
     val launchedPlain = remember { com.example.itinerary.opensOnStartScreen(launchIntent?.action,
-        launchIntent?.getBooleanExtra(com.example.itinerary.reminders.EXTRA_FROM_NOTIFICATION, false) == true) }
+        launchIntent?.getBooleanExtra(com.example.itinerary.reminders.EXTRA_FROM_NOTIFICATION, false) == true) ||
+        launchIntent != null && launchIntent.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 }
     LaunchedEffect(nav) {
         nav.currentBackStackEntryFlow.collect { entry ->
             val route = entry.destination.route
@@ -156,7 +158,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     nav.navigate("notes") { launchSingleTop = true }
                     return@collect
                 }
-                if (route == "agenda" && page == com.example.itinerary.data.StartScreen.CALENDAR && widgetDate == null) {
+                // AB-4: Calendar too only on a plain start, as Settings and the notification code say.
+                if (route == "agenda" && page == com.example.itinerary.data.StartScreen.CALENDAR && !asked) {
                     nav.navigate("calendar") { launchSingleTop = true }
                     return@collect
                 }

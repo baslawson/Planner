@@ -254,7 +254,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val undo = rememberEditorUndo()
     Track(undo, "title", title) { title = it }
     Track(undo, "notes", notes) { notes = it }
-    checklist.forEach { entry -> key(entry.id) { Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } } }
+    // The checklist as one field: typing in a row, adding, removing or ticking one, and a template's list are undone
+    // together with the rest, so no step is left for a row that has gone (EU-3, EU-4).
+    Track(undo, "checklist", undoChecklist(checklist)) { checklist = undoChecklist(it) }
     var attachments by remember { mutableStateOf(if (draft != null) DraftCodec.attachments(draft.optJSONArray("attachments")) else initial.attachments) }
     var pendingPhoto by remember { mutableStateOf(draft?.optString("pendingPhoto")?.takeIf { it.isNotBlank() }) }
     var finished by remember { mutableStateOf(false) }

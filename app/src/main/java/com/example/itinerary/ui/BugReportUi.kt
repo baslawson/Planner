@@ -49,8 +49,9 @@ fun ReportBugDialog(onDismiss: () -> Unit) {
             opened = true
             try {
                 context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(report.url)))
-                // SR-5: a crash that went in a report isn't offered again with every later one.
-                if (crashText != null) CrashLog(context.filesDir).clear()
+                // SR-5, AB-1: a crash that went in a report isn't ticked again with every later one; kept, as the issue may
+                // never have been submitted, and only when it really went in (not left out for length).
+                if (crashText != null && !report.crashLeftOut) crash?.let { CrashLog(context.filesDir).markSent(it.at) }
                 onDismiss()
             } catch (_: android.content.ActivityNotFoundException) {
                 opened = false
@@ -65,7 +66,8 @@ fun ReportBugDialog(onDismiss: () -> Unit) {
         if (crash != null) Row(Modifier.fillMaxWidth().toggleable(withCrash, role = Role.Checkbox) { withCrash = it },
             verticalAlignment = Alignment.CenterVertically) {
             Checkbox(withCrash, onCheckedChange = null)
-            Text("Include the last crash (${momentLabel(crash.at, short = true)})", Modifier.padding(start = 8.dp))
+            Text("Include the last crash (${momentLabel(crash.at, short = true)})" + if (crash.sent) ", already in a report" else "",
+                Modifier.padding(start = 8.dp))
         }
         Text("What will be sent:", style = MaterialTheme.typography.labelLarge)
         Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp)) {

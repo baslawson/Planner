@@ -20,4 +20,5 @@
     <!-- SR-5: the last crash (data/BugReport CrashLog) is this phone's, for its own bug report; another phone, or a later
          version, would offer it as its own. -->
     <exclude domain="file" path="last-crash.txt" />
+    <exclude domain="file" path="last-crash.sent" />
 </full-backup-content>

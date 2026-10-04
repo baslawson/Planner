@@ -80,22 +80,28 @@ fun String.takeWhole(n: Int): String = if (n in 1 until length && this[n - 1].is
  * ends the app; the next crash replaces it, and a report that took it clears it.
  */
 class CrashLog(private val dir: File) {
-    data class Crash(val at: Long, val text: String)
+    // [sent]: opened in a report already (AB-1): still kept, as the person may not have submitted it, but not ticked again.
+    data class Crash(val at: Long, val text: String, val sent: Boolean = false)
 
     private val file get() = File(dir, "last-crash.txt")
+    private val sentFile get() = File(dir, "last-crash.sent")
 
     fun write(at: Long, version: String, error: Throwable) {
         // SR-6: not Log.getStackTraceString, which gives "" when any cause is an UnknownHostException (a crash while offline).
         val trace = error.stackTraceToString().takeWhole(MAX_TEXT)
-        runCatching { file.writeText("$at\n$version\n$trace") }
+        runCatching { file.writeText("$at\n$version\n$trace"); sentFile.delete() }
     }
 
     fun read(): Crash? = runCatching {
         val lines = file.takeIf { it.isFile }?.readText()?.split('\n', limit = 3) ?: return null
-        Crash(lines[0].toLong(), "Planner ${lines[1]}\n${lines.getOrElse(2) { "" }}".trim())
+        Crash(lines[0].toLong(), "Planner ${lines[1]}\n${lines.getOrElse(2) { "" }}".trim(),
+            sent = runCatching { sentFile.readText().toLong() }.getOrNull() == lines[0].toLong())
     }.getOrNull()
 
-    fun clear() { runCatching { file.delete() } }
+    fun clear() { runCatching { file.delete(); sentFile.delete() } }
+
+    /** The crash of [at] went into a report. */
+    fun markSent(at: Long) { runCatching { sentFile.writeText(at.toString()) } }
 
     companion object {
         const val MAX_TEXT = 12_000
