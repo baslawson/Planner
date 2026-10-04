@@ -209,6 +209,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         }
         pendingPhoto = null
     }
+    // SH-9: a photo still being taken when this editor was last open (Android closed Planner with the camera open): its
+    // result has come (above, as the launcher is set up) or never will. Attached if it was taken, so Take photo isn't
+    // left waiting for it.
+    LaunchedEffect(Unit) {
+        val name = pendingPhoto ?: return@LaunchedEffect
+        pendingPhoto = null
+        leftoverPhoto(attachmentStore.fileFor(name), "Note photo.jpg", attachments)?.let { setAttachments(attachments + it) }
+    }
     fun addTag() {
         // A tag that exists in other capitals is that tag ("Errands" adds #errands).
         val tag = Notes.existingSpelling(allTags, Notes.cleanTag(newTag))

@@ -205,6 +205,14 @@ fun rememberEditedTask(id: String, live: PlannerTask?): PlannerTask? {
     return live ?: last[0]
 }
 
+// SH-9: a camera photo whose result never came back, as an attachment named [name] when one was taken; an empty file
+// (nothing taken) is deleted. Null also when it is attached already.
+internal fun leftoverPhoto(file: java.io.File, name: String, attached: List<Attachment>): Attachment? = when {
+    attached.any { it.fileName == file.name } -> null
+    file.length() > 0 -> Attachment(itemId = 0, name = name, fileName = file.name, mimeType = "image/jpeg")
+    else -> { file.delete(); null }
+}
+
 // Holds [taskId] for one task editor from when it is first composed until it leaves (or its composition is dropped).
 private class TaskEditorClaim(val taskId: String) : RememberObserver {
     val owner = TaskDraftStore.claim(taskId, this)
@@ -368,6 +376,15 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         }
         pendingPhoto = null
         if (name != null && success) writeDraftNow(JSONObject(snapshot.toString()).put("attachments", DraftCodec.attachments(attachments)).put("pendingPhoto", ""))
+    }
+    // SH-9: a photo still being taken in a draft this form opened with (Android closed Planner with the camera open): its
+    // result has come (above, as the launcher is set up) or never will. Attached if it was taken, as the event editor
+    // does, so Take photo isn't left waiting for it.
+    LaunchedEffect(Unit) {
+        val name = pendingPhoto ?: return@LaunchedEffect
+        pendingPhoto = null
+        leftoverPhoto(attachmentStore.fileFor(name), "Task photo.jpg", attachments)?.let { attachments = attachments + it }
+        writeDraftNow(JSONObject(snapshot.toString()).put("attachments", DraftCodec.attachments(attachments)).put("pendingPhoto", ""))
     }
     BackHandler { if (!busy) close() }
     val taskScroll = rememberScrollState()
