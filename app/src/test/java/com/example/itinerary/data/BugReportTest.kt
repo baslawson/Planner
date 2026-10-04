@@ -85,11 +85,15 @@ class BugReportTest {
             val log = CrashLog(dir)
             log.write(1_000L, "0.0.16 (23)", IllegalStateException("first"))
             assertFalse(log.read()!!.sent)
-            log.markSent(1_000L)
+            log.markSent(1_000L, now = 1_000L)
             assertTrue(log.read()!!.sent)
             // SR9-3: a sent one is offered for a week more, then no longer.
             assertNotNull(log.offered(1_000L + CrashLog.SENT_OFFERED_MS - 1))
             assertNull(log.offered(1_000L + CrashLog.SENT_OFFERED_MS))
+            // SX-2: counted from when it was sent.
+            log.markSent(1_000L, now = 50_000L)
+            assertNotNull(log.offered(50_000L + CrashLog.SENT_OFFERED_MS - 1))
+            assertNull(log.offered(50_000L + CrashLog.SENT_OFFERED_MS))
             log.write(2_000L, "0.0.16 (23)", IllegalStateException("second"))
             assertFalse(log.read()!!.sent)
             log.clear(); assertNull(log.read())

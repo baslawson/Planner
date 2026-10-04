@@ -169,18 +169,40 @@ fun undoCursor(before: String, now: String): Int {
 // separator, id / done / text by the unit separator — characters no one types (and taken out if pasted).
 private const val ROW = '\u001E'
 private const val CELL = '\u001F'
+// Ids keep those characters, escaped (EX-3): a row must come back as the same row.
+private fun escapeId(id: String) = id.replace("%", "%25").replace(ROW.toString(), "%1E").replace(CELL.toString(), "%1F")
+private fun unescapeId(id: String) = id.replace("%1E", ROW.toString()).replace("%1F", CELL.toString()).replace("%25", "%")
 fun undoChecklist(entries: List<com.example.itinerary.data.ChecklistEntry>): String = entries.joinToString(ROW.toString()) {
-    it.id + CELL + (if (it.done) "1" else "0") + CELL + it.text.filterNot { c -> c == ROW || c == CELL }
+    escapeId(it.id) + CELL + (if (it.done) "1" else "0") + CELL + it.text.filterNot { c -> c == ROW || c == CELL }
 }
 
 fun undoChecklist(text: String): List<com.example.itinerary.data.ChecklistEntry> =
     if (text.isEmpty()) emptyList() else text.split(ROW).mapNotNull { row ->
         val cells = row.split(CELL, limit = 3)
-        if (cells.size < 3) null else com.example.itinerary.data.ChecklistEntry(cells[0], cells[2], cells[1] == "1")
+        if (cells.size < 3) null else com.example.itinerary.data.ChecklistEntry(unescapeId(cells[0]), cells[2], cells[1] == "1")
     }
 
 // Typing in one checklist row goes on in one step; adding, removing, ticking or moving to another row starts a new one (ER-1).
 fun checklistTyping(start: String, now: String): Boolean {
     val a = undoChecklist(start); val b = undoChecklist(now)
     return a.size == b.size && a.zip(b).all { (x, y) -> x.id == y.id && x.done == y.done } && a.zip(b).count { (x, y) -> x.text != y.text } <= 1
+}
+
+/**
+ * A field the app changes beside the text (a template's time, category, amount…), for [EditorUndo.around]: [back] puts
+ * it as it was and [again] as the app left it, each only while nobody has changed it since (EX-1).
+ */
+class UndoKept<T>(private val get: () -> T, private val set: (T) -> Unit) {
+    private val was = get()
+    private var after = was
+    val changed: Boolean get() = was != after
+    fun applied() { after = get() }
+    fun back() { if (get() == after) set(was) }
+    fun again() { if (get() == was) set(after) }
+}
+
+/** Moves [list] from [from] to [to] by what differs, leaving entries added or removed since as they are (EX-1). */
+fun <T> undoShift(list: MutableList<T>, from: List<T>, to: List<T>) {
+    list.removeAll((from - to.toSet()).toSet())
+    (to - from.toSet()).forEach { if (it !in list) list += it }
 }

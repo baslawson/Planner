@@ -144,6 +144,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(if (recovered != null) "Recovered unsaved changes. Save them, or Close and Discard." else null) }
     var askingToSave by rememberSaveable { mutableStateOf(false) }
+    // RS-1: Delete asks first when typing would be lost with it.
+    var askingToDelete by rememberSaveable { mutableStateOf(false) }
     var justSaved by remember { mutableStateOf(false) }
     // Changed elsewhere in the same place as here: how it is now, while the user chooses.
     var conflict by remember { mutableStateOf<PlannerNote?>(null) }
@@ -426,7 +428,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 // Beside Save, where it can't be missed.
                 if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = MaterialTheme.colorScheme.error)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ delete() }) else null,
+                EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ if (unsaved) askingToDelete = true else delete() }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
                     saveEnabled = canSave && (unsaved || deletedElsewhere), undo = undo, undoEnabled = !busy) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
@@ -462,6 +464,11 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             Text("This note was changed elsewhere (by Nextcloud sync or a reminder) while you were editing, in the same place as your changes. " +
                 "Keep your version, or use the other one and lose your changes.")
         }
+    }
+    if (askingToDelete) PlannerDialog("Delete note?", onDismissRequest = { askingToDelete = false },
+        primary = DialogAction("Delete", danger = true) { askingToDelete = false; delete() },
+        dismiss = DialogAction("Cancel") { askingToDelete = false }) {
+        Text("The note as last saved will be kept in Recently deleted for 30 days. Changes you haven't saved will be lost.")
     }
     if (askingToSave) PlannerDialog("Save changes?", onDismissRequest = { askingToSave = false },
         primary = DialogAction("Save", enabled = canSave) { askingToSave = false; save(::dismiss) },

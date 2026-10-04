@@ -131,6 +131,8 @@ fun SettingsScreen(
                     SettingsHeading("Agenda")
                     SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
+                    // RS-4: not Agenda settings: a heading of their own.
+                    SettingsHeading("Start and notes")
                     SettingsSection(
                         title = "Open Planner on",
                         options = com.example.itinerary.data.StartScreen.entries,

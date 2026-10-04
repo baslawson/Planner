@@ -116,4 +116,28 @@ class EditorUndoTest {
         undo.undo(); assertEquals("Old", title.text); assertEquals("Other", category); assertFalse(undo.canUndo)
         undo.redo(); assertEquals("Flight", title.text); assertEquals("Travel", category)
     }
+
+    // EX-1: a kept field changed again after the app's change keeps that change on Undo, and Redo likewise.
+    @Test fun keptFieldsGoBackOnlyWhenUntouched() {
+        var a = "was"; var b = "was"
+        val ka = UndoKept({ a }) { a = it }; val kb = UndoKept({ b }) { b = it }
+        a = "template"; b = "template"; ka.applied(); kb.applied()
+        assertTrue(ka.changed)
+        b = "typed later"
+        ka.back(); kb.back()
+        assertEquals("was", a); assertEquals("typed later", b)
+        ka.again(); assertEquals("template", a)
+        val list = mutableListOf("own", "added later")
+        undoShift(list, from = listOf("tpl"), to = listOf("own"))
+        assertEquals(listOf("own", "added later"), list)
+        val l2 = mutableListOf("tpl", "added later")
+        undoShift(l2, from = listOf("tpl"), to = listOf("own"))
+        assertEquals(listOf("added later", "own"), l2)
+    }
+
+    // EX-3: ids with the separator characters come back as the same row.
+    @Test fun oddChecklistIdsSurvive() {
+        val rows = listOf(com.example.itinerary.data.ChecklistEntry("a\u001Eb%1F", "x"), com.example.itinerary.data.ChecklistEntry("c\u001Fd", "y", true))
+        assertEquals(rows, undoChecklist(undoChecklist(rows)))
+    }
 }

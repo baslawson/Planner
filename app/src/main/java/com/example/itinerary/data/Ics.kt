@@ -178,7 +178,9 @@ internal object Ics {
                         val at = stack.lastIndexOf(name)
                         if (at < 0) {
                             if (name == component && justRead) { events.removeAt(events.lastIndex); unreadable?.invoke() }
-                            justRead = false; continue
+                            // SX-3: a raw "End:Notes" is text too, not the end of what was read.
+                            if (name == component || name in COMPONENTS) justRead = false
+                            continue
                         }
                         stack.subList(at + 1, stack.size).clear()
                     }

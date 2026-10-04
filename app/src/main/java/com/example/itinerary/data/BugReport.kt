@@ -96,16 +96,21 @@ class CrashLog(private val dir: File) {
     fun read(): Crash? = runCatching {
         val lines = file.takeIf { it.isFile }?.readText()?.split('\n', limit = 3) ?: return null
         Crash(lines[0].toLong(), "Planner ${lines[1]}\n${lines.getOrElse(2) { "" }}".trim(),
-            sent = runCatching { sentFile.readText().toLong() }.getOrNull() == lines[0].toLong())
+            sent = sentAt(lines[0].toLong()) != null)
     }.getOrNull()
 
     fun clear() { runCatching { file.delete(); sentFile.delete() } }
 
     /** The crash to offer in a report at [now]: a sent one only for [SENT_OFFERED_MS] after it happened (SR9-3). */
-    fun offered(now: Long = System.currentTimeMillis()): Crash? = read()?.takeIf { !it.sent || now - it.at < SENT_OFFERED_MS }
+    // SX-2: the week counts from when it went into a report, not from the crash.
+    fun offered(now: Long = System.currentTimeMillis()): Crash? = read()?.takeIf { c -> !c.sent || now - (sentAt(c.at) ?: c.at) < SENT_OFFERED_MS }
 
-    /** The crash of [at] went into a report. */
-    fun markSent(at: Long) { runCatching { sentFile.writeText(at.toString()) } }
+    // When the crash of [at] went into a report, or null. Old marker files hold only the crash's time (SX-2).
+    private fun sentAt(at: Long): Long? = runCatching { sentFile.readText().split('\n') }.getOrNull()
+        ?.takeIf { it[0].toLongOrNull() == at }?.let { it.getOrNull(1)?.toLongOrNull() ?: at }
+
+    /** The crash of [at] went into a report at [now]. */
+    fun markSent(at: Long, now: Long = System.currentTimeMillis()) { runCatching { sentFile.writeText("$at\n$now") } }
 
     companion object {
         const val MAX_TEXT = 12_000

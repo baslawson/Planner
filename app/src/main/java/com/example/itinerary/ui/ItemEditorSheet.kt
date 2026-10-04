@@ -554,24 +554,20 @@ private fun ItemEditorForm(
             }
         } catch (_: Exception) { error = draftError }
     }
-    fun applyTemplate(content: TemplateContent, record: Boolean = true) {
+    fun applyTemplate(content: TemplateContent) {
         val item = content.forDate(date)
-        // ER-2: one Undo puts the whole form back as it was, not only its text: the other fields are saved here.
-        if (record) {
-            val was = listOf(paymentLink, paymentReference, bpayBillerCode, bpayReference, beforeText, afterText, durationText, billAmountText)
-            val wasTime = time; val wasLastTimed = lastTimedTime; val wasEnd = endDate; val wasCategory = category
-            val wasColor = colorIndex; val wasCustom = customColor; val wasCurrency = billCurrency; val wasPaid = paid
-            val wasRepeat = repeat; val wasCount = repeatCount; val wasEntire = entireSeries
-            val wasAdded = addedReminders.toList(); val wasRemoved = removedReminders.toList()
-            undo.around(undo = {
-                paymentLink = was[0]; paymentReference = was[1]; bpayBillerCode = was[2]; bpayReference = was[3]
-                beforeText = was[4]; afterText = was[5]; durationText = was[6]; billAmountText = was[7]
-                time = wasTime; lastTimedTime = wasLastTimed; endDate = wasEnd; category = wasCategory; colorIndex = wasColor
-                customColor = wasCustom; billCurrency = wasCurrency; paid = wasPaid; repeat = wasRepeat; repeatCount = wasCount
-                entireSeries = wasEntire
-                addedReminders.clear(); addedReminders.addAll(wasAdded); removedReminders.clear(); removedReminders.addAll(wasRemoved)
-            }, redo = { applyTemplate(content, record = false) })
-        }
+        // ER-2: one Undo puts the form back as it was, not only its text. EX-1: a field changed again after the template
+        // keeps that change; only one still as the template left it goes back (and Redo likewise).
+        val kept = listOf(UndoKept({ paymentLink }) { paymentLink = it }, UndoKept({ paymentReference }) { paymentReference = it },
+            UndoKept({ bpayBillerCode }) { bpayBillerCode = it }, UndoKept({ bpayReference }) { bpayReference = it },
+            UndoKept({ beforeText }) { beforeText = it }, UndoKept({ afterText }) { afterText = it },
+            UndoKept({ durationText }) { durationText = it }, UndoKept({ billAmountText }) { billAmountText = it },
+            UndoKept({ time }) { time = it }, UndoKept({ lastTimedTime }) { lastTimedTime = it }, UndoKept({ endDate }) { endDate = it },
+            UndoKept({ category }) { category = it }, UndoKept({ colorIndex }) { colorIndex = it }, UndoKept({ customColor }) { customColor = it },
+            UndoKept({ billCurrency }) { billCurrency = it }, UndoKept({ paid }) { paid = it }, UndoKept({ repeat }) { repeat = it },
+            UndoKept({ repeatCount }) { repeatCount = it }, UndoKept({ entireSeries }) { entireSeries = it })
+        val wasText = listOf(title, location, notes, undoChecklist(checklist))
+        val wasAdded = addedReminders.toList(); val wasRemoved = removedReminders.toList()
         paymentLink = item.paymentLink; paymentReference = item.paymentReference
         bpayBillerCode = item.bpayBillerCode; bpayReference = item.bpayReference
         // A time block keeps its own time and length when the template has none.
@@ -583,6 +579,16 @@ private fun ItemEditorForm(
         repeat = content.repeat; repeatCount = EditorRules.templateCount(content.repeat, content.count, repeatCount); entireSeries = false
         addedReminders.clear(); removedReminders.clear(); removedReminders.addAll(existingReminders)
         addedReminders.addAll(content.reminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) })
+        kept.forEach { it.applied() }
+        val nowAdded = addedReminders.toList(); val nowRemoved = removedReminders.toList()
+        // EX-2: a template that changed nothing is no step.
+        if (kept.none { it.changed } && wasText == listOf(title, location, notes, undoChecklist(checklist)) &&
+            wasAdded == nowAdded && wasRemoved == nowRemoved) return
+        undo.around(undo = {
+            kept.forEach { it.back() }; undoShift(addedReminders, nowAdded, wasAdded); undoShift(removedReminders, nowRemoved, wasRemoved)
+        }, redo = {
+            kept.forEach { it.again() }; undoShift(addedReminders, wasAdded, nowAdded); undoShift(removedReminders, wasRemoved, nowRemoved)
+        })
     }
     fun save(allowDuplicate: Boolean = false, allowStale: Boolean = false) {
         if (busy) return
@@ -1044,7 +1050,7 @@ private fun ItemEditorForm(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             EditorActions(
-                onDelete = if (isNew || deletedElsewhere) null else ({ if (deleteAsks(billTask, initial.seriesId != null)) deleting = true else delete(false) }),
+                onDelete = if (isNew || deletedElsewhere) null else ({ if (deleteAsks(billTask, initial.seriesId != null) || unsaved) deleting = true else delete(false) }),
                 onClose = ::close, onSave = { save() },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 8.dp),
                 deleteEnabled = !busy && !readingText, closeEnabled = !busy && !readingText,
@@ -1100,7 +1106,8 @@ private fun ItemEditorForm(
             androidx.compose.foundation.text.selection.SelectionContainer { Text(attachment.recognizedText) }
         }
     }
-    if (deleting) DeleteEventDialog(bill = billTask, repeating = initial.seriesId != null, onDismiss = { deleting = false }, onDelete = ::delete)
+    if (deleting) DeleteEventDialog(bill = billTask, repeating = initial.seriesId != null, onDismiss = { deleting = false }, onDelete = ::delete,
+        unsaved = unsaved)
 
     if (scannedBillSuggestion != null && !billReviewRequested && billSuggestion == null) {
         PlannerDialog("Read details from this scan?",

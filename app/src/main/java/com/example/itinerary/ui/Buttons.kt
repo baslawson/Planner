@@ -126,14 +126,15 @@ fun EditorActions(
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 36.dp) {
             if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
-            if (undo != null) {
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            // RS-1: Undo and Redo, tapped often, sit away from Delete (beside Close), with a full 48 dp touch area.
+            if (undo != null) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 48.dp) {
                 val tight = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                 OutlinedButton(enabled = undoEnabled && undo.canUndo, onClick = undo::undo, contentPadding = tight, modifier = size) {
                     androidx.compose.material3.Icon(UndoIcons.undo, contentDescription = "Undo", modifier = Modifier.size(18.dp)) }
                 OutlinedButton(enabled = undoEnabled && undo.canRedo, onClick = undo::redo, contentPadding = tight, modifier = size) {
                     androidx.compose.material3.Icon(UndoIcons.redo, contentDescription = "Redo", modifier = Modifier.size(18.dp)) }
             }
-            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
             OutlinedButton(enabled = closeEnabled, onClick = onClose, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Close") } }
             MatrixButton(enabled = saveEnabled, onClick = onSave, modifier = size, contentPadding = padding) {

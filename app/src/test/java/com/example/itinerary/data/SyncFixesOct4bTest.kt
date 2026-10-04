@@ -90,6 +90,12 @@ class SyncFixesOct4bTest {
         CalendarFileImport.read(earlyThenAlarm, ZoneOffset.UTC, today).let {
             assertEquals(listOf("Next"), it.entries.map { e -> e.item.title }); assertEquals(1, it.skipped)
         }
+        // SX-3: a raw "End:Notes" after the raw "End:Vevent" doesn't let the cut-short event in either.
+        val earlyThenEndText = ics("DTSTART:20261005T100000\r\nDESCRIPTION:line1\r\nEnd:Vevent\r\nEnd:Notes\r\nSUMMARY:Cut",
+            "DTSTART:20261006T100000\r\nSUMMARY:Next")
+        CalendarFileImport.read(earlyThenEndText, ZoneOffset.UTC, today).let {
+            assertEquals(listOf("Next"), it.entries.map { e -> e.item.title }); assertEquals(1, it.skipped)
+        }
         // A subscribed calendar link is read the same way.
         assertEquals(listOf("Good"), CalendarFileImport.window(unfinished, ZoneOffset.UTC, today, today.plusDays(5)).events.map { it.title })
         // A file cut off before its END:VCALENDAR is still incomplete, and a server's reply is still strict.
