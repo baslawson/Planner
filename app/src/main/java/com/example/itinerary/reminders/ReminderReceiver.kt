@@ -23,9 +23,9 @@ class ReminderReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                (context.applicationContext as ItineraryApp).repository.deliverReminder(
-                    id, intent.getLongExtra(ReminderScheduler.EXTRA_TRIGGER, 0L)) { item, reminder ->
-                    show(context, reminderIntent(context, item, reminder))
+                val trigger = intent.getLongExtra(ReminderScheduler.EXTRA_TRIGGER, 0L)
+                (context.applicationContext as ItineraryApp).repository.deliverReminder(id, trigger) { item, reminder ->
+                    show(context, reminderIntent(context, item, reminder, trigger))
                 }
                 // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
                 withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }

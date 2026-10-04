@@ -315,6 +315,7 @@ class AlarmService : Service() {
                 .putExtra(ReminderScheduler.EXTRA_TIME, LocalTime.now().withSecond(0).withNano(0).toString())
                 .putExtra(ReminderScheduler.EXTRA_OFFSET_LABEL, "Test")
                 .putExtra(ReminderScheduler.EXTRA_RING, true)
+                .putExtra(ReminderScheduler.EXTRA_TRIGGER, System.currentTimeMillis())
             ContextCompat.startForegroundService(context, intent)
             return true
         }
