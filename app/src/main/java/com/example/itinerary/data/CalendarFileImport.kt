@@ -26,14 +26,15 @@ object CalendarFileImport {
     data class Entry(val id: Int, val item: ItineraryItem, val dates: List<LocalDate>, val repeat: RepeatRule, val note: String? = null) {
         val repeating: Boolean get() = dates.size > 1
 
-        // The dates that would be imported: from today on (an occurrence still under way counts), or all of them with
-        // past events included. When there are more than 365: the latest ones if past dates are among them, else (R5-5)
-        // the first ones, so a series from today keeps today and loses its far end.
+        // The dates that would be imported, at most 365. From today on (an occurrence still under way counts) the first
+        // ones, so a series from today keeps today and loses its far end (R5-5). S6-2: past events included, the past
+        // dates nearest today fill what is left of the 365, so ticking it never imports less than leaving it off.
         fun datesFor(today: LocalDate, includePast: Boolean): List<LocalDate> {
             val span = item.endDate?.let { ChronoUnit.DAYS.between(item.date, it) } ?: 0
             fun past(date: LocalDate) = date.plusDays(span).isBefore(today)
-            val chosen = if (includePast) dates else dates.filter { !past(it) }
-            return if (chosen.firstOrNull()?.let(::past) == true) chosen.takeLast(MAX_SERIES) else chosen.take(MAX_SERIES)
+            val upcoming = dates.filter { !past(it) }.take(MAX_SERIES)
+            if (!includePast) return upcoming
+            return dates.filter(::past).takeLast(MAX_SERIES - upcoming.size) + upcoming
         }
 
         fun past(today: LocalDate): Boolean = datesFor(today, includePast = false).isEmpty()

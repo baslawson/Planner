@@ -132,6 +132,8 @@ internal object Ics {
                component: String = "VEVENT", unreadable: (() -> Unit)? = null): List<List<Property>> {
         val stack = mutableListOf<String>(); val events = mutableListOf<List<Property>>(); var current: MutableList<Property>? = null
         var broken = false
+        // The last thing read was an event, kept (see the END of nothing open below).
+        var justRead = false
         val forgiving = unreadable != null
         for (line in lines) {
             val p = if (unreadable == null) property(line) else runCatching { property(line) }.getOrNull()
@@ -148,7 +150,7 @@ internal object Ics {
                         stack.subList(stack.lastIndexOf(component), stack.size).clear()
                     }
                     if (name == component) { require(current == null); current = mutableListOf(); broken = false }
-                    stack += name
+                    stack += name; justRead = false
                 }
                 "END" -> {
                     val name = p.value.uppercase()
@@ -156,12 +158,28 @@ internal object Ics {
                         // A stray END inside the event, or its own END with something inside still open: either way
                         // the event can't be trusted. Its own END still closes it.
                         broken = true
-                        if (name != component) continue
-                        stack.subList(stack.lastIndexOf(component) + 1, stack.size).clear()
+                        val open = stack.lastIndexOf(component)
+                        if (name == component) stack.subList(open + 1, stack.size).clear()
+                        // S6-3: the END of what the event sits in (the file's END:VCALENDAR after an event that never
+                        // ended): the event is skipped, and that END closes its own component below.
+                        else if (name in stack.subList(0, open)) { unreadable?.invoke(); current = null; stack.subList(open, stack.size).clear() }
+                        else continue
+                    }
+                    if (forgiving && current == null && stack.lastOrNull() != name) {
+                        // S6-3: outside an event, an END of nothing open is text ("End:Monday"), except a second END of
+                        // an event: a raw "End:Vevent" in its text closed it early, so the event just read is skipped
+                        // after all. An END of something further out closes what a raw "Begin:Notes" left open.
+                        val at = stack.lastIndexOf(name)
+                        if (at < 0) {
+                            if (name == component && justRead) { events.removeAt(events.lastIndex); unreadable?.invoke() }
+                            justRead = false; continue
+                        }
+                        stack.subList(at + 1, stack.size).clear()
                     }
                     require(stack.lastOrNull() == name) { "Incomplete calendar component." }
+                    justRead = false
                     if (name == component) {
-                        if (broken) unreadable?.invoke() else events += requireNotNull(current).toList()
+                        if (broken) unreadable?.invoke() else { events += requireNotNull(current).toList(); justRead = true }
                         current = null; require(events.size <= max) { tooMany }
                     }
                     stack.removeAt(stack.lastIndex)
