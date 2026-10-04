@@ -74,9 +74,8 @@ internal object NoteEditorMemory {
     }
     fun opened(key: String) { live += key }
     fun closed(key: String) { live -= key }
+    // NT-1: by key, not by note: an editor another window left behind (its task swiped away) isn't this page's.
     fun restore(key: String, noteId: String): Body? = kept[key]?.takeIf { it.noteId == noteId }?.body
-    /** Whether an editor of [noteId] left its state here: recreated after a rotation, not after Android closed Planner. */
-    fun holds(noteId: String) = kept.values.any { it.noteId == noteId }
     fun forget(key: String) { kept.remove(key) }
     // What Android closing Planner does to it; also for tests.
     fun forgetAll() { kept.clear(); live.clear() }
@@ -91,7 +90,7 @@ internal object NoteEditorMemory {
 @Composable
 fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(),
                recovered: NoteDraftStore.Draft? = null, onDuplicate: ((PlannerNote) -> Unit)? = null, copyOf: String? = null,
-               onDismiss: () -> Unit) {
+               editorKey: String? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -108,8 +107,10 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     }
     // What the fields start from: a recovered draft (Android closed Planner mid-edit), else the note.
     val start = recovered?.note ?: initial
-    // The body, attachments and base live in NoteEditorMemory, not in the saved state (see there).
-    val memoryKey = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    // The body, attachments and base live in NoteEditorMemory, not in the saved state (see there). NT-1: under the key the
+    // Notes page gave, so the page knows its own editor's state from one another window left.
+    val ownKey = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val memoryKey = editorKey ?: ownKey
     val body = remember { NoteEditorMemory.restore(memoryKey, initial.id) ?: NoteEditorMemory.Body(TextFieldValue(start.content), start.attachments,
         if (recovered != null) recovered.base else if (creating) null else initial).also { NoteEditorMemory.keep(memoryKey, initial.id, it) } }
     DisposableEffect(memoryKey) { NoteEditorMemory.opened(memoryKey); onDispose { NoteEditorMemory.closed(memoryKey) } }
@@ -146,6 +147,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var justSaved by remember { mutableStateOf(false) }
     // Changed elsewhere in the same place as here: how it is now, while the user chooses.
     var conflict by remember { mutableStateOf<PlannerNote?>(null) }
+    // EU-1, EU-2: whether loading [note] changes what is typed in the fields Undo follows.
+    fun wordsDiffer(note: PlannerNote) = noteWordsDiffer(note, title, content.text, notebook)
     fun load(note: PlannerNote) {
         title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook; color = note.color
         pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; priority = note.priority
@@ -165,8 +168,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         val now = stored
         if (now != null) {
             seenStored = true
-            // Not a step to undo: that would put back the text from before, over the other device's change (ED-7).
-            if (base != null && now != base && !unsaved) { undo.reload(); load(now); base = now }
+            // Not a step to undo: that would put back the text from before, over the other device's change (ED-7). EU-2: and
+            // only when the words changed: a snooze, a pin or a sync's new time leaves the history as it is.
+            if (base != null && now != base && !unsaved) {
+                if (wordsDiffer(now)) undo.reload()
+                load(now); base = now
+            }
         }
     }
     val deletedElsewhere = base != null && seenStored && stored == null
@@ -212,7 +219,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // in a saved note, Recently deleted or elsewhere stays). The draft is cleared first, here, so no write lands after it.
     fun releaseFiles() {
         val files = (initial.attachments + start.attachments + attachments + base?.attachments.orEmpty()).map { it.fileName } + listOfNotNull(pendingPhoto)
-        runCatching { draftStore.clear(initial.id) }
+        // NT-1: only a draft this editor wrote or started from; another one of this note (another window's) stays.
+        if (ownsDraft) runCatching { draftStore.clear(initial.id) }
         app.appScope.launch { runCatching { repo.releaseTaskFiles(files) } }
     }
     val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
@@ -255,7 +263,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         val edited = Notes.clean(current)
         val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color && note.priority == edited.priority &&
             note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt
-        base = note; if (!same) load(note); justSaved = true
+        // EU-1: a merge brings in another device's words: loaded as no step, so Undo can't take them back unseen.
+        base = note; if (!same) { if (noteWordsDiffer(note, edited.title, edited.content, edited.notebook)) undo.reload(); load(note) }; justSaved = true
         releaseFiles(); then()
     }
     // [note] written over how it is now ([latest]): the user chose their version.
@@ -322,7 +331,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     // editor takes over this one's files, so they aren't released here.
                     if (base != null && onDuplicate != null) MatrixTextButton(enabled = !busy && Notes.hasContent(current), onClick = {
                         val copy = Notes.copyOf(current)
-                        runCatching { draftStore.clear(initial.id) }
+                        if (ownsDraft) runCatching { draftStore.clear(initial.id) } // NT-1, as in releaseFiles
                         dismiss(); onDuplicate(copy)
                     }) { Text("Duplicate note") }
                     OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
@@ -444,7 +453,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         PlannerDialog("Changed elsewhere", onDismissRequest = { conflict = null },
             primary = DialogAction("Keep my version", enabled = !busy) { conflict = null; saveOver(current, latest) },
             dismiss = DialogAction("Cancel") { conflict = null },
-            extra = listOf(DialogAction("Use the other version", danger = true) { conflict = null; base = latest; load(latest); error = null })) {
+            extra = listOf(DialogAction("Use the other version", danger = true) { conflict = null; base = latest; undo.reload(); load(latest); error = null })) {
             Text("This note was changed elsewhere (by Nextcloud sync or a reminder) while you were editing, in the same place as your changes. " +
                 "Keep your version, or use the other one and lose your changes.")
         }
@@ -550,3 +559,7 @@ private class NoteEditorClaim(val noteId: String) : RememberObserver {
     override fun onForgotten() = NoteDraftStore.release(noteId, this)
     override fun onAbandoned() = NoteDraftStore.release(noteId, this)
 }
+
+// EU-1, EU-2: whether [note]'s title, body or notebook differ from what the fields hold, the text Undo follows.
+internal fun noteWordsDiffer(note: PlannerNote, title: String, content: String, notebook: String) =
+    note.title != title || note.content != content || note.notebook != notebook

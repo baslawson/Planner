@@ -51,10 +51,13 @@ class NoteDraftStore(context: Context) {
         return (waiting + stored).distinctBy { it.note.id }
     }
 
-    /** The draft the Notes page [page] reopens (see [recoverableNoteDraft]); with no page, any not open in an editor. */
-    fun recoverable(editingId: String?, page: String? = null): Draft? = recoverableNoteDraft(editingId, page, ::isOpen, ::read, ::readAll)
+    /** The draft the Notes page [page] reopens (see [recoverableNoteDraft]); with no page, any not open in an editor.
+     *  [pageRestored]: the page's window came back from saved state (see [anotherWindowsDraft]). */
+    fun recoverable(editingId: String?, page: String? = null, pageRestored: Boolean = false): Draft? =
+        recoverableNoteDraft(editingId, page, ::isOpen, ::read, ::readAll) { anotherWindows(it, page, pageRestored) }
     /** NW-5: another window's draft, which the Notes page [page] offers rather than opens (see [offeredNoteDraft]). */
-    fun offered(page: String): Draft? = offeredNoteDraft(page, ::isOpen, readAll())
+    fun offered(page: String, pageRestored: Boolean = false): Draft? =
+        offeredNoteDraft(page, ::isOpen, readAll()) { anotherWindows(it, page, pageRestored) }
 
     /** Written now, on this thread. */
     fun write(draft: Draft) { val id = draft.note.id; val encoded = encode(draft); writer.now(id) { writeFile(id, encoded) } }
@@ -110,21 +113,45 @@ class NoteDraftStore(context: Context) {
         fun claim(noteId: String, editor: Any): Boolean = synchronized(owners) { owners.getOrPut(noteId) { editor } === editor }
         fun release(noteId: String, editor: Any) { synchronized(owners) { if (owners[noteId] === editor) owners.remove(noteId) } }
         fun isOpen(noteId: String): Boolean = synchronized(owners) { noteId in owners }
+
+        // NT-2: the Planner windows (AppNav ids) this process has shown: those on screen now, and every one so far. A
+        // draft of a window that went while Planner ran (its task swiped away) is no other window's any more.
+        private val liveWindows = HashSet<String>()
+        private val seenWindows = HashSet<String>()
+        fun windowOpened(id: String) { synchronized(liveWindows) { liveWindows += id; seenWindows += id } }
+        fun windowClosed(id: String) { synchronized(liveWindows) { liveWindows -= id } }
+        private fun anotherWindows(owner: String?, page: String?, pageRestored: Boolean) = synchronized(liveWindows) {
+            anotherWindowsDraft(owner, page, owner in liveWindows, owner in seenWindows, pageRestored)
+        }
     }
 }
+
+/**
+ * NT-2: whether a draft written in the window [owner] is still that window's, so the Notes page [page] only offers it.
+ * Yes while that window is on screen in this process ([live]). One this process showed and that has gone ([seen], not
+ * live) won't come back for it. One from before Planner was last started may: when this window came back from its saved
+ * state too ([pageRestored], Android closed Planner with both open, NW-5), that window may still be restored. A window
+ * started afresh (Planner swiped away, a reboot) takes it as its own, as before drafts named their window.
+ */
+internal fun anotherWindowsDraft(owner: String?, page: String?, live: Boolean, seen: Boolean, pageRestored: Boolean): Boolean =
+    owner != null && owner != page && (live || !seen && pageRestored)
 
 /**
  * The draft a Notes page reopens as it opens: rebuilt with a note open ([editingId], after Android closed Planner) only
  * that note's, else the newest. Never one whose note an editor has open, in this window or another ([isOpen]): that
  * editor is still writing it. NW-5: with no note open, only a draft of this page ([page]) or of none (written before
  * drafts named their page): another window's is that window's to reopen when it comes back, so it is only offered
- * ([offeredNoteDraft]). With no [page] (the share's check), any.
+ * ([offeredNoteDraft]). NT-2: one of a window that is gone is this page's too ([anotherWindows]). With no [page] (the
+ * share's check), any.
  */
 internal fun recoverableNoteDraft(editingId: String?, page: String?, isOpen: (String) -> Boolean, read: (String) -> NoteDraftStore.Draft?,
-                                  readAll: () -> List<NoteDraftStore.Draft>): NoteDraftStore.Draft? =
+                                  readAll: () -> List<NoteDraftStore.Draft>,
+                                  anotherWindows: (String?) -> Boolean = { it != null && it != page }): NoteDraftStore.Draft? =
     if (editingId != null) read(editingId)?.takeUnless { isOpen(it.note.id) }
-    else readAll().firstOrNull { !isOpen(it.note.id) && (page == null || it.owner == null || it.owner == page) }
+    else readAll().firstOrNull { !isOpen(it.note.id) && (page == null || !anotherWindows(it.owner)) }
 
-/** The newest draft of another Notes page than [page] whose note no editor has open: the page offers to open it. */
-internal fun offeredNoteDraft(page: String, isOpen: (String) -> Boolean, drafts: List<NoteDraftStore.Draft>): NoteDraftStore.Draft? =
-    drafts.firstOrNull { it.owner != null && it.owner != page && !isOpen(it.note.id) }
+/** The newest draft of another Notes page than [page] whose note no editor has open: the page offers to open it. NT-2:
+ *  only one [anotherWindows] says is still that window's (see [anotherWindowsDraft]); the page reopens the rest. */
+internal fun offeredNoteDraft(page: String, isOpen: (String) -> Boolean, drafts: List<NoteDraftStore.Draft>,
+                              anotherWindows: (String?) -> Boolean = { it != null && it != page }): NoteDraftStore.Draft? =
+    drafts.firstOrNull { anotherWindows(it.owner) && !isOpen(it.note.id) }
