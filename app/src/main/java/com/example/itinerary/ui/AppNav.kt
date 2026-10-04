@@ -129,6 +129,10 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     // U-13: the note a reminder's tap asked for, handed to the Notes page (see below).
     var noteToOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
+    // The intent that opened this window, before anything replaced it: a notification tap is not a plain start (SR-1).
+    val launchIntent = LocalContext.current.findActivity()?.intent
+    val launchedPlain = remember { com.example.itinerary.opensOnStartScreen(launchIntent?.action,
+        launchIntent?.getBooleanExtra(com.example.itinerary.reminders.EXTRA_FROM_NOTIFICATION, false) == true) }
     LaunchedEffect(nav) {
         nav.currentBackStackEntryFlow.collect { entry ->
             val route = entry.destination.route
@@ -139,7 +143,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 // Settings → Open Planner on (wish list #10). A widget day, shortcut, share, calendar file or reminder opens
                 // what it is for instead, over Agenda as before.
                 val page = app.settings.startScreen.value.page(app.settings.lastViewCalendar)
-                val asked = widgetDate != null || noteId != null || sharedText != null || entryAction != null || calendarUri != null || widgetTaskId != null
+                val asked = widgetDate != null || noteId != null || sharedText != null || entryAction != null || calendarUri != null || widgetTaskId != null ||
+                    !launchedPlain
                 if (route == "agenda" && page == com.example.itinerary.data.StartScreen.NOTES && !asked) {
                     nav.navigate("notes") { launchSingleTop = true }
                     return@collect

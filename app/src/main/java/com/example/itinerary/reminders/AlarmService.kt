@@ -26,7 +26,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.itinerary.ItineraryApp
-import com.example.itinerary.MainActivity
 import com.example.itinerary.R
 import java.time.LocalDate
 import java.time.LocalTime
@@ -321,8 +320,7 @@ class AlarmService : Service() {
         PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
-            Intent(this, MainActivity::class.java)
-                .addFlags(OPEN_PLANNER_FLAGS)
+            openPlannerIntent(this)
                 .putExtra(EXTRA_STOP_ALARM, token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

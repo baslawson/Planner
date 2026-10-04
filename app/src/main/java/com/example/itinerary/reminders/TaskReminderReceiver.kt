@@ -8,7 +8,6 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.itinerary.ItineraryApp
-import com.example.itinerary.MainActivity
 import com.example.itinerary.R
 import kotlinx.coroutines.*
 
@@ -49,8 +48,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
 internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false) {
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0,
-        Intent(context, MainActivity::class.java)
-            .addFlags(OPEN_PLANNER_FLAGS),
+        openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)

@@ -57,6 +57,14 @@ internal fun actsOnLaunchIntent(flags: Int, savedStateNull: Boolean): Boolean =
 internal fun opensCalendarFile(scheme: String?): Boolean = scheme == "content"
 
 /**
+ * Whether Planner opens on the chosen start screen (Settings → Open Planner on): only when it is opened itself, from the
+ * launcher or Recents. Anything else opens what it is for (SR-1): a notification tap ([fromNotification]) carries
+ * nothing else to say so, and a widget, shortcut, share or calendar file has its own action.
+ */
+internal fun opensOnStartScreen(action: String?, fromNotification: Boolean): Boolean =
+    (action == null || action == Intent.ACTION_MAIN) && !fromNotification
+
+/**
  * What an intent asks Planner to open: shared text (with its subject), a widget task, a calendar file, an entry
  * shortcut, a widget day, a note (its reminder's notification, U-13). Null: not asked. [U] is android.net.Uri (generic so the rules run in a plain JVM test).
  */
