@@ -69,7 +69,9 @@ private fun NavController.openCalendar(entry: NavBackStackEntry, date: LocalDate
 
 @Composable
 fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOpened: () -> Unit = {}, widgetDate: LocalDate? = null, onWidgetOpened: () -> Unit = {}, entryAction: String? = null, onEntryOpened: () -> Unit = {}, calendarUri: android.net.Uri? = null, onCalendarOpened: () -> Unit = {}, widgetTaskId: String? = null, onWidgetTaskOpened: () -> Unit = {}, noteId: String? = null, onNoteOpened: () -> Unit = {}) {
-    val windowEditors = remember { WindowEditors() }
+    // Its id is kept with the window's saved state: a note draft names the window it was written in (NW-5).
+    val windowId = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val windowEditors = remember { WindowEditors(windowId) }
     // Task ↔ event conversions asked for from a card's ⋮ or an editor (wish list #1), opened by ConversionHost below.
     val conversions = rememberConversions()
     CompositionLocalProvider(LocalWindowEditors provides windowEditors, LocalConversions provides conversions) {
@@ -465,7 +467,7 @@ internal fun shortcutBlockedMessage(windowEventEditors: Int, allEventEditors: In
     else "Finish or discard your current draft before using a shortcut."
 
 /** The editors open in one Planner window (one AppNav), for what waits for them there (U-N5). */
-internal class WindowEditors {
+internal class WindowEditors(val id: String = java.util.UUID.randomUUID().toString()) {
     var events by mutableIntStateOf(0)
     var tasks by mutableIntStateOf(0)
     var notes by mutableIntStateOf(0)
