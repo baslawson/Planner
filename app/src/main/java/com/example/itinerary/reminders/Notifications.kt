@@ -26,6 +26,8 @@ private const val TEST_NOTIFICATION_ID = 0
 
 // A6-4: a notification tap opens Planner as the widget and shortcuts do: in its open window (onNewIntent), clearing
 // the App lock screen above it (MainActivity locks again on start), never as one more Planner window on top.
+// AS-6: accepted, the same as the widget's: it also ends a camera or file picker Planner opened in its own task (a photo
+// being framed is lost). The PendingIntent is made when the reminder posts, so it can't tell what will be on top then.
 internal const val OPEN_PLANNER_FLAGS = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
 
 // Marks a notification tap, which opens Planner where it already was (Agenda on a fresh start), never on the chosen

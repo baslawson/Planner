@@ -72,6 +72,16 @@ class LockedAlarmsTest {
         assertEquals(listOf(monthly), LockedAlarmSelection.select(near + monthly, again))
     }
 
+    // AS-5: cut short by MAX, the snapshot is written again by the last alarm it kept, not two weeks on.
+    @Test fun aSnapshotCutByItsCapIsDueByItsLastAlarm() {
+        val many = (1..LockedAlarmSelection.MAX + 10).map { LockedAlarm.Note("n$it", now + it * 60_000L) }
+        val kept = LockedAlarmSelection.select(many, now)
+        assertEquals(LockedAlarmSelection.MAX, kept.size)
+        assertEquals(kept.last().trigger, LockedAlarmSelection.rewriteAt(many, now))
+        // Exactly MAX ahead: all kept, no rewrite.
+        assertNull(LockedAlarmSelection.rewriteAt(many.take(LockedAlarmSelection.MAX), now))
+    }
+
     @Test fun mirrorSaysWhenTheSnapshotIsDueAgain() {
         val near = (1..LockedAlarmSelection.MIN_KEPT).map { LockedAlarm.Note("near$it", now + it * hour) }
         val mirror = LockedAlarmMirror(read = { null }, write = {}, timeFormat = { null })
