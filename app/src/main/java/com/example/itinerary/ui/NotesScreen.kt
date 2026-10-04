@@ -188,11 +188,12 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     }
     // A share made into a note: it opens like a duplicate, as a new note that is only saved by Save. The share checked
     // that no note was open; one opened meanwhile (a draft recovered) stays, and the share is dropped with a message.
+    // N6-5: the page shows all notes then (no notebook, tag, Archive or search), so the note is there once saved.
     LaunchedEffect(newNote, notes != null, draftChecked) {
         val note = newNote ?: return@LaunchedEffect
         if (notes == null || !draftChecked) return@LaunchedEffect
         if (editingId != null) android.widget.Toast.makeText(context, "A note is already open. Close it, then share again.", android.widget.Toast.LENGTH_LONG).show()
-        else { pendingCopy = note; editingNew = true; editingId = note.id }
+        else { filterKey = "all"; query = ""; pendingCopy = note; editingNew = true; editingId = note.id }
         onNewNoteOpened()
     }
     LaunchedEffect(editingId, waitingNoteId, notes) {
@@ -511,9 +512,7 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
             val message = when {
                 state.running -> "Syncing…"
                 state.error != null -> state.error!!
-                state.lastSynced != null -> "Synced " + momentLabel(state.lastSynced!!, short = true) +
-                    if (state.conflicts > 0) " · ${state.conflicts} conflict cop${if (state.conflicts == 1) "y" else "ies"} made (changed in both places)" else "" +
-                    if (state.skipped > 0) " · ${state.skipped} note${if (state.skipped == 1) "" else "s"} left as they are (too long for Planner, or Nextcloud wouldn't take the change)" else ""
+                state.lastSynced != null -> "Synced " + momentLabel(state.lastSynced!!, short = true) + syncCounts(state.conflicts, state.skipped)
                 else -> "Not synced yet."
             }
             Text(message, style = MaterialTheme.typography.bodyMedium,
@@ -521,6 +520,13 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
         }
     }
 }
+
+// After "Synced …": the conflict copies made and the notes left as they are, each only when there are some (N6-2: the
+// second was lost whenever there was a first).
+internal fun syncCounts(conflicts: Int, skipped: Int): String = listOfNotNull(
+    if (conflicts > 0) "$conflicts conflict cop${if (conflicts == 1) "y" else "ies"} made (changed in both places)" else null,
+    if (skipped > 0) "$skipped note${if (skipped == 1) "" else "s"} left as they are (too long for Planner, or Nextcloud wouldn't take the change)" else null,
+).joinToString("") { " · $it" }
 
 /** White or black, whichever reads better on [background] (4.5:1 or more on all the card colours): a card's text and marks. */
 internal fun onColour(background: Color): Color =
