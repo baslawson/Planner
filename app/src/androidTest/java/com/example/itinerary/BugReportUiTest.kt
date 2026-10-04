@@ -16,8 +16,8 @@ import java.net.URLDecoder
 
 /**
  * Wish list #6: ⋮ → Report a bug shows exactly what will be sent, the last crash only when ticked, and opens a new GitHub
- * issue with it. The browser is never opened: the test catches the link. Run only with an external backup/restore
- * harness for the shared emulator.
+ * issue with it. The browser is never opened: the test catches the link. It puts back the last crash and start screen it
+ * changes (SR-11); opening GitHub clears the crash it sent, which is put back too.
  */
 class BugReportUiTest {
     private val ins get() = InstrumentationRegistry.getInstrumentation()
@@ -49,7 +49,15 @@ class BugReportUiTest {
         }; Thread.sleep(500)
     }
 
-    @After fun done() { CrashLog(context.filesDir).clear() }
+    // SR-11: the person's own last crash and start screen are put back afterwards, harness or not.
+    private val crashFile get() = File(context.filesDir, "last-crash.txt")
+    private val savedCrash = crashFile.takeIf { it.isFile }?.readBytes()
+    private val savedStart = app.settings.startScreen.value
+
+    @After fun done() {
+        if (savedCrash != null) crashFile.writeBytes(savedCrash) else CrashLog(context.filesDir).clear()
+        app.settings.setStartScreen(savedStart)
+    }
 
     @Test fun aReportShowsWhatIsSentAndOpensAGitHubIssue() {
         CrashLog(context.filesDir).write(System.currentTimeMillis(), "0.0.15 (22)", IllegalStateException("QA crash for the report"))
@@ -84,5 +92,7 @@ class BugReportUiTest {
             assertTrue(body.contains("QA crash for the report"))
         } finally { ins.removeMonitor(monitor) }
         await { find("What happened?") == null }
+        // SR-5: a crash that went in a report isn't offered again.
+        assertNull(CrashLog(context.filesDir).read())
     }
 }
