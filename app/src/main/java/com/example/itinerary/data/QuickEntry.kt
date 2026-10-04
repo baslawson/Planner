@@ -178,7 +178,7 @@ object QuickEntry {
     private const val approx = "(?:(?:around|about|approx(?:imately)?|roughly|circa)\\s+|~\\s*)"
     // 3p, 3:30p and 15.30 are times only where they read like one; see readsAsTime.
     private const val shortClock = "\\d{1,2}(?::\\d{2})?[ap]|\\d{1,2}\\.[0-5]\\d"
-    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:.h])(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
+    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:h]|\\.\\d)(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
     private val shortClocks = rx("(?<![\\w.:/])($shortClock)(?![\\w.])")
     private const val amount = "(?:-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
@@ -194,7 +194,8 @@ object QuickEntry {
     private val durationParts = rx("($amount)\\s*($hours|$minutes)(?![a-z])")
     private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)")
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
-    private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-\\d.]+|$countWords|half|a quarter))?\\s*$")
+    // A full stop alone is no number: "for Tuesday 13 October at 2pm." ends a sentence (Q6-1).
+    private val unfinished = rx("(?<![-\\w])(?:at|on|in|for|from|until|to|next|this)(?:\\s+(?:[-.]*\\d[-\\d.]*|$countWords|half|a quarter))?\\s*$")
     // "Table for 4 Saturday", "Dinner for two Friday": a whole number after "for", with the when after it, is how many people:
     // title text rather than an unfinished length. At the very end ("Study for 30") the length may still be being typed,
     // unless a booking or meal word comes before it ("Dinner tonight for two").
@@ -307,6 +308,8 @@ object QuickEntry {
     // They count as scheduling only beside other scheduling words, never before an ordinary word.
     private val titleWordCandidates = rx("\\b(sun|sat|wed|noon|midnight|midday|now)\\b")
     private val nextWord = Regex("^[\\s,]*([A-Za-z]+)")
+    // Words that make the number before them a count of people, whatever their case.
+    private val countNouns = setOf("people", "persons", "guests", "adults", "kids", "children", "pax", "friends", "of")
     private val scheduleVocabulary = (listOf("at", "on", "in", "from", "for", "to", "until", "till", "by", "with", "and", "then",
         "before", "after", "actually", "every", "each", "remind", "notify", "next", "this", "the", "today", "tomorrow", "tmr",
         "morning", "afternoon", "arvo", "evening", "night", "noon", "midnight", "midday", "am", "pm", "til", "all",
@@ -530,13 +533,14 @@ object QuickEntry {
             // Before a name ("Friday night 8 Luigi's") too, but only an hour that falls in that part of the day: "2nite 4 Sam"
             // is text speak for "for Sam", and 4 is no hour of the night (only 4am after it), so it stays in the title (Q5).
             // Before an ordinary word it is a count: "Friday night 8 people".
-            if (dayPeriod != null && periodHour == null) rx("^\\s+(\\d{1,2})(?![\\w:./\\-–—])(?!\\s*(?:[-–—]|to|till?|until)\\b)").find(remaining.substring(match.range.last + 1))?.let { hour ->
+            if (dayPeriod != null && periodHour == null) rx("^\\s+(\\d{1,2})(?![\\w:./\\-–—])(?!\\s*(?:[-–—]|to|till?|until)\\b)(?!\\s*$meridiem(?!\\w))").find(remaining.substring(match.range.last + 1))?.let { hour ->
                 val rest = remaining.substring(match.range.last + 1 + hour.range.last + 1)
                 val following = nextWord.find(rest)?.groupValues?.get(1)
                 val scheduleNext = rest.isBlank() || following?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true
                 val n = hour.groupValues[1].toInt()
                 val inPeriod = n in 1..12 && listOf(n % 12, n % 12 + 12).count { LocalTime.of(it, 0) in dayPeriods.getValue(dayPeriod!!) } == 1
-                val nameNext = re("^\\s+\\p{Lu}").containsMatchIn(rest)
+                // Not a count with a capital: "Dinner tonight 6 Guests" (Q6-6).
+                val nameNext = re("^\\s+\\p{Lu}").containsMatchIn(rest) && following?.lowercase(Locale.ROOT) !in countNouns
                 if (n in 1..12 && (scheduleNext || inPeriod && nameNext)) { periodHour = n; end = match.range.last + hour.range.last + 1 }
             }
             consume(start..end, QuickPhraseKind.TIME)
@@ -847,7 +851,10 @@ object QuickEntry {
             if (found.size + (if (spanLength != null) 1 else 0) > 1) return error("Use one length.")
             found.firstOrNull()?.let { match ->
                 val said = match.groupValues[1].ifEmpty { match.groupValues[2] }.lowercase(Locale.ROOT)
-                val count = re("\\d+").findAll(said).map { it.value.toDouble() }.toList().takeIf { it.size == 2 }?.max() ?: readAmount(said)
+                val pair = re("\\d+").findAll(said).map { it.value.toDouble() }.toList().takeIf { it.size == 2 }
+                // "3-2 nights": a range written backwards is asked about rather than read (Q6-13).
+                if (pair != null && pair[0] >= pair[1]) return error("Write the shorter stay first, for example 2-3 nights.")
+                val count = pair?.max() ?: readAmount(said)
                 if (!count.isFinite() || count % 1 != 0.0 || count < 1 || count + 1 > MultiDay.MAX_DAYS)
                     return error("An entry can cover 1–${MultiDay.MAX_DAYS - 1} nights.")
                 if (rangeStart != null || stayUntilText != null) return error("Use a date range or a length, not both.")
@@ -1013,7 +1020,8 @@ object QuickEntry {
             if (dateChoices.size == 1) dateChoices = emptyList()
         }
         var holiday = false
-        if (ds.isEmpty() && numeric.isEmpty() && !relative && !impliedToday && orDates == null) holidays.find(remaining)?.let { match ->
+        // Not over a range or start already written: "Halloween party Fri-Sun", "Christmas lunch 24-26 Dec" (Q6-4).
+        if (ds.isEmpty() && numeric.isEmpty() && !relative && !impliedToday && orDates == null && rangeStart == null && startFrom == null) holidays.find(remaining)?.let { match ->
             // "Boxing Day 2027": that year's, and the year is not a time. "Christmas Day 1100" is a 24-hour time instead.
             val year = rx("^\\s*,?\\s*(\\d{4})\\b").find(remaining.substring(match.range.last + 1))?.takeIf { it.groupValues[1].toInt() in today.year - 1..2100 }
             date = nextHoliday(match.value.lowercase(Locale.ROOT), year?.let { LocalDate.of(it.groupValues[1].toInt(), 1, 1) } ?: today)
@@ -1230,7 +1238,7 @@ object QuickEntry {
             else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:./-])").findAll(remaining).firstOrNull { m ->
                 m.value.toInt() in 1..12 &&
                     phrases.any { (it.kind == QuickPhraseKind.DATE || it.kind == QuickPhraseKind.REPEAT && rx("(?:$weekdays|$pluralWeekdays)$").containsMatchIn(text.substring(it.start, it.end))) && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(re("[\\s,]*")) } &&
-                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() ||
+                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("\\s*[!?]+\\s*")) ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
         var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
@@ -1357,7 +1365,8 @@ object QuickEntry {
         }
         // "Book table for Saturday", "Move dentist to Friday", "Party from 7pm": a word left right before the date or time
         // it introduces goes with it, out of the title. Before a time only for and from: "Work until 5pm" gives no start.
-        rx("(?<![-\\w])(for|from|to|until|till)\\s*$").find(remaining)?.let { match ->
+        // Sentence punctuation may follow: "Book table for Saturday!" (Q6-9).
+        rx("(?<![-\\w])(for|from|to|until|till)\\s*[!?.]*\\s*$").find(remaining)?.let { match ->
             val word = match.groups[1]!!.range
             val next = word.last + 1 + text.substring(word.last + 1).let { it.length - it.trimStart().length }
             val kinds = if (match.groupValues[1].lowercase(Locale.ROOT) in setOf("for", "from")) setOf(QuickPhraseKind.DATE, QuickPhraseKind.TIME) else setOf(QuickPhraseKind.DATE)
@@ -1395,7 +1404,7 @@ object QuickEntry {
         }?.let { periodSaid }
         title = title.replace("\"", "").replace(re("\\(\\s*\\)|\\[\\s*]"), " ")
             // Commas left alone by removed phrases: "Dentist 3 October, 2pm".
-            .replace(re("(?<=^|\\s)[,;]+(?=\\s|$)"), " ").replace(re("[\\s,;]+$"), "")
+            .replace(re("(?<=^|\\s)[,;:]+(?=\\s|$)"), " ").replace(re("[\\s,;:]+$"), "")
             .trim().replace(re("\\s+"), " ")
         // A title that followed a leading length or date keeps the capital the entry started with: "Friday drinks" → "Drinks".
         val startedCapital = text.trimStart().firstOrNull()?.isUpperCase() == true && consumed.any { it.first <= text.indexOfFirst { c -> !c.isWhitespace() } }

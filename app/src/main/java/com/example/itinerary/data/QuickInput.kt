@@ -82,6 +82,8 @@ fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String
             "‘$periodInTitle’ would be the due day, out of the title. Put it at the end, or open More options → Adjust recognised text to keep it in the title."
         task && (time != null || ambiguousTime || durationMinutes != null) -> "Tasks use due dates. Choose Event for a time or duration."
         task && endDate != null -> "Tasks use one due date. Choose Event for several days."
+        // Saving would fail its multi-day check with a vague message; say what is wrong instead.
+        endDate != null && !endDate.isAfter(date) -> "The last day is before the first. Check the dates."
         endDate != null && (time != null || durationMinutes != null) -> "An entry over several days is all day. Remove the time, or add each day separately."
         error != null -> error
         title.isBlank() -> "Add a title."
