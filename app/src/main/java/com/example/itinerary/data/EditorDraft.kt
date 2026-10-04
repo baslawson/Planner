@@ -28,13 +28,23 @@ class EditorDraftStore(context: Context) {
     private fun writeFile(json: JSONObject) = synchronized(lock) { file.writeText(json.toString()) }
     /** E5-1: the files the draft holds (a waiting one's included, as [read] sees it first), which the unused-file
      *  clean-up must leave alone: an editor still open on an event emptied from Recently deleted saves them as new. */
-    fun files(): Set<String> = read()?.let { json ->
-        listOf("existingAttachments", "added", "removed").flatMap { name ->
-            runCatching { DraftCodec.attachments(json.optJSONArray(name)).map { it.fileName } }.getOrDefault(emptyList())
-        } + listOfNotNull(json.optJSONObject("state")?.optString("pendingPhoto")?.takeIf { it.isNotBlank() && it != "null" })
-    }.orEmpty().toSet()
+    fun files(): Set<String> = files(::read)
 
     companion object {
+        // S6-8: a draft that can't be read holds no files (as the note and task drafts), so it can't stop every clean-up.
+        // S6-4: the files of every event editor open now count too, drafted or not (one opened without an edit has none).
+        internal fun files(read: () -> JSONObject?): Set<String> = (runCatching { read() }.getOrNull()?.let { json ->
+            listOf("existingAttachments", "added", "removed").flatMap { name ->
+                runCatching { DraftCodec.attachments(json.optJSONArray(name)).map { it.fileName } }.getOrDefault(emptyList())
+            } + listOfNotNull(json.optJSONObject("state")?.optString("pendingPhoto")?.takeIf { it.isNotBlank() && it != "null" })
+        }.orEmpty() + heldFiles.values.flatten()).toSet()
+
+        // S6-4: by editor, the files an open event editor shows or holds (removed, added, a photo being taken), until it
+        // closes. An event deleted elsewhere and then emptied from Recently deleted leaves them to that editor's Save.
+        private val heldFiles = java.util.concurrent.ConcurrentHashMap<Any, Set<String>>()
+        fun holdFiles(editor: Any, files: Set<String>) { heldFiles[editor] = files }
+        fun releaseFiles(editor: Any) { heldFiles.remove(editor) }
+
         private const val KEY = "event"
         private val lock = Any()
         // One for the process: the editor, the recovery check and the widget each make their own store.
