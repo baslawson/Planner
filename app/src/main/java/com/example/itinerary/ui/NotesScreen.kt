@@ -1,6 +1,7 @@
 package com.example.itinerary.ui
 
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -173,8 +174,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     val page = window?.id
     val pageRestored = window?.restored == true
     val offeredIds = remember { HashSet<String>() }
+    // NX-1: the `changes` value this page last looked at, from when it was composed (a window rebuilt has its old page's
+    // bump in it already). NX-2: and the one [recovered] was read at: one read before a later change may be out of date.
+    val looks = remember { DraftLooks(com.example.itinerary.data.NoteDraftStore.changes.value) }
+    var recoveredAt by remember { mutableIntStateOf(0) }
     suspend fun lookForDraft() {
         val restoring = editingId
+        val at = com.example.itinerary.data.NoteDraftStore.changes.value
+        looks.looked(at)
         val store = com.example.itinerary.data.NoteDraftStore(context)
         val (draft, other) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { store.recoverable(restoring, page, pageRestored).let { own ->
@@ -182,7 +189,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         if (draft != null) {
             // Read now, not before: a card tapped meanwhile opens its own note.
             if (editingId != null && editingId != draft.note.id) return
-            recovered = draft; editingNew = draft.creating; editingId = draft.note.id
+            recovered = draft; recoveredAt = at; editingNew = draft.creating; editingId = draft.note.id
         } else if (other != null && offeredIds.add(other.note.id)) barScope.launch {
             // NO-3: a window this process hasn't shown may never come back (a share swiped away before Android closed
             // Planner), so it isn't named then.
@@ -202,8 +209,15 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         if (draftChecked && editingId == null) draftScope.launch { if (editingId == null) lookForDraft() }
     }
     // NT-2: and again when another window's editor lets its note go or that window goes, which comes after this resume.
-    LaunchedEffect(Unit) {
-        com.example.itinerary.data.NoteDraftStore.changes.drop(1).collect { if (draftChecked && editingId == null) lookForDraft() }
+    // NX-1: one that comes during the first look waits for it, then looks again. NX-2: only while this page is on
+    // screen (a stopped window would read a draft another window may take meanwhile); a change made while it was
+    // stopped is looked at as it starts again.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            lookOnChanges(com.example.itinerary.data.NoteDraftStore.changes, looks, checked = { snapshotFlow { draftChecked }.first { it } },
+                canLook = { editingId == null }, look = { lookForDraft() })
+        }
     }
     // NW-1: a note opened here (its card, a reminder, Open) with a draft on disk, from another window or left from before,
     // opens with that draft rather than over it. The editor waits for this read.
@@ -213,11 +227,20 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     LaunchedEffect(editingId, draftChecked) {
         val id = editingId ?: run { draftReadFor = null; return@LaunchedEffect }
         if (!draftChecked) return@LaunchedEffect
-        if (recovered?.note?.id != id && !ownEditorKept(id) && !com.example.itinerary.data.NoteDraftStore.isOpen(id)) {
+        // NX-2: a draft reopened before another editor let a note go or a window went (this page stopped meanwhile) is
+        // read again: that window may have saved it, changed it further or discarded it since.
+        val stale = recovered?.note?.id == id && recoveredAt != com.example.itinerary.data.NoteDraftStore.changes.value
+        if ((recovered?.note?.id != id || stale) && !ownEditorKept(id) && !com.example.itinerary.data.NoteDraftStore.isOpen(id)) {
+            val at = com.example.itinerary.data.NoteDraftStore.changes.value
             val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { com.example.itinerary.data.NoteDraftStore(context).read(id) }.getOrNull() }
             if (editingId != id) return@LaunchedEffect
-            if (draft != null) { recovered = draft; if (all.none { it.id == id }) editingNew = draft.creating }
+            if (draft != null) { recovered = draft; recoveredAt = at; if (all.none { it.id == id }) editingNew = draft.creating }
+            else if (stale) {
+                recovered = null
+                // NX-2: a new note whose draft was discarded meanwhile leaves nothing to open.
+                if (all.none { it.id == id } && pendingCopy?.id != id) { editingId = null; editingNew = false; return@LaunchedEffect }
+            }
         }
         draftReadFor = id
     }
@@ -594,3 +617,24 @@ internal fun syncCounts(conflicts: Int, skipped: Int): String = listOfNotNull(
 /** White or black, whichever reads better on [background] (4.5:1 or more on all the card colours): a card's text and marks. */
 internal fun onColour(background: Color): Color =
     if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) Color.White else Color.Black
+
+/** NX-1: the `changes` value a Notes page last looked for drafts at. A different one means a look is due. */
+internal class DraftLooks(start: Int) {
+    var at = start; private set
+    fun due(now: Int) = now != at
+    fun looked(now: Int) { at = now }
+}
+
+/**
+ * NT-2: a Notes page looks for drafts again when another editor lets its note go or a window goes ([changes]). NX-1: a
+ * change that comes before the page's first look is done ([checked] waits for it) is not dropped, and one that comes
+ * during a look ([look] notes the value it starts at in [looks]) makes another. Only with no note open ([canLook]).
+ */
+internal suspend fun lookOnChanges(changes: kotlinx.coroutines.flow.StateFlow<Int>, looks: DraftLooks, checked: suspend () -> Unit,
+                                   canLook: () -> Boolean, look: suspend () -> Unit) {
+    changes.collect { now ->
+        if (!looks.due(now)) return@collect
+        checked()
+        if (canLook() && looks.due(changes.value)) look()
+    }
+}

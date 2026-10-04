@@ -147,6 +147,9 @@ internal class NoteWindows {
     fun started(id: String, fromSavedState: Boolean): Boolean = synchronized(this) { restored.getOrPut(id) { fromSavedState } }
     fun opened(id: String) { synchronized(this) { live += id; restored.getOrPut(id) { false } } }
     // NO-1: a window Android destroys but keeps in Recents with its saved state stays live: it may come back for its draft.
+    // NX-3: if its task is then removed, Planner hears nothing, so it stays live while this process runs. Left so: a share
+    // window lives in the sharing app's task, which Planner can't look up, and the cost is small: its one draft is
+    // offered (once per Notes page) rather than reopened, never lost, and opening it there makes it that page's.
     fun closed(id: String, gone: Boolean) { synchronized(this) { if (gone) live -= id } }
     fun live(id: String?): Boolean = synchronized(this) { id != null && id in live }
     fun another(owner: String?, page: String?, pageRestored: Boolean): Boolean = synchronized(this) {
