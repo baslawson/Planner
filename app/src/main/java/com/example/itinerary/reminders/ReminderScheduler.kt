@@ -38,7 +38,23 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     // RB-3: every alarm set here, with what it shows, for a reboot that stays locked (LockedAlarm). Kept beside the ledger.
     private val locked = LockedAlarmMirror(read = { DirectBoot.store(context).read() }, write = { DirectBoot.store(context).write(it) },
         timeFormat = { (context.applicationContext as? com.example.itinerary.ItineraryApp)?.settings?.timeFormat?.value?.name })
-    override fun saveLockedAlarms(force: Boolean) = locked.save(System.currentTimeMillis(), force)
+    override fun saveLockedAlarms(force: Boolean) {
+        locked.save(System.currentTimeMillis(), force)?.let(::setLockedRefresh)
+    }
+
+    // R6-3: a snapshot that left later alarms out is written again before its two weeks run out (BootReceiver), even if
+    // no reminder rings and Planner isn't opened by then. Inexact (a day to spare), and cleared when nothing was left out.
+    private fun setLockedRefresh(at: Long) {
+        val intent = Intent(context, BootReceiver::class.java).setAction(BootReceiver.ACTION_REFRESH_LOCKED)
+        if (at == Long.MAX_VALUE) {
+            PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+                ?.let { alarmManager.cancel(it); it.cancel() }
+            return
+        }
+        val pending = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        try { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending) }
+        catch (e: Exception) { android.util.Log.w("ReminderScheduler", "Couldn't set the locked-boot refresh", e) }
+    }
     private fun armed(alarm: LockedAlarm) { ledger.set(alarm.key, alarm.trigger); locked.put(alarm) }
     private fun disarmed(key: String) { ledger.remove(key); locked.remove(key) }
     override fun markDelivered(key: String, trigger: Long) = delivered.record(key, trigger)

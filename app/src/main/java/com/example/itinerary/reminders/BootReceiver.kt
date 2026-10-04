@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
-                Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED)) return
+                Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED, ACTION_REFRESH_LOCKED)) return
         // RB-3: directBootAware, so this also runs before the first unlock, when the database can't be read. Then the
         // nearest alarms are set from the locked snapshot; BOOT_COMPLETED, which Android sends once the phone is
         // unlocked, sets them all from the database (the same request codes: each replaces its snapshot one). A time
@@ -27,6 +27,8 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // R6-3: the snapshot is old enough by now (D6-4's half a day), so every alarm is set again and it is written.
+                if (intent.action == ACTION_REFRESH_LOCKED) { DirectBoot.afterRing(app); return@launch }
                 // Only a reboot leaves due alarms unseen for long: a time change fires past ones late, an update takes seconds.
                 if (intent.action == Intent.ACTION_BOOT_COMPLETED) showMissedReminders(context, afterBoot = true)
                 app.repository.rescheduleAllReminders()
@@ -34,5 +36,10 @@ class BootReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }
+    }
+
+    companion object {
+        // Planner's own: the locked-boot snapshot is due to be written again (ReminderScheduler).
+        const val ACTION_REFRESH_LOCKED = "com.example.itinerary.REFRESH_LOCKED_ALARMS"
     }
 }
