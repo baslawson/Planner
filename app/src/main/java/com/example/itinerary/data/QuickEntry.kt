@@ -670,10 +670,11 @@ object QuickEntry {
             if (oneMonth && day(if (g[4].isNotEmpty()) g[4] else g[10]).toInt() < day(if (g[4].isNotEmpty()) g[1] else g[8]).toInt())
                 return error("End the date range after it starts.")
             val hasYear = re("\\d{4}").containsMatchIn(match.value)
-            // "20 Oct to 10 Oct", "20 Nov to 10 Oct": written backwards, not a stay of most of a year (nor one that began
-            // last year, SQ-14). Across New Year ("28 Dec – 3 Jan") a range without a year is a short one.
+            // "20 Oct to 10 Oct", "20 Nov to 10 Oct": written backwards, the end on an earlier day of the start's month or
+            // the month before, not a stay of most of a year (nor one that began last year, SQ-14). Other ranges without a
+            // year cross New Year forwards, long ones too: "School year 1 Sep to 30 Jun", "Lease 1 Jul to 30 Jun" (SQ8-2).
             if (!hasYear && g[12].isEmpty() && java.time.MonthDay.from(end) < java.time.MonthDay.from(start) &&
-                java.time.temporal.ChronoUnit.DAYS.between(start, end.withYear(start.year).let { if (it <= start) it.plusYears(1) else it }) > 182)
+                end.dayOfMonth < start.dayOfMonth && end.monthValue >= start.monthValue - 1)
                 return error("End the date range after it starts.")
             // "28 Dec – 3 Jan 2027": a year on the end only, across New Year, starts the range the year before.
             val endYearOnly = g[4].isNotEmpty() && g[3].isEmpty() && g[6].isNotEmpty() || g[7].isNotEmpty() && g[11].isNotEmpty()
@@ -1241,10 +1242,11 @@ object QuickEntry {
         // "Brekkie Sunday 9", "Gym every Monday 6": an hour right after the date or a weekday repeat, when nothing else follows
         // but schedule words. Not after "daily": "Pills daily 2" may be a count.
         val bareHour = if (rs.isNotEmpty() || timePrompt != null || endOfDaySaid || times.containsMatchIn(remaining)) null
-            else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:/-]|\\.[\\w.:/-])").findAll(remaining).firstOrNull { m ->
+            else rx("(?<![\\w.:/£€¥$#])(\\d{1,2})(?![\\w:/-]|\\.+[\\w:/-])").findAll(remaining).firstOrNull { m ->
                 m.value.toInt() in 1..12 &&
                     phrases.any { (it.kind == QuickPhraseKind.DATE || it.kind == QuickPhraseKind.REPEAT && rx("(?:$weekdays|$pluralWeekdays)$").containsMatchIn(text.substring(it.start, it.end))) && it.end <= m.range.first && text.substring(it.end, m.range.first).matches(re("[\\s,]*")) } &&
-                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("\\s*[!?.]+\\s*")) ||
+                    // Before "!", "?" or "." and a new sentence: "Gym Friday 6. Bring towel", "Gym Friday 6..." (SQ8-9).
+                    remaining.substring(m.range.last + 1).let { after -> after.isBlank() || after.matches(re("(?s)\\s*[!?.]+(?:\\s+\\p{Lu}.*)?\\s*")) ||
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
         var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
