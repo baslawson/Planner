@@ -24,6 +24,10 @@ const val REMINDER_CHANNEL_ID = "reminders"
 // Reminder ids start at 1, so 0 can never collide with a real reminder's notification.
 private const val TEST_NOTIFICATION_ID = 0
 
+// A6-4: a notification tap opens Planner as the widget and shortcuts do: in its open window (onNewIntent), clearing
+// the App lock screen above it (MainActivity locks again on start), never as one more Planner window on top.
+internal const val OPEN_PLANNER_FLAGS = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+
 // Ringing alarms play their own looping sound from AlarmService, so the channel itself is silent.
 const val ALARM_CHANNEL_ID = "alarms"
 
@@ -102,7 +106,7 @@ fun postReminderNotification(
     val open = PendingIntent.getActivity(
         context,
         notificationId,
-        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        Intent(context, MainActivity::class.java).addFlags(OPEN_PLANNER_FLAGS),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)

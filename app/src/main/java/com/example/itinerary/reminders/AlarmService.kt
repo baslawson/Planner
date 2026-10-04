@@ -322,7 +322,7 @@ class AlarmService : Service() {
             this,
             NOTIFICATION_ID,
             Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .addFlags(OPEN_PLANNER_FLAGS)
                 .putExtra(EXTRA_STOP_ALARM, token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

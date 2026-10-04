@@ -53,7 +53,7 @@ class NoteReminderReceiver : BroadcastReceiver() {
         /** Planner opened on this note. Each note has its own data, so each notification keeps its own note. */
         fun openIntent(context: Context, id: String): Intent = Intent(context, MainActivity::class.java).setAction(OPEN_NOTE)
             .setData(Uri.Builder().scheme("planner").authority("note").appendPath(id).build())
-            .putExtra(EXTRA_NOTE_ID, id).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_NOTE_ID, id).addFlags(OPEN_PLANNER_FLAGS)
     }
 }
 
