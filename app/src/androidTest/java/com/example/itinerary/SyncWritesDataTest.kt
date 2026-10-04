@@ -30,7 +30,7 @@ class SyncWritesDataTest {
             db.tripDao().upsert(Trip(id = 1, name = "Fixture", destination = "", startDate = day, endDate = day))
             fun last() = synchronized(changes) { changes.last() }
             val planner = repo.asPlannerStore()
-            val id = planner.add(ItineraryItem(tripId = 1, date = day, startTime = null, title = "From Nextcloud"))
+            val id = planner.add(ItineraryItem(tripId = 0, date = day, startTime = null, title = "From Nextcloud"))
             assertFalse(last())
             planner.update(id) { it.copy(title = "Changed on Nextcloud") }
             assertFalse(last())
