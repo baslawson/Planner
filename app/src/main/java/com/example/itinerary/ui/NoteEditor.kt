@@ -147,10 +147,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var justSaved by remember { mutableStateOf(false) }
     // Changed elsewhere in the same place as here: how it is now, while the user chooses.
     var conflict by remember { mutableStateOf<PlannerNote?>(null) }
-    // EU-1, EU-2: whether loading [note] changes what is typed in the fields Undo follows.
-    fun wordsDiffer(note: PlannerNote) = noteWordsDiffer(note, title, content.text, notebook)
-    fun load(note: PlannerNote) {
-        title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook; color = note.color
+    // EU-1, EU-2: whether loading [note] changes what is typed in the fields Undo follows. NO-2: as stored, so a body
+    // ending in a new line or a notebook in other capitals isn't a change (spelt as [current] spells it).
+    fun wordsDiffer(note: PlannerNote) =
+        noteWordsDiffer(note, title, content.text, Notes.existingSpelling(notebooks, notebook.trim()))
+    // NO-2: [words] false leaves the typed fields (and the cursor) as they are: the stored words are the same once cleaned.
+    fun load(note: PlannerNote, words: Boolean = true) {
+        if (words) { title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook }
+        color = note.color
         pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
@@ -171,8 +175,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             // Not a step to undo: that would put back the text from before, over the other device's change (ED-7). EU-2: and
             // only when the words changed: a snooze, a pin or a sync's new time leaves the history as it is.
             if (base != null && now != base && !unsaved) {
-                if (wordsDiffer(now)) undo.reload()
-                load(now); base = now
+                val words = wordsDiffer(now)
+                if (words) undo.reload()
+                load(now, words); base = now
             }
         }
     }
@@ -264,7 +269,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color && note.priority == edited.priority &&
             note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt
         // EU-1: a merge brings in another device's words: loaded as no step, so Undo can't take them back unseen.
-        base = note; if (!same) { if (noteWordsDiffer(note, edited.title, edited.content, edited.notebook)) undo.reload(); load(note) }; justSaved = true
+        base = note; if (!same) { val words = noteWordsDiffer(note, edited.title, edited.content, edited.notebook); if (words) undo.reload(); load(note, words) }; justSaved = true
         releaseFiles(); then()
     }
     // [note] written over how it is now ([latest]): the user chose their version.
@@ -561,5 +566,9 @@ private class NoteEditorClaim(val noteId: String) : RememberObserver {
 }
 
 // EU-1, EU-2: whether [note]'s title, body or notebook differ from what the fields hold, the text Undo follows.
-internal fun noteWordsDiffer(note: PlannerNote, title: String, content: String, notebook: String) =
-    note.title != title || note.content != content || note.notebook != notebook
+internal fun noteWordsDiffer(note: PlannerNote, title: String, content: String, notebook: String): Boolean {
+    // NO-2: both sides as Notes.clean stores them: "milk" + a new line typed is "milk" saved, and no change of words.
+    val stored = Notes.clean(note)
+    val typed = Notes.clean(note.copy(title = title, content = content, notebook = notebook))
+    return stored.title != typed.title || stored.content != typed.content || stored.notebook != typed.notebook
+}

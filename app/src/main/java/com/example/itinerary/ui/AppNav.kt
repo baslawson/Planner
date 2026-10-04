@@ -74,10 +74,14 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     // NT-2: and whether it came back from that saved state (not started afresh), which decides whose old drafts it takes.
     val fresh = remember { booleanArrayOf(false) }
     val windowId = rememberSaveable { fresh[0] = true; java.util.UUID.randomUUID().toString() }
-    val windowEditors = remember { WindowEditors(windowId, restored = !fresh[0]) }
+    // CC-1: only when this process meets the window first: rebuilt in a living process, it is what it was then.
+    val windowEditors = remember { WindowEditors(windowId, restored = com.example.itinerary.data.NoteDraftStore.windowStarted(windowId, fromSavedState = !fresh[0])) }
+    // NO-1: the window is gone only when its activity is finishing; one Android destroys to rebuild later (a background
+    // task trimmed, "Don't keep activities", a configuration change) may come back for its drafts.
+    val windowActivity = LocalContext.current.findActivity()
     DisposableEffect(windowId) {
         com.example.itinerary.data.NoteDraftStore.windowOpened(windowId)
-        onDispose { com.example.itinerary.data.NoteDraftStore.windowClosed(windowId) }
+        onDispose { com.example.itinerary.data.NoteDraftStore.windowClosed(windowId, gone = windowActivity?.isFinishing != false) }
     }
     // Task ↔ event conversions asked for from a card's ⋮ or an editor (wish list #1), opened by ConversionHost below.
     val conversions = rememberConversions()

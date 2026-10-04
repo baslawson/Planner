@@ -151,4 +151,23 @@ class ShareEmailUiTest {
         assertTrue(note.content.contains("Two eggs, flour and milk."))
         assertTrue(note.content.startsWith("From: QA Sender <sender@example.com>"))
     }
+
+    // NO-3: a draft another window's Notes page owns (only offered here) doesn't stop the share's Add note; it stays.
+    @Test fun anotherWindowsNoteDraftDoesNotBlockAddNote() = runBlocking {
+        val other = "qa-other-window"
+        NoteDraftStore.windowStarted(other, fromSavedState = false); NoteDraftStore.windowOpened(other)
+        try {
+            val left = PlannerNote(title = "QA other window's draft", content = "typed there")
+            NoteDraftStore(context).write(NoteDraftStore.Draft(left, creating = true, base = null, pendingPhoto = null, owner = other))
+            share(email("QA recipe from Sam", "Two eggs, flour and milk."))
+            click("Add note")
+            await { find("Add to Planner") == null && nodes().any { it.isEditable && it.text?.toString() == "QA recipe from Sam" } }
+            assertNull(findStarting("You have an unfinished note"))
+            assertEquals("typed there", NoteDraftStore(context).read(left.id)?.note?.content)
+            click("Close"); await { find("Save changes?") != null }
+            click("Discard")
+            await { find("Save changes?") == null }
+            assertFalse(app.repository.allNotes().any { it.title == "QA recipe from Sam" })
+        } finally { NoteDraftStore.windowClosed(other, gone = true) }
+    }
 }

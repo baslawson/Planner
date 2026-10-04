@@ -156,8 +156,10 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
         val editor = if (value == "bill") "event" else value
         val check = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { when (editor) {
             "event" -> EditorDraftStore(app).read() != null
-            // A note draft the Notes page would reopen first (N6-1: not one whose note is open in an editor).
-            "note" -> NoteDraftStore(app).recoverable(null) != null
+            // A note draft the Notes page would reopen first (N6-1: not one whose note is open in an editor). NO-3: this
+            // window's page: another window's draft is only offered there, so it doesn't stop the share (it used to, for
+            // good, when that window was a share swiped away before Android closed Planner).
+            "note" -> NoteDraftStore(app).recoverable(null, window?.id, window?.restored == true) != null
             else -> TaskDraftStore(app).read("new") != null
         } } }
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }

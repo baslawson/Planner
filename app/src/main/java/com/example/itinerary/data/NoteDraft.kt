@@ -114,21 +114,42 @@ class NoteDraftStore(context: Context) {
         fun release(noteId: String, editor: Any) { synchronized(owners) { if (owners[noteId] === editor) owners.remove(noteId) } }
         fun isOpen(noteId: String): Boolean = synchronized(owners) { noteId in owners }
 
-        // NT-2: the Planner windows (AppNav ids) this process has shown: those on screen now, and every one so far. A
-        // draft of a window that went while Planner ran (its task swiped away) is no other window's any more.
-        private val liveWindows = HashSet<String>()
-        private val seenWindows = HashSet<String>()
-        fun windowOpened(id: String) { synchronized(liveWindows) { liveWindows += id; seenWindows += id } }
-        fun windowClosed(id: String) { synchronized(liveWindows) { liveWindows -= id } }
-        private fun anotherWindows(owner: String?, page: String?, pageRestored: Boolean) = synchronized(liveWindows) {
-            anotherWindowsDraft(owner, page, owner in liveWindows, owner in seenWindows, pageRestored)
-        }
+        // NT-2: the Planner windows (AppNav ids) this process has shown (see [NoteWindows]).
+        private val windows = NoteWindows()
+        /** CC-1: whether the window [id] came back from saved state after Android closed Planner: only the first time this
+         *  process meets it, and only if [fromSavedState]. Rebuilt in this process it keeps what it was then. */
+        fun windowStarted(id: String, fromSavedState: Boolean): Boolean = windows.started(id, fromSavedState)
+        fun windowOpened(id: String) = windows.opened(id)
+        /** NO-1: [gone] when the window is finishing (its task swiped away, Back); otherwise Android may rebuild it. */
+        fun windowClosed(id: String, gone: Boolean) = windows.closed(id, gone)
+        /** NO-3: whether [id] is a window of this process that is shown or may come back. */
+        fun windowLive(id: String?): Boolean = windows.live(id)
+        private fun anotherWindows(owner: String?, page: String?, pageRestored: Boolean) = windows.another(owner, page, pageRestored)
+    }
+}
+
+/**
+ * NT-2: the Planner windows this process has shown: those that are live (on screen, or destroyed by Android to be
+ * rebuilt later, NO-1) and every one so far. A draft of a window that went while Planner ran (its task swiped
+ * away) is no other window's any more. CC-1: whether each came back from saved state is fixed when this process first
+ * meets it, so a window rebuilt in a living process (an unlisted configuration change) still counts as started afresh.
+ */
+internal class NoteWindows {
+    private val live = HashSet<String>()
+    private val restored = HashMap<String, Boolean>()
+    fun started(id: String, fromSavedState: Boolean): Boolean = synchronized(this) { restored.getOrPut(id) { fromSavedState } }
+    fun opened(id: String) { synchronized(this) { live += id; restored.getOrPut(id) { false } } }
+    // NO-1: a window Android destroys but keeps in Recents with its saved state stays live: it may come back for its draft.
+    fun closed(id: String, gone: Boolean) { synchronized(this) { if (gone) live -= id } }
+    fun live(id: String?): Boolean = synchronized(this) { id != null && id in live }
+    fun another(owner: String?, page: String?, pageRestored: Boolean): Boolean = synchronized(this) {
+        anotherWindowsDraft(owner, page, owner in live, owner in restored, pageRestored)
     }
 }
 
 /**
  * NT-2: whether a draft written in the window [owner] is still that window's, so the Notes page [page] only offers it.
- * Yes while that window is on screen in this process ([live]). One this process showed and that has gone ([seen], not
+ * Yes while that window is on screen in this process, or was destroyed by Android to be rebuilt (NO-1) ([live]). One this process showed and that has gone ([seen], not
  * live) won't come back for it. One from before Planner was last started may: when this window came back from its saved
  * state too ([pageRestored], Android closed Planner with both open, NW-5), that window may still be restored. A window
  * started afresh (Planner swiped away, a reboot) takes it as its own, as before drafts named their window.
