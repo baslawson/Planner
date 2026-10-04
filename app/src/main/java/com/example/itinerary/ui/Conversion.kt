@@ -30,10 +30,13 @@ class Conversions {
     // The request whose new item has been saved (its original replaced): rebuilt after that, nothing is left to convert,
     // and the new item's editor draft is recovered the usual way (TE-5).
     var replacedFor by mutableStateOf<String?>(null)
+    // What replaced it: the new event's id, or "<new task id>|<event ids>" — so a window rebuilt after Android ended
+    // Planner between the Save and the original's move can still move it (CV-4).
+    var replacedWith by mutableStateOf<String?>(null)
     // The request the window was rebuilt with, until its editor opens: its draft is its own, not one in the way (TE-6).
     internal var restored: String? = null
-    fun taskToEvent(taskId: String) { replacedFor = null; request = "task:$taskId" }
-    fun eventToTask(eventId: Long, wholeSeries: Boolean) { replacedFor = null; request = "event:$eventId:$wholeSeries" }
+    fun taskToEvent(taskId: String) { replacedFor = null; replacedWith = null; request = "task:$taskId" }
+    fun eventToTask(eventId: Long, wholeSeries: Boolean) { replacedFor = null; replacedWith = null; request = "event:$eventId:$wholeSeries" }
 }
 
 val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
@@ -42,9 +45,11 @@ val LocalConversions = staticCompositionLocalOf<Conversions?> { null }
 fun rememberConversions(): Conversions {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
     var savedReplaced by rememberSaveable { mutableStateOf<String?>(null) }
-    val conversions = remember { Conversions().also { it.request = saved; it.restored = saved; it.replacedFor = savedReplaced } }
+    var savedWith by rememberSaveable { mutableStateOf<String?>(null) }
+    val conversions = remember { Conversions().also { it.request = saved; it.restored = saved; it.replacedFor = savedReplaced; it.replacedWith = savedWith } }
     LaunchedEffect(conversions.request) { saved = conversions.request }
     LaunchedEffect(conversions.replacedFor) { savedReplaced = conversions.replacedFor }
+    LaunchedEffect(conversions.replacedWith) { savedWith = conversions.replacedWith }
     return conversions
 }
 
@@ -82,12 +87,27 @@ fun ConversionHost(conversions: Conversions) {
     val done = { if (conversions.request == request) conversions.request = null }
     // Rebuilt after its Save, the original is gone: the new item stays, with its draft recovered as any other (TE-5).
     val restored = request == conversions.restored
-    if (restored && conversions.replacedFor == request) { LaunchedEffect(request) { done() }; return }
+    val parts = request.split(':')
+    val toEvent = parts[0] == "task"
+    if (restored && conversions.replacedFor == request) {
+        LaunchedEffect(request) {
+            // Ended between the Save and the original's move (CV-4): moved now, while both are there (an Undo since took
+            // the new one back, and then nothing is moved). Already moved, the calls find nothing to do.
+            conversions.replacedWith?.let { with -> runCatching { withContext(NonCancellable) {
+                val repo = app.repository
+                if (toEvent) with.toLong().let { id -> if (repo.eventDetails(id) != null) repo.replaceTaskWithEvent(parts[1], id) }
+                else {
+                    val (taskId, ids) = with.split('|', limit = 2)
+                    if (repo.task(taskId) != null) repo.replaceEventsWithTask(ids.split(',').mapNotNull { it.toLongOrNull() }.toSet(), taskId)
+                }
+            } } }
+            done()
+        }
+        return
+    }
     val today = LocalDate.parse(rememberSaveable(request) { LocalDate.now().toString() })
     // The new task's id, kept with the request so a rebuilt window knows the new-task draft as its own (TE-6).
     val taskSeed = rememberSaveable(request) { java.util.UUID.randomUUID().toString() }
-    val parts = request.split(':')
-    val toEvent = parts[0] == "task"
     // Read once: what the original is now, made into the other kind; or why it can't be.
     val prepared by produceState<Result<Prepared>?>(null, request) {
         value = runCatching {
@@ -99,9 +119,11 @@ fun ConversionHost(conversions: Conversions) {
                 val whole = parts[2].toBoolean()
                 val (event, attachments, reminders) = app.repository.eventDetails(id) ?: error("This event no longer exists.")
                 val series = if (whole) app.repository.seriesEvents(id) else listOf(event)
-                // A whole series is due on its next occurrence (its last, when all have passed), not the one tapped.
-                val due = if (whole) (series.map { it.date }.filter { !it.isBefore(today) }.minOrNull() ?: series.maxOf { it.date }) else null
-                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, due = due,
+                // A whole series is due on its next occurrence (its last, when all have passed), not the one tapped; its
+                // reminder goes with it (CV-2).
+                val occurrence = if (!whole) event else series.filter { !(it.endDate ?: it.date).isBefore(today) }.minByOrNull { it.date }
+                    ?: series.maxBy { it.date }
+                Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence,
                     idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
             val eventDraft = runCatching { EditorDraftStore(app).read() }.getOrNull()
@@ -125,9 +147,10 @@ fun ConversionHost(conversions: Conversions) {
     }
     // The original is replaced once, at the new one's first Save, in the app's own scope: closing the editor straight
     // after ("Save changes?" → Save) mustn't cancel it and leave both (TE-8).
-    fun replace(block: suspend () -> Unit) {
+    fun replace(with: String, block: suspend () -> Unit) {
         if (conversions.replacedFor == request) return
         conversions.replacedFor = request
+        conversions.replacedWith = with
         app.appScope.launch {
             withContext(NonCancellable) {
                 try { block() } catch (e: Exception) {
@@ -143,7 +166,7 @@ fun ConversionHost(conversions: Conversions) {
       is Prepared.ToEvent -> {
         val (converted, files) = ready
         val event = remember(request) { converted.result }
-        NewPlanningEventEditor(event, onSaved = { id -> replace { app.repository.replaceTaskWithEvent(parts[1], id) } }, prefilled = true,
+        NewPlanningEventEditor(event, onSaved = { id -> replace(id.toString()) { app.repository.replaceTaskWithEvent(parts[1], id) } }, prefilled = true,
             initialAddedReminders = converted.reminders, initialAddedAttachments = files.map { it.copy(id = 0, itemId = 0) },
             notice = conversionNotice("event", converted.dropped), onDismiss = done)
       }
@@ -152,7 +175,7 @@ fun ConversionHost(conversions: Conversions) {
         val task = remember(request) { converted.result }
         PlanningOverlay(done) {
             TaskEditor(task, true, prefilled = true, notice = conversionNotice("task", converted.dropped),
-                afterSave = { id -> replace { app.repository.replaceEventsWithTask(ids, id) } }, onDismiss = done)
+                afterSave = { id -> replace("$id|" + ids.joinToString(",")) { app.repository.replaceEventsWithTask(ids, id) } }, onDismiss = done)
         }
       }
     }

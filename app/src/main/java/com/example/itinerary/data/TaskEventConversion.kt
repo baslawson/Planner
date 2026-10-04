@@ -40,11 +40,12 @@ object TaskEventConversion {
 
     /**
      * [wholeSeries]: a repeating event becomes one repeating task; otherwise only this occurrence does, and the series
-     * keeps its other events. A multi-day event is due on its last day: done by the end.
+     * keeps its other events. A multi-day event is due on its last day: done by the end. [occurrence]: for a whole series,
+     * the one the task is due on (its next), whose day and reminder it takes; the tapped [event] otherwise (CV-2).
      */
     fun toTask(event: ItineraryItem, reminders: List<Reminder>, attachments: List<Attachment>, wholeSeries: Boolean,
                zone: ZoneId = ZoneId.systemDefault(), now: Long = System.currentTimeMillis(), seriesCount: Int = 1,
-               due: LocalDate? = null, idSeed: String? = null): Converted<PlannerTask> {
+               occurrence: ItineraryItem = event, idSeed: String? = null): Converted<PlannerTask> {
         val dropped = mutableListOf<String>()
         if (event.startTime != null) dropped += "The time" + (if (event.durationMinutes != null) " and length" else "") + ": tasks have a due day only."
         if (event.endDate != null) dropped += "The days before the last: the task is due on the last day."
@@ -60,11 +61,11 @@ object TaskEventConversion {
         val repeating = event.repeatRule != RepeatRule.NONE.name
         if (repeating && wholeSeries) dropped += "The series' end: a repeating task goes on until you stop it."
         // A reminder already gone would stop the task saving ("Choose a future reminder"): left out, and said (TE-10).
-        val reminderAt = first?.let { reminderTrigger(event.date, event.startTime, it.offsetMinutes, zone).toInstant().toEpochMilli() }
+        val reminderAt = first?.let { reminderTrigger(occurrence.date, occurrence.startTime, it.offsetMinutes, zone).toInstant().toEpochMilli() }
             ?.takeIf { it > now } ?: null.also { if (first != null) dropped += "The reminder: its time has passed." }
         // The same id each time this conversion is read, so a rebuilt window knows the new-task draft as its own (TE-6).
         val id = idSeed?.let { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() } ?: java.util.UUID.randomUUID().toString()
-        val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = due ?: event.endDate ?: event.date,
+        val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
             checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
             repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt)
         return Converted(task, dropped = dropped)
@@ -76,8 +77,13 @@ object TaskEventConversion {
         // clock change in between can't move it by an hour (TE-2).
         val wall = ChronoUnit.MINUTES.between(Instant.ofEpochMilli(at).atZone(zone).toLocalDateTime(), date.atTime(time ?: LocalTime.of(9, 0)))
         val elapsed = ChronoUnit.MINUTES.between(Instant.ofEpochMilli(at).atZone(zone), date.atTime(time ?: LocalTime.of(9, 0)).atZone(zone))
-        val minutes = listOf(wall, wall - 60, wall + 60, wall - 30, wall + 30).filter { it >= 0 }
-            .firstOrNull { reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() == at } ?: elapsed.takeIf { it >= 0 } ?: return null
+        // When clocks go back some times can't be said exactly ("1 day" is an hour off, 1439 minutes a minute): the nearest
+        // is taken, earlier on a tie (CV-1).
+        if (wall < 0 && elapsed < 0) return null
+        val minutes = (maxOf(0, minOf(wall, elapsed) - 90)..maxOf(wall, elapsed) + 90)
+            .minWith(compareBy({ kotlin.math.abs(reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() - at) },
+                { -reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() }))
+            .takeIf { reminderTrigger(date, time, it, zone).toInstant().toEpochMilli() - at in -60 * 60_000L..60 * 60_000L } ?: return null
         return when {
             minutes % 1440 == 0L -> Reminder(itemId = 0, amount = (minutes / 1440).toInt(), unit = ReminderUnit.DAYS)
             minutes % 60 == 0L -> Reminder(itemId = 0, amount = (minutes / 60).toInt(), unit = ReminderUnit.HOURS)

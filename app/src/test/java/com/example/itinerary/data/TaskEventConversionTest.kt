@@ -88,23 +88,43 @@ class TaskEventConversionTest {
         }
     }
 
-    // TE-10, TE-12: a reminder already gone is left out and said; a whole series says what goes; the id can be fixed.
+    // TE-10, TE-12, CV-2: a reminder already gone is left out and said; a whole series is due on its next occurrence and
+    // takes its reminder from that one; it says what goes; the id can be fixed.
     @Test fun whatAnEventToTaskSays() {
         val day = LocalDate.of(2026, 10, 9)
         val event = ItineraryItem(id = 3, tripId = 1, date = day, startTime = null, title = "Bins", repeatRule = "WEEKLY", seriesId = "s",
             linkedTaskId = "t1")
         val reminders = listOf(Reminder(itemId = 3, amount = 1, unit = ReminderUnit.DAYS))
+        val gone = TaskEventConversion.toTask(event, reminders, emptyList(), wholeSeries = false, zone = zone, now = at(day, 0))
+        assertNull(gone.result.reminderAt)
+        assertTrue(gone.dropped.contains("The reminder: its time has passed."))
         val late = TaskEventConversion.toTask(event, reminders, emptyList(), wholeSeries = true, zone = zone, now = at(day, 0),
-            seriesCount = 4, due = day.plusDays(7), idSeed = "seed")
-        assertNull(late.result.reminderAt)
-        assertTrue(late.dropped.contains("The reminder: its time has passed."))
+            seriesCount = 4, occurrence = event.copy(id = 4, date = day.plusDays(7)), idSeed = "seed")
+        assertEquals(at(day.plusDays(6), 9), late.result.reminderAt)
         assertTrue(late.dropped.contains("All 4 events of the series go to Recently deleted, past ones too."))
         assertTrue(late.dropped.contains("Its link to the task it was time for."))
         assertEquals(day.plusDays(7), late.result.dueDate)
+        // A multi-day series is due on the last day of its next occurrence, as the notice says.
+        val trip = event.copy(endDate = day.plusDays(2))
+        assertEquals(day.plusDays(9), TaskEventConversion.toTask(trip, emptyList(), emptyList(), true, zone = zone,
+            occurrence = trip.copy(date = day.plusDays(7), endDate = day.plusDays(9))).result.dueDate)
         assertEquals(late.result.id, TaskEventConversion.toTask(event, reminders, emptyList(), true, zone = zone, idSeed = "seed").result.id)
         val early = TaskEventConversion.toTask(event, reminders, emptyList(), wholeSeries = false, zone = zone, now = at(today, 0))
         assertEquals(at(day.minusDays(1), 9), early.result.reminderAt)
         assertTrue(TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = day), today, zone, hasTimeBlocks = true).dropped
             .contains("Its time blocks stay in the calendar, without their task."))
+    }
+
+    // CV-1: when clocks go back, a time that can't be said exactly takes the nearest offset, not one an hour early.
+    @Test fun clocksGoingBackTakeTheNearest() {
+        val ny = ZoneId.of("America/New_York")
+        val day = LocalDate.of(2026, 11, 1)
+        val at = LocalDateTime.of(2026, 10, 31, 10, 0).atZone(ny).toInstant().toEpochMilli()
+        val r = TaskEventConversion.reminderBefore(day, null, at, ny)!!
+        val fires = reminderTrigger(day, null, r.offsetMinutes, ny).toInstant().toEpochMilli()
+        assertTrue("fires ${(fires - at) / 60_000} min off", kotlin.math.abs(fires - at) <= 60_000)
+        // Times that can be said exactly still are.
+        val nine = LocalDateTime.of(2026, 10, 31, 9, 0).atZone(ny).toInstant().toEpochMilli()
+        assertEquals(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS), TaskEventConversion.reminderBefore(day, null, nine, ny))
     }
 }

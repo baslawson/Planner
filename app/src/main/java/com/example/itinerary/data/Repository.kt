@@ -454,6 +454,7 @@ class Repository(
 
     suspend fun deleteTask(id: String) = changes.withLock {
         withContext(NonCancellable) {
+            val earlier = conversionsMaking(taskIds = setOf(id))
             deletingWithUndo({ archived ->
                 val task = taskDao.byId(id) ?: return@deletingWithUndo null
                 val deleted = PendingDeletion(items = emptyList(), attachments = emptyList(), reminders = emptyList(), tasks = listOf(task))
@@ -461,6 +462,7 @@ class Repository(
                 deleted
             }) { taskDao.delete(id) } ?: return@withContext
             afterCommit(taskIds = listOf(id))
+            settleConversions(earlier)
         }
     }
 
@@ -468,6 +470,7 @@ class Repository(
     // that also removes the event. Tasks waiting on it stop waiting, rather than staying blocked for good.
     suspend fun replaceTaskWithEvent(taskId: String, eventId: Long) = changes.withLock {
         withContext(NonCancellable) {
+            val earlier = conversionsMaking(taskIds = setOf(taskId))
             val freed = mutableListOf<String>()
             deletingWithUndo({ archived ->
                 val task = taskDao.byId(taskId) ?: return@deletingWithUndo null
@@ -480,7 +483,7 @@ class Repository(
                 deleted
             }) { taskDao.delete(taskId) } ?: return@withContext
             afterCommit(taskIds = listOf(taskId) + freed)
-            settleEarlierConversions { it.taskId == taskId }
+            settleConversions(earlier)
         }
     }
 
@@ -489,8 +492,7 @@ class Repository(
     suspend fun replaceEventsWithTask(ids: Set<Long>, taskId: String) = changes.withLock {
         requirePlannerEvents(ids)
         withContext(NonCancellable) {
-            val made = _pendingDeletions.value.mapNotNull { it.madeInto }.flatMap { it.eventIds }
-                .filter { e -> seriesIds(e).any(ids::contains) }.toSet()
+            val earlier = conversionsMaking(eventIds = ids)
             val deleted = deletingWithUndo({ archived ->
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
                 if (selected.isEmpty()) return@deletingWithUndo null
@@ -502,7 +504,7 @@ class Repository(
                 bundle
             }) { bundle -> bundle.items.forEach { itemDao.delete(it) } } ?: return@withContext
             afterCommit(reminderIds = deleted.reminders.map { it.id })
-            if (made.isNotEmpty()) settleEarlierConversions { m -> m.eventIds.any(made::contains) }
+            settleConversions(earlier)
         }
     }
 
@@ -617,7 +619,12 @@ class Repository(
     // Once started, a restore finishes (its reminders set, its stored bundle removed) even if the screen goes.
     suspend fun restoreDeleted(id: String) = withContext(NonCancellable) { changes.withLock { restoreDeletedLocked(id) } }
 
-    private suspend fun restoreDeletedLocked(id: String) {
+    private suspend fun restoreDeletedLocked(id: String) = finishRestore(id, restoreDeletedRows(id))
+
+    private class Restored(val reminderIds: List<Long>, val tasks: List<String>, val notes: List<String>, val stored: String?)
+
+    // The database half of a restore, so an Undo of a conversion can do it in the same transaction as its take-back.
+    private suspend fun restoreDeletedRows(id: String): Restored {
         val restoredTasks = mutableListOf<String>()
         val restoredNotes = mutableListOf<String>()
         var stored: String? = null
@@ -648,9 +655,13 @@ class Repository(
             deletedDao.delete(id)
             restored
         }
-        stored?.let(payloads::delete)
+        return Restored(reminderIds, restoredTasks, restoredNotes, stored)
+    }
+
+    private suspend fun finishRestore(id: String, restored: Restored) {
+        restored.stored?.let(payloads::delete)
         _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token == id }
-        afterCommit(reminderIds = reminderIds, taskIds = restoredTasks, noteIds = restoredNotes)
+        afterCommit(reminderIds = restored.reminderIds, taskIds = restored.tasks, noteIds = restored.notes)
     }
 
     // Recently deleted's selection: each entry on its own, as one Restore / Delete forever would; one that fails doesn't
@@ -954,6 +965,7 @@ class Repository(
     // By id, as it is now: the card's ⋮ only has the id and whether it repeats.
     suspend fun deleteWithUndo(id: Long, entireSeries: Boolean = false) = changes.withLock {
         requirePlannerEvent(id)
+        val earlier = conversionsMaking(eventIds = setOf(id))
         val deleted = deletingWithUndo({ archived ->
             val current = itemDao.byId(id) ?: return@deletingWithUndo null
             val selected = if (entireSeries && current.seriesId != null) {
@@ -967,6 +979,7 @@ class Repository(
             bundle
         }) { bundle -> bundle.items.forEach { itemDao.delete(it) } } ?: return@withLock
         afterCommit(reminderIds = deleted.reminders.map { it.id })
+        settleConversions(earlier)
     }
 
     // Delete exactly these occurrences together, with one Undo bundle for the entire selection.
@@ -974,8 +987,7 @@ class Repository(
     suspend fun deleteEventsWithUndo(ids: Set<Long>, taskIds: Set<String> = emptySet()) = changes.withLock {
         requirePlannerEvents(ids)
         withContext(NonCancellable) {
-            val made = _pendingDeletions.value.mapNotNull { it.madeInto }.flatMap { it.eventIds }
-                .filter { e -> seriesIds(e).any(ids::contains) }.toSet()
+            val earlier = conversionsMaking(eventIds = ids, taskIds = taskIds)
             val deleted = deletingWithUndo({ archived ->
                 val selected = readIds(ids, itemDao::byIds).sortedBy { it.id }
                 val tasks = taskIds.mapNotNull { taskDao.byId(it) }.sortedBy { it.id }
@@ -991,6 +1003,7 @@ class Repository(
                 bundle.tasks.forEach { taskDao.delete(it.id) }
             } ?: return@withContext
             afterCommit(reminderIds = deleted.reminders.map { it.id }, taskIds = deleted.tasks.map { it.id })
+            settleConversions(earlier)
         }
     }
 
@@ -1017,17 +1030,25 @@ class Repository(
 
     suspend fun undoDeletion(token: String) = withContext(NonCancellable) { changes.withLock {
         val madeInto = _pendingDeletions.value.find { it.token == token }?.madeInto
-        // A conversion's new item goes first and the original comes back after: a failure in between leaves the Undo
-        // pending, so it is offered again, rather than keeping both (TE-7).
-        madeInto?.let { takeBackConversion(it) }
-        restoreDeletedLocked(token)
-        madeInto?.let { waitAgain(it) }
+            ?: return@withLock restoreDeletedLocked(token)
+        // A conversion's take-back, the original's return and the waits put back are one transaction: a failure (or
+        // Android ending Planner) leaves all of it undone, with the Undo still pending, never one without the other
+        // (TE-7, CV-4).
+        lateinit var taken: TakenBack
+        lateinit var again: List<String>
+        val restored = db.withTransaction {
+            taken = takeBackRows(madeInto)
+            restoreDeletedRows(token).also { again = waitAgainRows(madeInto) }
+        }
+        finishRestore(token, restored)
+        afterCommit(files = taken.files, reminderIds = taken.reminderIds, taskIds = taken.taskIds + again)
     } }
 
     // Undo of a conversion: what the original was made into goes (a series' every event; a repeating task's next ones,
     // made by completing it meanwhile), with no Recently deleted entry of its own. Tasks made to wait on it meanwhile
     // stop waiting (TE-9).
-    private suspend fun takeBackConversion(made: MadeInto) {
+    private class TakenBack(val reminderIds: List<Long>, val taskIds: Set<String>, val files: List<String>)
+    private suspend fun takeBackRows(made: MadeInto): TakenBack {
         val result = db.withTransaction {
             val events = made.eventIds.mapNotNull { itemDao.byId(it) }.flatMap { e -> e.seriesId?.let { itemDao.forSeries(it) } ?: listOf(e) }.distinctBy { it.id }
             val eventIds = events.mapTo(hashSetOf()) { it.id }
@@ -1041,16 +1062,16 @@ class Repository(
             tasks.forEach { files += it.attachments.map { a -> a.fileName }; taskDao.delete(it.id) }
             val unblocked = taskDao.all().filter { t -> t.prerequisiteIds.any { it in goneIds } }
                 .onEach { taskDao.update(it.copy(prerequisiteIds = it.prerequisiteIds - goneIds)) }
-            Triple(reminders, goneIds + unblocked.map { it.id }, files)
+            TakenBack(reminders.map { it.id }, goneIds + unblocked.map { it.id }, files)
         }
-        afterCommit(files = result.third, reminderIds = result.first.map { it.id }, taskIds = result.second)
+        return result
     }
 
     // After the Undo of a task made into an event: the tasks that stopped waiting on it wait again, unless a wait added
     // meanwhile would make that a loop (TE-9).
-    private suspend fun waitAgain(made: MadeInto) {
-        val from = made.fromTaskId ?: return
-        val again = db.withTransaction {
+    private suspend fun waitAgainRows(made: MadeInto): List<String> {
+        val from = made.fromTaskId ?: return emptyList()
+        return db.withTransaction {
             if (taskDao.byId(from) == null) return@withTransaction emptyList()
             made.freed.mapNotNull { taskDao.byId(it) }.mapNotNull { waiting ->
                 val updated = waiting.copy(prerequisiteIds = (waiting.prerequisiteIds + from).distinct())
@@ -1060,15 +1081,27 @@ class Repository(
                 waiting.id
             }
         }
-        if (again.isNotEmpty()) afterCommit(taskIds = again)
     }
 
-    // An item being converted that an earlier conversion, still offering its Undo, made: that Undo is dropped (it would
-    // bring back the first original beside this one); its original stays in Recently deleted (TE-9).
-    private suspend fun settleEarlierConversions(made: (MadeInto) -> Boolean) {
-        val earlier = _pendingDeletions.value.filter { it.madeInto?.let(made) == true }
+    // The conversions still offering their Undo that made one of these events (or their series) or tasks (or a task's
+    // next ones, made by completing it). Read before those go.
+    private suspend fun conversionsMaking(eventIds: Set<Long> = emptySet(), taskIds: Set<String> = emptySet()): List<PendingDeletion> =
+        _pendingDeletions.value.filter { bundle ->
+            val made = bundle.madeInto ?: return@filter false
+            made.eventIds.any { e -> e in eventIds || seriesIds(e).any(eventIds::contains) } || made.taskId != null && run {
+                var next: String? = made.taskId
+                var steps = 0
+                while (next != null && steps++ < 1000) { if (next in taskIds) return@run true; next = taskDao.byId(next)?.nextTaskId }
+                false
+            }
+        }
+
+    // An item converted onward or deleted that an earlier conversion, still offering its Undo, made: that Undo is dropped
+    // (it would bring back the first original beside it); the original stays in Recently deleted (TE-9, CV-3).
+    private suspend fun settleConversions(earlier: List<PendingDeletion>) {
         if (earlier.isEmpty()) return
-        _pendingDeletions.value = _pendingDeletions.value.filterNot { it in earlier }
+        val tokens = earlier.mapTo(hashSetOf()) { it.token }
+        _pendingDeletions.value = _pendingDeletions.value.filterNot { it.token in tokens }
         afterCommit(files = earlier.flatMap { bundle -> bundle.attachments.map { it.fileName } }, notify = false)
         onDeletionFinished()
     }
