@@ -140,6 +140,14 @@
             android:name="com.google.mlkit.common.internal.MlKitInitProvider"
             android:authorities="${applicationId}.mlkitinitprovider"
             tools:node="remove" />
+        <!-- A6-8: ML Kit sends usage logs to Google through Google's data transport, whose only way out is the CCT backend
+             named in this service's meta-data. Without the service no backend is found: each log is dropped when made
+             ("Transport backend 'cct' is not registered"), and any queued by an older version is deleted unsent. Text
+             recognition runs on the phone and doesn't need it. The transport's scheduler service and receiver stay (not
+             exported; with no backend they have nothing to send). -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            tools:node="remove" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
