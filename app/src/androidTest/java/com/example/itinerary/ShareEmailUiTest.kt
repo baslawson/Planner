@@ -66,12 +66,12 @@ class ShareEmailUiTest {
     private fun data() = runBlocking { app.repository.snapshot() }
 
     @Before fun fresh() {
-        TaskDraftStore(context).clear("new"); EditorDraftStore(context).clear(); NoteDraftStore(context).clear()
+        TaskDraftStore(context).clear("new"); EditorDraftStore(context).clear(); NoteDraftStore(context).clearAll()
         app.settings.setTimeFormat(TimeFormat.HOUR_24)
     }
     @After fun done() {
         activity?.let { a -> ins.runOnMainSync { a.finish() } }
-        TaskDraftStore(context).clear("new"); EditorDraftStore(context).clear(); NoteDraftStore(context).clear()
+        TaskDraftStore(context).clear("new"); EditorDraftStore(context).clear(); NoteDraftStore(context).clearAll()
     }
 
     @Test fun eventTakesTheSubjectTheDayAndThePickedTimeAndCloseAsks() = runBlocking {

@@ -103,7 +103,8 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
 
 // Why shared text can't go to [value] ("event", "task" or "note") now, or null when it can. An event editor open in this
 // or another Planner window (U3) holds the one event draft, so it is named rather than an unfinished draft to resume. A
-// note opens on the Notes page, which would drop an event or task editor open here ([otherEditorOpen]).
+// note opens on this window's Notes page, which would drop an event or task editor open here ([otherEditorOpen]) and
+// keeps a note open here ([noteEditorOpen]); editors in other windows don't count (N6-6).
 internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOpen: Boolean,
                               noteEditorOpen: Boolean = false, otherEditorOpen: Boolean = false): String? = when {
     value == "event" && eventEditorOpen -> "An event is open in Planner. Close this share, then save or close that event before sharing again."
@@ -130,16 +131,20 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
     var pickedTime by rememberSaveable(text, subject) { mutableStateOf<String?>(null) }
     val id = rememberSaveable(text, subject) { java.util.UUID.randomUUID().toString() }
     var error by remember { mutableStateOf<String?>(null) }
+    // N6-6: the note and the other editors the Notes page would meet are the ones in this window.
+    val window = LocalWindowEditors.current
     fun choose(value: String) {
         val editor = if (value == "bill") "event" else value
         val check = runCatching { when (editor) {
             "event" -> EditorDraftStore(app).read() != null
-            "note" -> NoteDraftStore(app).read() != null
+            // A note draft the Notes page would reopen first (N6-1: not one whose note is open in an editor).
+            "note" -> NoteDraftStore(app).recoverable(null) != null
             else -> TaskDraftStore(app).read("new") != null
         } }
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }
         val blocked = sharedDraftBlock(editor, check.getOrThrow(), EditorDraftStore.openEditors.value > 0,
-            NoteDraftStore.openEditors.value > 0, EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value > 0)
+            (window?.notes ?: NoteDraftStore.openEditors.value) > 0,
+            (window?.let { it.events + it.tasks } ?: (EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value)) > 0)
         if (blocked != null) error = blocked
         else if (value == "note") content.getOrNull()?.let { onNote(PlannerNote(title = it.title, content = it.notes)); onDismiss() }
         else destination = value

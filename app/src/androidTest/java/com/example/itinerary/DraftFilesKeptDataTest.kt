@@ -31,7 +31,7 @@ class DraftFilesKeptDataTest {
             override fun cancel(reminderId: Long) {}
         })
         try { test(repo, store, context) }
-        finally { EditorDraftStore(context).clear(); NoteDraftStore(context).clear(); db.close(); dir.deleteRecursively() }
+        finally { EditorDraftStore(context).clear(); NoteDraftStore(context).clearAll(); db.close(); dir.deleteRecursively() }
     }
 
     // E5-1: an event editor still open on an event that was archived elsewhere (it saves the attachments as a new
@@ -66,10 +66,10 @@ class DraftFilesKeptDataTest {
         val drafts = NoteDraftStore(context)
         val note = PlannerNote(title = "Discarded")
         drafts.schedule(NoteDraftStore.Draft(note, creating = true, base = null, pendingPhoto = null)) {}
-        assertEquals("Discarded", drafts.read()?.note?.title) // a reader sees it while it waits
-        drafts.clear()
+        assertEquals("Discarded", drafts.read(note.id)?.note?.title) // a reader sees it while it waits
+        drafts.clear(note.id)
         Thread.sleep(1500)
         drafts.flush()
-        assertNull(drafts.read())
+        assertNull(drafts.read(note.id))
     }
 }

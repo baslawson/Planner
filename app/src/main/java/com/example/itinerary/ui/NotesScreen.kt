@@ -154,13 +154,15 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     }
     // An editor Android closed mid-edit: its draft reopens it once, here. That includes the editor still open in the
     // saved state, whose body is only in the draft (NoteEditorMemory); a rotated editor has it in memory instead.
+    // N6-1: never the draft of a note open in an editor, here or in another Planner window: that editor is still on it.
     var recovered by remember { mutableStateOf<com.example.itinerary.data.NoteDraftStore.Draft?>(null) }
     var draftChecked by remember { mutableStateOf(editingId?.let(NoteEditorMemory::holds) == true) }
     LaunchedEffect(Unit) {
         try {
             if (draftChecked) return@LaunchedEffect
+            val restoring = editingId
             val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { com.example.itinerary.data.NoteDraftStore(context).read() }.getOrNull() } ?: return@LaunchedEffect
+                runCatching { com.example.itinerary.data.NoteDraftStore(context).recoverable(restoring) }.getOrNull() } ?: return@LaunchedEffect
             // Read now, not before: a card tapped meanwhile opens its own note.
             if (editingId != null && editingId != draft.note.id) return@LaunchedEffect
             recovered = draft; editingNew = draft.creating; editingId = draft.note.id

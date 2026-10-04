@@ -329,8 +329,9 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         // stays where it is. Snapshot state: the tap that brings Planner back sees the current count at once.
         val openEventEditors = windowEditors.events
         val openTaskEditors = windowEditors.tasks
-        // A note being written counts too (Q-1): moving to the day would close the Notes page with it.
-        val openNoteEditors by com.example.itinerary.data.NoteDraftStore.openEditors.collectAsStateWithLifecycle()
+        // A note being written here counts too (Q-1): moving to the day would close the Notes page with it (N6-6: one in
+        // another window doesn't).
+        val openNoteEditors = windowEditors.notes
         val openEditors = openEventEditors + openTaskEditors + openNoteEditors
         val waitingForEditor = openEditors > 0
         LaunchedEffect(widgetDate) {
@@ -434,6 +435,7 @@ internal fun shortcutBlockedMessage(windowEventEditors: Int, allEventEditors: In
 internal class WindowEditors {
     var events by mutableIntStateOf(0)
     var tasks by mutableIntStateOf(0)
+    var notes by mutableIntStateOf(0)
 }
 internal val LocalWindowEditors = compositionLocalOf<WindowEditors?> { null }
 

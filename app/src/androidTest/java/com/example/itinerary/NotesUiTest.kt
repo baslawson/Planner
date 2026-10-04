@@ -321,8 +321,37 @@ class NotesUiTest {
             screenshot("draft-recovered")
             click("Save")
             await { notes().singleOrNull()?.content == "typed before Android closed Planner" }
-            await { com.example.itinerary.data.NoteDraftStore(context).read() == null }
-        } finally { com.example.itinerary.data.NoteDraftStore(context).clear() }
+            await { com.example.itinerary.data.NoteDraftStore(context).read("qa-draft-note") == null }
+        } finally { com.example.itinerary.data.NoteDraftStore(context).clearAll() }
+    }
+
+    // Bug hunt 4 Oct (b) N6-1 / A6-1: a second Planner window (in a task of its own, as a share from the mail app opens)
+    // with its own Notes page. It doesn't reopen the note still open in the first window as "Recovered", and its own
+    // note's Discard leaves the first window's draft.
+    @Test fun aSecondWindowLeavesTheFirstWindowsNoteAlone() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(0, "QA first window"); type(1, "typed in the first window")
+        await { NoteDraftStore(context).readAll().singleOrNull()?.note?.content == "typed in the first window" }
+        val firstId = NoteDraftStore(context).readAll().single().note.id
+        val second = ins.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
+        try {
+            await { find("AGENDA") != null }
+            click("More options"); click("Notes")
+            await { find("Search notes") != null && find("New note") != null }
+            Thread.sleep(1000) // a recovered draft would open by now
+            assertNull(find("Recovered unsaved changes. Save them, or Close and Discard."))
+            assertNull(find("QA first window"))
+            screenshot("second-window-notes")
+            click("New note"); await { find("Title") != null }
+            type(0, "QA second window"); type(1, "second")
+            await { NoteDraftStore(context).readAll().size == 2 }
+            click("Close"); click("Discard")
+            await { find("Search notes") != null && NoteDraftStore(context).readAll().size == 1 }
+            assertEquals("typed in the first window", NoteDraftStore(context).read(firstId)?.note?.content)
+            assertTrue("the first window's editor is still open", NoteDraftStore.isOpen(firstId))
+        } finally { ins.runOnMainSync { second.finish() } }
     }
 
     @Test fun gridLooksInTheDarkTheme() {
@@ -638,7 +667,7 @@ class NotesUiTest {
         assertNull(find("Couldn't save this note. Please try again."))
         // No draft either: the editor still opens the saved note (not a new one), and Save updates it.
         type(1, "ABC"); Thread.sleep(800)
-        com.example.itinerary.data.NoteDraftStore(context).clear()
+        com.example.itinerary.data.NoteDraftStore(context).clearAll()
         recreateAsAfterProcessDeath()
         await { find("Edit note") != null && find("Delete") != null }
         type(1, "ABCD"); click("Save")
