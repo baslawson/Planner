@@ -11,7 +11,7 @@ data class BillSuggestion(val title: String?, val date: LocalDate?, val amount: 
 object BillSuggestions {
     private val amountLabel = Regex("(?i)\\b(?:total\\s+amount\\s+due|amount\\s+due|balance\\s+due|total\\s+due|grand\\s+total|total)\\b\\s*[:=-]?\\s*")
     private val dueLabel = Regex("(?i)\\b(?:payment\\s+due(?:\\s+date)?|due\\s+date|pay\\s+by|due\\s+by|due)\\b\\s*[:=-]?\\s*")
-    private val money = Regex("(?i)^(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s*)?([£€$])?\\s*([0-9]{1,9}(?:\\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?)(?:\\s*(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR))?$")
+    private val money = Regex("(?i)^(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s*)?([£€$])?\\s*([0-9]{1,9}(?:\\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?)(?:\\s*(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)|([£€$])))?$")
     private fun lines(text: String) = text.take(200_000).lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     private fun values(lines: List<String>, label: Regex): List<String> = lines.mapIndexedNotNull { i, line ->
         if (label == dueLabel && amountLabel.containsMatchIn(line)) return@mapIndexedNotNull null
@@ -26,7 +26,7 @@ object BillSuggestions {
         val amounts = amountValues.mapNotNull { value -> money.matchEntire(value)?.let { match ->
             val amount = Bills.parse(match.groupValues[3].replace(",", "")) ?: return@let null
             val code = match.groupValues[1].ifEmpty { match.groupValues[4] }.uppercase(Locale.ROOT).ifEmpty {
-                when (match.groupValues[2]) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+                when (match.groupValues[2].ifEmpty { match.groupValues[5] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
             }.ifEmpty { null }
             amount to code
         } }.distinct()
@@ -49,18 +49,23 @@ object BillSuggestions {
         }
         return BillSuggestion(title, dates.singleOrNull(), amounts.singleOrNull()?.first, amounts.singleOrNull()?.second, warnings)
     }
-    // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP").
-    // Tried only from the start of a run of digits, dots and commas: from every digit of a long run ("12.50,13.20,…") it
-    // read the rest of the run again each time (SQ9-10).
-    private val number = "(?<![0-9.,])[0-9](?:[0-9.,]*[0-9])?"
-    private val looseMoney = Regex("(?i)(?<![A-Za-z])(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)(?![A-Za-z])")
+    // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP", "84,20 €",
+    // SQX-8; not "for 2 $40": a sign before a number is that number's). Tried only from the start of a run of digits, dots
+    // and commas: from every digit of a long run ("12.50,13.20,…") it read the rest of the run again each time (SQ9-10).
+    // Thousands may be set apart by a space ("2 450,00 €", SQX-8), at most three times, so that stays short too.
+    private val number = "(?<![0-9.,])(?:[0-9]{1,3}(?:[ \\u00A0\\u202F][0-9]{3}){1,3}(?:[.,][0-9]{1,2})?(?![0-9.,])|[0-9](?:[0-9.,]*[0-9])?)"
+    private const val codes = "AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR"
+    private val looseMoney = Regex("(?i)(?<![A-Za-z])($codes)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(?:($codes)(?![A-Za-z])|([£€$])(?!\\s?[0-9]))")
     // Things counted under a "total": "Items in total: 3" (SQ8-8).
     private val countWord = Regex("(?i)\\b(?:items?|articles?|pieces?|units?|products?|parcels?|packages?|tickets?|guests?|people|persons?|qty|quantity)\\b")
-    private fun looseAmount(text: String): Long? = when {
-        Regex("[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(",", ""))
-        Regex("[0-9]{1,3}(?:\\.[0-9]{3})+(?:,[0-9]{1,2})?").matches(text) -> Bills.parse(text.replace(".", ""))
+    private val commaThousands = Regex("[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?")
+    private val dotThousands = Regex("[0-9]{1,3}(?:\\.[0-9]{3})+(?:,[0-9]{1,2})?")
+    private val thousandsSpace = Regex("[ \\u00A0\\u202F]")
+    private fun looseAmount(written: String): Long? = written.replace(thousandsSpace, "").let { text -> when {
+        commaThousands.matches(text) -> Bills.parse(text.replace(",", ""))
+        dotThousands.matches(text) -> Bills.parse(text.replace(".", ""))
         else -> Bills.parse(text)
-    }
+    } }
 
     /**
      * A bill from an email's wording: the labelled lines [parse] reads, else one amount with a currency written anywhere
@@ -71,7 +76,7 @@ object BillSuggestions {
             val g = m.groupValues
             val amount = looseAmount(g[2].ifEmpty { g[4] }.ifEmpty { g[5] }) ?: return@mapNotNull null
             val code = g[1].ifEmpty { g[6] }.uppercase(Locale.ROOT).ifEmpty {
-                when (g[3]) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+                when (g[3].ifEmpty { g[7] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
             }.ifEmpty { null }
             amount to code
         }.toList()

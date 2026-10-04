@@ -22,8 +22,8 @@ class ShareQuickHuntEightTest {
         // The bill amount is read again too.
         val bill = "Your appointment on 20.10.2026 at 10:30 is confirmed. Please bring:\n- EUR 84.20 in cash"
         assertEquals(8420L, BillSuggestions.parseMessage(SharedText.draft(bill).body, null).amount)
-        // An attribution in a language not in the list still starts an earlier message.
-        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10:00 ritade Jo:\nWhat about 20 October at 6pm?"))
+        // An attribution in a language not in the list still starts an earlier message, with the address (SQX-3).
+        assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\nDen 30.09.2026 kl. 10:00 ritade Jo <jo@example.com>:\nWhat about 20 October at 6pm?"))
         assertEquals(listOf(oct14), days("Dinner on 14 October at 7pm.\n2026-09-30 10:00 GMT+02:00 Jo <jo@example.com>:\nWhat about 20 October at 6pm?"))
     }
 
