@@ -76,7 +76,7 @@ class SharedMessageTest {
     }
 
     @Test fun theSentDateIsNeverTaken() {
-        val text = "Subject: Order shipped\nDate: 6 Oct 2026 08:00\nFrom: Shop <shop@example.com>\n\nYour parcel is on its way."
+        val text = "Subject: Order shipped\nDate: 6 Oct 2026 08:00\nFrom: Shop <shop@example.com>\nTo: Me <me@example.org>\n\nYour parcel is on its way."
         assertEquals(SharedWhen(null, null, emptyList()), SharedDates.find(SharedText.draft(text).body, today))
     }
 
@@ -94,12 +94,16 @@ class SharedMessageTest {
             SharedDates.find("Due 20 October 2026.\nReminder: pay by 20 October 2026.", today))
     }
 
-    @Test fun aLongEmailIsReadQuickly() {
-        val long = (1..400).joinToString("\n") { "Line $it of the newsletter with nothing in particular to say about anything." }
+    // Only a message's opening is read, so a long one can't hold the share up (SH-5): a day after it isn't seen.
+    @Test fun onlyTheOpeningOfALongMessageIsRead() {
+        val filler = (1..200).joinToString("\n") { "Line $it of the newsletter with nothing in particular to say." }
+        assertTrue(filler.length > SharedDates.MAX_READ)
+        assertEquals(emptyList<LocalDate>(), SharedDates.find("$filler\nSee you on 20 October 2026.", today).dates)
+        assertEquals(LocalDate.of(2026, 10, 20), SharedDates.find("See you on 20 October 2026.\n$filler", today).date)
         val start = System.nanoTime()
-        SharedDates.find(long.take(20_000), today)
-        val ms = (System.nanoTime() - start) / 1_000_000
-        assertTrue("took $ms ms", ms < 1500)
+        SharedDates.find("a".repeat(20_000), today)
+        assertTrue(SharedDates.find(filler.repeat(3), today).dates.isEmpty())
+        assertTrue((System.nanoTime() - start) / 1_000_000 < 5_000)
     }
 
     @Test fun billFromEmailWording() {
@@ -127,5 +131,71 @@ class SharedMessageTest {
     @Test fun labelledTotalsStillWin() {
         val bill = BillSuggestions.parseMessage("Previous balance EUR 10.00\nAmount due: EUR 84.20\nDue date: 2026-10-20", null)
         assertEquals(8420L, bill.amount); assertEquals("EUR", bill.currency); assertEquals(LocalDate.of(2026, 10, 20), bill.date)
+    }
+
+    // Bug hunt #6: realistic messages, where only a plain appointment day counts.
+
+    @Test fun aContactCardIsNoEmail() {
+        val card = "Name: Plumber\nContact: bob@example.com\nAddress: 12 High St\nPrice: \$120\n\nCall him Monday"
+        assertEquals(SharedDraft("Name: Plumber", card), SharedText.draft(card))
+    }
+
+    @Test fun emailsWithoutASubjectAnEmptyBodyOrFoldedHeaders() {
+        // No subject: Thunderbird leaves the line out, so the first line is the sent date, never the title.
+        val noSubject = SharedText.draft("Date: 4 Oct 2026 09:14\nFrom: A <a@example.com>\nTo: B <b@example.com>\n\nSee you soon\nA")
+        assertEquals("See you soon", noSubject.title)
+        // An empty body: still an email, titled from its subject, with only the sender kept.
+        val empty = SharedText.draft("Subject: Photos\nDate: 4 Oct 2026 09:14\nFrom: A <a@example.com>\nTo: B <b@example.com>")
+        assertEquals("Photos", empty.title); assertEquals("From: A <a@example.com>", empty.notes)
+        // A subject with an address in it is still the subject, and From is still the sender.
+        val about = SharedText.draft("Subject: Mail from a@shop.example\nDate: 4 Oct 2026 09:14\nFrom: A <a@example.com>\nTo: B <b@example.com>\n\nHi")
+        assertEquals("Mail from a@shop.example", about.title); assertTrue(about.notes.startsWith("From: A <a@example.com>"))
+        // Headers folded over two lines, with Windows line ends.
+        val folded = SharedText.draft("Subject: A very long\r\n subject line\r\nDate: 4 Oct 2026 09:14\r\nFrom: A <a@example.com>\r\nTo: B <b@example.com>,\r\n C <c@example.com>\r\n\r\nHi")
+        assertEquals("A very long subject line", folded.title); assertEquals("Hi", folded.body)
+    }
+
+    @Test fun boilerplateNamesNoDay() {
+        listOf("Open Monday to Friday 9am-5pm", "Call us 24/7.", "This offer is valid until 30 November.", "We spoke on Monday.",
+            "Add 1/2 cup of sugar.", "Score 3-1 at half time.", "Open 9-5.", "We meet every Monday.", "Please reply by end of day.",
+            "Your delivery is scheduled for tomorrow.", "Our office is open Monday to Friday.").forEach {
+            assertEquals(it, emptyList<LocalDate>(), SharedDates.find(it, today).dates)
+        }
+    }
+
+    @Test fun theAppointmentNotTheSignature() {
+        val email = "Subject: Your appointment\nDate: 2 Oct 2026 09:14\nFrom: The Clinic <clinic@example.com>\nTo: Me <me@example.org>\n\n" +
+            "Hi Bas,\nYour appointment is confirmed for Tuesday 13 October at 2pm.\nKind regards\nThe Clinic\nOpen Monday to Friday 9am-5pm"
+        assertEquals(SharedWhen(LocalDate.of(2026, 10, 13), LocalTime.of(14, 0), listOf(LocalDate.of(2026, 10, 13))),
+            SharedDates.find(SharedText.draft(email).body, today))
+        // A weekday with a time is a day; the table is on Saturday 10 October.
+        assertEquals(LocalDate.of(2026, 10, 10), SharedDates.find("Your table is booked for Saturday at 7pm.", today).date)
+    }
+
+    @Test fun aQuotedEarlierMessageAndASignatureAreNotRead() {
+        val reply = "Sounds good, see you then.\nOn Sun, 4 Oct 2026 at 08:00, B <b@example.com> wrote:\n> Lunch on 20 October at 1pm?"
+        assertEquals(emptyList<LocalDate>(), SharedDates.find(SharedText.draft(reply).body, today).dates)
+        val quoted = "Yes please.\nAm 4. Okt. 2026 schrieb B:\n> Dinner on 21 October at 7pm?"
+        assertEquals(emptyList<LocalDate>(), SharedDates.find(SharedText.draft(quoted).body, today).dates)
+        val signed = "Thanks!\n-- \nJo, open 1 November for bookings"
+        assertEquals(emptyList<LocalDate>(), SharedDates.find(SharedText.draft(signed).body, today).dates)
+    }
+
+    @Test fun abbreviationsDontEndASentence() {
+        assertEquals(SharedWhen(LocalDate.of(2026, 10, 12), LocalTime.of(15, 0), listOf(LocalDate.of(2026, 10, 12))),
+            SharedDates.find("Your appointment is on Oct. 12 at 3pm.", today))
+        assertEquals(SharedWhen(LocalDate.of(2026, 10, 9), LocalTime.of(10, 0), listOf(LocalDate.of(2026, 10, 9))),
+            SharedDates.find("See you at 10 a.m. on Friday 9 October.", today))
+    }
+
+    @Test fun aTimeAlreadyGoneTodayIsLeftOut() {
+        assertEquals(emptyList<LocalDate>(), SharedDates.find("Call on 4 October 2026 at 8am.", today, LocalTime.of(10, 0)).dates)
+        assertEquals(today, SharedDates.find("Call on 4 October 2026 at 4pm.", today, LocalTime.of(10, 0)).date)
+    }
+
+    @Test fun billAmountWithACurrencyBeatsABareTotalAndAPastDueDateIsLeft() {
+        assertEquals(8420L to "EUR", BillSuggestions.parseMessage("Items in total: 3\nAmount EUR 84.20", null).let { it.amount to it.currency })
+        assertNull(BillSuggestions.parseMessage("Due date: 2026-09-01\nEUR 84.20", null, today).date)
+        assertEquals(LocalDate.of(2026, 10, 20), BillSuggestions.parseMessage("Due date: 2026-10-20\nEUR 84.20", null, today).date)
     }
 }

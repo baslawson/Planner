@@ -72,8 +72,12 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     CompositionLocalProvider(LocalWindowEditors provides windowEditors) {
     val nav = rememberNavController()
     val app = LocalContext.current.applicationContext as ItineraryApp
-    // A share made into a note, handed to the Notes page, which opens it in a new note's editor.
-    var sharedNote by remember { mutableStateOf<com.example.itinerary.data.PlannerNote?>(null) }
+    // A share made into a note, handed to the Notes page, which opens it in a new note's editor. Kept with its words
+    // until then, as the share itself is already cleared (SH-12).
+    var sharedNote by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<com.example.itinerary.data.PlannerNote?, String>(
+        save = { it?.let { note -> com.example.itinerary.data.NoteCodec.encode(listOf(note)).toString() } ?: "" },
+        restore = { text -> text.takeIf { it.isNotEmpty() }?.let { runCatching { com.example.itinerary.data.NoteCodec.decodeLenient(org.json.JSONArray(it)).firstOrNull() }.getOrNull() } },
+    )) { mutableStateOf<com.example.itinerary.data.PlannerNote?>(null) }
     val sharedEvent = if (sharedText != null) key(sharedText, sharedSubject) {
         SharedTextReview(sharedText, sharedSubject, onSharedOpened, onNote = { note ->
             sharedNote = note

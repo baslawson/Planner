@@ -55,7 +55,8 @@ object SavedSearchCodec {
     }
 }
 
-// [body]: the words to read dates and amounts from, an email's headers (its sent date among them) left out.
+// [body]: the words to read dates and amounts from: the message itself, without an email's headers (its sent date among
+// them), a quoted earlier message or a signature.
 data class SharedDraft(val title: String, val notes: String, val body: String = notes)
 object SharedText {
     private const val MAX_LENGTH = 20_000
@@ -66,10 +67,13 @@ object SharedText {
         // An email shared with its headers on top (Thunderbird): its subject is the title, and of the headers only who
         // sent it stays, above the message.
         val email = EmailHeaders.read(body)
+        // Dates are read from the message alone, not a quoted earlier one or a signature (SH-4).
+        val message = EmailHeaders.message(email?.body ?: body)
         val title = subject?.trim()?.takeIf { it.isNotBlank() } ?: email?.subject
-            ?: (email?.body?.takeIf { it.isNotBlank() } ?: body).lineSequence().first()
+            ?: email?.let { e -> e.body.lineSequence().firstOrNull { it.isNotBlank() } ?: e.from }
+            ?: body.lineSequence().first()
         val notes = email?.let { listOf(it.from, it.body).filter(String::isNotBlank).joinToString("\n\n") } ?: body
-        return SharedDraft(title.replace('\n', ' ').take(MAX_TITLE), notes, email?.body ?: body)
+        return SharedDraft(title.trim().replace('\n', ' ').take(MAX_TITLE), notes, message)
     }
 
     // What Planner keeps of a share while it's up, saved state included (Q-5: a share of a few hundred thousand

@@ -60,8 +60,13 @@ object BillSuggestions {
      * A bill from an email's wording: the labelled lines [parse] reads, else one amount with a currency written anywhere
      * and [due], the one day the email names ([SharedDates]). Several different amounts are left for the person.
      */
-    fun parseMessage(text: String, due: LocalDate?): BillSuggestion {
-        val labelled = parse(text)
+    fun parseMessage(text: String, due: LocalDate?, today: LocalDate? = null): BillSuggestion {
+        val labelled = parse(text).let { l ->
+            // A labelled number without a currency ("Items in total: 3") gives way to an amount with one (SH-6); a labelled
+            // due date already past isn't this bill's next one (SH-7).
+            l.copy(amount = l.amount.takeIf { l.currency != null || !looseMoney.containsMatchIn(text) },
+                date = l.date?.takeUnless { today != null && it.isBefore(today) })
+        }
         val loose = looseMoney.findAll(text.take(200_000)).mapNotNull { m ->
             val g = m.groupValues
             val amount = looseAmount(g[2].ifEmpty { g[4] }.ifEmpty { g[5] }) ?: return@mapNotNull null

@@ -144,6 +144,7 @@ fun ItemEditorSheet(
     initialRepeatCount: Int = 12,
     // Opened filled in from a share: unsaved until saved, so Close asks "Save changes?" rather than dropping it.
     prefilled: Boolean = false,
+    checkCurrency: Boolean = false,
 ) {
     val repository = (LocalContext.current.applicationContext as ItineraryApp).repository
     // One open editor for the widget's wait (D10) for the whole visit, saves included.
@@ -162,7 +163,7 @@ fun ItemEditorSheet(
     val current = saved
     if (current == null) ItemEditorForm(initial, existingAttachments, existingReminders, categoryCounts, hiddenCategories,
         onRemoveCategories, onShowCategory, onDismiss, onSave, onSaved, onDelete, startWithScan, startWithBillScan,
-        initialAddedReminders, initialRepeatCount, prefilled = prefilled)
+        initialAddedReminders, initialRepeatCount, prefilled = prefilled, checkCurrency = checkCurrency)
     else key(current.first) {
         val (item, attachments, reminders) = current.second
         ItemEditorForm(item, attachments, reminders, categoryCounts, hiddenCategories, onRemoveCategories, onShowCategory,
@@ -191,6 +192,7 @@ private fun ItemEditorForm(
     // Opened again right after a Save: the Save button says "Saved" until something changes.
     justSaved: Boolean = false,
     prefilled: Boolean = false,
+    checkCurrency: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -689,6 +691,8 @@ private fun ItemEditorForm(
                     modifier = Modifier.fillMaxWidth())
                 SettingsDropdown(label = "Currency", current = billCurrency, options = if (payments.isEmpty()) Bills.currencies else listOf(billCurrency),
                     onSelect = { billCurrency = it }, entry = { Text(it) })
+                if (checkCurrency && billCurrency == initial.billCurrency)
+                    Text("Check the currency: the text gave only a \$ sign.", style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Switch(checked = paid, onCheckedChange = {
                         try {

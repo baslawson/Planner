@@ -121,11 +121,25 @@ internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOp
 fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNote: (PlannerNote) -> Unit = {}): ItineraryItem? {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val content = remember(text, subject) { runCatching { SharedText.draft(text, subject) } }
-    val today = remember(text, subject) { LocalDate.now() }
-    // What the message says: the one day (and time) it names, and for a bill one amount.
-    val found = remember(content) { content.getOrNull()?.let { SharedDates.find(it.body, today) } }
-    val bill = remember(content, found) { content.getOrNull()?.let { BillSuggestions.parseMessage(it.body, found?.date) } }
+    // The day the share came in, kept when the window is rebuilt on a later day so its event stays the one its draft
+    // was made from (SH-11).
+    val today = LocalDate.parse(rememberSaveable(text, subject) { LocalDate.now().toString() })
+    // What the message says: the one day (and time) it names, and for a bill one amount. Read away from the screen's
+    // thread, as a long message takes a moment (SH-5); the choices wait for it.
+    val read by produceState<Pair<SharedWhen, BillSuggestion>?>(null, content) {
+        value = content.getOrNull()?.let { shared -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val now = java.time.LocalTime.now().takeIf { LocalDate.now() == today }
+            val found = SharedDates.find(shared.body, today, now)
+            found to BillSuggestions.parseMessage(shared.body.take(SharedDates.MAX_READ), found.date, today)
+        } }
+    }
+    val found = read?.first
+    val bill = read?.second
+    val ready = content.isFailure || read != null
     var destination by rememberSaveable(text, subject) { mutableStateOf("") }
+    // What the editor opens with (date, time, amount, currency), fixed when it is chosen: rebuilt after Android closed
+    // Planner, the event must be the one its draft was made from at once, before the text is read again (Q-2, SH-11).
+    var chosen by rememberSaveable(text, subject) { mutableStateOf("{}") }
     // "10:30": morning or evening, picked here; null leaves the time to the editor.
     var pickedTime by rememberSaveable(text, subject) { mutableStateOf<String?>(null) }
     val id = rememberSaveable(text, subject) { java.util.UUID.randomUUID().toString() }
@@ -142,17 +156,27 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
             NoteDraftStore.openEditors.value > 0, EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value > 0)
         if (blocked != null) error = blocked
         else if (value == "note") content.getOrNull()?.let { onNote(PlannerNote(title = it.title, content = it.notes)); onDismiss() }
-        else destination = value
+        else {
+            val forBill = value == "bill"
+            chosen = org.json.JSONObject()
+                .put("date", ((if (forBill) bill?.date else null) ?: found?.date)?.toString())
+                .put("time", if (forBill) null else (found?.time?.toString() ?: pickedTime))
+                .put("amount", if (forBill) bill?.amount else null)
+                .put("currency", if (forBill) bill?.currency else null)
+                .put("checkCurrency", forBill && bill?.amount != null && bill.currency == null).toString()
+            destination = value
+        }
     }
     val dateFormat = LocalDateFormat.current
     val is24Hour = LocalTimeFormat.current.is24Hour(LocalContext.current)
     if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
-        primary = DialogAction("Add task", enabled = content.isSuccess) { choose("task") },
+        primary = DialogAction("Add task", enabled = content.isSuccess && ready) { choose("task") },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
-        extra = listOf(DialogAction("Add event", enabled = content.isSuccess) { choose("event") },
-            DialogAction("Add bill", enabled = content.isSuccess) { choose("bill") },
-            DialogAction("Add note", enabled = content.isSuccess) { choose("note") })) {
+        extra = listOf(DialogAction("Add event", enabled = content.isSuccess && ready) { choose("event") },
+            DialogAction("Add bill", enabled = content.isSuccess && ready) { choose("bill") },
+            DialogAction("Add note", enabled = content.isSuccess && ready) { choose("note") })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
+            if (!ready) Text("Reading the text…")
             found?.date?.let { date ->
                 Text("Date in the text: " + date.dayLabel(dateFormat) + (found.time?.let { ", " + it.label(is24Hour) }.orEmpty()))
                 if (found.timeChoices.isNotEmpty()) {
@@ -170,21 +194,27 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
                 Text("Several dates in the text (" + found.dates.joinToString(", ") { it.dayLabel(dateFormat) } + "). Set the date in the editor.")
             bill?.amount?.let { amount -> Text("Amount for a bill: " +
                 (bill.currency?.let { Bills.format(amount, it) } ?: (Bills.input(amount) + " (check the currency)"))) }
+            // A bill's due date from its own label, when that isn't the date above (SH-7).
+            bill?.date?.takeIf { it != found?.date }?.let { Text("Due date for a bill: " + it.dayLabel(dateFormat)) }
             bill?.warnings?.get("amount")?.let { Text("$it in the text. Enter the bill's amount in the editor.") }
             Text("Choose where to put this text, then review and save.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     val shared = content.getOrNull() ?: return null
-    val time = found?.time ?: pickedTime?.let(java.time.LocalTime::parse)
+    val fields = remember(chosen) { org.json.JSONObject(chosen) }
+    fun field(name: String) = fields.optString(name).takeIf { fields.has(name) && !fields.isNull(name) && it.isNotEmpty() }
+    val date = field("date")?.let(LocalDate::parse)
     if (destination == "task") PlanningOverlay(onDismiss) {
-        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes, dueDate = found?.date), true, prefilled = true, onDismiss = onDismiss)
+        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes, dueDate = date), true, prefilled = true, onDismiss = onDismiss)
     }
     if (destination != "event" && destination != "bill") return null
-    val event = remember(destination, time) {
-        if (destination == "bill") ItineraryItem(tripId = 0, date = bill?.date ?: today, startTime = null, title = shared.title,
-            notes = shared.notes, category = "Bills", billAmountMinor = bill?.amount).let { b -> bill?.currency?.let { b.copy(billCurrency = it) } ?: b }
-        else ItineraryItem(tripId = 0, date = found?.date ?: today, startTime = found?.date?.let { time }, title = shared.title, notes = shared.notes)
+    val event = remember(destination, chosen) {
+        if (destination == "bill") ItineraryItem(tripId = 0, date = date ?: today, startTime = null, title = shared.title,
+            notes = shared.notes, category = "Bills", billAmountMinor = field("amount")?.toLong())
+            .let { b -> field("currency")?.let { b.copy(billCurrency = it) } ?: b }
+        else ItineraryItem(tripId = 0, date = date ?: today, startTime = date?.let { field("time")?.let(java.time.LocalTime::parse) },
+            title = shared.title, notes = shared.notes)
     }
-    NewPlanningEventEditor(event, prefilled = true, onDismiss = onDismiss)
+    NewPlanningEventEditor(event, prefilled = true, checkCurrency = fields.optBoolean("checkCurrency"), onDismiss = onDismiss)
     return event
 }
