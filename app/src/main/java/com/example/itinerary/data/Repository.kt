@@ -279,7 +279,9 @@ class Repository(
     // A new note ([create]) or the one being edited, stamped with the time it changed (unless nothing did). Returns it as saved.
     // [expected]: the version the editor started from (null: don't check). A note changed since (by sync, or a
     // reminder's Done) isn't overwritten: NoteChangedException carries the newer version for the editor to merge.
-    suspend fun saveNote(note: PlannerNote, create: Boolean, expected: PlannerNote? = null): PlannerNote = changes.withLock {
+    // [after]: the note this new one is a copy of (the editor's Duplicate): placed next to it as card Duplicate places it,
+    // where the original is at Save, not where it was at Duplicate (NW-3).
+    suspend fun saveNote(note: PlannerNote, create: Boolean, expected: PlannerNote? = null, after: String? = null): PlannerNote = changes.withLock {
         val old = noteDao.byId(note.id)
         if (!create && expected != null && old != null && old != expected) throw NoteChangedException(old)
         // A changed reminder time ends its snooze, as a task's does.
@@ -287,13 +289,21 @@ class Repository(
         // A new note goes to the top of the page; an edited one keeps the place it was dragged to.
         // A new note that comes with a place (the editor's Duplicate: next to its original) keeps it, the notes from there
         // moving down one when it is stored (D6-7).
-        val keepsPlace = create && old == null && withSnooze.position != 0L && withSnooze.position != Notes.topPosition(noteDao.all())
-        val placed = if (create && old == null && !keepsPlace) withSnooze.copy(position = Notes.topPosition(noteDao.all())) else withSnooze.copy(position = old?.position ?: withSnooze.position)
+        val original = if (create && old == null) after?.let { noteDao.byId(it) } else null
+        val keepsPlace = original == null && create && old == null && withSnooze.position != 0L && withSnooze.position != Notes.topPosition(noteDao.all())
+        val placed = when {
+            original != null -> withSnooze.copy(position = Notes.copyPosition(original, noteDao.all()))
+            create && old == null && !keepsPlace -> withSnooze.copy(position = Notes.topPosition(noteDao.all()))
+            else -> withSnooze.copy(position = old?.position ?: withSnooze.position)
+        }
         val clean = Notes.clean(placed).let { if (it == old) it else it.copy(modified = System.currentTimeMillis()) }
         require(Notes.hasContent(clean)) { "An empty note can't be saved" }
         Notes.validate(clean)
         withContext(NonCancellable) {
-            if (create) { if (keepsPlace) noteDao.makeRoomAt(clean.position); noteDao.insert(clean) }
+            if (create) db.withTransaction {
+                if (original != null) makeRoomForCopy(original, clean.position) else if (keepsPlace) noteDao.makeRoomAt(clean.position)
+                noteDao.insert(clean)
+            }
             else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
             afterCommit(noteIds = listOf(clean.id),
                 resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
@@ -342,14 +352,8 @@ class Repository(
                 val pinned = ids.filter { noteDao.byId(it)?.pinned == true }.toSet()
                 val made = Notes.duplicateOrder(ids, pinned::contains).mapNotNull { id ->
                     val original = noteDao.byId(id) ?: return@mapNotNull null
-                    val all = noteDao.all()
-                    val place = Notes.copyPosition(original, all)
-                    if (!original.pinned) {
-                        // N6-4: a note sharing the original's place that shows after it goes after the copy too.
-                        val tied = Notes.tiedAfter(original, all)
-                        noteDao.makeRoomAt(place, 1L + tied.size)
-                        tied.forEachIndexed { i, note -> noteDao.update(note.copy(position = place + 1 + i)) }
-                    }
+                    val place = Notes.copyPosition(original, noteDao.all())
+                    makeRoomForCopy(original, place)
                     val copy = Notes.clean(Notes.copyOf(original).copy(position = place))
                     Notes.validate(copy)
                     noteDao.insert(copy)
@@ -360,6 +364,15 @@ class Repository(
             afterCommit(noteIds = copies.map { it.id })
             copies
         }
+    }
+
+    // Room for a copy of [original] at [place] (Notes.copyPosition), in a transaction: the notes from there move down one.
+    // N6-4: a note sharing the original's place that shows after it goes after the copy too. A pinned one's copy goes on top.
+    private suspend fun makeRoomForCopy(original: PlannerNote, place: Long) {
+        if (original.pinned) return
+        val tied = Notes.tiedAfter(original, noteDao.all())
+        noteDao.makeRoomAt(place, 1L + tied.size)
+        tied.forEachIndexed { i, note -> noteDao.update(note.copy(position = place + 1 + i)) }
     }
 
     // Notes dragged into a new order: [places] from Notes.reorder. Their words didn't change, so neither does their time.

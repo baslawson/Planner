@@ -63,18 +63,23 @@ internal object NoteEditorMemory {
     // An editor whose window went without closing it never forgets its own: the oldest go past a few.
     private const val MAX = 8
     private val kept = LinkedHashMap<String, Kept>()
+    // NW-4: the editors on screen now. Theirs never go past the few: a long-open editor would lose its body at the next
+    // rotation, and its draft with it.
+    private val live = HashSet<String>()
 
     fun keep(key: String, noteId: String, body: Body) {
         kept.values.removeAll { it.noteId == noteId }
         kept[key] = Kept(noteId, body)
-        while (kept.size > MAX) kept.remove(kept.keys.first())
+        while (kept.size > MAX) kept.remove(kept.keys.firstOrNull { it !in live } ?: break)
     }
+    fun opened(key: String) { live += key }
+    fun closed(key: String) { live -= key }
     fun restore(key: String, noteId: String): Body? = kept[key]?.takeIf { it.noteId == noteId }?.body
     /** Whether an editor of [noteId] left its state here: recreated after a rotation, not after Android closed Planner. */
     fun holds(noteId: String) = kept.values.any { it.noteId == noteId }
     fun forget(key: String) { kept.remove(key) }
     // What Android closing Planner does to it; also for tests.
-    fun forgetAll() { kept.clear() }
+    fun forgetAll() { kept.clear(); live.clear() }
 }
 
 /**
@@ -85,7 +90,8 @@ internal object NoteEditorMemory {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>, allTags: List<String> = emptyList(),
-               recovered: NoteDraftStore.Draft? = null, onDuplicate: ((PlannerNote) -> Unit)? = null, onDismiss: () -> Unit) {
+               recovered: NoteDraftStore.Draft? = null, onDuplicate: ((PlannerNote) -> Unit)? = null, copyOf: String? = null,
+               onDismiss: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -106,6 +112,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val memoryKey = rememberSaveable { java.util.UUID.randomUUID().toString() }
     val body = remember { NoteEditorMemory.restore(memoryKey, initial.id) ?: NoteEditorMemory.Body(TextFieldValue(start.content), start.attachments,
         if (recovered != null) recovered.base else if (creating) null else initial).also { NoteEditorMemory.keep(memoryKey, initial.id, it) } }
+    DisposableEffect(memoryKey) { NoteEditorMemory.opened(memoryKey); onDispose { NoteEditorMemory.closed(memoryKey) } }
     // The stored version these edits started from (null: a new note not saved yet). Save checks it's still current.
     var base by body::base
     var title by rememberSaveable { mutableStateOf(start.title) }
@@ -176,14 +183,24 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // the editor has closed (Discard, Save and close, Delete) nothing more is sent, and clear drops what was waiting.
     val closed = remember { booleanArrayOf(false) }
     val draftError = "Couldn't keep unsaved changes on this device."
+    // NW-1: a draft this editor neither wrote nor started from (another window's, left behind) isn't its to clear for
+    // having nothing typed yet. NW-5: each draft names its window, which reopens it after Android closed Planner.
+    var ownsDraft by rememberSaveable { mutableStateOf(recovered != null) }
     fun keepDraft() {
         if (closed[0]) return
         runCatching {
-            if (unsaved || pendingPhoto != null) draftStore.schedule(NoteDraftStore.Draft(current, base == null, base, pendingPhoto)) {
-                android.os.Handler(android.os.Looper.getMainLooper()).post { if (!closed[0]) error = draftError }
-            } else draftStore.clear(initial.id)
+            if (unsaved || pendingPhoto != null) {
+                draftStore.schedule(NoteDraftStore.Draft(current, base == null, base, pendingPhoto, windowEditors?.id)) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { if (!closed[0]) error = draftError }
+                }
+                ownsDraft = true
+            } else if (ownsDraft) draftStore.clear(initial.id)
         }
     }
+    // ED-10: the way the note was left, recorded as it closes (not only a tap on Edit or Preview), once it is saved.
+    val leftPreview by rememberUpdatedState(preview)
+    val leftSaved by rememberUpdatedState(base != null)
+    DisposableEffect(Unit) { onDispose { if (leftSaved) app.settings.setNoteLeftInPreview(initial.id, leftPreview) } }
     LaunchedEffect(current, base, pendingPhoto, unsaved) {
         kotlinx.coroutines.delay(400)
         keepDraft()
@@ -261,7 +278,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         scope.launch {
             try {
                 // Deleted elsewhere: saved again as it is here (a new note), so nothing typed is lost.
-                saved(repo.saveNote(current, create = base == null || deletedElsewhere, expected = base), then)
+                saved(repo.saveNote(current, create = base == null || deletedElsewhere, expected = base, after = copyOf.takeIf { base == null }), then)
             } catch (e: CancellationException) { throw e }
             catch (e: com.example.itinerary.data.NoteChangedException) {
                 // Changed elsewhere meanwhile: merged when the two touched different things, else the user chooses.

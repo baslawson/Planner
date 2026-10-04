@@ -13,13 +13,13 @@ class NotesFixesOct4bTest {
         val drafts = listOf(draft("shared"), draft("older"))
         val all = { drafts }
         val read = { id: String -> drafts.firstOrNull { it.note.id == id } }
-        assertEquals("shared", recoverableNoteDraft(null, { false }, read, all)?.note?.id)
-        assertEquals("older", recoverableNoteDraft(null, { it == "shared" }, read, all)?.note?.id)
-        assertNull(recoverableNoteDraft(null, { true }, read, all))
+        assertEquals("shared", recoverableNoteDraft(null, null, { false }, read, all)?.note?.id)
+        assertEquals("older", recoverableNoteDraft(null, null, { it == "shared" }, read, all)?.note?.id)
+        assertNull(recoverableNoteDraft(null, null, { true }, read, all))
         // The page's own editor after Android closed Planner: its draft, not the newest.
-        assertEquals("older", recoverableNoteDraft("older", { false }, read, all)?.note?.id)
-        assertNull("its note is open in another window by now", recoverableNoteDraft("older", { it == "older" }, read, all))
-        assertNull(recoverableNoteDraft("none", { false }, read, all))
+        assertEquals("older", recoverableNoteDraft("older", null, { false }, read, all)?.note?.id)
+        assertNull("its note is open in another window by now", recoverableNoteDraft("older", null, { it == "older" }, read, all))
+        assertNull(recoverableNoteDraft("none", null, { false }, read, all))
     }
 
     // N6-3: copies of pinned notes each go to the top, so they are made last first and show in the order chosen.

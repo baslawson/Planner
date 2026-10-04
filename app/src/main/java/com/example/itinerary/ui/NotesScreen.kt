@@ -65,7 +65,9 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     var query by rememberSaveable { mutableStateOf("") }
     // Opens on the last Show choice; one whose notebook or tag has gone falls back to all notes (below).
     var filterKey by rememberSaveable { mutableStateOf(app.settings.noteFilter) }
-    LaunchedEffect(filterKey) { app.settings.noteFilter = filterKey }
+    // NW-8: All notes shown for a share's note is for now, not the Show choice kept for next time.
+    var shownForShare by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(filterKey) { if (shownForShare) shownForShare = false else app.settings.noteFilter = filterKey }
     // The note open in the editor: its id, and whether it is a new one not saved yet.
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingNew by rememberSaveable { mutableStateOf(false) }
@@ -141,6 +143,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         save = { it?.let { note -> com.example.itinerary.data.NoteCodec.encode(listOf(note.copy(content = ""))).toString() } ?: "" },
         restore = { text -> text.takeIf { it.isNotEmpty() }?.let { runCatching { com.example.itinerary.data.NoteCodec.decodeLenient(org.json.JSONArray(it)).firstOrNull() }.getOrNull() } },
     )) { mutableStateOf<PlannerNote?>(null) }
+    // NW-3: the note the editor's copy was made from, which Save places it next to.
+    var copyOfId by rememberSaveable { mutableStateOf<String?>(null) }
     val duplicatedBar = remember { SnackbarHostState() }
     val barScope = rememberCoroutineScope()
     fun duplicated(copies: List<PlannerNote>) {
@@ -157,16 +161,47 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     // N6-1: never the draft of a note open in an editor, here or in another Planner window: that editor is still on it.
     var recovered by remember { mutableStateOf<com.example.itinerary.data.NoteDraftStore.Draft?>(null) }
     var draftChecked by remember { mutableStateOf(editingId?.let(NoteEditorMemory::holds) == true) }
-    LaunchedEffect(Unit) {
-        try {
-            if (draftChecked) return@LaunchedEffect
-            val restoring = editingId
-            val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { com.example.itinerary.data.NoteDraftStore(context).recoverable(restoring) }.getOrNull() } ?: return@LaunchedEffect
+    // NW-5: this window's own drafts reopen; another window's (that window may come back for it) is offered, once each.
+    val page = LocalWindowEditors.current?.id
+    val offeredIds = remember { HashSet<String>() }
+    suspend fun lookForDraft() {
+        val restoring = editingId
+        val store = com.example.itinerary.data.NoteDraftStore(context)
+        val (draft, other) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { store.recoverable(restoring, page).let { own ->
+                own to (if (own == null && restoring == null && page != null) store.offered(page) else null) } }.getOrNull() } ?: return
+        if (draft != null) {
             // Read now, not before: a card tapped meanwhile opens its own note.
-            if (editingId != null && editingId != draft.note.id) return@LaunchedEffect
+            if (editingId != null && editingId != draft.note.id) return
             recovered = draft; editingNew = draft.creating; editingId = draft.note.id
-        } finally { draftChecked = true }
+        } else if (other != null && offeredIds.add(other.note.id)) barScope.launch {
+            val result = duplicatedBar.showSnackbar("A note in another Planner window has unsaved changes", actionLabel = "Open",
+                duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed && editingId == null) { editingNew = other.creating; editingId = other.note.id }
+        }
+    }
+    LaunchedEffect(Unit) {
+        try { if (!draftChecked) lookForDraft() } finally { draftChecked = true }
+    }
+    // NW-2: a draft left meanwhile (a share's window swiped away with its note open) is found on coming back here, not
+    // only when the page first opens.
+    val draftScope = rememberCoroutineScope()
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        if (draftChecked && editingId == null) draftScope.launch { if (editingId == null) lookForDraft() }
+    }
+    // NW-1: a note opened here (its card, a reminder, Open) with a draft on disk, from another window or left from before,
+    // opens with that draft rather than over it. The editor waits for this read.
+    var draftReadFor by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(editingId, draftChecked) {
+        val id = editingId ?: return@LaunchedEffect
+        if (!draftChecked) return@LaunchedEffect
+        if (recovered?.note?.id != id && !NoteEditorMemory.holds(id) && !com.example.itinerary.data.NoteDraftStore.isOpen(id)) {
+            val draft = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.example.itinerary.data.NoteDraftStore(context).read(id) }.getOrNull() }
+            if (editingId != id) return@LaunchedEffect
+            if (draft != null) { recovered = draft; if (all.none { it.id == id }) editingNew = draft.creating }
+        }
+        draftReadFor = id
     }
     // U-13: the note a reminder's tap asked for, once the notes and any draft are read. Another note open in the editor
     // stays open (opening this one would close it); a note deleted since leaves just the page.
@@ -193,7 +228,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         val note = newNote ?: return@LaunchedEffect
         if (notes == null || !draftChecked) return@LaunchedEffect
         if (editingId != null) android.widget.Toast.makeText(context, "A note is already open. Close it, then share again.", android.widget.Toast.LENGTH_LONG).show()
-        else { filterKey = "all"; query = ""; pendingCopy = note; editingNew = true; editingId = note.id }
+        else { if (filterKey != "all") { shownForShare = true; filterKey = "all" }; query = ""; pendingCopy = note; copyOfId = null
+            editingNew = true; editingId = note.id }
         onNewNoteOpened()
     }
     LaunchedEffect(editingId, waitingNoteId, notes) {
@@ -201,6 +237,12 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         if (editingId != null || notes == null) return@LaunchedEffect
         waitingNoteId = null
         if (notes.orEmpty().any { it.id == waiting }) { editingNew = false; editingId = waiting }
+    }
+    // NW-7, ED-10: the way each note was left, kept only for notes there are (deleted, synced away or replaced by a
+    // restore, theirs go; one back from Recently deleted opens as a note never left does).
+    LaunchedEffect(notes != null) {
+        val ids = notes?.mapTo(HashSet()) { it.id } ?: return@LaunchedEffect
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { app.settings.pruneNoteViews(ids) } }
     }
     val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 
@@ -349,7 +391,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     if (showSync) NoteSyncDialog { showSync = false }
     // Not before the notes and any draft are read: reopened after Android closed Planner, the editor would otherwise take
     // a note already saved for a new one (and every Save would fail), or open without its draft.
-    if (notes != null && draftChecked) editingId?.let { id ->
+    if (notes != null && draftChecked && draftReadFor == editingId) editingId?.let { id ->
         val existing = all.firstOrNull { it.id == id }
         if (existing != null) lastSeen[id] = existing
         // Saved once: no longer new, should the page be rebuilt (rotation, or Android closing Planner).
@@ -360,9 +402,9 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             tags = listOfNotNull((filter as? NoteFilter.Tag)?.name)) else null
         if (start != null) key(id) {
             NoteEditor(start, creating = editingNew && existing == null && lastSeen[id] == null, notebooks = notebooks, allTags = tags,
-                recovered = draft,
+                recovered = draft, copyOf = copyOfId.takeIf { pendingCopy?.id == id },
                 // Duplicate note: the editor goes, and a new one opens on the copy (not saved yet), as in the task editor.
-                onDuplicate = { copy -> pendingCopy = copy.copy(position = Notes.copyPosition(existing ?: start, all))
+                onDuplicate = { copy -> pendingCopy = copy.copy(position = Notes.copyPosition(existing ?: start, all)); copyOfId = id
                     editingNew = true; editingId = copy.id }) {
                 editingId = null; editingNew = false; recovered = null; lastSeen.remove(id) }
         } else LaunchedEffect(id) { editingId = null }

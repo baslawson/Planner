@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -147,14 +148,18 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
     var error by remember { mutableStateOf<String?>(null) }
     // N6-6: the note and the other editors the Notes page would meet are the ones in this window.
     val window = LocalWindowEditors.current
-    fun choose(value: String) {
+    // NW-9: the drafts are read away from the screen's thread (a note's can be long, and there can be several); the
+    // buttons wait meanwhile.
+    val checkScope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    suspend fun chooseChecked(value: String) {
         val editor = if (value == "bill") "event" else value
-        val check = runCatching { when (editor) {
+        val check = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { when (editor) {
             "event" -> EditorDraftStore(app).read() != null
             // A note draft the Notes page would reopen first (N6-1: not one whose note is open in an editor).
             "note" -> NoteDraftStore(app).recoverable(null) != null
             else -> TaskDraftStore(app).read("new") != null
-        } }
+        } } }
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }
         val blocked = sharedDraftBlock(editor, check.getOrThrow(), EditorDraftStore.openEditors.value > 0,
             (window?.notes ?: NoteDraftStore.openEditors.value) > 0,
@@ -172,14 +177,15 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
             destination = value
         }
     }
+    fun choose(value: String) { if (!checking) { checking = true; checkScope.launch { try { chooseChecked(value) } finally { checking = false } } } }
     val dateFormat = LocalDateFormat.current
     val is24Hour = LocalTimeFormat.current.is24Hour(LocalContext.current)
     if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
-        primary = DialogAction("Add task", enabled = content.isSuccess && ready) { choose("task") },
+        primary = DialogAction("Add task", enabled = content.isSuccess && ready && !checking) { choose("task") },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
-        extra = listOf(DialogAction("Add event", enabled = content.isSuccess && ready) { choose("event") },
-            DialogAction("Add bill", enabled = content.isSuccess && ready) { choose("bill") },
-            DialogAction("Add note", enabled = content.isSuccess && ready) { choose("note") })) {
+        extra = listOf(DialogAction("Add event", enabled = content.isSuccess && ready && !checking) { choose("event") },
+            DialogAction("Add bill", enabled = content.isSuccess && ready && !checking) { choose("bill") },
+            DialogAction("Add note", enabled = content.isSuccess && ready && !checking) { choose("note") })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
             if (!ready) Text("Reading the text…")
             found?.date?.let { date ->

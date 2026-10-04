@@ -190,6 +190,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val noteViews = context.getSharedPreferences("note_views", Context.MODE_PRIVATE)
     fun noteLeftInPreview(id: String): Boolean? = if (noteViews.contains(id)) noteViews.getBoolean(id, false) else null
     fun setNoteLeftInPreview(id: String, preview: Boolean) { noteViews.edit { putBoolean(id, preview) } }
+    /** NW-7: forgets the view of every note not in [ids]. */
+    fun pruneNoteViews(ids: Set<String>) {
+        val gone = noteViews.all.keys.filter { it !in ids }
+        if (gone.isNotEmpty()) noteViews.edit { gone.forEach(::remove) }
+    }
 
     // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
     private val _noteSort = MutableStateFlow(runCatching { NoteSort.valueOf(prefs.getString("note_sort", null) ?: "") }.getOrDefault(NoteSort.MY_ORDER))
