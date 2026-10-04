@@ -183,7 +183,10 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             if (editingId != null && editingId != draft.note.id) return
             recovered = draft; editingNew = draft.creating; editingId = draft.note.id
         } else if (other != null && offeredIds.add(other.note.id)) barScope.launch {
-            val result = duplicatedBar.showSnackbar("A note in another Planner window has unsaved changes", actionLabel = "Open",
+            // NO-3: a window this process hasn't shown may never come back (a share swiped away before Android closed
+            // Planner), so it isn't named then.
+            val where = if (com.example.itinerary.data.NoteDraftStore.windowLive(other.owner)) " in another Planner window" else ""
+            val result = duplicatedBar.showSnackbar("A note$where has unsaved changes", actionLabel = "Open",
                 duration = SnackbarDuration.Long)
             if (result == SnackbarResult.ActionPerformed && editingId == null) { editingNew = other.creating; editingId = other.note.id }
         }
