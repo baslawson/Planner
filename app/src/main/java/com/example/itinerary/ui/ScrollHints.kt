@@ -65,18 +65,21 @@ fun LazyScrollHints(modifier: Modifier = Modifier, content: @Composable (LazyLis
 // The same bar on a pop-up list (a dropdown's menu) that scrolls with [state]: shown while there is more than fits, so a
 // long list of notebooks or tags plainly goes on (wish list #8).
 @Composable
-fun Modifier.scrollBar(state: ScrollState): Modifier {
+// [inset]: padding at the top and bottom of what scrolls (a menu's 8 dp), left out of the bar's length (ED-14).
+fun Modifier.scrollBar(state: ScrollState, inset: androidx.compose.ui.unit.Dp = 0.dp): Modifier {
     val thumbColor = scrollBarColor()
     val trackColor = thumbColor.copy(alpha = thumbColor.alpha * TRACK_ALPHA)
     return drawWithContent {
         drawContent()
-        if (state.maxValue > 0 && size.height > 0f) {
-            val heightFraction = size.height / (size.height + state.maxValue)
-            val thumbHeight = (size.height * heightFraction).coerceIn(24.dp.toPx().coerceAtMost(size.height), size.height)
-            val top = ((state.value.toFloat() / (size.height + state.maxValue)) * size.height).coerceIn(0f, size.height - thumbHeight)
+        val pad = inset.toPx()
+        val track = size.height - 2 * pad
+        if (state.maxValue > 0 && track > 0f) {
+            val heightFraction = track / (track + state.maxValue)
+            val thumbHeight = (track * heightFraction).coerceIn(24.dp.toPx().coerceAtMost(track), track)
+            val top = pad + ((state.value.toFloat() / (track + state.maxValue)) * track).coerceIn(0f, track - thumbHeight)
             val width = 4.dp.toPx()
             val x = size.width - width - 2.dp.toPx()
-            drawRoundRect(trackColor, Offset(x, 0f), Size(width, size.height), CornerRadius(width / 2))
+            drawRoundRect(trackColor, Offset(x, pad), Size(width, track), CornerRadius(width / 2))
             drawRoundRect(thumbColor, Offset(x, top), Size(width, thumbHeight), CornerRadius(width / 2))
         }
     }

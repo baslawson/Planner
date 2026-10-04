@@ -2,7 +2,7 @@ package com.example.itinerary.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -40,9 +40,10 @@ fun <T> SettingsDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
         )
-        val scroll = rememberScrollState()
+        // A fresh one each time it opens, so it starts at the top rather than where it was left (ED-14).
+        val scroll = remember(open) { androidx.compose.foundation.ScrollState(0) }
         ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll), scrollState = scroll) {
+            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp), scrollState = scroll) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { entry(option) },

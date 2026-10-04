@@ -254,7 +254,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val undo = rememberEditorUndo()
     Track(undo, "title", title) { title = it }
     Track(undo, "notes", notes) { notes = it }
-    checklist.forEach { entry -> Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } }
+    checklist.forEach { entry -> key(entry.id) { Track(undo, "check:" + entry.id, entry.text) { t -> checklist = checklist.map { if (it.id == entry.id) it.copy(text = t) else it } } } }
     var attachments by remember { mutableStateOf(if (draft != null) DraftCodec.attachments(draft.optJSONArray("attachments")) else initial.attachments) }
     var pendingPhoto by remember { mutableStateOf(draft?.optString("pendingPhoto")?.takeIf { it.isNotBlank() }) }
     var finished by remember { mutableStateOf(false) }
@@ -398,7 +398,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val taskScroll = rememberScrollState()
     val checklistAnchor = remember { ChecklistAnchor() }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo, enabled = !busy)) {
             ScrollHints(taskScroll, Modifier.weight(1f).fillMaxWidth(),
                 overlay = { ChecklistJumpButton(checklist, checklistAnchor, taskScroll) }) { Column(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -524,7 +524,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 EditorActions(onDelete = if (!creating && !deletedElsewhere) ({ confirmingDelete = true }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && (unsaved || creating), undo = undo) { SaveLabel(busy, saved = justSaved && !unsaved) }
+                    saveEnabled = canSave && (unsaved || creating), undo = undo, undoEnabled = !busy) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
         }
     }

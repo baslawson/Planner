@@ -99,7 +99,8 @@ fun AttachmentsSection(
 @Composable
 fun AttachmentRow(attachment: Attachment, store: AttachmentStore, enabled: Boolean, onOpen: () -> Unit, onRemove: () -> Unit) {
     // The remove button already sits at the end of the row, so no arrow here.
-    TappableRow(onClick = onOpen, modifier = Modifier.fillMaxWidth(), arrow = false) {
+    // Not opened while the editor is busy, as before the shared row (ED-13).
+    TappableRow(onClick = { if (enabled) onOpen() }, modifier = Modifier.fillMaxWidth(), arrow = false) {
         AttachmentThumb(attachment, store)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).align(Alignment.CenterVertically)) {

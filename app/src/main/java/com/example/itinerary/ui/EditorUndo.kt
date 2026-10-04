@@ -17,13 +17,17 @@ import androidx.compose.ui.input.key.type
  */
 @Stable
 class EditorUndo internal constructor() {
-    private data class Step(val field: String, val before: String, var after: String, var at: Long)
+    // One step: a field's typing, or several fields the app changed at once (a template, a bill suggestion).
+    private data class Part(val field: String, val before: String, val after: String)
+    private data class Step(val parts: List<Part>, val at: Long, val typed: Boolean)
     private val undos = mutableStateListOf<Step>()
     private val redos = mutableStateListOf<Step>()
     private val setters = HashMap<String, (String) -> Unit>()
-    // The text each field last reported, and the text an Undo or Redo is about to put there (not a new step).
+    // The text each field last reported.
     private val seen = HashMap<String, String>()
-    private val applying = HashMap<String, String>()
+    // Changes the app is making: joined into one step until [joinUntil], or not recorded at all when [quiet] (ED-7).
+    private var joinUntil = 0L
+    private var quiet = false
 
     val canUndo: Boolean get() = undos.isNotEmpty()
     val canRedo: Boolean get() = redos.isNotEmpty()
@@ -32,30 +36,62 @@ class EditorUndo internal constructor() {
         setters[field] = set
         val before = seen.put(field, text) ?: return
         if (before == text) return
-        if (applying.remove(field) == text) return
+        if (now < joinUntil && quiet) return
         redos.clear()
         val last = undos.lastOrNull()
-        if (last != null && last.field == field && last.after == before && now - last.at < GROUP_MS && !startsWord(before, text)) {
-            last.after = text; last.at = now
-            undos[undos.lastIndex] = last.copy()
-        } else {
-            undos += Step(field, before, text, now)
-            if (undos.size > MAX_STEPS) undos.removeAt(0)
+        val part = last?.parts?.singleOrNull()
+        when {
+            now < joinUntil && last != null && !last.typed && last.at >= joinUntil - JOIN_MS ->
+                undos[undos.lastIndex] = last.copy(parts = last.parts.filterNot { it.field == field } +
+                    Part(field, last.parts.find { it.field == field }?.before ?: before, text))
+            now >= joinUntil && last != null && last.typed && part!!.field == field && part.after == before &&
+                now - last.at < GROUP_MS && !startsWord(before, text) ->
+                undos[undos.lastIndex] = Step(listOf(part.copy(after = text)), now, typed = true)
+            else -> {
+                undos += Step(listOf(Part(field, before, text)), if (now < joinUntil) joinUntil - JOIN_MS else now, typed = now >= joinUntil)
+                trim()
+            }
         }
     }
 
-    fun undo() { val step = undos.removeLastOrNull() ?: return; redos += step; put(step.field, step.before) }
-    fun redo() { val step = redos.removeLastOrNull() ?: return; undos += step; put(step.field, step.after) }
+    // At most MAX_STEPS steps and about MAX_CHARS characters kept: each step holds whole texts (ED-11).
+    private fun trim() {
+        var chars = undos.sumOf { s -> s.parts.sumOf { it.before.length + it.after.length } }
+        while (undos.size > 1 && (undos.size > MAX_STEPS || chars > MAX_CHARS)) {
+            chars -= undos.removeAt(0).parts.sumOf { it.before.length + it.after.length }
+        }
+    }
 
-    private fun put(field: String, text: String) {
-        val set = setters[field] ?: return
-        applying[field] = text; seen[field] = text
-        set(text)
+    /** The next changes, made by the app in several fields at once, are one step (ED-7). */
+    fun together(now: Long = System.currentTimeMillis()) { joinUntil = now + JOIN_MS; quiet = false }
+
+    /** The next changes aren't the person's (a sync change loaded): no step, and the history so far goes (ED-7). */
+    fun reload(now: Long = System.currentTimeMillis()) { undos.clear(); redos.clear(); joinUntil = now + JOIN_MS; quiet = true }
+
+    // A field that is gone (a deleted checklist entry): its steps are skipped, not put into whichever field took its
+    // place (ED-2). A rebuilt editor reports its fields again before anything can be undone.
+    internal fun untrack(field: String) { setters.remove(field); seen.remove(field) }
+
+    fun undo() = move(undos, redos) { it.before }
+    fun redo() = move(redos, undos) { it.after }
+
+    private fun move(from: MutableList<Step>, to: MutableList<Step>, text: (Part) -> String) {
+        while (true) {
+            val step = from.removeLastOrNull() ?: return
+            val live = step.parts.filter { it.field in setters }
+            if (live.isEmpty()) continue
+            to += step
+            joinUntil = 0
+            live.forEach { part -> seen[part.field] = text(part); setters.getValue(part.field)(text(part)) }
+            return
+        }
     }
 
     companion object {
         const val MAX_STEPS = 100
+        const val MAX_CHARS = 2_000_000
         const val GROUP_MS = 1_000L
+        const val JOIN_MS = 500L
         // A space or a new line typed after a word starts a new step, so Undo goes back a word at a time.
         internal fun startsWord(before: String, after: String): Boolean {
             if (after.length <= before.length) return false
@@ -77,7 +113,8 @@ fun rememberEditorUndo(): EditorUndo {
         while (EditorUndoMemory.kept.size > 8) EditorUndoMemory.kept.remove(EditorUndoMemory.kept.keys.first())
     } } }
     // Gone for good (not rebuilt): its history goes too.
-    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    // The Activity itself, also from inside a Dialog (whose context only wraps it), so a rotation keeps it there too (ED-4).
+    val activity = androidx.compose.ui.platform.LocalContext.current.findActivity()
     DisposableEffect(key) { onDispose { if (activity?.isChangingConfigurations != true) synchronized(EditorUndoMemory) { EditorUndoMemory.kept.remove(key) } } }
     return undo
 }
@@ -87,14 +124,19 @@ fun rememberEditorUndo(): EditorUndo {
 fun Track(undo: EditorUndo, field: String, text: String, set: (String) -> Unit) {
     val setter by rememberUpdatedState(set)
     SideEffect { undo.report(field, text, { setter(it) }) }
+    DisposableEffect(undo, field) { onDispose { undo.untrack(field) } }
 }
 
-/** Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) on a physical keyboard, for an editor's whole form. */
-fun androidx.compose.ui.Modifier.undoKeys(undo: EditorUndo): androidx.compose.ui.Modifier = onPreviewKeyEvent { event ->
-    if (event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || !event.isCtrlPressed) return@onPreviewKeyEvent false
+/**
+ * Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y) on a physical keyboard, for an editor's whole form: only while [enabled] (not while
+ * saving, ED-3) and when there is something to take back or redo; otherwise the focused field's own undo has the key (ED-6).
+ */
+fun androidx.compose.ui.Modifier.undoKeys(undo: EditorUndo, enabled: Boolean = true): androidx.compose.ui.Modifier = onPreviewKeyEvent { event ->
+    if (!enabled || event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || !event.isCtrlPressed) return@onPreviewKeyEvent false
     when {
-        event.key == androidx.compose.ui.input.key.Key.Z && event.isShiftPressed || event.key == androidx.compose.ui.input.key.Key.Y -> { undo.redo(); true }
-        event.key == androidx.compose.ui.input.key.Key.Z -> { undo.undo(); true }
+        event.key == androidx.compose.ui.input.key.Key.Z && event.isShiftPressed || event.key == androidx.compose.ui.input.key.Key.Y ->
+            undo.canRedo.also { if (it) undo.redo() }
+        event.key == androidx.compose.ui.input.key.Key.Z -> undo.canUndo.also { if (it) undo.undo() }
         else -> false
     }
 }

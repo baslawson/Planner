@@ -2,7 +2,7 @@ package com.example.itinerary.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenuItem
@@ -51,9 +51,10 @@ fun SuggestField(
             keyboardActions = keyboardActions,
             trailingIcon = trailingIcon,
         )
-        val scroll = rememberScrollState()
+        // A fresh one each time it opens, so it starts at the top rather than where it was left (ED-14).
+        val scroll = remember(expanded) { androidx.compose.foundation.ScrollState(0) }
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll), scrollState = scroll) {
+            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp), scrollState = scroll) {
             suggestions.forEach { name ->
                 DropdownMenuItem(text = { Text(shown(name)) }, onClick = { onPick(name); open = false })
             }

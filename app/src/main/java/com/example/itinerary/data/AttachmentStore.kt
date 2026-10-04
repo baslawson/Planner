@@ -28,14 +28,17 @@ class AttachmentStore(private val context: Context) {
         override fun sizeOf(key: ThumbKey, value: Bitmap) = value.allocationByteCount
         // Do not recycle evicted bitmaps: a visible Compose row may still own one.
     }
+    // Files that gave no preview, as they were then: not opened again each time their row shows (ED-8).
+    private val noThumbnail = java.util.Collections.synchronizedSet(HashSet<ThumbKey>())
     fun taskDraftFiles(): Set<String> = TaskDraftStore(context).files()
     fun noteDraftFiles(): Set<String> = NoteDraftStore(context).files()
     fun eventDraftFiles(): Set<String> = EditorDraftStore(context).files()
     // Big Recently deleted bundles (see DeletedPayloads).
     fun deletedPayloads() = DeletedPayloads(File(context.filesDir, "recently-deleted"))
-    fun clearThumbnails() = thumbnails.evictAll()
+    fun clearThumbnails() { thumbnails.evictAll(); noThumbnail.clear() }
     private fun invalidateThumbnail(name: String) {
         thumbnails.snapshot().keys.filter { it.name == name }.forEach(thumbnails::remove)
+        synchronized(noThumbnail) { noThumbnail.removeAll { it.name == name } }
     }
     // Only the calls that are about to write need the folder to exist, so reading a file (every
     // attachment row asks for its path, and again for its thumbnail) costs no file system call.
@@ -107,7 +110,9 @@ class AttachmentStore(private val context: Context) {
     }.getOrDefault(false)
 
     private fun pdfFirstPage(file: File, maxPx: Int): Bitmap? = runCatching {
-        android.graphics.pdf.PdfRenderer(android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)).use { pdf ->
+        // The descriptor is closed by its own use {} too: PdfRenderer's constructor failing (a locked or damaged file)
+        // would leave it open (ED-8).
+        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd -> android.graphics.pdf.PdfRenderer(fd).use { pdf ->
             if (pdf.pageCount == 0) return@use null
             pdf.openPage(0).use { page ->
                 val scale = maxPx.toFloat() / maxOf(page.width, page.height)
@@ -116,17 +121,26 @@ class AttachmentStore(private val context: Context) {
                     page.render(it, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 }
             }
-        }
+        } }
     }.getOrNull()
 
-    // Small preview decoded at reduced size, rotated per the photo's EXIF orientation.
-    @Synchronized fun thumbnail(fileName: String, maxPx: Int): Bitmap? {
+    // Small preview decoded at reduced size, rotated per the photo's EXIF orientation. Not one lock for all: a slow PDF
+    // doesn't hold up every other preview (ED-8); the cache is safe to share.
+    fun thumbnail(fileName: String, maxPx: Int): Bitmap? {
         require(maxPx > 0)
         val file = fileFor(fileName)
         val key = ThumbKey(fileName, maxPx, file.length(), file.lastModified())
         thumbnails.get(key)?.let { return it }
+        if (key in noThumbnail) return null
+        return decodeThumbnail(file, maxPx)?.also { thumbnails.put(key, it) } ?: null.also {
+            if (noThumbnail.size > 200) noThumbnail.clear()
+            noThumbnail += key
+        }
+    }
+
+    private fun decodeThumbnail(file: File, maxPx: Int): Bitmap? {
         // A PDF (or a scan saved as one) shows its first page (wish list #4); a locked or damaged one shows its kind.
-        if (isPdf(file)) return pdfFirstPage(file, maxPx)?.also { thumbnails.put(key, it) }
+        if (isPdf(file)) return pdfFirstPage(file, maxPx)
         val path = file.path
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
@@ -145,13 +159,11 @@ class AttachmentStore(private val context: Context) {
                 else -> 0f
             }
         }.getOrDefault(0f)
-        val result = if (degrees == 0f) bitmap else {
+        return if (degrees == 0f) bitmap else {
             val matrix = Matrix().apply { postRotate(degrees) }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
                 if (it !== bitmap) bitmap.recycle()
             }
         }
-        thumbnails.put(key, result)
-        return result
     }
 }

@@ -112,6 +112,8 @@ fun EditorActions(
     saveEnabled: Boolean = true,
     // Undo and Redo of what was typed in the editor (wish list #2).
     undo: EditorUndo? = null,
+    // Off while saving: an Undo then would be lost when the form takes the saved version (ED-3).
+    undoEnabled: Boolean = true,
     saveLabel: @Composable RowScope.() -> Unit,
 ) {
     androidx.compose.foundation.layout.FlowRow(modifier.fillMaxWidth(),
@@ -126,9 +128,9 @@ fun EditorActions(
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
             if (undo != null) {
                 val tight = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                OutlinedButton(enabled = undo.canUndo, onClick = undo::undo, contentPadding = tight, modifier = size) {
+                OutlinedButton(enabled = undoEnabled && undo.canUndo, onClick = undo::undo, contentPadding = tight, modifier = size) {
                     androidx.compose.material3.Icon(UndoIcons.undo, contentDescription = "Undo", modifier = Modifier.size(18.dp)) }
-                OutlinedButton(enabled = undo.canRedo, onClick = undo::redo, contentPadding = tight, modifier = size) {
+                OutlinedButton(enabled = undoEnabled && undo.canRedo, onClick = undo::redo, contentPadding = tight, modifier = size) {
                     androidx.compose.material3.Icon(UndoIcons.redo, contentDescription = "Redo", modifier = Modifier.size(18.dp)) }
             }
             androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))

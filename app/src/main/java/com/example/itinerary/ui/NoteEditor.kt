@@ -158,7 +158,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         val now = stored
         if (now != null) {
             seenStored = true
-            if (base != null && now != base && !unsaved) { load(now); base = now }
+            // Not a step to undo: that would put back the text from before, over the other device's change (ED-7).
+            if (base != null && now != base && !unsaved) { undo.reload(); load(now); base = now }
         }
     }
     val deletedElsewhere = base != null && seenStored && stored == null
@@ -296,7 +297,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var noteFocused by remember { mutableStateOf(false) }
     val toolsPinned = !preview && noteFocused && WindowInsets.isImeVisible
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo, enabled = !busy)) {
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
@@ -396,7 +397,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ delete() }) else null,
                     onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && (unsaved || deletedElsewhere), undo = undo) { SaveLabel(busy, saved = justSaved && !unsaved) }
+                    saveEnabled = canSave && (unsaved || deletedElsewhere), undo = undo, undoEnabled = !busy) { SaveLabel(busy, saved = justSaved && !unsaved) }
             }
             if (toolsPinned) {
                 HorizontalDivider()
