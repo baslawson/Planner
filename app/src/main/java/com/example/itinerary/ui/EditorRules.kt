@@ -91,12 +91,13 @@ object EditorRules {
     }
 
     // U-N1: the same for a task: [stored] differs from [baseline] in what Save would write over (title, notes, due date,
-    // priority, and R-5: the reminder time, repeat and checklist; a time-zone change moves the reminder underneath, and
+    // priority, ringing choice, and R-5: the reminder time, repeat and checklist; a time-zone change moves the reminder underneath, and
     // Save would set the old instant again). Done and a snooze alone don't count: Save keeps both as stored while the
     // reminder time is unchanged (Repository.saveTask). Nor does a task gone meanwhile (see taskDeletedElsewhere).
     fun taskChangedElsewhere(baseline: com.example.itinerary.data.PlannerTask, stored: com.example.itinerary.data.PlannerTask?): Boolean =
         stored != null && stored.id == baseline.id && (stored.title != baseline.title || stored.notes != baseline.notes ||
             stored.dueDate != baseline.dueDate || stored.priority != baseline.priority || stored.reminderAt != baseline.reminderAt ||
+            stored.ringUntilDismissed != baseline.ringUntilDismissed ||
             stored.repeat != baseline.repeat || stored.repeatDays != baseline.repeatDays || stored.checklist != baseline.checklist)
 
     fun taskChangedElsewhereBanner(): String = "This task was changed elsewhere"

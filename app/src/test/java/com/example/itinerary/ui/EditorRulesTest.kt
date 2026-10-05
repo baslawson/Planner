@@ -129,6 +129,16 @@ class EditorRulesTest {
         assertEquals("This bill was changed elsewhere", EditorRules.changedElsewhereBanner(bill = true))
     }
 
+    @Test fun taskRingingChangedElsewhereNeedsConfirmationInBothDirections() {
+        val quiet = com.example.itinerary.data.PlannerTask(id = "t", title = "Reminder", reminderAt = 1000)
+        val ringing = quiet.copy(ringUntilDismissed = true)
+        assertEquals(true, EditorRules.taskChangedElsewhere(quiet, ringing))
+        assertEquals(true, EditorRules.taskChangedElsewhere(ringing, quiet))
+        assertEquals(false, EditorRules.taskChangedElsewhere(ringing, ringing))
+        assertEquals(false, EditorRules.taskChangedElsewhere(ringing, ringing.copy(done = true, snoozedUntil = 2000)))
+        assertEquals(false, EditorRules.taskChangedElsewhere(quiet, ringing.copy(id = "other")))
+    }
+
     // U-N1: a task changed underneath its open editor in what Save would write over; done and a snooze alone don't count.
     @Test fun taskChangedElsewhereIsWhatSaveWouldOverwrite() {
         val opened = com.example.itinerary.data.PlannerTask(id = "t", title = "Pay rent", dueDate = oct3, notes = "n")
