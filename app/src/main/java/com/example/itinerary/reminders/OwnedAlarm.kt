@@ -24,11 +24,14 @@ internal fun ownedAlarmExtras(kind: String, id: String, title: String, trigger: 
 /** False means the receiver must still post its notification, including a truthful fallback message. */
 internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: String, trigger: Long, ring: Boolean): Boolean {
     if (!ring || !ringingAlarmsEnabled(context)) return false
+    var token: String? = null
     return try {
+        token = OwnedAlarmStarts.reserve(context, kind, id)
         ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java)
-            .putExtras(ownedAlarmExtras(kind, id, title, trigger)))
+            .putExtras(ownedAlarmExtras(kind, id, title, trigger)).putExtra(EXTRA_OWNER_START, token))
         true
     } catch (e: Exception) {
+        token?.let { runCatching { OwnedAlarmStarts.cancel(context, kind, id, it) } }
         android.util.Log.w("OwnedAlarm", "Couldn't start ringing reminder", e)
         false
     }

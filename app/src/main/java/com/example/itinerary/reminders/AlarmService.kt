@@ -46,6 +46,13 @@ class AlarmService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP || intent?.action == ACTION_SNOOZE) {
+            if (!RingToken.matches(stopToken, intent.getStringExtra(EXTRA_STOP_ALARM))) {
+                // A stale button must neither stop this ring nor change its process-restart policy.
+                if (ringing == null) { stopSelf(startId); return START_NOT_STICKY }
+                return START_REDELIVER_INTENT
+            }
+        }
         when (intent?.action) {
             ACTION_STOP -> stopRinging()
             ACTION_SNOOZE -> {
@@ -56,7 +63,19 @@ class AlarmService : Service() {
                 stopRinging()
             }
             else -> {
-                startRinging(intent?.extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
+                val extras = intent?.extras
+                val accepted = OwnedAlarmStarts.start(this, extras) {
+                    startRinging(extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
+                }
+                if (!accepted && ringing == null) {
+                    // Fulfil the foreground-start deadline, then end this cancelled start without playing anything.
+                    val cancelled = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_notification).setContentTitle("Reminder cancelled")
+                        .setCategory(NotificationCompat.CATEGORY_STATUS).setSilent(true).build()
+                    ServiceCompat.startForeground(this, NOTIFICATION_ID, cancelled, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                }
                 // Android ending the process (low memory, seen right after an unlock) must not end the alarm without anyone
                 // stopping it: the start is delivered again and it rings on (Stop and Snooze end it for good).
                 return START_REDELIVER_INTENT
@@ -78,6 +97,8 @@ class AlarmService : Service() {
                 )
             }
         }
+        if (previous?.getString(EXTRA_OWNER_START) != extras?.getString(EXTRA_OWNER_START))
+            OwnedAlarmStarts.finish(this, previous)
         ringing = extras
         ringingStart = startId
         currentReminderId = extras?.takeUnless { it.containsKey(EXTRA_OWNER_KIND) }?.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
@@ -297,6 +318,7 @@ class AlarmService : Service() {
         vibrator?.cancel()
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null
+        OwnedAlarmStarts.finish(this, ringing)
         ringing = null
         currentReminderId = null
         currentOwner = null
@@ -318,6 +340,7 @@ class AlarmService : Service() {
     }
 
     override fun onDestroy() {
+        OwnedAlarmStarts.finish(this, ringing)
         currentReminderId = null
         currentOwner = null
         stopToken = null
@@ -333,7 +356,7 @@ class AlarmService : Service() {
         PendingIntent.getService(
             this,
             action.hashCode(),
-            Intent(this, AlarmService::class.java).setAction(action),
+            alarmAction(this, action, stopToken),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -352,28 +375,42 @@ class AlarmService : Service() {
     companion object {
         @Volatile private var currentOwner: String? = null
         fun stopIfRinging(context: Context, kind: String, id: String) {
-            if (currentOwner == "$kind:$id") context.stopService(Intent(context, AlarmService::class.java))
+            synchronized(OwnedAlarmStarts) {
+                try { OwnedAlarmStarts.cancel(context, kind, id) }
+                finally { if (currentOwner == "$kind:$id") requestStop(context, stopToken) }
+            }
         }
         @Volatile private var currentReminderId: Long? = null
         @Volatile private var ringingSince = 0L
         @Volatile private var stopToken: String? = null
         fun stopIfRinging(context: Context, id: Long) {
-            if (currentReminderId == id) context.stopService(Intent(context, AlarmService::class.java))
+            synchronized(OwnedAlarmStarts) {
+                if (currentReminderId == id) requestStop(context, stopToken)
+            }
         }
 
         // Planner opened while an alarm rings without its notification (swiped away on Android 14+ and the delete intent
         // didn't get through): nothing else could stop it, so opening the app does. The first seconds are left alone,
         // while Android may not list the just-posted notification yet.
         fun stopIfUnseen(context: Context) {
+            val token = stopToken
             if ((currentReminderId == null && currentOwner == null) || SystemClock.elapsedRealtime() - ringingSince < 3_000L) return
             val shown = runCatching {
                 context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == NOTIFICATION_ID }
             }.getOrDefault(true)
-            if (!shown) context.stopService(Intent(context, AlarmService::class.java))
+            if (!shown) requestStop(context, token)
         }
         /** A tap on the ringing notification ([EXTRA_STOP_ALARM]): stops it only with the ringing alarm's own token. */
         fun stopFromTap(context: Context, token: String?) {
-            if (RingToken.matches(stopToken, token)) context.stopService(Intent(context, AlarmService::class.java))
+            if (RingToken.matches(stopToken, token)) requestStop(context, token)
+        }
+        private fun alarmAction(context: Context, action: String, token: String?): Intent =
+            Intent(context, AlarmService::class.java).setAction(action)
+                .setData(Uri.Builder().scheme("planner").authority("alarm-action").appendPath(action).appendPath(token.orEmpty()).build())
+                .putExtra(EXTRA_STOP_ALARM, token)
+
+        private fun requestStop(context: Context, token: String?) {
+            if (token != null) context.startService(alarmAction(context, ACTION_STOP, token))
         }
         const val ACTION_STOP = "com.example.itinerary.alarm.STOP"
         const val ACTION_SNOOZE = "com.example.itinerary.alarm.SNOOZE"
