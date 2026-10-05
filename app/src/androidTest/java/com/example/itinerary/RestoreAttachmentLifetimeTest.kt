@@ -72,6 +72,35 @@ class RestoreAttachmentLifetimeTest {
         }
     }
 
+    // S16-1: a restore cut short (Planner ended mid-copy) left the file half written under its own name: restoring the
+    // same backup again writes it whole, and a copy never takes the name until it is complete.
+    @Test fun aHalfWrittenFileFromAnInterruptedRestoreIsWrittenAgain() = runBlocking {
+        val root = File(base.cacheDir, "restore-interrupted").apply { deleteRecursively(); mkdirs() }
+        val prefix = "restore_interrupted_"
+        val context = isolated(root, prefix)
+        val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
+        try {
+            val store = AttachmentStore(context)
+            val repo = Repository(db, store, alarms)
+            val backup = BackupManager(context, repo, store, SettingsRepository(context))
+            val photo = Attachment(98201, 0, "Photo", "restore-half.bin", "application/octet-stream")
+            val bytes = ByteArray(200_000) { (it * 31 % 251).toByte() }
+            store.writableFileFor(photo.fileName).writeBytes(bytes)
+            repo.saveNote(PlannerNote(title = "Interrupted restore", attachments = listOf(photo)), create = true)
+            val zip = File(root, "backup.zip")
+            backup.export(Uri.fromFile(zip))
+            repo.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
+            // What the process left when it ended mid-copy.
+            store.writableFileFor(photo.fileName).writeBytes(bytes.copyOf(bytes.size / 2))
+            backup.restore(backup.stage(Uri.fromFile(zip)))
+            assertArrayEquals("The restored file is still the half-written one", bytes, store.fileFor(photo.fileName).readBytes())
+            assertTrue(store.fileFor(photo.fileName).parentFile!!.listFiles()!!.none { it.name.endsWith(".part") })
+        } finally {
+            db.close(); root.deleteRecursively()
+            listOf("settings", "backup_status").forEach { base.deleteSharedPreferences(prefix + it) }
+        }
+    }
+
     @Test fun normalCleanupWaitsForInstallationAndThenSeesRestoredOwnership() = runBlocking {
         val root = File(base.cacheDir, "restore-lifetime-lease").apply { deleteRecursively(); mkdirs() }
         val context = isolated(root, "restore_lifetime_lease_")

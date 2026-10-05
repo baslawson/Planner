@@ -417,10 +417,12 @@ class NoteSync(
                             NextcloudClient.NoteDelete.UNSUPPORTED -> keptRemote++
                         }
                     }
+                    // N16-2: shared read-only and unchanged: left there, and its link kept so it isn't imported again.
+                    else if (theirs.etag == row.etag) {}
                     else {
-                        // Changed there, or shared read-only: kept there, and (changed) it comes back below as a new note.
+                        // Changed there: kept there, and it comes back below as a new note.
                         rows.delete(row.noteId)
-                        if (theirs.etag != row.etag) linkedRemote.remove(theirs.id)
+                        linkedRemote.remove(theirs.id)
                     }
                 }
                 // Deleted on Nextcloud: to Recently deleted, unless changed here since (then it goes up again).
@@ -471,7 +473,14 @@ class NoteSync(
         val links = rows.all().associateBy { it.noteId }
         val free = local.values.filter { it.id !in links && it.id !in pending }.toMutableList()
         for (theirs in remote.values.filter { it.id !in linkedRemote }) each {
-            if (!NoteMapping.fits(theirs)) { skipped++; return@each }
+            if (!NoteMapping.fits(theirs)) {
+                // N16-1: its copy here (same words, or the same title for one grown too long) is neither linked nor sent
+                // up again as a second note.
+                val copy = free.firstOrNull { NoteMapping.sameText(it.content, theirs.content) }
+                    ?: free.takeIf { theirs.content.length > Notes.MAX_CONTENT }?.firstOrNull { NoteMapping.sameTitle(NoteMapping.remoteTitle(it), theirs.title) }
+                copy?.let(free::remove)
+                skipped++; return@each
+            }
             val incoming = NoteMapping.apply(PlannerNote(), theirs)
             val sameWords = free.filter { NoteMapping.sameText(it.content, incoming.content) }
             val twin = sameWords.firstOrNull { NoteMapping.sameTitle(NoteMapping.remoteTitle(it), theirs.title) } ?: sameWords.firstOrNull()

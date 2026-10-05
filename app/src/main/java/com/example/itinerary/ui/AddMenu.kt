@@ -249,7 +249,11 @@ fun BoxScope.AddMenuHost(
     var quickEntry by rememberSaveable { mutableStateOf(false) }
     var choosingTaskType by rememberSaveable { mutableStateOf(false) }
     var newTaskId by rememberSaveable { mutableStateOf<String?>(null) }
-    var quickTask by remember { mutableStateOf<PlannerTask?>(null) }
+    // T16-4: kept across process death, as the Quick entry draft it replaced was (that is cleared at the handover).
+    var quickTask by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<PlannerTask?, String>(
+        save = { task -> task?.let { com.example.itinerary.data.TaskCodec.encode(listOf(it)).toString() } ?: "" },
+        restore = { text -> text.takeIf { it.isNotEmpty() }?.let { com.example.itinerary.data.TaskCodec.decode(org.json.JSONArray(it)).single() } },
+    )) { mutableStateOf<PlannerTask?>(null) }
     val repository = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).repository
 
     fun addEvent(bill: Boolean = false, scan: Boolean = false) {
@@ -309,7 +313,8 @@ fun BoxScope.AddMenuHost(
             quickEntry = false
         })
     quickTask?.let { task ->
-        key(task.id) { TaskEditor(task, true) { quickTask = null } }
+        // T16-4: what Quick entry handed over is unsaved until saved: Close asks rather than dropping it.
+        key(task.id) { TaskEditor(task, true, prefilled = true) { quickTask = null } }
     }
     state.adding?.let { current ->
         val quick = state.quickDefaults
@@ -319,6 +324,8 @@ fun BoxScope.AddMenuHost(
             initialAddedReminders = quick?.quickReminders().orEmpty(),
             initialRepeatCount = quick?.repeatCount ?: 12,
             initialRepeatAnchorDay = quick?.repeatAnchorDay ?: 0,
+            // T16-4: handed over by Quick entry (its draft cleared), so Close asks rather than dropping it.
+            prefilled = quick != null,
             existingAttachments = emptyList(),
             existingReminders = emptyList(),
             categoryCounts = categoryCounts,

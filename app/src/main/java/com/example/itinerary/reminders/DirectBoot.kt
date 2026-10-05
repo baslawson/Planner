@@ -34,7 +34,8 @@ object DirectBoot {
      * the snapshot written from them, so it keeps the next two weeks however long Planner goes unopened.
      */
     suspend fun afterRing(app: com.example.itinerary.ItineraryApp, now: Long = System.currentTimeMillis()) {
-        fun stale(at: Long) = runCatching { LockedAlarmSelection.stale(store(app).writtenAt(), at) }.getOrDefault(false)
+        // T16-1: from the last full write; a partial one (a Done in a fresh process) doesn't put the refresh off.
+        fun stale(at: Long) = runCatching { LockedAlarmSelection.stale(store(app).read()?.fullAt ?: store(app).writtenAt(), at) }.getOrDefault(false)
         if (!stale(now)) {
             app.repository.refillReminders()
             deliverDeferredReminders(app, now)

@@ -181,6 +181,17 @@ class QuickReviewUiTest {
         click("Save");await { data().items.count { it.title=="QA repeat editor" }==2 };click("Close")
         data().items.filter { it.title=="QA repeat editor" }.forEach { item -> assertEquals(60L,data().reminders.single { it.itemId==item.id }.offsetMinutes) }
     }
+    // T16-4: an entry handed to the full editor is unsaved until saved: Close asks rather than dropping it.
+    private fun handoverAsks(task:Boolean) {
+        start();if(task)click("Task");setText("",if(task)"QA handover task tomorrow" else "QA handover event tomorrow 3pm")
+        click("More options");click("Open in full editor");reveal { find("Close")!=null }
+        click("Close")
+        await(15000) { find("Keep editing")!=null }
+        screenshot("handover-asks-${if(task)"task" else "event"}")
+        click("Discard");await { find("Keep editing")==null }
+    }
+    @Test fun quickEntryTaskHandedToTheEditorAsksBeforeClosing()=handoverAsks(true)
+    @Test fun quickEntryEventHandedToTheEditorAsksBeforeClosing()=handoverAsks(false)
     @Test fun taskRepeatAndReminderContinueAfterCompletion()=runBlocking {
         val due=LocalDate.now().plusDays(3)
         start();click("Task");setText("","QA repeat task in 3 days every week remind me 1 day before")

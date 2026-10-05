@@ -92,6 +92,31 @@ class LockedAlarmsTest {
         assertEquals(now + LockedAlarmSelection.REWRITE_AFTER_MS, mirror.save(now))
     }
 
+    // T16-1: a fresh process (a Done from a notification) knows only what the last snapshot kept. Its save must not cancel
+    // the refresh that snapshot still needs, nor count as a full write for the 12-hour check.
+    @Test fun aPartialMirrorKeepsTheRefreshAndTheLastFullWrite() {
+        var stored: LockedSnapshot? = null
+        val many = (1..84).map { LockedAlarm.Note("n$it", now + it * 4 * hour) }
+        val first = LockedAlarmMirror(read = { stored }, write = { stored = LockedAlarmCodec.decode(LockedAlarmCodec.encode(it)) }, timeFormat = { null })
+        many.forEach(first::put)
+        first.markComplete(now)
+        val refresh = first.save(now)!!
+        assertTrue(refresh < Long.MAX_VALUE)
+        assertEquals(refresh, stored!!.rewriteAt)
+        assertEquals(now, stored!!.fullAt)
+        val later = now + hour
+        val fresh = LockedAlarmMirror(read = { stored }, write = { stored = LockedAlarmCodec.decode(LockedAlarmCodec.encode(it)) }, timeFormat = { null })
+        fresh.remove("n:n1")
+        assertEquals("a partial save cancelled the refresh", refresh, fresh.save(later))
+        assertEquals(refresh, stored!!.rewriteAt)
+        assertEquals("a partial save counted as a full write", now, stored!!.fullAt)
+        // Every alarm set again in that process: it knows them all, and writes as a full set.
+        many.drop(1).forEach(fresh::put)
+        fresh.markComplete(later + LockedAlarmSelection.REFRESH_MS)
+        fresh.save(later + LockedAlarmSelection.REFRESH_MS)
+        assertEquals(later + LockedAlarmSelection.REFRESH_MS, stored!!.fullAt)
+    }
+
     @Test fun eventCarriesWhatTheNotificationShowsAndABillTokenOnlyForAnUnpaidBill() {
         val item = ItineraryItem(id = 3, tripId = 1, date = LocalDate.of(2026, 10, 5), startTime = LocalTime.of(9, 30), title = "Rent",
             location = "Bank", category = "Bills")

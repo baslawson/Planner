@@ -59,7 +59,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
             }
             "REPORT" -> {
                 val wanted = Regex("<d:href>([^<]+)</d:href>").findAll(body).map { it.groupValues[1] }.toSet()
-                // calendar-query: events from the window start on (or repeating); multiget: the listed files.
+                // calendar-query: events from the window start on (or repeating); multiget: the listed files. The event's own
+                // start, as a server reads it, not a VTIMEZONE's (E16-2).
                 val start = Regex("start=\"(\\d{8})").find(body)?.groupValues?.get(1)
                 if (start != null) { queries += start; onQuery?.invoke(start); if (refuseBefore?.let { start < it } == true) return MockResponse().setResponseCode(500) }
                 val todo = body.contains("name=\"VTODO\"")
@@ -68,7 +69,7 @@ class FakeCalDav(private val home: String, private val user: String, private val
                     if (body.contains("calendar-multiget")) p in wanted
                     // A calendar-query returns only the kind it asks for.
                     else if (todo != v.second.contains("BEGIN:VTODO")) false
-                    else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second)?.groupValues?.get(1) ?: "0") >= start
+                    else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second.substringAfter("BEGIN:VEVENT"))?.groupValues?.get(1) ?: "0") >= start
                 }.entries.joinToString("") { entry(it.key, it.value, it.key !in withoutData) })
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)

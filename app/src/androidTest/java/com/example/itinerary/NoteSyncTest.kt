@@ -480,6 +480,34 @@ class NoteSyncTest {
         assertEquals(1, r.db.sentNoteDao().all().size)
     }
 
+    // N16-2: a shared read-only note deleted here stays deleted here on later passes; changed there, it comes back.
+    @Test fun deletedReadOnlyNoteIsNotImportedAgain() = rig("note-sync-readonly-delete") { r ->
+        val id = r.fake.add("Shared", "Shared\nfrom a colleague", readonly = true)
+        assertTrue(r.sync.sync())
+        r.repo.deleteNote(r.note("Shared").id); r.repo.finishDeletion(r.repo.pendingDeletions.value.single().token)
+        repeat(3) { assertTrue(r.sync.sync()) }
+        assertTrue("The deleted shared note came back", r.repo.allNotes().none { Notes.label(it) == "Shared" })
+        assertNotNull(r.fake.notes[id])
+        assertTrue(r.fake.requests.none { it == "DELETE /index.php/apps/notes/api/v1/notes/$id" })
+        r.fake.edit(id) { it.copy(content = "Shared\nupdated by a colleague") }
+        assertTrue(r.sync.sync())
+        assertEquals("Shared\nupdated by a colleague", r.note("Shared").content)
+    }
+
+    // N16-1: links rebuilt (sync off and on) while a linked note no longer fits: its copy here isn't uploaded again.
+    @Test fun relinkingDoesNotUploadACopyOfANoteThatDoesNotFit() = rig("note-sync-relink-unfit") { r ->
+        val id = r.fake.add("Legacy", "Original", "Parent/Child")
+        assertTrue(r.sync.sync())
+        val longCategory = "A".repeat(60) + "/" + "B".repeat(60)
+        r.fake.edit(id) { it.copy(category = longCategory) }
+        assertTrue(r.sync.sync())
+        r.sync.setEnabled(false); r.sync.setEnabled(true)
+        assertTrue(r.sync.sync())
+        assertEquals("A second copy went up", 1, r.fake.notes.size)
+        assertEquals(1, r.repo.allNotes().size)
+        assertEquals(1, r.sync.state.value.skipped)
+    }
+
     // Bug hunt 3 Oct, SY-1: a restore confirmed while a notes pass runs waits for it. Before, the pass carried on across
     // the restore and put back a link for a note the backup doesn't have, so the next pass deleted it on Nextcloud too.
     @Test fun aRestoreWaitsForANotesPassUnderWay() = rig("note-sync-restore") { r ->

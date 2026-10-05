@@ -55,9 +55,15 @@ class LatestFeaturesTest {
         repo.setPaid(data.items.first().id, false)
         repo.deliverReminder(id, 0) { _, _ -> delivered++ }
         assertEquals(2, delivered)
-        repo.setPaid(data.items.first().id, true)
-        repo.saveItem(repo.snapshot().items.first().copy(category = "Other"))
-        assertFalse(repo.snapshot().items.first().paid)
+        // A paid bill moved to another category is no longer paid: its reminder comes again. Hunt 16: the second occurrence,
+        // as one reminder already delivered is never delivered twice (hunts 11-12).
+        val second = repo.snapshot().items.last()
+        val secondReminder = repo.snapshot().reminders.single { it.itemId == second.id }.id
+        repo.setPaid(second.id, true)
+        repo.saveItem(repo.snapshot().items.last().copy(category = "Other"))
+        assertFalse(repo.snapshot().items.last().paid)
+        repo.deliverReminder(secondReminder, 0) { _, _ -> delivered++ }
+        assertEquals(3, delivered)
         repo.deliverReminder(id, 0) { _, _ -> delivered++ }
         assertEquals(3, delivered)
     }

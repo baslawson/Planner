@@ -171,10 +171,18 @@ class BackupManager(
                         if (attachment.url != null) return@forEach // a link has no file to copy
                         // Written below, so the attachments folder must exist even on a fresh install.
                         val target = store.writableFileFor(attachment.fileName)
-                        if (target.exists()) return@forEach
-                        created += target
-                        val entry = zip.getEntry("$ATTACHMENTS_DIR/${attachment.fileName}") ?: error("Missing entry")
-                        zip.getInputStream(entry).use { source -> target.outputStream().use { room -= copyLimited(source, it, minOf(MAX_ATTACHMENT_BYTES, room)) } }
+                        val entry = zip.getEntry("$ATTACHMENTS_DIR/${attachment.fileName}")
+                        // S16-1: one already there is the same file, unless a restore cut short (Planner ended mid-copy)
+                        // left it shorter than the backup's: that one is written again.
+                        if (target.exists() && (entry == null || entry.size < 0 || target.length() == entry.size)) return@forEach
+                        if (entry == null) error("Missing entry")
+                        // Copied beside it and put in place only once whole, so a copy cut short never takes the file's name.
+                        val partial = java.io.File(target.parentFile, target.name + ".part")
+                        try {
+                            zip.getInputStream(entry).use { source -> partial.outputStream().use { room -= copyLimited(source, it, minOf(MAX_ATTACHMENT_BYTES, room)) } }
+                            if (!target.exists()) created += target
+                            check(partial.renameTo(target)) { "Couldn't put the attachment in place" }
+                        } finally { partial.delete() }
                     }
                 }
             } catch (e: Exception) {

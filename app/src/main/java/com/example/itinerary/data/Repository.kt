@@ -1441,6 +1441,7 @@ class Repository(
         var failure: Exception? = null
         jobs.sortedByDescending { it.first }.forEach { (_, job) -> try { job() } catch (e: Exception) { failure = e } }
         failure?.let { throw it }
+        scheduler.lockedAlarmsComplete()
     }
 
     // Task reminders keep their clock time when the phone's time zone changes, as event reminders do (inTimeZone). The

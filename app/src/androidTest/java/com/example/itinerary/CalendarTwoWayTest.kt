@@ -540,6 +540,7 @@ class CalendarTwoWayTest {
             "BEGIN:VEVENT\r\nUID:ex-1\r\nDTSTART;TZID=Customized Time Zone:20261007T090000\r\nDTEND;TZID=Customized Time Zone:20261007T100000\r\n" +
             "SUMMARY:QA Exchange\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
         start()
+        syncAgain() // read as the synced calendar now, not as an ordinary ticked one
         assertTrue(items().none { it.title == "QA Exchange" })
         val shown = sync.shown.first().values.single { it.event.title == "QA Exchange" }.event
         assertEquals(LocalDate.of(2026, 10, 7) to LocalTime.of(9, 0), shown.date to shown.startTime) // the phone's zone (UTC here)

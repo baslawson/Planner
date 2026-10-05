@@ -42,7 +42,9 @@ sealed interface LockedAlarm {
 }
 
 /** The snapshot: the alarms, and the time format the user chose (the reminder text says the time, as the app does). */
-data class LockedSnapshot(val timeFormat: String?, val alarms: List<LockedAlarm>)
+// T16-1: [rewriteAt], the refresh a snapshot that left alarms out still needs; [fullAt], when it was last written from
+// every alarm (a full reschedule), not from what a later process read back of it.
+data class LockedSnapshot(val timeFormat: String?, val alarms: List<LockedAlarm>, val rewriteAt: Long? = null, val fullAt: Long? = null)
 
 /** An alarm that rang before the first unlock: the ledger and delivery records are brought up to date once it's unlocked. */
 data class LockedFired(val key: String, val trigger: Long, val at: Long)
@@ -95,7 +97,7 @@ object LockedAlarmCodec {
     private const val NULL = "\\0"
 
     fun encode(snapshot: LockedSnapshot): String = buildString {
-        line(HEADER, VERSION, snapshot.timeFormat)
+        line(HEADER, VERSION, snapshot.timeFormat, snapshot.rewriteAt?.toString(), snapshot.fullAt?.toString())
         snapshot.alarms.forEach { a ->
             when (a) {
                 is LockedAlarm.Event -> line("e", a.reminderId.toString(), a.trigger.toString(), a.title, a.location, a.date, a.time,
@@ -123,7 +125,7 @@ object LockedAlarmCodec {
                 }
             }.getOrNull()
         }
-        return LockedSnapshot(header[2], alarms)
+        return LockedSnapshot(header[2], alarms, header.getOrNull(3)?.toLongOrNull(), header.getOrNull(4)?.toLongOrNull())
     }
 
     fun encodeFired(fired: List<LockedFired>): String = buildString { fired.forEach { line(it.key, it.trigger.toString(), it.at.toString()) } }
@@ -172,6 +174,8 @@ class LockedAlarmMirror(private val read: () -> LockedSnapshot?, private val wri
     private var alarms: MutableMap<String, LockedAlarm>? = null
     private var written: LockedSnapshot? = null
     private var dirty = false
+    // T16-1: read back from the last snapshot, the alarms it left out are missing here until every alarm is set again.
+    private var complete = false
 
     private fun loaded(): MutableMap<String, LockedAlarm> = alarms ?: run {
         val last = runCatching { read() }.getOrNull()
@@ -188,6 +192,14 @@ class LockedAlarmMirror(private val read: () -> LockedSnapshot?, private val wri
         if (loaded().remove(key) != null) dirty = true
     }
 
+    /** Every alarm has just been set again (a full reschedule): the alarms here are all of them. */
+    @Synchronized fun markComplete(now: Long) {
+        loaded()
+        complete = true
+        val full = written?.fullAt
+        if (full == null || LockedAlarmSelection.stale(full, now)) dirty = true
+    }
+
     /**
      * Writes the snapshot if an alarm or the time format changed since it was last written, or when [force]d. Null when
      * nothing was written; else when it is to be written again ([LockedAlarmSelection.rewriteAt], Long.MAX_VALUE: no need).
@@ -196,10 +208,12 @@ class LockedAlarmMirror(private val read: () -> LockedSnapshot?, private val wri
         val map = loaded()
         val format = runCatching { timeFormat() }.getOrNull()
         if (!force && !dirty && written?.timeFormat == format) return null
-        val snapshot = LockedSnapshot(format, LockedAlarmSelection.select(map.values, now))
+        // T16-1: only a complete set knows what was left out; a partial one keeps the refresh the last full write asked for.
+        val rewrite = LockedAlarmSelection.rewriteAt(map.values, now).let { if (complete) it else listOfNotNull(it, written?.rewriteAt).minOrNull() }
+        val snapshot = LockedSnapshot(format, LockedAlarmSelection.select(map.values, now), rewrite, if (complete) now else written?.fullAt)
         write(snapshot)
         written = snapshot
         dirty = false
-        return LockedAlarmSelection.rewriteAt(map.values, now) ?: Long.MAX_VALUE
+        return rewrite ?: Long.MAX_VALUE
     }
 }
