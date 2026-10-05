@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.content.ContextCompat
+import com.example.itinerary.data.PlannerNote
+import com.example.itinerary.data.PlannerTask
 import com.example.itinerary.data.activeReminderAt
 import kotlinx.coroutines.launch
 
@@ -39,29 +41,47 @@ internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: 
     }
 }
 
-/** An alarm displaced by another, or timed out, keeps its own normal notification and actions. */
-internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false): Boolean {
+/**
+ * An alarm displaced by another, or timed out, keeps its own normal notification and actions. [silent]: ringing was just
+ * turned off, so it doesn't sound again (A15-3).
+ */
+internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false, silent: Boolean = false): Boolean {
     val id = extras.getString(EXTRA_OWNER_ID) ?: return false
     val trigger = extras.getLong(ReminderScheduler.EXTRA_TRIGGER)
-    when (extras.getString(EXTRA_OWNER_KIND)) {
+    val kind = extras.getString(EXTRA_OWNER_KIND)
+    when (kind) {
         "task" -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") +
-            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger)
-        "note" -> {
-            // The alarm carries no word of the note: "Note reminder" at once, then (A14-3) its name and first lines once read,
-            // unless it was dealt with meanwhile. Before the first unlock the words wait, as for any note (DirectBoot).
-            postNoteReminder(context, id, trigger, null, missed = missed)
-            if (DirectBoot.isUnlocked(context)) {
-                val app = context.applicationContext as com.example.itinerary.ItineraryApp
-                app.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    runCatching {
-                        val note = app.repository.note(id)?.takeIf { it.activeReminderAt == trigger } ?: return@runCatching
-                        val shown = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.tag == "note:$id" }
-                        if (shown) postNoteReminder(context, id, trigger, note, quiet = true, missed = missed)
-                    }.onFailure { android.util.Log.w("OwnedAlarm", "Couldn't show the note's words", it) }
-                }
-            }
-        }
+            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger, silent = silent)
+        // The alarm carries no word of the note: "Note reminder" at once, its words once read (below).
+        "note" -> postNoteReminder(context, id, trigger, null, missed = missed, silent = silent)
         else -> return false
     }
+    refreshOwnedAlarm(context, kind, id, trigger, missed, silent)
     return true
+}
+
+/**
+ * A14-3/A15-3: shown again, quietly, from the reminder as it now is (a note's words, a task's current title). A15-2: one
+ * dealt with meanwhile (Done, Snooze, changed, deleted) is taken away instead, and it is checked again after posting, so a
+ * Done landing in between can't bring it back. Before the first unlock nothing can be read: it waits, as any note (DirectBoot).
+ */
+private fun refreshOwnedAlarm(context: Context, kind: String, id: String, trigger: Long, missed: Boolean, silent: Boolean) {
+    if (!DirectBoot.isUnlocked(context)) return
+    val app = context.applicationContext as com.example.itinerary.ItineraryApp
+    val tag = "$kind:$id"
+    app.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val manager = androidx.core.app.NotificationManagerCompat.from(context)
+            suspend fun current(): Any? = if (kind == "task") app.repository.task(id)?.takeIf { !it.done && it.activeReminderAt == trigger }
+                else app.repository.note(id)?.takeIf { it.activeReminderAt == trigger }
+            val item = current() ?: run { manager.cancel(tag, 0); return@runCatching }
+            val shown = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.tag == tag }
+            if (!shown) return@runCatching
+            when (item) {
+                is PlannerTask -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") + item.title, trigger, quiet = true, silent = silent)
+                is PlannerNote -> postNoteReminder(context, id, trigger, item, quiet = true, missed = missed, silent = silent)
+            }
+            if (current() == null) manager.cancel(tag, 0)
+        }.onFailure { android.util.Log.w("OwnedAlarm", "Couldn't show the reminder as it now is", it) }
+    }
 }

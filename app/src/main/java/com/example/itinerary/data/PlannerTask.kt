@@ -46,6 +46,8 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id") fun observe(id: String): Flow<PlannerTask?>
     @Insert suspend fun insert(task: PlannerTask)
     @Insert suspend fun insertAll(tasks: List<PlannerTask>)
+    // U15-1: a ring choice left without its reminder (builds before that rule) is cleared.
+    @Query("UPDATE tasks SET ringUntilDismissed = 0 WHERE ringUntilDismissed = 1 AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
     @Update suspend fun update(task: PlannerTask)
     @Query("DELETE FROM tasks WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM tasks") suspend fun deleteAll()
@@ -135,7 +137,7 @@ object TaskCodec {
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
             prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),
             // Optional: older backups have no task snoozes.
-            ringUntilDismissed = value.optBoolean("ringUntilDismissed", false),
+            ringUntilDismissed = value.optBoolean("ringUntilDismissed", false) && !value.isNull("reminderAt"),
             snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null
                 else value.strictLong("snoozedUntil") { "Invalid task snooze time" })
             // A task saved before the cap may have more text; it is cut rather than refusing the whole file.

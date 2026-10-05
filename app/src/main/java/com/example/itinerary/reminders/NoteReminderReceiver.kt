@@ -68,7 +68,7 @@ class NoteReminderReceiver : BroadcastReceiver() {
  * is locked it leaves the words out of the notification itself too, and is shown again with them after the unlock
  * (NoteWords). [quiet]: shown again with the note's words, without sounding a second time.
  */
-internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false) {
+internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false) {
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -95,7 +95,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
-        .setOnlyAlertOnce(quiet)
+        .setOnlyAlertOnce(quiet).setSilent(silent)
         .addDataAction(context, "Done", NoteActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
     try { NotificationManagerCompat.from(context).notify(tag, 0, notification) }

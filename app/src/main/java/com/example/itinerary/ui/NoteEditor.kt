@@ -134,7 +134,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val attachments by body::attachments
     fun setAttachments(list: List<Attachment>) { body.attachments = list }
     var pendingPhoto by rememberSaveable { mutableStateOf(recovered?.pendingPhoto) }
-    var ringUntilDismissed by rememberSaveable { mutableStateOf(start.ringUntilDismissed) }
+    // U15-1: no reminder, no ringing, whatever an earlier build stored.
+    var ringUntilDismissed by rememberSaveable { mutableStateOf(start.ringUntilDismissed && start.reminderAt != null) }
     var reminderAt by rememberSaveable { mutableStateOf(start.reminderAt) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
     var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
@@ -158,7 +159,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     fun load(note: PlannerNote, words: Boolean = true) {
         if (words) { title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook }
         color = note.color
-        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed; priority = note.priority
+        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null; priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
     val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,

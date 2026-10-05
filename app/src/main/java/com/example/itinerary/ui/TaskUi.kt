@@ -236,7 +236,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val repo = app.repository
     val notifications = rememberNotificationState()
     val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
-    var ringUntilDismissed by rememberSaveable(initial.id) { mutableStateOf(draft?.optBoolean("ringUntilDismissed", initial.ringUntilDismissed) ?: initial.ringUntilDismissed) }
+    // U15-1: no reminder, no ringing, whatever an earlier build stored.
+    val initialRing = initial.ringUntilDismissed && initial.reminderAt != null
+    var ringUntilDismissed by rememberSaveable(initial.id) { mutableStateOf(draft?.optBoolean("ringUntilDismissed", initialRing) ?: initialRing) }
     var reminderAt by rememberSaveable(initial.id) { mutableStateOf(if (draft != null && !draft.isNull("reminderAt")) draft.getLong("reminderAt") else if (draft != null) null else initial.reminderAt) }
     var reminderSuggestion by rememberSaveable(initial.id) { mutableStateOf<String?>(null) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }

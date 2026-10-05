@@ -62,7 +62,11 @@ class AlarmService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 // D14-1: ringing turned off while it rang: the reminder stays, as its normal notification.
-                if (intent.getBooleanExtra(EXTRA_KEEP_REMINDER, false)) ringing?.let { postOwnedAlarm(this, it) }
+                // A15-1: only one that still stands (not completed or deleted meanwhile), checked and posted under the lock
+                // that cancelling takes, and without sounding again (A15-3).
+                if (intent.getBooleanExtra(EXTRA_KEEP_REMINDER, false)) ringing?.let { extras ->
+                    synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.isCurrent(this, extras)) postOwnedAlarm(this, extras, silent = true) }
+                }
                 stopRinging()
             }
             ACTION_SNOOZE -> {
@@ -78,7 +82,7 @@ class AlarmService : Service() {
                     startRinging(extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
                 }
                 // Turned quiet on its way (D14-1): its reminder is shown as a normal notification instead.
-                if (!accepted && OwnedAlarmStarts.takeQuiet(this, extras)) extras?.let { postOwnedAlarm(this, it) }
+                if (!accepted) synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.takeQuiet(this, extras)) extras?.let { postOwnedAlarm(this, it) } }
                 if (!accepted && ringing != null) ignoredStart = maxOf(ignoredStart, startId)
                 if (!accepted && ringing == null) {
                     // Fulfil the foreground-start deadline, then end this cancelled start without playing anything.

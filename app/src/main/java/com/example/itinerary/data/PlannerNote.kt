@@ -80,6 +80,8 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE id = :id") fun observe(id: String): Flow<PlannerNote?>
     @Insert suspend fun insert(note: PlannerNote)
     @Insert suspend fun insertAll(notes: List<PlannerNote>)
+    // U15-1: a ring choice left without its reminder (builds before that rule) is cleared.
+    @Query("UPDATE notes SET ringUntilDismissed = 0 WHERE ringUntilDismissed = 1 AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
     @Update suspend fun update(note: PlannerNote)
     // Room for a note placed at [from] (Duplicate): every note there or after it moves down one place, or [by] places.
     @Query("UPDATE notes SET position = position + 1 WHERE position >= :from") suspend fun makeRoomAt(from: Long)
@@ -336,7 +338,7 @@ object NoteCodec {
             DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"),
             // Older files have no place: most recently changed first, as the page sorted them then.
             time("position") ?: -(time("modified") ?: created),
-            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL), ringUntilDismissed = value.optBoolean("ringUntilDismissed", false))
+            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL), ringUntilDismissed = value.optBoolean("ringUntilDismissed", false) && time("reminderAt") != null)
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
             .let(Notes::clean)
     }

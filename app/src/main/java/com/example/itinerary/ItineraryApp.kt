@@ -144,6 +144,7 @@ class ItineraryApp : Application() {
         if (!started.compareAndSet(false, true)) return
         // A Gemini or OpenAI key saved by an earlier version is deleted, not left behind.
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.example.itinerary.data.RemovedAiData.remove(this@ItineraryApp) } }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { repository.clearRingWithoutReminder() } }
         // Calendar sync in the background follows the setting (and a restored backup's).
         // Logged, not thrown: started at the unlock, WorkManager may not be ready yet (it starts with the app's providers).
         // D6-5: then it is tried once more a little later, with the setting as it is by then.

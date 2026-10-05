@@ -89,6 +89,67 @@ class TaskNoteRingingDataTest {
         } finally { db.close() }
     }
 
+    // D15-2: a reminder whose time has passed (no snooze), through the editor's saveNote and note sync too; turned on, the
+    // reminder is set again with the new choice rather than cancelled.
+    @Test fun ringOnlyChangesOnPassedRemindersAcrossWritePaths() = runBlocking {
+        val log = mutableListOf<String>()
+        val alarms = object : ReminderAlarms {
+            override fun schedule(item: ItineraryItem, reminder: Reminder) {}
+            override fun cancel(reminderId: Long) {}
+            override fun scheduleTask(task: PlannerTask) { log += "schedule task ring=${task.ringUntilDismissed}" }
+            override fun scheduleNote(note: PlannerNote) { log += "schedule note ring=${note.ringUntilDismissed}" }
+            override fun cancelTask(id: String) { log += "cancel task" }
+            override fun cancelNote(id: String) { log += "cancel note" }
+            override fun ringOffTask(id: String) { log += "quiet task" }
+            override fun ringOffNote(id: String) { log += "quiet note" }
+        }
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val repo = Repository(db, AttachmentStore(context), alarms)
+            val due = System.currentTimeMillis() - 60_000
+            repo.saveTask(PlannerTask(id = "qa-passed-task", title = "QA passed task", reminderAt = due))
+            val note = repo.saveNote(PlannerNote(title = "QA passed note", reminderAt = due), true)
+            log.clear()
+            repo.saveTask(repo.task("qa-passed-task")!!.copy(ringUntilDismissed = true), false)
+            assertEquals(listOf("schedule task ring=true"), log); log.clear()
+            repo.saveTask(repo.task("qa-passed-task")!!.copy(ringUntilDismissed = false), false)
+            assertEquals(listOf("quiet task", "schedule task ring=false"), log); log.clear()
+            repo.saveNote(repo.note(note.id)!!.copy(ringUntilDismissed = true), false)
+            assertEquals(listOf("schedule note ring=true"), log); log.clear()
+            repo.saveNote(repo.note(note.id)!!.copy(ringUntilDismissed = false), false)
+            assertEquals(listOf("quiet note", "schedule note ring=false"), log); log.clear()
+            repo.saveNote(repo.note(note.id)!!.copy(ringUntilDismissed = true), false); log.clear()
+            val current = repo.note(note.id)!!
+            assertTrue(repo.putSyncedNote(current.copy(ringUntilDismissed = false), current))
+            assertEquals(listOf("quiet note", "schedule note ring=false"), log)
+        } finally { db.close() }
+    }
+
+    // U15-1: a ring choice an earlier build stored without its reminder is cleared at start, and never read back from a file.
+    @Test fun ringChoiceWithoutReminderFromEarlierBuildsIsCleared() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val repo = Repository(db, AttachmentStore(context), object : ReminderAlarms {
+                override fun schedule(item: ItineraryItem, reminder: Reminder) {}
+                override fun cancel(reminderId: Long) {}
+            })
+            val due = System.currentTimeMillis() + 3_600_000
+            db.taskDao().insert(PlannerTask(id = "qa-legacy", title = "QA legacy", ringUntilDismissed = true))
+            db.taskDao().insert(PlannerTask(id = "qa-kept", title = "QA kept", reminderAt = due, ringUntilDismissed = true))
+            db.noteDao().insert(Notes.clean(PlannerNote(id = "qa-legacy-note", title = "QA legacy note", reminderAt = due, ringUntilDismissed = true)).copy(reminderAt = null))
+            assertTrue(db.noteDao().byId("qa-legacy-note")!!.ringUntilDismissed)
+            repo.clearRingWithoutReminder()
+            assertFalse(repo.task("qa-legacy")!!.ringUntilDismissed)
+            assertTrue(repo.task("qa-kept")!!.ringUntilDismissed)
+            assertFalse(repo.note("qa-legacy-note")!!.ringUntilDismissed)
+            val legacyTask = TaskCodec.encode(listOf(PlannerTask(id = "x", title = "x", ringUntilDismissed = true)))
+            assertFalse(TaskCodec.decode(legacyTask).single().ringUntilDismissed)
+            val legacyNote = NoteCodec.encode(listOf(PlannerNote(id = "y", title = "y", ringUntilDismissed = true)))
+            assertFalse(NoteCodec.decode(legacyNote).single().ringUntilDismissed)
+            assertTrue(TaskCodec.decode(TaskCodec.encode(listOf(PlannerTask(id = "z", title = "z", reminderAt = due, ringUntilDismissed = true)))).single().ringUntilDismissed)
+        } finally { db.close() }
+    }
+
     // U14-2: no reminder, no ringing: the choice doesn't wait unseen for the next reminder.
     @Test fun ringChoiceEndsWithItsReminder() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()

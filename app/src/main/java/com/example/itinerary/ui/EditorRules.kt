@@ -109,7 +109,7 @@ object EditorRules {
     // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
     fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
         fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),
-            checklist = checklist.map { it.copy(text = it.text.trim()) })
+            checklist = checklist.map { it.copy(text = it.text.trim()) }, ringUntilDismissed = ringUntilDismissed && reminderAt != null)
         return recovered || saved.stored() != now.stored()
     }
 }

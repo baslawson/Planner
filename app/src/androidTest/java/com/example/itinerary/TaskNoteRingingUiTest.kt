@@ -115,6 +115,25 @@ class TaskNoteRingingUiTest {
         val saved = runBlocking { app.repository.snapshot().tasks.single() }
         assertNull(saved.reminderAt); assertFalse(saved.ringUntilDismissed)
     }
+    // U15-1: a task an earlier build stored with ringing on but no reminder: a new reminder starts quiet, and Remove then
+    // Close asks nothing. Inserted as stored (the start-up clean-up would otherwise have run already).
+    @Test fun legacyRingWithoutReminderStartsQuiet() {
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) { app.database.taskDao().insert(PlannerTask(id = "qa-ui-legacy", title = "QA legacy ring", ringUntilDismissed = true)) }
+        ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        click("QA legacy ring")
+        var chip: AccessibilityNodeInfo? = null
+        await("No Tomorrow reminder chip") { chip = nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Tomorrow") == true }; chip != null }
+        while (chip != null && !chip!!.isClickable) chip = chip!!.parent
+        assertTrue(chip!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        reveal("Ring until I stop it")
+        assertFalse("A new reminder on a legacy task started with ringing on", labelledRing()!!.isChecked)
+        var target: AccessibilityNodeInfo? = nodes().first { it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("Remove reminder") == true }
+        while (target != null && !target.isClickable) target = target.parent
+        assertTrue(target!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("Reminder wasn't removed") { find("Ring until I stop it") == null }
+        click("Close"); Thread.sleep(800)
+        assertNull("Close asked to save an unchanged legacy task", find("Keep editing"))
+    }
     @Test fun noteRingChoiceSavesAndReopens() {
         val initial = NoteCodec.decode(org.json.JSONArray().put(org.json.JSONObject().put("id", "qa-ui-ring-note")
             .put("title", "QA note ring choice").put("content", "").put("reminderAt", System.currentTimeMillis() + 3_600_000))).single()

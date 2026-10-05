@@ -319,6 +319,13 @@ class Repository(
         clean
     }
 
+    // U15-1: once at start, a ring choice stored without its reminder by an earlier build is cleared (nothing is armed for it).
+    suspend fun clearRingWithoutReminder() = changes.withLock {
+        withContext(NonCancellable) {
+            if (taskDao.clearRingWithoutReminder() + noteDao.clearRingWithoutReminder() > 0) afterCommit()
+        }
+    }
+
     // Pin, archive or tick a checklist line from the Notes page: [change] made to the note as it is at that moment.
     suspend fun updateNote(id: String, change: (PlannerNote) -> PlannerNote): PlannerNote? = changes.withLock {
         withContext(NonCancellable) {

@@ -164,6 +164,32 @@ class TaskNoteRingingAlarmTest {
         assertEquals("PRIVATE BODY", posted("note:${note.id}")!!.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
         action("Stop"); await("Stop failed") { alarm() == null }
     }
+    // A15-3: ringing turned off (and renamed in the same save): the reminder it leaves is silent and shows the title now.
+    @Test fun ringOffLeavesSilentReminderWithCurrentTitle() {
+        val owner = start("task")
+        runBlocking { app.repository.saveTask(app.repository.snapshot().tasks.single { it.id == owner.id }.copy(title = "QA renamed task", ringUntilDismissed = false), false) }
+        await("Ringing didn't stop") { alarm() == null }
+        await("The kept reminder doesn't show the current title") {
+            posted("task:${owner.id}")?.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "QA renamed task"
+        }
+        assertEquals("The kept reminder sounds again", Notification.GROUP_ALERT_SUMMARY, posted("task:${owner.id}")!!.notification.groupAlertBehavior)
+    }
+    // A15-1: ringing turned off, then the task completed straight after: it must not come back as a notification.
+    @Test fun ringOffThenDoneDoesNotBringTheTaskBack() {
+        val owner = start("task")
+        ins.runOnMainSync {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                app.repository.saveTask(app.repository.snapshot().tasks.single { it.id == owner.id }.copy(ringUntilDismissed = false), false)
+                app.repository.setTaskDone(owner.id, true)
+            }
+        }
+        await("Ringing didn't stop") { alarm() == null }
+        val end = SystemClock.uptimeMillis() + 2_000
+        while (SystemClock.uptimeMillis() < end) {
+            assertNull("The completed task's notification came back", posted("task:${owner.id}"))
+            Thread.sleep(50)
+        }
+    }
     @Test fun anotherOwnerCannotStopTheRingingNoteAndNewAlarmDisplacesItSafely() {
         val note = start("note")
         app.reminderScheduler.cancelTask(note.id)
