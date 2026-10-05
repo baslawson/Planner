@@ -49,8 +49,10 @@ class NotesUiTest {
             }
         }
     }
+    private var toolbarAnchorWindowId: Int? = null
     private fun click(text: String) {
         reveal(text)
+        if (text == "Sort" || text == "Show") toolbarAnchorWindowId = ins.uiAutomation.freshRoot?.windowId
         await { var n = find(text); while (n != null && !n.isClickable) n = n.parent; n?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true }
         Thread.sleep(400)
     }
@@ -65,10 +67,21 @@ class NotesUiTest {
             if (android.os.Build.VERSION.SDK_INT >= 34) ins.uiAutomation.clearCache()
             val result = mutableListOf<AccessibilityNodeInfo>()
             fun visit(n: AccessibilityNodeInfo) { result += n; for (i in 0 until n.childCount) n.getChild(i)?.let(::visit) }
-            // The popups: every app window but the largest, which is the screen itself.
-            fun area(w: android.view.accessibility.AccessibilityWindowInfo) = android.graphics.Rect().also(w::getBoundsInScreen).let { it.width() * it.height() }
-            val apps = ins.uiAutomation.windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
-            apps.sortedByDescending(::area).drop(1).forEach { w -> w.root?.let(::visit) }
+            val anchor = toolbarAnchorWindowId
+            if (anchor != null) {
+                // Material menus can be the active root without appearing as a separate application window.
+                // Compare against the actual toolbar window captured before opening, not a title/type guess.
+                val roots = ins.uiAutomation.windows.mapNotNull { it.root } + listOfNotNull(ins.uiAutomation.freshRoot)
+                roots.filter { it.windowId != anchor && it.packageName?.toString() == context.packageName }
+                    .distinctBy { it.windowId }.forEach(::visit)
+            } else {
+                // Existing exposed text-field suggestions use the smaller secondary app windows.
+                fun area(w: android.view.accessibility.AccessibilityWindowInfo) = android.graphics.Rect().also(w::getBoundsInScreen).let { it.width() * it.height() }
+                val apps = ins.uiAutomation.windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+                val largest = apps.maxOfOrNull(::area) ?: 0
+                apps.filter { it.title?.toString()?.contains("PopupWindow") == true || area(it) < largest }
+                    .forEach { w -> w.root?.let(::visit) }
+            }
             return block(result)
         } finally { info.flags = before; ins.uiAutomation.serviceInfo = info }
     }
@@ -83,6 +96,7 @@ class NotesUiTest {
             n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         }
         await { !listShows(text) }
+        toolbarAnchorWindowId = null
         Thread.sleep(300)
     }
     // Chooses [choice] in the Notes page's Show list.
@@ -123,6 +137,88 @@ class NotesUiTest {
         await { find("Search notes") != null || find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
     }
 
+    @Test fun searchOpensFromToolbarAndClosingRestoresNotes() {
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = "QA orchard", content = "Apples and pears"), create = true)
+            app.repository.saveNote(PlannerNote(title = "QA library", content = "Return books"), create = true)
+        }
+        openNotes()
+        fun searchField() = nodes().firstOrNull { n -> n.isVisibleToUser && n.isEditable &&
+            (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Search notes" } }
+        assertNull("Search field should leave room for notes until opened", searchField())
+        fun bounds(label: String) = android.graphics.Rect().also { find(label)!!.getBoundsInScreen(it) }
+        val cloud = nodes().first { it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("Notes sync:") == true }
+        val cloudBounds = android.graphics.Rect().also(cloud::getBoundsInScreen)
+        assertTrue("Sync sits beside the heading", cloudBounds.left >= bounds("NOTES").right &&
+            cloudBounds.left - bounds("NOTES").right <= 24 * context.resources.displayMetrics.density)
+        assertTrue("Sync belongs left of search", cloudBounds.right <= bounds("Search notes").left)
+        assertTrue("Search belongs left of Show", bounds("Search notes").right <= bounds("Show").left)
+        assertTrue("Show belongs left of sort", bounds("Show").right <= bounds("Sort").left)
+        assertTrue("Sort belongs left of view style", bounds("Sort").right <= bounds("Show as list").left)
+        val topWithoutSearch = bounds("QA orchard").top
+        screenshot("search-hidden")
+        click("Search notes")
+        await { searchField()?.isFocused == true }
+        assertTrue("Opening search makes room for its field", bounds("QA orchard").top > topWithoutSearch)
+        typeInto("Search notes", "orchard")
+        await { find("QA orchard") != null && find("QA library") == null }
+        screenshot("search-filtered")
+        click("Clear search")
+        await { find("QA orchard") != null && find("QA library") != null }
+        assertNotNull("Clear keeps search open", find("Close search"))
+        typeInto("Search notes", "no such note")
+        await { find("No notes match \"no such note\".") != null }
+        click("Close search")
+        await { find("Search notes") != null && find("QA orchard") != null && find("QA library") != null }
+        assertNull(searchField())
+        assertEquals("Closing restores the space", topWithoutSearch, bounds("QA orchard").top)
+        screenshot("search-closed")
+        // Reopening focuses a newly composed field, and Back clears its query before navigating away.
+        click("Search notes")
+        await { searchField()?.isFocused == true }
+        typeInto("Search notes", "orchard")
+        // Android consumes the first Back to dismiss the keyboard; the next reaches the Notes handler.
+        shell("input keyevent KEYCODE_BACK")
+        Thread.sleep(300)
+        if (find("Close search") != null) shell("input keyevent KEYCODE_BACK")
+        await { find("Search notes") != null && find("QA library") != null }
+        assertNotNull("Back closes search without leaving Notes", find("NOTES"))
+    }
+
+    @Test fun manyNotesScrollInGridAndList() {
+        val oldColor = app.settings.scrollBarColor.value
+        val oldSeeThrough = app.settings.scrollBarSeeThrough.value
+        try {
+            app.settings.setScrollBarColor(android.graphics.Color.RED)
+            app.settings.setScrollBarSeeThrough(0)
+            runBlocking {
+                repeat(30) { index ->
+                    app.repository.saveNote(PlannerNote(title = "QA scroll %02d".format(index),
+                        content = List(4) { "Notes retain enough text to make scrolling necessary." }.joinToString("\n")), create = true)
+                    Thread.sleep(2)
+                }
+            }
+            openNotes()
+            click("Sort"); pick(NoteSort.TITLE.label)
+            // Changing sort preserves the visible item; explicitly return to the first note.
+            reveal("QA scroll 00")
+            assertNull("Last note should require scrolling", find("QA scroll 29"))
+            screenshot("scroll-grid-top")
+            reveal("QA scroll 29")
+            screenshot("scroll-grid-bottom")
+            click("Show as list")
+            await { app.settings.notesAsList.value }
+            reveal("QA scroll 00")
+            screenshot("scroll-list-top")
+            assertNull("Last note should require scrolling in list view", find("QA scroll 29"))
+            reveal("QA scroll 29")
+            screenshot("scroll-list-bottom")
+        } finally {
+            app.settings.setScrollBarColor(oldColor)
+            app.settings.setScrollBarSeeThrough(oldSeeThrough)
+        }
+    }
+
     @Test fun longSelectionsAndLargeTextGridStayReadable() {
         val oldSize = app.settings.textSizePercent.value
         val notebook = "Household administration and documents"
@@ -143,10 +239,11 @@ class NotesUiTest {
             click("Sort"); pick(NoteSort.CHANGED.label)
             await { find(firstTitle) != null && find(secondTitle) != null }
             val usableDp = context.resources.configuration.screenWidthDp - 32
-            if (usableDp < 600) {
-                assertTrue("Selected controls must stack on a phone-width screen",
-                    bounds(find("Sort")!!).top > bounds(find("Show")!!).bottom)
-            }
+            assertTrue("Show belongs between Search and Sort in the toolbar",
+                bounds(find("Search notes")!!).right <= bounds(find("Show")!!).left &&
+                    bounds(find("Show")!!).right <= bounds(find("Sort")!!).left)
+            assertTrue("Default Notes page should not have permanent selection fields",
+                nodes().none { it.isVisibleToUser && it.isEditable })
             screenshot("responsive-grid-100")
             app.settings.setTextSizePercent(125)
             // Recomposition and staggered-grid remeasurement must settle before positions are compared.
@@ -158,6 +255,9 @@ class NotesUiTest {
             assertFalse("Responsive one-column grid must retain the saved grid choice", app.settings.notesAsList.value)
             assertNotNull(find("Show as list"))
             screenshot("responsive-grid-125")
+            click("Sort"); await { listShows(NoteSort.CHANGED.label) }
+            screenshot("sort-menu-125")
+            pick(NoteSort.CHANGED.label)
             repeat(8) {
                 page()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 Thread.sleep(250)
@@ -699,7 +799,7 @@ class NotesUiTest {
         await { find("Cancel") == null } // a drag doesn't select
         screenshot("drag-after")
         // While searching, the cards stay where they are.
-        reveal("Search notes")
+        click("Search notes")
         val search = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Search notes" } }
         search.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "QA") })
         Thread.sleep(500)

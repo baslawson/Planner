@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -53,6 +54,24 @@ fun LazyScrollHints(state: LazyListState, modifier: Modifier = Modifier, content
             else (state.firstVisibleItemIndex.toFloat() / total) to (visible.toFloat() / total)
         },
     ) { content() }
+}
+
+// Notes use a staggered grid for both layouts; share the same drawing and Settings colours as lists.
+@Composable
+fun LazyStaggeredScrollHints(state: LazyStaggeredGridState, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    ScrollBarFrame(modifier = modifier, thumb = { _ ->
+        val info = state.layoutInfo
+        val total = info.totalItemsCount
+        if (total == 0 || !state.canScrollForward && !state.canScrollBackward) null
+        else {
+            val visible = info.visibleItemsInfo.count {
+                it.offset.y < info.viewportEndOffset && it.offset.y + it.size.height > info.viewportStartOffset
+            }
+            val fraction = visible.toFloat() / total
+            val top = if (!state.canScrollForward) 1f - fraction else state.firstVisibleItemIndex.toFloat() / total
+            top to fraction
+        }
+    }) { content() }
 }
 
 // The same, owning the list state: LazyScrollHints(modifier) { state -> LazyColumn(state = state) { … } }.

@@ -3,6 +3,7 @@ package com.example.itinerary.ui
 import kotlinx.coroutines.flow.first
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -16,6 +17,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +35,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +73,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     val repo = app.repository
     val notes by repo.notes.collectAsStateWithLifecycle(initialValue = null)
     var query by rememberSaveable { mutableStateOf("") }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    fun closeSearch() {
+        query = ""; showSearch = false
+        focusManager.clearFocus(); keyboard?.hide()
+    }
     // Opens on the last Show choice; one whose notebook or tag has gone falls back to all notes (below).
     var filterKey by rememberSaveable { mutableStateOf(app.settings.noteFilter) }
     // NW-8: All notes shown for a share's note is for now, not the Show choice kept for next time. NT-3: so only a choice
@@ -102,7 +118,15 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     LaunchedEffect(shown, notes) { if (notes != null) shown.mapTo(HashSet()) { it.id }.let { ids -> selectedIds.filter { it in ids } }
         .let { if (it != selectedIds) selectedIds = it } }
     val selecting = selectedIds.isNotEmpty()
+    // Selection ends first; the next Back closes search before leaving Notes.
+    androidx.activity.compose.BackHandler(showSearch && !selecting && editingId == null) { closeSearch() }
     androidx.activity.compose.BackHandler(selecting) { selectedIds = emptyList() }
+    LaunchedEffect(showSearch, editingId) {
+        if (showSearch && editingId == null) {
+            searchFocus.requestFocus()
+            keyboard?.show()
+        }
+    }
     fun toggle(id: String) { selectedIds = if (id in selectedSet) selectedIds - id else selectedIds + id }
 
     // Long press, held and moved: the card is dragged to a new place. While it moves (and until the saved order comes
@@ -290,6 +314,17 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     }
     val pendingUndo by repo.pendingDeletions.collectAsStateWithLifecycle()
 
+    val filterChoices = remember(notebooks, tags) {
+        listOf<NoteFilter>(NoteFilter.All) + notebooks.map { NoteFilter.Notebook(it) } + tags.map { NoteFilter.Tag(it) } + NoteFilter.Archive
+    }
+    val filterCounts = remember(all) { noteFilterCounts(all) }
+    fun filterName(choice: NoteFilter) = when (choice) {
+        NoteFilter.All -> "All notes"
+        is NoteFilter.Notebook -> choice.name
+        is NoteFilter.Tag -> "#${choice.name}"
+        NoteFilter.Archive -> "Archive"
+    }
+
     // Notes sync: a pass on opening the page (when it's on), and its cloud in the top bar opens its settings.
     val sync = app.noteSync
     val syncOn by sync.enabled.collectAsStateWithLifecycle()
@@ -307,27 +342,46 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             topBar = {
                 TopAppBar(
                     // The same heading as Agenda and Calendar.
-                    title = { HeadingText("NOTES", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true) },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            HeadingText("NOTES", modifier = Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true)
+                            val label = when {
+                                !syncOn -> "Notes sync: off"
+                                syncState.running -> "Notes sync: syncing"
+                                syncState.error != null -> "Notes sync: problem"
+                                else -> "Notes sync: up to date"
+                            }
+                            IconButton(onClick = { showSync = true }) {
+                                when {
+                                    !syncOn -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
+                                    syncState.running -> SyncCloud(CloudLook.RAINING, MaterialTheme.colorScheme.primary, label)
+                                    syncState.error != null -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.error, label)
+                                    else -> SyncCloud(CloudLook.SYNCED, MaterialTheme.colorScheme.primary, label)
+                                }
+                            }
+                        }
+                    },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                     actions = {
-                        val label = when {
-                            !syncOn -> "Notes sync: off"
-                            syncState.running -> "Notes sync: syncing"
-                            syncState.error != null -> "Notes sync: problem"
-                            else -> "Notes sync: up to date"
+                        IconButton(onClick = { if (showSearch) closeSearch() else showSearch = true }) {
+                            Icon(if (showSearch) Icons.Filled.Close else Icons.Filled.Search,
+                                contentDescription = if (showSearch) "Close search" else "Search notes")
                         }
+                        NotesToolbarMenu("Show", FilterIcon, filterName(filter), filterChoices, filter,
+                            onSelect = { showFilter(it.key()) }) { choice ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(filterName(choice), Modifier.weight(1f))
+                                Text((filterCounts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        NotesToolbarMenu("Sort", SortIcon, sort.label, com.example.itinerary.data.NoteSort.entries, sort,
+                            onSelect = app.settings::setNoteSort) { Text(it.label) }
                         // Grid or list: the button shows the layout it switches to.
                         IconButton(onClick = { app.settings.setNotesAsList(!asList) }) {
                             Text(if (asList) "▦" else "☰", style = MaterialTheme.typography.titleLarge,
                                 modifier = Modifier.semantics { contentDescription = if (asList) "Show as grid" else "Show as list" })
-                        }
-                        IconButton(onClick = { showSync = true }) {
-                            when {
-                                !syncOn -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
-                                syncState.running -> SyncCloud(CloudLook.RAINING, MaterialTheme.colorScheme.primary, label)
-                                syncState.error != null -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.error, label)
-                                else -> SyncCloud(CloudLook.SYNCED, MaterialTheme.colorScheme.primary, label)
-                            }
                         }
                     },
                 )
@@ -348,46 +402,10 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             },
         ) { inner ->
             Column(Modifier.fillMaxSize().padding(inner).imePadding()) {
-                OutlinedTextField(query, { query = it.replace('\n', ' ') }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                if (showSearch) OutlinedTextField(query, { query = it.replace('\n', ' ') },
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).focusRequester(searchFocus),
                     label = { Text("Search notes") }, singleLine = true,
                     trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, contentDescription = "Clear search") } })
-                // One filter at a time, chosen from a list that grows downwards: all notes, each notebook, each #tag, the archive.
-                val choices = remember(notebooks, tags) {
-                    listOf<NoteFilter>(NoteFilter.All) + notebooks.map { NoteFilter.Notebook(it) } + tags.map { NoteFilter.Tag(it) } + NoteFilter.Archive
-                }
-                // How many notes each choice shows, counted in one pass per change to the notes (UI-8).
-                val counts = remember(all) { noteFilterCounts(all) }
-                fun name(choice: NoteFilter) = when (choice) {
-                    NoteFilter.All -> "All notes"
-                    is NoteFilter.Notebook -> choice.name
-                    is NoteFilter.Tag -> "#${choice.name}"
-                    NoteFilter.Archive -> "Archive"
-                }
-                // Phone-width choices stack so selected notebook/sort names have room to wrap.
-                BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    @Composable fun showChoice() {
-                        SettingsDropdown("Show", name(filter), choices, onSelect = { showFilter(it.key()) }, singleLine = false) { choice ->
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(name(choice), Modifier.weight(1f))
-                                Text((counts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                    @Composable fun sortChoice() {
-                        SettingsDropdown("Sort", sort.label, com.example.itinerary.data.NoteSort.entries,
-                            onSelect = app.settings::setNoteSort, singleLine = false) { Text(it.label) }
-                    }
-                    if (maxWidth >= 600.dp * textScale) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f)) { showChoice() }
-                            Box(Modifier.weight(1f)) { sortChoice() }
-                        }
-                    } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        showChoice()
-                        sortChoice()
-                    }
-                }
                 when {
                     notes == null -> {}
                     shown.isEmpty() -> Text(
@@ -407,6 +425,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                     // Screen readers can't drag: in My order a card offers Move earlier / Move later instead.
                     val placeOf = remember(displayed) { displayed.withIndex().associate { it.value.id to it.index } }
                     fun canMove(index: Int, by: Int) = displayed.getOrNull(index + by)?.pinned == displayed.getOrNull(index)?.pinned
+                    LazyStaggeredScrollHints(grid, Modifier.fillMaxSize()) {
                     LazyVerticalStaggeredGrid(
                         columns = if (asList) StaggeredGridCells.Fixed(1) else StaggeredGridCells.Adaptive(160.dp * textScale),
                         state = grid,
@@ -438,6 +457,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                         }
                     }
                     }
+                    }
                 }
             }
         }
@@ -465,6 +485,29 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                 editorKey = UUID.randomUUID().toString(); draftReadFor = null }
         } else LaunchedEffect(id) { editingId = null; draftReadFor = null }
     }
+    }
+}
+
+// Toolbar choices share the same menu, selected indication and scroll bar.
+@Composable
+private fun <T> NotesToolbarMenu(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+    currentLabel: String, choices: List<T>, current: T, onSelect: (T) -> Unit,
+    choiceText: @Composable (T) -> Unit) {
+    Box {
+        var open by remember { mutableStateOf(false) }
+        val scroll = rememberScrollState()
+        IconButton(onClick = { open = true }, modifier = Modifier.semantics { stateDescription = currentLabel }) {
+            Icon(icon, contentDescription = label)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll,
+            modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp)) {
+            choices.forEach { choice ->
+                DropdownMenuItem(text = { choiceText(choice) },
+                    leadingIcon = { if (current == choice) Icon(Icons.Filled.Check, contentDescription = "Selected") },
+                    modifier = Modifier.semantics { selected = current == choice },
+                    onClick = { onSelect(choice); open = false })
+            }
+        }
     }
 }
 
