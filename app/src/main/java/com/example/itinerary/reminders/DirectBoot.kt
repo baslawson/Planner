@@ -35,10 +35,15 @@ object DirectBoot {
      */
     suspend fun afterRing(app: com.example.itinerary.ItineraryApp, now: Long = System.currentTimeMillis()) {
         fun stale(at: Long) = runCatching { LockedAlarmSelection.stale(store(app).writtenAt(), at) }.getOrDefault(false)
-        if (!stale(now)) { app.repository.refillReminders(); return }
+        if (!stale(now)) {
+            app.repository.refillReminders()
+            deliverDeferredReminders(app, now)
+            return
+        }
         app.repository.rescheduleAllReminders()
         // Nothing had changed, so that wrote nothing: written now, so the next ring doesn't do it all again.
         if (stale(System.currentTimeMillis())) app.reminderScheduler.saveLockedAlarms(force = true)
+        deliverDeferredReminders(app, now)
     }
 
     /** At LOCKED_BOOT_COMPLETED: the snapshot's alarms still ahead are set. The number set. */

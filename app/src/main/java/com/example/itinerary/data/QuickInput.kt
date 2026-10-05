@@ -48,7 +48,7 @@ data class QuickInput(
             error = read.error.takeUnless { read.clarificationOnly && read.dateChoices.isEmpty() })
         // A reminder implied by "remind me to" is dropped once it has passed, rather than blocking the entry.
         val impliedPassed = parsed.reminderImplied && parsed.reminderMinutes != null &&
-            reminderTrigger(corrected.date, if (task) null else corrected.time, parsed.reminderMinutes.toLong(), now.zone) <= now
+            corrected.quickReminderTrigger(task, now.zone)!! <= now
         return corrected.copy(
             title = if (task && parsed.location.isNotBlank()) "${parsed.title} at ${parsed.location}" else parsed.title,
             location = if (task) "" else parsed.location,
@@ -76,7 +76,7 @@ fun QuickEntrySuggestion.nextRepeatDate(task: Boolean, now: ZonedDateTime): Loca
 }
 
 fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String? {
-    val reminder = reminderMinutes?.let { reminderTrigger(date, if (task) null else time, it.toLong(), now.zone) }
+    val reminder = quickReminderTrigger(task, now.zone)
     return when {
         task && ambiguousTime && time == null && periodInTitle != null ->
             "‘$periodInTitle’ would be the due day, out of the title. Put it at the end, or open More options → Adjust recognised text to keep it in the title."

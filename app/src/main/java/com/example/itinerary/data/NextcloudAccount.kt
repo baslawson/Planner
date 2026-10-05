@@ -84,13 +84,14 @@ class NextcloudAccountStore(context: Context, private val keyAlias: String = "pl
     // a sync check unlocks it once rather than five or six times. Kept while the file is unchanged on disk; save and clear
     // replace it. The password is in memory between syncs as a result (it already was during one).
     private val cacheKey = file.baseFile.absolutePath + "|" + keyAlias
+    private val lock = locks.computeIfAbsent(file.baseFile.absolutePath) { Any() }
     private fun stamp() = file.baseFile.let { "${it.lastModified()}:${it.length()}" }
 
-    fun load(): NextcloudAccount? {
-        if (!file.baseFile.exists()) { cache.remove(cacheKey); return null }
+    fun load(): NextcloudAccount? = synchronized(lock) {
+        if (!file.baseFile.exists()) { cache.remove(cacheKey); return@synchronized null }
         val stamp = stamp()
-        cache[cacheKey]?.let { (at, account) -> if (at == stamp) return account }
-        return unlock().also { account -> if (account != null) cache[cacheKey] = stamp to account }
+        cache[cacheKey]?.let { (at, account) -> if (at == stamp) return@synchronized account }
+        unlock().also { account -> if (account != null) cache[cacheKey] = stamp to account }
     }
 
     private fun unlock(): NextcloudAccount? {
@@ -108,7 +109,7 @@ class NextcloudAccountStore(context: Context, private val keyAlias: String = "pl
         }
     }
 
-    fun save(account: NextcloudAccount) {
+    fun save(account: NextcloudAccount) = synchronized(lock) {
         try {
             val json = JSONObject().put("server", account.server.toString()).put("username", account.username)
                 .put("password", account.password).put("lastBackup", account.lastBackup.orEmpty())
@@ -131,9 +132,18 @@ class NextcloudAccountStore(context: Context, private val keyAlias: String = "pl
         }
     }
 
-    fun clear() { cache.remove(cacheKey); file.delete() }
+    fun clear() = synchronized(lock) { cache.remove(cacheKey); file.delete() }
+
+    // A delayed backup or a stale Settings window must never replace a newer login or folder.
+    fun updateIfCurrent(expected: NextcloudAccount, change: (NextcloudAccount) -> NextcloudAccount): NextcloudAccount? = synchronized(lock) {
+        val current = load() ?: return@synchronized null
+        if (current.server != expected.server || current.username != expected.username ||
+            current.password != expected.password || current.folderPath != expected.folderPath) return@synchronized null
+        change(current).also(::save)
+    }
 
     private companion object {
+        val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
         val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, NextcloudAccount>>()
     }
 

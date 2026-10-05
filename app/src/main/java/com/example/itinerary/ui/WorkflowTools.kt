@@ -107,10 +107,12 @@ fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onCha
 // note opens on this window's Notes page, which would drop an event or task editor open here ([otherEditorOpen]) and
 // keeps a note open here ([noteEditorOpen]); editors in other windows don't count (N6-6).
 internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOpen: Boolean,
-                              noteEditorOpen: Boolean = false, otherEditorOpen: Boolean = false): String? = when {
+                              noteEditorOpen: Boolean = false, otherEditorOpen: Boolean = false,
+                              newTaskEditorOpen: Boolean = false): String? = when {
     value == "event" && eventEditorOpen -> "An event is open in Planner. Close this share, then save or close that event before sharing again."
     value == "note" && noteEditorOpen -> "A note is open in Planner. Close this share, then save or close that note before sharing again."
     value == "note" && otherEditorOpen -> "An event or task is open in Planner. Close this share, then save or close it before sharing again."
+    value == "task" && newTaskEditorOpen -> "A new task is open in Planner. Close this share, then save or close that task before sharing again."
     draftExists -> "You have an unfinished $value. Close this share, then resume or discard that draft before sharing again."
     else -> null
 }
@@ -165,7 +167,8 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
         if (check.isFailure) { error = "Couldn't check your unfinished draft. Close this share and try again."; return }
         val blocked = sharedDraftBlock(editor, check.getOrThrow(), EditorDraftStore.openEditors.value > 0,
             (window?.notes ?: NoteDraftStore.openEditors.value) > 0,
-            (window?.let { it.events + it.tasks } ?: (EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value)) > 0)
+            (window?.let { it.events + it.tasks } ?: (EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value)) > 0,
+            newTaskEditorOpen = TaskDraftStore.isOpen("new"))
         if (blocked != null) error = blocked
         else if (value == "note") content.getOrNull()?.let { onNote(PlannerNote(title = it.title, content = it.notes)); onDismiss() }
         else {

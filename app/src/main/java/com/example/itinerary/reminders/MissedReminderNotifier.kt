@@ -66,6 +66,24 @@ internal suspend fun handleMissedReminders(repository: Repository, ledger: Alarm
     }
 }
 
+/** Drain the separately tracked waiting alarms outside Repository's scheduling mutex. */
+internal suspend fun drainDeferredReminders(repository: Repository, scheduler: ReminderAlarms, now: Long,
+                                             post: (List<MissedReminders.Missed>) -> Unit) {
+    val pending = scheduler.deferredReminders()
+    if (pending.values.none { it <= now }) return
+    repository.deliverMissedReminders(pending, now) { due ->
+        // Remove only the captured due version: a later edit to the same reminder must stay waiting.
+        scheduler.forgetDeferred(pending.filterValues { it <= now })
+        post(due)
+    }
+}
+
+internal suspend fun deliverDeferredReminders(app: ItineraryApp, now: Long = System.currentTimeMillis()) {
+    drainDeferredReminders(app.repository, app.reminderScheduler, now) { due ->
+        postMissedReminders(app, due, now, afterBoot = false, waiting = true)
+    }
+}
+
 /**
  * After a reboot ([afterBoot]), the reminders due while the phone was off. When the app opens, the ones whose alarm
  * Android dropped without ringing: a force stop (some phones do one when Planner is swiped away) or the exact-alarm
@@ -83,6 +101,7 @@ suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
     catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't record the reminders rung while locked", e) }
     val now = System.currentTimeMillis()
     try {
+        deliverDeferredReminders(app, now)
         handleMissedReminders(app.repository, app.reminderScheduler.ledger, now,
             if (afterBoot) 0L else MissedReminders.openGraceMs(app.reminderScheduler.canScheduleExact()),
             app.reminderScheduler::disarm) { postMissedReminders(app, it, now, afterBoot) }
@@ -111,7 +130,8 @@ private const val MISSED_GROUP = "planner.missed"
  * Normal (never ringing) notifications, in the reminder's own slot so a later real one replaces it. Several go in one group
  * whose summary alone alerts, and at most [MissedReminders.MAX_SHOWN] are shown; the summary counts the rest.
  */
-fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, now: Long, afterBoot: Boolean = true) {
+fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, now: Long, afterBoot: Boolean = true,
+                        waiting: Boolean = false) {
     if (missed.isEmpty() || !notificationsEnabled(context)) return
     val grouped = missed.size > 1
     val shown = missed.take(MissedReminders.MAX_SHOWN)
@@ -122,7 +142,7 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
         val time = at.toLocalTime().label(timeFormat, context)
         val today = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
         val day = if (at.toLocalDate() == today) "" else at.toLocalDate().format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())) + ", "
-        return "Missed · due $day$time"
+        return (if (waiting) "Due " else "Missed · due ") + "$day$time"
     }
     fun open(code: Int) = PendingIntent.getActivity(context, code,
         openPlannerIntent(context),
@@ -138,11 +158,11 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
         val tag = "note:${m.note.id}"
         val words = !NoteWords.hide(context)
         if (words) NoteWords.shown(tag) else NoteWords.later(context, tag) { missedNote(m, quiet = true) }
-        manager.notify(tag, 0, builder(if (words) com.example.itinerary.data.Notes.label(m.note) else "Missed note reminder", dueText(m.due), 0)
+        manager.notify(tag, 0, builder(if (words) com.example.itinerary.data.Notes.label(m.note) else if (waiting) "Note reminder" else "Missed note reminder", dueText(m.due), 0)
             .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("Missed note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
+                .setContentTitle(if (waiting) "Note reminder" else "Missed note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
             // U-13: opens the note, as the reminder itself does.
             .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
@@ -173,8 +193,8 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
             shown.forEach { style.addLine(it.title()) }
             if (more > 0) style.setSummaryText("+$more more in Planner")
             manager.notify("missed-reminders", 0, NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_notification).setContentTitle("${missed.size} missed reminders")
-                .setContentText((if (afterBoot) "While your phone was off" else "Android stopped their alarms") + if (more > 0) " · $more more in Planner" else "")
+                .setSmallIcon(R.drawable.ic_notification).setContentTitle("${missed.size} ${if (waiting) "reminders due" else "missed reminders"}")
+                .setContentText((if (waiting) "Open Planner to see them" else if (afterBoot) "While your phone was off" else "Android stopped their alarms") + if (more > 0) " · $more more in Planner" else "")
                 .setStyle(style).setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setGroup(MISSED_GROUP).setGroupSummary(true).setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
                 .setContentIntent(open(0)).setAutoCancel(true).build())

@@ -224,6 +224,56 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         }
     }
 
+    enum class NoteDelete { DELETED, CHANGED, UNSUPPORTED }
+
+    // Notes API DELETE ignores If-Match. Resolve its backing file id through DAV and delete only that version.
+    fun deleteNoteFile(account: NextcloudAccount, notesPath: String, category: String, id: Long,
+                       content: String, stillCurrent: () -> Boolean): NoteDelete {
+        fun parts(path: String, emptyAllowed: Boolean): List<String>? {
+            if (path.isEmpty()) return if (emptyAllowed) emptyList() else null
+            val parts = path.trim('/').split('/')
+            if (parts.any { it.isEmpty() || it == "." || it == ".." || it.contains('\\') ||
+                    it.any { c -> c.isISOControl() } || Regex("(?i)%2f|%5c|%2e").containsMatchIn(it) }) return null
+            return parts
+        }
+        val path = parts(notesPath, false) ?: return NoteDelete.UNSUPPORTED
+        val sub = parts(category, true) ?: return NoteDelete.UNSUPPORTED
+        val folder = account.filesRoot.newBuilder().apply { (path + sub).forEach { addPathSegment(it) }; addPathSegment("") }.build()
+        if (!inside(folder, account.filesRoot)) return NoteDelete.UNSUPPORTED
+        val entries = multistatus(account, "PROPFIND", folder, NOTE_PROPERTIES, "1", missingIsEmpty = true,
+            tooLarge = "The notes folder is too large to check safely.", invalid = "Nextcloud returned an invalid notes file list.",
+            empty = "Nextcloud returned an empty notes file list.")
+        val matching = entries.filter { (url, prop) ->
+            inside(url, folder) && segments(url).size == segments(folder).size + 1 &&
+                url.pathSegments.none { it == "." || it == ".." || '/' in it || '\\' in it } &&
+                prop("resourcetype")?.children("collection")?.isNotEmpty() != true &&
+                prop("fileid", "http://owncloud.org/ns")?.textContent?.trim()?.toLongOrNull() == id
+        }
+        if (matching.size != 1) return NoteDelete.UNSUPPORTED
+        val (url, prop) = matching.single()
+        val rawTag = prop("getetag")?.textContent?.trim() ?: return NoteDelete.UNSUPPORTED
+        if (rawTag.startsWith("W/") || !rawTag.startsWith('"') || !rawTag.endsWith('"')) return NoteDelete.UNSUPPORTED
+        val tag = etag(rawTag) ?: return NoteDelete.UNSUPPORTED
+        request(account, "GET", url, headers = mapOf("If-Match" to tag)).use { response ->
+            if (response.code == 404 || response.code == 412) return NoteDelete.CHANGED
+            if (response.code != 200) fail(response.code)
+            val bytes = response.body?.byteStream()?.use { it.readBytesLimited(Notes.MAX_CONTENT * 4 + 16, "The note file is too large to check safely.") }
+                ?: return NoteDelete.UNSUPPORTED
+            val decoded = runCatching { Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString() }.getOrNull()
+                ?: return NoteDelete.UNSUPPORTED
+            val text = decoded.replace("\uFEFF", "").replace("\uFFFE", "")
+            if (text != content) return NoteDelete.CHANGED
+        }
+        if (!stillCurrent()) return NoteDelete.CHANGED
+        request(account, "DELETE", url, headers = mapOf("If-Match" to tag)).use { response ->
+            return when (response.code) {
+                200, 204, 404 -> NoteDelete.DELETED
+                412 -> NoteDelete.CHANGED
+                else -> fail(response.code)
+            }
+        }
+    }
+
     // Step 5: creates ([etag] null, only if nothing has that name) or replaces (only if the server still has version
     // [etag]) Planner's event [uid] in [calendar].
     fun putEvent(account: NextcloudAccount, calendar: String, uid: String, body: String, etag: String?): WriteResult =
@@ -506,6 +556,7 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
         // Compiled once (each sync asks for time ranges and names event files).
         private val RANGE_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
         private val EVENT_NAME = Regex("[A-Za-z0-9@._-]{1,200}")
+        private const val NOTE_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><d:resourcetype/><d:getetag/><oc:fileid/></d:prop></d:propfind>"""
         private const val PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
         private const val ETAG_PROPERTIES = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getetag/></d:prop></d:propfind>"""
 

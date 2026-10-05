@@ -59,7 +59,7 @@ object MissedReminders {
                tasks: Map<String, PlannerTask>, notes: Map<String, com.example.itinerary.data.PlannerNote> = emptyMap()): List<Missed> = due.mapNotNull { (key, trigger) ->
         eventId(key)?.let { id ->
             val (item, reminder) = events[id] ?: return@mapNotNull null
-            val expected = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder.offsetMinutes).toInstant().toEpochMilli()
+            val expected = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder).toInstant().toEpochMilli()
             // An exact match only: a reminder changed since (or moved by a time-zone change while off) isn't the one that was missed.
             if (item.paid || item.skipped || trigger != expected || ReminderDeliveries.delivered(delivered[id], item, reminder)) null
             else Event(item, reminder, trigger)

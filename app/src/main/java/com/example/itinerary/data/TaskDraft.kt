@@ -47,9 +47,10 @@ class TaskDraftStore(context: Context) {
         // One for the process: each editor and the file clean-up make their own store.
         private val writer = DraftWriter()
 
-        // U4: which editor has each existing task open, in any Planner window. The first one owns it; a second editor
-        // on the same task would share its draft, and its Discard draft would delete the first one's new files.
+        // Which editor owns each draft in any Planner window, including "new" before it contains anything. A second
+        // editor sharing that draft would overwrite it, and its Discard would delete the first editor's recovery.
         private val owners = HashMap<String, Any>()
+        fun isOpen(taskId: String): Boolean = synchronized(owners) { taskId in owners }
         fun claim(taskId: String, editor: Any): Boolean = synchronized(owners) { owners.getOrPut(taskId) { editor } === editor }
         fun release(taskId: String, editor: Any) { synchronized(owners) { if (owners[taskId] === editor) owners.remove(taskId) } }
 

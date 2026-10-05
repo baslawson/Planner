@@ -25,13 +25,14 @@ class NextcloudBackups(
     suspend fun disconnect() = withContext(Dispatchers.IO) { store.clear() }
 
     suspend fun saveFolder(account: NextcloudAccount, path: String): NextcloudAccount = withContext(Dispatchers.IO) {
-        account.withFolder(path).also { store.save(it) }
+        store.updateIfCurrent(account) { it.withFolder(path) }
+            ?: throw BackupException("The Nextcloud connection changed. Close and reopen Settings before trying again.")
     }
 
     suspend fun list(account: NextcloudAccount): List<NextcloudBackup> = withContext(Dispatchers.IO) { client.list(account) }
 
     // [cancel] (S6-1): Cancel in the pop-up; nothing is uploaded once it is pressed before the upload starts.
-    suspend fun upload(account: NextcloudAccount, cancel: BackupTransfer? = null): NextcloudAccount = backup.status.track("Nextcloud") { withContext(Dispatchers.IO) {
+    suspend fun upload(account: NextcloudAccount, cancel: BackupTransfer? = null): NextcloudAccount? = backup.status.track("Nextcloud") { withContext(Dispatchers.IO) {
         val file = File.createTempFile("nextcloud-export-", ".zip", context.cacheDir)
         try {
             backup.export(Uri.fromFile(file), trackStatus = false)
@@ -39,8 +40,8 @@ class NextcloudBackups(
             client.upload(account, file, cancel)
             val updated = account.backedUpAt(Instant.now().toString())
             // The upload is successful even if recording its time on the device fails.
-            runCatching { store.save(updated) }
-            updated
+            runCatching { store.updateIfCurrent(account) { it.backedUpAt(updated.lastBackup!!) } }
+            runCatching { store.load() }.getOrNull()
         } finally {
             file.delete()
         }

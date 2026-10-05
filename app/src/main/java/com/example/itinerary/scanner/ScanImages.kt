@@ -5,6 +5,7 @@ import android.graphics.pdf.PdfDocument
 import android.media.ExifInterface
 import com.example.itinerary.data.Attachment
 import com.example.itinerary.data.AttachmentStore
+import com.example.itinerary.data.imageOrientationMatrix
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -33,17 +34,7 @@ object ScanImages {
         try {
             val exif = runCatching { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
                 .getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-            val matrix = Matrix().apply {
-                when (exif) {
-                    ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
-                    ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
-                    ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
-                    ExifInterface.ORIENTATION_TRANSPOSE -> { setRotate(90f); postScale(-1f, 1f) }
-                    ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
-                    ExifInterface.ORIENTATION_TRANSVERSE -> { setRotate(-90f); postScale(-1f, 1f) }
-                    ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(-90f)
-                }
-            }
+            val matrix = imageOrientationMatrix(exif)
             if (!matrix.isIdentity) {
                 val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
                 if (rotated !== bitmap) { bitmap.recycle(); bitmap = rotated }

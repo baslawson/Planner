@@ -1017,10 +1017,10 @@ private fun ItemEditorForm(
                 notificationsOn = notifications.enabled,
                 onEnableNotifications = notifications.enable,
                 onAdd = { amount, unit ->
-                    val minutes = amount * unit.minutes
-                    // Already in the list: nothing to add.
-                    if (shownReminders.none { it.offsetMinutes == minutes }) {
-                        addedReminders += Reminder(itemId = 0, amount = amount, unit = unit)
+                    val candidate = Reminder(itemId = 0, amount = amount, unit = unit)
+                    // Calendar days and elapsed hours can differ across a clock change.
+                    if (shownReminders.none { it.scheduleKey == candidate.scheduleKey }) {
+                        addedReminders += candidate
                         val needsPermission = Build.VERSION.SDK_INT >= 33 &&
                             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                             PackageManager.PERMISSION_GRANTED
@@ -1231,7 +1231,7 @@ private fun ItemEditorForm(
 
 // Touches don't reach the form while [locked] (an event saving): taps on fields, dates, chips and attachments do nothing.
 // Its text fields are also read-only then, which stops text arriving another way (a screen reader, autofill).
-private fun Modifier.lockedWhile(locked: Boolean): Modifier = if (!locked) this else pointerInput(Unit) {
+internal fun Modifier.lockedWhile(locked: Boolean): Modifier = if (!locked) this else pointerInput(Unit) {
     awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
 }
 

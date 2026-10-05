@@ -83,35 +83,44 @@ class BackupManager(
         if (trackStatus) status.track("File") { writeExport(uri) } else writeExport(uri)
     }
     private suspend fun writeExport(uri: Uri) = withContext(Dispatchers.IO) {
-        val snapshot = repo.snapshot()
-        // A record whose file has gone missing would only be a broken row in the backup. A link has no file.
-        val attachments = snapshot.attachments.filter { it.url != null || store.fileFor(it.fileName).exists() }
-        val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || store.fileFor(it.fileName).exists() }
-        val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { store.fileFor(it.fileName).exists() },
-            notes = filterNoteAttachments(snapshot.notes) { store.fileFor(it.fileName).exists() })
-        val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
+        val files = File.createTempFile("backup-files-", "", context.cacheDir).apply { delete(); mkdirs() }
         try {
-            val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
-            ZipOutputStream(out.buffered()).use { zip ->
-                zip.putNextEntry(ZipEntry(DATA_ENTRY))
-                zip.write(json.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-                saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
-                    zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
-                    store.fileFor(name).inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
+            val snapshot = repo.withSnapshotFiles { data ->
+                data.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
+                    val source = store.fileFor(name)
+                    if (source.exists()) source.copyTo(File(files, name))
                 }
+                data
             }
-        } catch (e: Exception) {
-            // Don't leave a half-written file behind that looks like a good backup.
-            runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
-            throw BackupException("Couldn't write the backup file.")
-        }
+            // A record whose file has gone missing would only be a broken row in the backup. A link has no file.
+            val attachments = snapshot.attachments.filter { it.url != null || File(files, it.fileName).exists() }
+            val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || File(files, it.fileName).exists() }
+            val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { File(files, it.fileName).exists() },
+                notes = filterNoteAttachments(snapshot.notes) { File(files, it.fileName).exists() })
+            val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
+            try {
+                val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
+                ZipOutputStream(out.buffered()).use { zip ->
+                    zip.putNextEntry(ZipEntry(DATA_ENTRY))
+                    zip.write(json.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                    saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
+                        zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
+                        File(files, name).inputStream().use { it.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+                }
+            } catch (e: Exception) {
+                // Don't leave a half-written file behind that looks like a good backup.
+                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                throw BackupException("Couldn't write the backup file.")
+            }
+        } finally { files.deleteRecursively() }
     }
 
     // Reads and checks the file. Throws [BackupException] if it isn't a usable backup.
     suspend fun stage(uri: Uri): StagedBackup = withContext(Dispatchers.IO) {
-        val file = File(context.cacheDir, STAGING_FILE)
+        val file = File.createTempFile("import-staging-", ".zip", context.cacheDir)
         try {
             val input = context.contentResolver.openInputStream(uri) ?: error("Could not open $uri")
             input.use { source -> file.outputStream().use { source.copyTo(it) } }
@@ -553,7 +562,6 @@ class BackupManager(
         const val FORMAT_VERSION = 17
         private const val DATA_ENTRY = "data.json"
         private const val ATTACHMENTS_DIR = "attachments"
-        private const val STAGING_FILE = "import-staging.zip"
 
         // Attachment file names become paths inside the app's storage, so nothing but plain names is allowed.
         private val SAFE_FILE_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")

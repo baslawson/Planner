@@ -33,6 +33,7 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
     val requests = CopyOnWriteArrayList<String>()
     @Volatile var missing = false
     @Volatile var beforePut: ((Long) -> Unit)? = null
+    @Volatile var beforeDavDelete: ((Long) -> Unit)? = null
     @Volatile var beforePost: (() -> Unit)? = null
     @Volatile var refused: Set<Long> = emptySet()
     @Volatile var noTag = false
@@ -50,6 +51,33 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
         val path = request.requestUrl!!.encodedPath
         requests += "${request.method} $path"
         if (request.getHeader("Authorization") != Credentials.basic(user, password, Charsets.UTF_8)) return MockResponse().setResponseCode(401)
+        val davRoot = "/remote.php/dav/files/$user/Notes/"
+        if (path.startsWith(davRoot)) {
+            val id = path.substringAfterLast('/').removeSuffix(".txt").toLongOrNull()
+            return synchronized(this) {
+                fun tag(n: N) = "\"d${n.etag}\""
+                when (request.method) {
+                    "PROPFIND" -> {
+                        val category = path.removePrefix(davRoot).trim('/')
+                        val files = notes.filter { it.value.category == category }.entries.joinToString("") { (k, n) ->
+                            "<d:response><d:href>${path}$k.txt</d:href><d:propstat><d:prop><d:resourcetype/><oc:fileid>$k</oc:fileid><d:getetag>${tag(n)}</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+                        }
+                        MockResponse().setResponseCode(207).setBody("<d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\">$files</d:multistatus>")
+                    }
+                    "GET", "DELETE" -> {
+                        if (id == null) return@synchronized MockResponse().setResponseCode(404)
+                        if (request.method == "DELETE") beforeDavDelete?.invoke(id)
+                        val n = notes[id] ?: return@synchronized MockResponse().setResponseCode(404)
+                        if (request.getHeader("If-Match") != tag(n)) return@synchronized MockResponse().setResponseCode(412)
+                        if (request.method == "GET") MockResponse().setHeader("ETag", tag(n)).setBody(n.content)
+                        else { notes.remove(id); MockResponse().setResponseCode(204) }
+                    }
+                    else -> MockResponse().setResponseCode(405)
+                }
+            }
+        }
+        if (path == "/index.php/apps/notes/api/v1/settings")
+            return if (missing) MockResponse().setResponseCode(404) else MockResponse().setBody("{\"notesPath\":\"Notes\",\"fileSuffix\":\".txt\"}")
         val base = "/index.php/apps/notes/api/v1/notes"
         if (missing || !path.startsWith(base)) return MockResponse().setResponseCode(404)
         val id = path.removePrefix(base).trim('/').toLongOrNull()
@@ -65,6 +93,8 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                     if (request.getHeader("If-None-Match") == tag) { conditional++; MockResponse().setResponseCode(304) }
                     else MockResponse().setBody(list).apply { if (!noTag) setHeader("ETag", tag) }
                 }
+                request.method == "GET" && id != null -> notes[id]?.let { MockResponse().setBody(json(id, it).toString()) }
+                    ?: MockResponse().setResponseCode(404)
                 request.method == "POST" && id == null -> {
                     val o = JSONObject(body)
                     val made = add(o.getString("title").ifBlank { o.getString("content").lineSequence().first() }, o.getString("content"), o.optString("category"), o.optBoolean("favorite"))
@@ -79,6 +109,7 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                     edit(id) { it.copy(title = o.getString("title"), content = o.getString("content"), category = o.optString("category"), favorite = o.optBoolean("favorite")) }
                     MockResponse().setBody(json(id, notes[id]!!).toString())
                 }
+                // The actual Notes API does not support If-Match on DELETE.
                 request.method == "DELETE" && id != null -> if (notes.remove(id) != null) MockResponse() else MockResponse().setResponseCode(404)
                 else -> MockResponse().setResponseCode(405)
             }
@@ -174,7 +205,7 @@ class NoteSyncTest {
             assertTrue(local().none { it.content == "Recipe\ntheirs" })
             assertTrue(repo.snapshot().deleted.any { DeletedCodec.decode(it.payload).notes.any { n -> n.content == "Recipe\ntheirs" } })
 
-            // Deleted in Planner: not while its Undo is on offer, then on Nextcloud too.
+            // Deleted in Planner: held during Undo, then its backing file is deleted conditionally.
             repo.deleteNote(byTitle("Groceries").id)
             assertTrue(sync.sync())
             assertTrue(fake.notes.values.any { it.title == "Groceries" })
@@ -196,7 +227,7 @@ class NoteSyncTest {
             assertTrue(local().any { it.content == "Shared\nmy edit" })
             assertEquals("x".repeat(Notes.MAX_CONTENT + 1), fake.notes[long]!!.content)
 
-            // Links forgotten (a restored backup): the same notes link up again by their words, nothing doubled.
+            // Links forgotten (a restored backup): matching content relinks without duplicates.
             assertTrue(sync.sync())
             val counts = local().size to fake.notes.size
             sync.forget()

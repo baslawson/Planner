@@ -418,6 +418,8 @@ class NextcloudBackupTest {
     }
 
     @Test fun testNestedFolderCreationPersistenceAndIsolation() = runBlocking {
+        // Folder changes apply to the connected account; an upload must not reconnect a missing login.
+        accounts.save(account)
         service.upload(account)
         val oldFiles = fixture.files.toMap()
         val changed = service.saveFolder(account.backedUpAt("2026-09-21T00:00:00Z"), " /Backups/Plans 100%/ ")

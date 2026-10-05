@@ -46,4 +46,43 @@ class AlarmWindowTest {
         assertTrue(AlarmWindow.needsRefill(AlarmWindow.LIMIT / 2 - 1, now))
         assertFalse(AlarmWindow.needsRefill(AlarmWindow.LIMIT / 2, now))
     }
+    @Test fun simultaneousEventsTasksAndNotesShareOneBoundedWindow() {
+        val triggers = (1..601).associate { i ->
+            (when (i % 3) { 0 -> "e:$i"; 1 -> "t:$i"; else -> "n:$i" }) to now + 1
+        }
+        val selection = AlarmWindow.select(triggers, now)
+        assertEquals(AlarmWindow.LIMIT, triggers.count { (key, trigger) -> selection.arms(key, trigger) })
+        val selected = triggers.filter { (key, trigger) -> selection.arms(key, trigger) }.keys
+        assertEquals(triggers.keys.sorted().take(AlarmWindow.LIMIT).toSet(), selected)
+        assertEquals(selection, AlarmWindow.select(triggers.entries.reversed().associate { it.toPair() }, now))
+        // Once one selected alarm rings, the first waiting identity obtains the free slot.
+        val next = AlarmWindow.select(triggers - selected.first(), now)
+        assertEquals(AlarmWindow.LIMIT, (triggers - selected.first()).count { (key, trigger) -> next.arms(key, trigger) })
+        assertEquals(1, next.atHorizon.count { it !in selected })
+    }
+
+    @Test fun identityWindowKeepsEarlierAlarmsAndIgnoresPastSlots() {
+        val triggers = (1..10).associate { "past:$it" to now - it } +
+            (1..3).associate { "near:$it" to now + it } + (1..20).associate { "tie:$it" to now + 20 }
+        val selection = AlarmWindow.select(triggers, now, limit = 5)
+        assertTrue((1..3).all { selection.arms("near:$it", now + it) })
+        assertEquals(5, triggers.count { (key, trigger) -> trigger > now && selection.arms(key, trigger) })
+        assertNull(AlarmWindow.select(triggers.filterValues { it <= now + 3 }, now, limit = 5).horizon)
+    }
+
+    @Test fun overdueDeferredTiesRemainAccountedForUntilDelivery() {
+        val at = now + 100
+        val triggers = (1..601).associate { "t:$it" to at }
+        val selected = AlarmWindow.select(triggers, now)
+        val waiting = AlarmWindow.deferred(emptyMap(), triggers, selected, now)
+        assertEquals(201, waiting.size)
+        val afterDue = AlarmWindow.select(triggers, at)
+        assertNull(afterDue.horizon)
+        assertEquals(waiting, AlarmWindow.deferred(waiting, triggers, afterDue, at))
+        // Newly saved past reminders were never waiting and must not be delivered as overflow.
+        assertTrue(AlarmWindow.deferred(emptyMap(), triggers, afterDue, at).isEmpty())
+        val changed = waiting.mapValues { it.value - 1 }
+        assertTrue(AlarmWindow.deferred(waiting, changed, afterDue, at).isEmpty())
+    }
+
 }

@@ -332,7 +332,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo, enabled = !busy)) {
             ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp).lockedWhile(busy), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
                     // A copy of what is here now as a new note (not saved yet); the original stays as last saved. The copy's
                     // editor takes over this one's files, so they aren't released here.
@@ -342,12 +342,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         dismiss(); onDuplicate(copy)
                     }) { Text("Duplicate note") }
                     OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
-                        label = { Text("Title") }, singleLine = true,
+                        label = { Text("Title") }, singleLine = true, enabled = !busy,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                     // Edit / Preview, and in Edit the Markdown shortcuts.
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf(false to "Edit", true to "Preview").forEachIndexed { index, (isPreview, label) ->
-                            SegmentedButton(selected = preview == isPreview, onClick = { preview = isPreview; app.settings.setNoteLeftInPreview(initial.id, isPreview) },
+                            SegmentedButton(selected = preview == isPreview, enabled = !busy, onClick = { preview = isPreview; app.settings.setNoteLeftInPreview(initial.id, isPreview) },
                                 shape = SegmentedButtonDefaults.itemShape(index, 2),
                                 colors = SegmentedButtonDefaults.colors(activeContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                                     activeContentColor = MaterialTheme.colorScheme.primary)) { Text(label) }
@@ -355,60 +355,70 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     }
                     if (preview) {
                         if (content.text.isBlank()) Text("Nothing written yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else MarkdownView(content.text, Modifier.fillMaxWidth(), onToggle = { line ->
+                        else MarkdownView(content.text, Modifier.fillMaxWidth(), onToggle = if (busy) null else { line ->
                             content = TextFieldValue(Markdown.toggle(content.text, line), content.selection)
                         })
                     } else {
-                        if (!toolsPinned) MarkdownToolbar { edit -> content = edit(content) }
+                        if (!toolsPinned) MarkdownToolbar(enabled = !busy) { edit -> content = edit(content) }
                         OutlinedTextField(content, { typed ->
                                 // Enter in a checklist or list item starts the next item (or ends the list on an empty one).
                                 val next = Markdown.continueList(content.text, typed.text, typed.selection.start)
                                     ?.takeIf { typed.selection.collapsed && continueLists }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
                                 content = if (next.text.length <= Notes.MAX_CONTENT) next else content
                             },
-                            Modifier.fillMaxWidth().onFocusChanged { noteFocused = it.isFocused }, label = { Text("Note") }, minLines = 8,
+                            Modifier.fillMaxWidth().onFocusChanged { noteFocused = it.isFocused }, label = { Text("Note") }, minLines = 8, enabled = !busy,
                             textStyle = MaterialTheme.typography.bodyLarge,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                         Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SwitchRow("Continue lists on Enter", continueLists, app.settings::setContinueLists, Modifier,
+                        SwitchRow("Continue lists on Enter", continueLists, app.settings::setContinueLists, Modifier, enabled = !busy,
                             style = MaterialTheme.typography.bodyMedium)
                     }
                     HorizontalDivider()
                     // Existing notebooks open under the box and narrow as you type; a new name is typed as before.
                     SuggestField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, "Notebook (optional)",
-                        suggestions = Notes.suggest(notebooks, notebook).filter { it != notebook.trim() }, onPick = { notebook = it })
+                        suggestions = Notes.suggest(notebooks, notebook).filter { it != notebook.trim() }, onPick = { notebook = it }, enabled = !busy)
                     Text("Tags", style = MaterialTheme.typography.titleSmall)
                     if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         tags.forEach { tag ->
-                            FilterChip(selected = true, onClick = { tags = tags - tag }, label = { Text("#$tag") },
+                            FilterChip(selected = true, enabled = !busy, onClick = { tags = tags - tag }, label = { Text("#$tag") },
                                 trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove tag $tag", Modifier.size(16.dp)) })
                         }
                     }
                     SuggestField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, "Add a tag",
                         suggestions = Notes.suggest(allTags, Notes.cleanTag(newTag), taken = tags),
                         onPick = { tag -> if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, shown = { "#$it" },
-                        enabled = tags.size < Notes.MAX_TAGS,
+                        enabled = !busy && tags.size < Notes.MAX_TAGS,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
-                        trailingIcon = { if (newTag.isNotBlank()) IconButton(onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
+                        trailingIcon = { if (newTag.isNotBlank()) IconButton(enabled = !busy, onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
                     NoteReminderSection(reminderAt, base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                         enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                     Text("Importance", style = MaterialTheme.typography.titleSmall)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         com.example.itinerary.data.TaskPriority.entries.forEach { option ->
-                            FilterChip(selected = priority == option, onClick = { priority = option }, label = { Text(option.label) })
+                            FilterChip(selected = priority == option, enabled = !busy, onClick = { priority = option }, label = { Text(option.label) })
                         }
                     }
                     Text("Colour", style = MaterialTheme.typography.titleSmall)
-                    ColorChoices(color, onCustom = { pickingColor = true }) { color = it }
-                    FilterChip(selected = pinned, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
+                    ColorChoices(color, enabled = !busy, onCustom = { pickingColor = true }) { color = it }
+                    FilterChip(selected = pinned, enabled = !busy, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
                         leadingIcon = if (pinned) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)) }) else null)
                     HorizontalDivider()
                     HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
                     attachments.forEach { attachment ->
                         AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) },
-                            onRemove = { setAttachments(attachments.filterNot { it.fileName == attachment.fileName }) })
+                            onRemove = {
+                                val remaining = attachments.filterNot { it.fileName == attachment.fileName }
+                                // Persist the removal before cleanup: neither this draft nor a recovered editor may still name it.
+                                try {
+                                    draftStore.write(NoteDraftStore.Draft(current.copy(attachments = remaining), base == null, base,
+                                        pendingPhoto, windowEditors?.id))
+                                    ownsDraft = true
+                                    setAttachments(remaining)
+                                    app.appScope.launch { runCatching { repo.releaseTaskFiles(listOf(attachment.fileName)) } }
+                                } catch (_: Exception) { error = draftError }
+                            })
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
@@ -434,7 +444,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
             }
             if (toolsPinned) {
                 HorizontalDivider()
-                MarkdownToolbar(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) { edit -> content = edit(content) }
+                MarkdownToolbar(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), enabled = !busy) { edit -> content = edit(content) }
             }
         }
     }
@@ -511,7 +521,7 @@ internal fun toolbarValue(edit: Markdown.Edit) = TextFieldValue(edit.text, TextR
 
 // Bold, italic, strike, heading, list, checklist and code, applied to the selection (or where the cursor is).
 @Composable
-private fun MarkdownToolbar(modifier: Modifier = Modifier, apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
+private fun MarkdownToolbar(modifier: Modifier = Modifier, enabled: Boolean = true, apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
     fun wrap(mark: String): (TextFieldValue) -> TextFieldValue = { v -> toolbarValue(Markdown.wrap(v.text, v.selection.start, v.selection.end, mark)) }
     fun prefix(mark: String): (TextFieldValue) -> TextFieldValue = { v -> toolbarValue(Markdown.prefixLines(v.text, v.selection.start, v.selection.end, mark)) }
     // Checklist is ☑ with U+FE0E, so it is drawn as text in the app's font rather than as a colour emoji.
@@ -523,7 +533,7 @@ private fun MarkdownToolbar(modifier: Modifier = Modifier, apply: ((TextFieldVal
     Row(modifier.horizontalScroll(rememberScrollState()).semantics { contentDescription = "Formatting" },
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tools.forEach { (label, name, edit) ->
-            OutlinedButton(onClick = { apply(edit) }, modifier = Modifier.semantics { contentDescription = name }.defaultMinSize(minWidth = 44.dp),
+            OutlinedButton(enabled = enabled, onClick = { apply(edit) }, modifier = Modifier.semantics { contentDescription = name }.defaultMinSize(minWidth = 44.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp)) {
                 Text(label, fontFamily = if (label == "</>") FontFamily.Monospace else null,
                     style = MaterialTheme.typography.labelLarge)
@@ -536,13 +546,13 @@ private fun MarkdownToolbar(modifier: Modifier = Modifier, apply: ((TextFieldVal
 // chosen one is ringed.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ColorChoices(selected: Int?, onCustom: () -> Unit, onSelect: (Int?) -> Unit) {
+internal fun ColorChoices(selected: Int?, enabled: Boolean = true, onCustom: () -> Unit, onSelect: (Int?) -> Unit) {
     val ring = MaterialTheme.colorScheme.primary
     @Composable
     fun Swatch(name: String, chosen: Boolean, fill: Modifier, tick: Color, onClick: () -> Unit, content: @Composable () -> Unit = {}) {
         Box(Modifier.size(40.dp).clip(CircleShape).then(fill)
             .border(if (chosen) 3.dp else 1.dp, if (chosen) ring else MaterialTheme.colorScheme.outline, CircleShape)
-            .clickable(role = Role.RadioButton, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .semantics { contentDescription = name; this.selected = chosen },
             contentAlignment = Alignment.Center) {
             if (chosen) Icon(Icons.Filled.Check, contentDescription = null, tint = tick, modifier = Modifier.size(20.dp)) else content()

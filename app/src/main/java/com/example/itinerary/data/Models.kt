@@ -124,6 +124,8 @@ data class Reminder(
     val snoozedUntil: Long? = null,
 ) {
     val offsetMinutes: Long get() = amount * unit.minutes
+    // Units are equivalent below one day; at or above it, calendar days and elapsed time are different.
+    val scheduleKey: Pair<Long, Boolean> get() = offsetMinutes to (unit == ReminderUnit.DAYS && amount != 0)
 
     val label: String
         get() = if (amount == 0) "At the time" else "$amount ${if (amount == 1) unit.singular else unit.plural} before"
@@ -144,7 +146,8 @@ object ReminderDeliveries {
 
     /** Null for a snoozed reminder: a snooze is an absolute time, so a zone change never moves it. */
     fun key(item: ItineraryItem, reminder: Reminder): String? =
-        if (reminder.snoozedUntil != null) null else key(item.date, item.startTime, reminder.offsetMinutes)
+        if (reminder.snoozedUntil != null) null else key(item.date, item.startTime, reminder.offsetMinutes) +
+            if (reminder.unit != ReminderUnit.DAYS && reminder.offsetMinutes >= 1440) "|elapsed" else ""
     fun key(date: LocalDate, time: LocalTime?, offsetMinutes: Long): String = "$date|${time ?: ""}|$offsetMinutes"
 
     fun delivered(recorded: String?, item: ItineraryItem, reminder: Reminder): Boolean =

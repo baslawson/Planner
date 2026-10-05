@@ -44,6 +44,12 @@ data class QuickEntrySuggestion(
     val periodInTitle: String? = null,
     /** "Party until midnight": when it ends (midnight is the end of [date]) while its start is asked; null otherwise. */
     val endTime: LocalTime? = null,
+    /** Explicit elapsed hours/minutes or calendar days; null for an absolute clock-time reminder. */
+    val reminderUnit: ReminderUnit? = null,
+    /** A reminder at this clock time on the specified prior day; re-evaluated when the event's date is corrected. */
+    val reminderClock: LocalTime? = null,
+    /** -1 means the previous day only when its clock time is later than the event's. */
+    val reminderDaysBefore: Int = 0,
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -577,6 +583,7 @@ object QuickEntry {
         }
 
         var reminderMinutes: Int? = null
+        var reminderUnit: ReminderUnit? = null
         var reminderAt: LocalTime? = null
         var reminderDaysBack = 0
         val reminderMatches = reminders.findAll(remaining).toList()
@@ -598,7 +605,12 @@ object QuickEntry {
                 reminderAt = readTime(raw)?.takeUnless { re("([1-9]|1[0-2])[:.]([0-5]\\d)").matches(raw.trim()) }
                     ?: return error("Add am or pm to the reminder time, for example remind me at 9am.")
                 reminderDaysBack = (total / 1440).toInt()
-            } else reminderMinutes = total.toInt()
+            } else {
+                reminderMinutes = total.toInt()
+                reminderUnit = if (rx("(?:days?|weeks?)$").containsMatchIn(match.groupValues[1].trim()) && total % 1440 == 0.0) ReminderUnit.DAYS
+                    else if (total % 60 == 0.0 && rx("(?:hours?|hrs?|h)(?![a-z])").containsMatchIn(match.groupValues[1])) ReminderUnit.HOURS
+                    else ReminderUnit.MINUTES
+            }
             consumeReminder(match)
         }
         reminderClockMatches.firstOrNull()?.takeIf { nightBefore.matches(it.value) }?.let { match ->
@@ -1453,7 +1465,8 @@ object QuickEntry {
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
-            taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle, endTime)
+            taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle, endTime, reminderUnit,
+            reminderAt, if (reminderAt == null) 0 else if (reminderDaysBack > 0) reminderDaysBack else -1)
     }
 
     /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */

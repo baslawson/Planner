@@ -603,6 +603,8 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
             }
             Text(message, style = MaterialTheme.typography.bodyMedium,
                 color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            if (state.keptRemote > 0) Text("${state.keptRemote} deletion${if (state.keptRemote == 1) "" else "s"} waiting: Nextcloud's note files couldn't be verified safely. " +
+                "Try syncing again, or delete those notes in Nextcloud.", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

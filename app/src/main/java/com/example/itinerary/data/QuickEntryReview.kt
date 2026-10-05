@@ -52,14 +52,29 @@ fun quickToken(token: String, index: Int) = if (index == 0) token else "$token-$
 /** Has a clock time, a vague time awaiting one, or a duration: an event rather than a task. */
 fun QuickEntrySuggestion.timed(): Boolean = phrases.any { it.kind == QuickPhraseKind.TIME || it.kind == QuickPhraseKind.DURATION }
 
-fun QuickEntrySuggestion.quickReminders(): List<Reminder> = reminderMinutes?.let { minutes ->
-    val unit = when { minutes > 0 && minutes % 1440 == 0 -> ReminderUnit.DAYS; minutes > 0 && minutes % 60 == 0 -> ReminderUnit.HOURS; else -> ReminderUnit.MINUTES }
-    listOf(Reminder(itemId = 0, amount = (minutes / unit.minutes).toInt(), unit = unit))
+fun QuickEntrySuggestion.quickReminders(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Reminder> = reminderMinutes?.let { minutes ->
+    val unit = reminderUnit
+    val reminder = if (unit != null) Reminder(itemId = 0, amount = (minutes / unit.minutes).toInt(), unit = unit)
+        else TaskEventConversion.reminderBefore(date, time,
+            quickReminderTrigger(task = false, zone = zone)!!.toInstant().toEpochMilli(), zone)
+    listOfNotNull(reminder)
 }.orEmpty()
+
+/** The same unit-aware time in the preview, validation and saved task. */
+fun QuickEntrySuggestion.quickReminderTrigger(task: Boolean, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): ZonedDateTime? =
+    reminderMinutes?.let { minutes ->
+        val at = if (task) null else time
+        val unit = reminderUnit
+        if (reminderClock != null) {
+            val days = if (reminderDaysBefore >= 0) reminderDaysBefore else if (reminderClock > (at ?: LocalTime.of(9, 0))) 1 else 0
+            date.minusDays(days.toLong()).atTime(reminderClock).atZone(zone)
+        } else if (unit == null) reminderTrigger(date, at, minutes.toLong(), zone)
+        else reminderTrigger(date, at, Reminder(itemId = 0, amount = (minutes / unit.minutes).toInt(), unit = unit), zone)
+    }
 
 fun QuickEntrySuggestion.quickTask(): PlannerTask = PlannerTask(
     title = title, dueDate = date.takeIf { dateSpecified }, repeat = repeat.name,
-    reminderAt = reminderMinutes?.let { reminderTrigger(date, null, it.toLong()).toInstant().toEpochMilli() },
+    reminderAt = quickReminderTrigger(task = true)?.toInstant()?.toEpochMilli(),
 )
 
 fun QuickEntrySuggestion.isPast(now: ZonedDateTime, task: Boolean): Boolean =

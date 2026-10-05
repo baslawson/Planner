@@ -122,6 +122,7 @@ fun QuickEntryDialog(
                 val older = runCatching { if (t) TaskDraftStore(context).read("new") else EditorDraftStore(context).read() }
                 val kind = if (t) "task" else "event"
                 when {
+                    t && TaskDraftStore.isOpen("new") -> handover = "A new task is open in Planner. Save or close it first. Your Quick entry is kept."
                     older.isFailure -> handover = "Couldn't check for an unfinished $kind. Your Quick entry is still here; try again."
                     older.getOrNull() != null -> handover = "You have an unfinished $kind ‘${older.getOrNull()?.optString("title").orEmpty().ifBlank { "untitled" }}’. " +
                         "Finish or discard it first (Add ${if (t) "task" else "event"}), then open this Quick entry in the full editor. Your Quick entry is kept."
@@ -223,7 +224,7 @@ fun QuickEntryEditor(
     LaunchedEffect(Unit) { while (true) { now = ZonedDateTime.now(); delay(30_000) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { now = ZonedDateTime.now() }
     val suggestion = remember(currentInput, now) { currentInput.suggestion(now) }
-    val reminder = suggestion.reminderMinutes?.let { reminderTrigger(suggestion.date, if (task) null else suggestion.time, it.toLong(), now.zone) }
+    val reminder = suggestion.quickReminderTrigger(task, now.zone)
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
         runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
     val problem = if (currentInput.length > 500) "Use at most 500 characters per entry." else suggestion.quickProblem(task, now)

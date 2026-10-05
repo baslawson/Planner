@@ -68,17 +68,15 @@ class TripsViewModel(
         }
     }
     private var cloudAccount: NextcloudAccount? = null
-    private var cloudLoaded = false
     private val _cloud = MutableStateFlow(NextcloudUiState())
     val cloud: StateFlow<NextcloudUiState> = _cloud.asStateFlow()
 
     fun loadNextcloud() {
-        if (cloudLoaded) return
         runBackup("Loading connection...", cloudAction = true) {
             val account = nextcloud.savedAccount()
             cloudAccount = account
             if (account != null) showAccount(account, "Connection saved on this device.")
-            cloudLoaded = true
+            else _cloud.value = NextcloudUiState()
             null
         }
     }
@@ -87,7 +85,6 @@ class TripsViewModel(
         runBackup("Checking Nextcloud...", cloudAction = true) {
             val account = nextcloud.connect(server, username, password)
             cloudAccount = account
-            cloudLoaded = true
             showAccount(account, "Connected. Backups will be saved in ${account.folderPath}.")
             null
         }
@@ -97,7 +94,6 @@ class TripsViewModel(
         // The Nextcloud calendars use the same login, so their list and downloaded events go too (phone calendars stay).
         calendars?.clearNextcloud()
         cloudAccount = null
-        cloudLoaded = true
         _cloud.value = _cloud.value.copy(connected = false, backups = null, lastBackup = null,
             status = "Disconnected. Your files on Nextcloud are unchanged.", error = false)
         null
@@ -116,7 +112,8 @@ class TripsViewModel(
         val account = cloudAccount ?: throw BackupException("Connect to Nextcloud first.")
         val updated = nextcloud.upload(account, transfer)
         cloudAccount = updated
-        showAccount(updated, "Backup uploaded to ${updated.folderPath}.")
+        if (updated != null) showAccount(updated, "Backup uploaded to ${account.folderPath}.")
+        else _cloud.value = NextcloudUiState(status = "Backup uploaded. The connection was disconnected meanwhile.")
         null
     } }
 

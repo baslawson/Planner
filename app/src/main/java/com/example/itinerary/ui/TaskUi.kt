@@ -124,13 +124,25 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
     val context = LocalContext.current
     val store = remember { TaskDraftStore(context) }
     val draftKey = if (creating) "new" else initial.id
+    // A new task owns the one "new" draft from the first composition, even while blank. Otherwise another window
+    // can open its own new task before a draft exists, and either one's Save/Discard erases the other's recovery.
+    var savedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val claimId = savedId ?: draftKey
+    val claim = remember(claimId) { TaskEditorClaim(claimId) }
+    if (!claim.owner) {
+        if (closeRequested) LaunchedEffect(Unit) { onDismiss() }
+        PlannerDialog("Task already open", onDismissRequest = onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) {
+            Text(if (claimId == "new") "A new task is open in another editor. Save or close it there first."
+                else "This task is open in another editor. Save or close it there first.")
+        }
+        return
+    }
     val recovered = remember(draftKey) { runCatching { store.read(draftKey) }.getOrNull() }
     var decision by rememberSaveable(draftKey) { mutableStateOf(if (recovered == null) "fresh" else "ask") }
     val scope = rememberCoroutineScope()
     val repo = (context.applicationContext as ItineraryApp).repository
     // After a Save the editor goes on with the task as stored (a new one becomes one to edit). Which task and which save
     // survive recreation, so a saved new task isn't offered as new again; each save starts the form afresh.
-    var savedId by rememberSaveable { mutableStateOf<String?>(null) }
     var savedRound by rememberSaveable { mutableIntStateOf(0) }
     var savedTask by remember { mutableStateOf<PlannerTask?>(null) }
     val onSaved: suspend (String) -> Unit = { id ->
@@ -143,17 +155,6 @@ fun TaskEditor(initial: PlannerTask, creating: Boolean, closeRequested: Boolean 
     DisposableEffect(Unit) {
         TaskDraftStore.editorOpened(); windowEditors?.let { it.tasks++ }
         onDispose { TaskDraftStore.editorClosed(); windowEditors?.let { it.tasks-- } }
-    }
-    // U4: one editor per task. Another one on a task already open (the widget's over the agenda's, a second window's)
-    // says so instead of opening on the same draft. A new task has nothing to share until it is saved.
-    val claimId = if (creating) savedKey else initial.id
-    val claim = remember(claimId) { claimId?.let(::TaskEditorClaim) }
-    if (claim != null && !claim.owner) {
-        if (closeRequested) LaunchedEffect(Unit) { onDismiss() }
-        PlannerDialog("Task already open", onDismissRequest = onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) {
-            Text("This task is open in another editor. Save or close it there first.")
-        }
-        return
     }
     if (savedKey != null) {
         if (savedTask == null) LaunchedEffect(savedKey) { repo.task(savedKey)?.let { savedTask = it } ?: onDismiss() }

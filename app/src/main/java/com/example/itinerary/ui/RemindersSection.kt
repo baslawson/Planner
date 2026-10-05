@@ -66,7 +66,7 @@ fun RemindersSection(
     ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
         chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom" to { customOpen = true })) {
         reminders.forEach { reminder ->
-            val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder.offsetMinutes, zone)
+            val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
             ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
                 onRemove = { onRemove(reminder) }) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -3,7 +3,6 @@ package com.example.itinerary.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -156,16 +155,11 @@ class AttachmentStore(private val context: Context) {
         val bitmap = BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
             ?: return null
 
-        val degrees = runCatching {
-            when (ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
-            }
-        }.getOrDefault(0f)
-        return if (degrees == 0f) bitmap else {
-            val matrix = Matrix().apply { postRotate(degrees) }
+        val orientation = runCatching {
+            ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val matrix = imageOrientationMatrix(orientation)
+        return if (matrix.isIdentity) bitmap else {
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
                 if (it !== bitmap) bitmap.recycle()
             }

@@ -24,7 +24,12 @@ interface ReminderAlarms {
     // At most AlarmWindow.LIMIT reminders are armed at once: the ones after [armHorizon] wait (null: all are armed).
     fun armHorizon(): Long? = null
     fun setArmHorizon(horizon: Long?) {}
+    fun setArmWindow(triggers: Map<String, Long>, now: Long) { setArmHorizon(AlarmWindow.horizon(triggers.values, now)) }
     fun armedCount(): Int = 0
+    fun needsArmRefill(): Boolean = AlarmWindow.needsRefill(armedCount(), armHorizon())
+    fun deferredReminders(): Map<String, Long> = emptyMap()
+    fun forgetDeferred(reminders: Map<String, Long>) {}
+    fun wasDelivered(key: String, trigger: Long): Boolean = false
     // A task reminder or snooze has rung at [trigger] (DeliveredAlarms): it isn't set again for that time.
     fun markDelivered(key: String, trigger: Long) {}
     // After a batch of alarm changes: the snapshot of them for a locked reboot is written (RB-3, LockedAlarm).
@@ -55,9 +60,17 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         try { alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending) }
         catch (e: Exception) { android.util.Log.w("ReminderScheduler", "Couldn't set the locked-boot refresh", e) }
     }
-    private fun armed(alarm: LockedAlarm) { ledger.set(alarm.key, alarm.trigger); locked.put(alarm) }
+    private fun armed(alarm: LockedAlarm) {
+        ledger.set(alarm.key, alarm.trigger)
+        removeDeferred(alarm.key)
+        locked.put(alarm)
+    }
     private fun disarmed(key: String) { ledger.remove(key); locked.remove(key) }
-    override fun markDelivered(key: String, trigger: Long) = delivered.record(key, trigger)
+    override fun markDelivered(key: String, trigger: Long) {
+        delivered.record(key, trigger)
+        forgetDeferred(mapOf(key to trigger))
+    }
+    override fun wasDelivered(key: String, trigger: Long): Boolean = delivered.delivered(key, trigger)
     // Backed up with the database on purpose: tasks restored on another phone were set in this zone.
     private val zonePrefs = context.getSharedPreferences("reminder_zone", Context.MODE_PRIVATE)
 
@@ -67,8 +80,70 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     private val windowPrefs = context.getSharedPreferences("alarm_window", Context.MODE_PRIVATE)
     override fun armHorizon(): Long? = if (windowPrefs.contains("horizon")) windowPrefs.getLong("horizon", 0L) else null
     override fun setArmHorizon(horizon: Long?) {
-        if (horizon != armHorizon()) windowPrefs.edit().apply { if (horizon == null) remove("horizon") else putLong("horizon", horizon) }.commit()
+        windowPrefs.edit().apply {
+            if (horizon == null) remove("horizon") else putLong("horizon", horizon)
+            remove("at_horizon")
+        }.commit()
     }
+    override fun deferredReminders(): Map<String, Long> = windowPrefs.all.mapNotNull { (key, value) ->
+        if (key.startsWith("deferred:") && value is Long) key.removePrefix("deferred:") to value else null
+    }.toMap()
+
+    private fun removeDeferred(key: String) {
+        if (windowPrefs.contains("deferred:$key")) windowPrefs.edit().remove("deferred:$key").commit()
+    }
+
+    override fun forgetDeferred(reminders: Map<String, Long>) {
+        val edit = windowPrefs.edit()
+        reminders.forEach { (key, trigger) ->
+            if (windowPrefs.getLong("deferred:$key", Long.MIN_VALUE) == trigger) edit.remove("deferred:$key")
+        }
+        edit.commit()
+    }
+
+    private fun defer(key: String, trigger: Long) {
+        if (windowPrefs.getLong("deferred:$key", Long.MIN_VALUE) == trigger) return
+        windowPrefs.edit().putLong("deferred:$key", trigger).putBoolean("rebalance", true).commit()
+    }
+
+    override fun setArmWindow(triggers: Map<String, Long>, now: Long) {
+        val candidates = triggers.filter { (key, trigger) -> !wasDelivered(key, trigger) }
+        val selection = AlarmWindow.select(candidates, now)
+        val previous = deferredReminders()
+        val waiting = AlarmWindow.deferred(previous, candidates, selection, now)
+        windowPrefs.edit().apply {
+            previous.keys.forEach { remove("deferred:$it") }
+            waiting.forEach { (key, trigger) -> putLong("deferred:$key", trigger) }
+            if (selection.horizon == null) remove("horizon") else putLong("horizon", selection.horizon)
+            putStringSet("at_horizon", selection.atHorizon)
+            remove("rebalance")
+        }.commit()
+        // Free excluded future slots before setting selected alarms, including ties whose file order differs.
+        ledger.all().filter { (key, trigger) -> trigger > now && !selection.arms(key, trigger) }.keys.forEach { key ->
+            disarm(key)
+            disarmed(key)
+        }
+    }
+
+    override fun needsArmRefill(): Boolean = windowPrefs.getBoolean("rebalance", false) ||
+        AlarmWindow.needsRefill(armedCount(), armHorizon())
+
+    private fun mayArm(key: String, trigger: Long): Boolean {
+        val horizon = armHorizon()
+        // Old versions stored just the horizon; the first full reschedule upgrades it to bounded identities.
+        val atHorizon = windowPrefs.getStringSet("at_horizon", null)
+        val selected = if (atHorizon == null) AlarmWindow.arms(trigger, horizon)
+            else AlarmWindow.Selection(horizon, atHorizon).arms(key, trigger)
+        if (!selected) { defer(key, trigger); return false }
+        // A large import schedules its changed rows before the batch refills the window. Bound that phase too.
+        val armed = ledger.all()
+        if (key !in armed && armed.size >= AlarmWindow.LIMIT) {
+            defer(key, trigger)
+            return false
+        }
+        return true
+    }
+
     // Every alarm set and not yet seen go off is in the ledger.
     override fun armedCount(): Int = ledger.all().size
 
@@ -82,7 +157,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         // Rang already, and the clock was set back since.
         if (delivered.delivered(MissedReminders.taskKey(task.id), triggerAt)) return
         // Waits until it is among the nearest (AlarmWindow); the notification of an earlier time stays.
-        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+        if (!mayArm(MissedReminders.taskKey(task.id), triggerAt)) {
             taskPending(task.id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
             disarmed(MissedReminders.taskKey(task.id))
             return
@@ -96,6 +171,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     }
 
     override fun cancelTask(id: String) {
+        removeDeferred(MissedReminders.taskKey(id))
         taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
         disarmed(MissedReminders.taskKey(id))
         delivered.forget(MissedReminders.taskKey(id))
@@ -109,7 +185,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         if (triggerAt == null) { cancelNote(note.id); return }
         if (triggerAt <= System.currentTimeMillis()) return
         if (delivered.delivered(key, triggerAt)) return
-        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+        if (!mayArm(key, triggerAt)) {
             notePending(note.id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
             disarmed(key)
             return
@@ -121,6 +197,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     }
 
     override fun cancelNote(id: String) {
+        removeDeferred(MissedReminders.noteKey(id))
         notePending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
         disarmed(MissedReminders.noteKey(id))
         delivered.forget(MissedReminders.noteKey(id))
@@ -164,7 +241,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         // A snooze that rang already, and the clock was set back since.
         if (delivered.delivered(MissedReminders.eventKey(reminder.id), triggerAt)) return
         cancelCode(snoozeCode(reminder.id))
-        if (!AlarmWindow.arms(triggerAt, armHorizon())) {
+        if (!mayArm(MissedReminders.eventKey(reminder.id), triggerAt)) {
             disarmed(MissedReminders.eventKey(reminder.id))
             cancelCode(reminder.id.toInt())
             return
@@ -200,6 +277,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     }
 
     override fun cancel(reminderId: Long) {
+        removeDeferred(MissedReminders.eventKey(reminderId))
         disarmed(MissedReminders.eventKey(reminderId))
         delivered.forget(MissedReminders.eventKey(reminderId))
         cancelCode(reminderId.toInt())

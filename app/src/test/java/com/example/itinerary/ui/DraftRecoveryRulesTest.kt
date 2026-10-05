@@ -7,6 +7,11 @@ import org.junit.Test
 // U3: a second Planner window doesn't recover the draft of an event editor still open in the first; sharing text to an
 // event then says that an event is open rather than offering a draft to resume.
 class DraftRecoveryRulesTest {
+    @org.junit.Test fun blankNewTaskEditorBlocksShareBeforeADraftExists() {
+        org.junit.Assert.assertEquals("A new task is open in Planner. Close this share, then save or close that task before sharing again.",
+            sharedDraftBlock("task", draftExists = false, eventEditorOpen = false, newTaskEditorOpen = true))
+        org.junit.Assert.assertNull(sharedDraftBlock("note", draftExists = false, eventEditorOpen = false, newTaskEditorOpen = true))
+    }
     @Test fun noRecoveryWhileAnEditorIsOpenInThisProcess() {
         var reads = 0
         assertNull(draftToRecover(1) { reads++; "draft" })

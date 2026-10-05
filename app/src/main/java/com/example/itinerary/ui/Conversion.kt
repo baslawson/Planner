@@ -84,9 +84,11 @@ internal fun conversionNotice(kind: String, dropped: List<String>): String =
         if (dropped.isEmpty()) "" else "\nWon't carry over:\n" + dropped.joinToString("\n") { "• $it" }
 
 // Why a conversion can't open its editor now, or null when it can: the editor it needs holds one unfinished draft.
-internal fun conversionBlock(toEvent: Boolean, eventDraft: Boolean, eventEditorOpen: Boolean, taskDraft: Boolean): String? = when {
+internal fun conversionBlock(toEvent: Boolean, eventDraft: Boolean, eventEditorOpen: Boolean, taskDraft: Boolean,
+                             newTaskEditorOpen: Boolean = false): String? = when {
     toEvent && eventEditorOpen -> "Close the event that's open first, then try again."
     toEvent && eventDraft -> "You have an unfinished event. Resume or discard it first, then try again."
+    !toEvent && newTaskEditorOpen -> "Close the new task that's open first, then try again."
     !toEvent && taskDraft -> "You have an unfinished new task. Resume or discard it first, then try again."
     else -> null
 }
@@ -157,7 +159,8 @@ fun ConversionHost(conversions: Conversions) {
                 is Prepared.ToEvent -> eventDraft != null && runCatching { DraftCodec.item(eventDraft.getJSONObject("initial")) == ready.converted.result }.getOrDefault(false)
                 is Prepared.ToTask -> taskDraft?.optString("id") == ready.converted.result.id
             }
-            if (!ownDraft) conversionBlock(toEvent, eventDraft != null, EditorDraftStore.openEditors.value > 0, taskDraft != null)?.let { error(it) }
+            if (!ownDraft) conversionBlock(toEvent, eventDraft != null, EditorDraftStore.openEditors.value > 0, taskDraft != null,
+                newTaskEditorOpen = TaskDraftStore.isOpen("new"))?.let { error(it) }
             ready
         }
         conversions.restored = null

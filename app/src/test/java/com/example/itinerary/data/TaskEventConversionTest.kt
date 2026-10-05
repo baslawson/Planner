@@ -84,7 +84,7 @@ class TaskEventConversionTest {
         listOf(LocalDateTime.of(2026, 10, 3, 8, 0), LocalDateTime.of(2026, 10, 2, 9, 0), LocalDateTime.of(2026, 10, 2, 20, 0)).forEach { time ->
             val at = time.atZone(sydney).toInstant().toEpochMilli()
             val r = TaskEventConversion.reminderBefore(day, null, at, sydney)!!
-            assertEquals(time.toString(), at, reminderTrigger(day, null, r.offsetMinutes, sydney).toInstant().toEpochMilli())
+            assertEquals(time.toString(), at, reminderTrigger(day, null, r, sydney).toInstant().toEpochMilli())
         }
     }
 
@@ -118,21 +118,20 @@ class TaskEventConversionTest {
             .contains("2 tasks that wait for it stop waiting."))
     }
 
-    // CV-1: when clocks go back, a time that can't be said exactly takes the nearest offset, not one an hour early.
+    // Elapsed-hour offsets represent the reminder exactly even when clocks go back.
     @Test fun clocksGoingBackTakeTheNearest() {
         val ny = ZoneId.of("America/New_York")
         val day = LocalDate.of(2026, 11, 1)
         val at = LocalDateTime.of(2026, 10, 31, 10, 0).atZone(ny).toInstant().toEpochMilli()
         val r = TaskEventConversion.reminderBefore(day, null, at, ny)!!
-        val fires = reminderTrigger(day, null, r.offsetMinutes, ny).toInstant().toEpochMilli()
+        val fires = reminderTrigger(day, null, r, ny).toInstant().toEpochMilli()
         assertTrue("fires ${(fires - at) / 60_000} min off", kotlin.math.abs(fires - at) <= 60_000)
         // Times that can be said exactly still are.
         val nine = LocalDateTime.of(2026, 10, 31, 9, 0).atZone(ny).toInstant().toEpochMilli()
         assertEquals(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS), TaskEventConversion.reminderBefore(day, null, nine, ny))
     }
 
-    // CW-1: when clocks go forward, whole days stay days ("1 day", not "23 hours"); CW-2: a time that can't be said is
-    // the nearest one, and the notice says by how much.
+    // Whole calendar days keep their label; other times retain the exact elapsed duration.
     @Test fun clockChangesKeepDaysAndTakeTheNearestEitherWay() {
         val sydney = ZoneId.of("Australia/Sydney")
         val at = LocalDateTime.of(2026, 10, 3, 9, 0).atZone(sydney).toInstant().toEpochMilli()
@@ -140,9 +139,10 @@ class TaskEventConversionTest {
         val ny = ZoneId.of("America/New_York")
         val late = LocalDateTime.of(2026, 10, 31, 9, 45).atZone(ny).toInstant().toEpochMilli()
         val r = TaskEventConversion.reminderBefore(LocalDate.of(2026, 11, 1), null, late, ny)!!
-        assertEquals(16 * 60_000L, reminderTrigger(LocalDate.of(2026, 11, 1), null, r.offsetMinutes, ny).toInstant().toEpochMilli() - late)
+        assertEquals(late, reminderTrigger(LocalDate.of(2026, 11, 1), null, r, ny).toInstant().toEpochMilli())
         val c = TaskEventConversion.toEvent(PlannerTask(title = "x", dueDate = LocalDate.of(2026, 11, 1), reminderAt = late), today, ny)
-        assertTrue(c.dropped.toString(), c.dropped.any { it.startsWith("The reminder: 16 min later") })
+        assertEquals(late, reminderTrigger(c.result.date, c.result.startTime, c.reminders.single(), ny).toInstant().toEpochMilli())
+        assertFalse(c.dropped.toString(), c.dropped.any { it.startsWith("The reminder:") })
     }
 
     // CW-3: a whole series is due on the first coming occurrence whose reminder is still ahead.

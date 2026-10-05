@@ -103,14 +103,17 @@ object CalendarFileImport {
         val replaced = overrides.groupBy { one(it, "UID")!!.value }
         val result = mutableListOf<Expanded>()
         for (props in others + orphans) {
-            try {
-                if (one(props, "STATUS")?.value?.uppercase() == "CANCELLED") continue
-                val moved = one(props, "UID")?.let { replaced[it.value] }.orEmpty()
-                expand(props, moved, zone, limit, from)?.let { result += it }
-                moved.forEach { override ->
-                    if (one(override, "STATUS")?.value?.uppercase() != "CANCELLED") expand(override, emptyList(), zone, limit, from)?.let { result += it }
+            if (one(props, "STATUS")?.value?.uppercase() == "CANCELLED") continue
+            val moved = one(props, "UID")?.let { replaced[it.value] }.orEmpty()
+            try { expand(props, moved, zone, limit, from)?.let { result += it } }
+            catch (_: Exception) { skipped++ }
+            // Each override is an event of its own: a broken master or sibling must not hide the readable ones.
+            moved.forEach { override ->
+                if (one(override, "STATUS")?.value?.uppercase() != "CANCELLED") {
+                    try { expand(override, emptyList(), zone, limit, from)?.let { result += it } }
+                    catch (_: Exception) { skipped++ }
                 }
-            } catch (_: Exception) { skipped++ }
+            }
         }
         return result to skipped
     }
@@ -144,18 +147,24 @@ object CalendarFileImport {
         val repeat = rule?.let { IcsRepeat.parse(it, ownZone, firstLocal.toLocalDate()) }
         if (rule != null && repeat == null) note = "Repeats in a way Planner can't copy, so only the first date is imported."
         if (fullDays > MultiDay.MAX_DAYS) note = listOfNotNull(note, "Lasts $fullDays days; Planner imports the first ${MultiDay.MAX_DAYS}.").joinToString(" ")
-        val keepFrom = from?.minusDays(days.coerceAtLeast(1) + 1) ?: firstLocal.toLocalDate()
-        val dates = (repeat?.dates(firstLocal.toLocalDate(), firstLocal.toLocalTime(), limit, from = keepFrom)
-            ?: listOf(firstLocal.toLocalDate())).toMutableSet()
-        props.filter { it.name == "RDATE" }.flatMap { values(it, ownZone) }.filter { it <= limit }.forEach { dates += it }
+        val spanDays = if (allDay) days else length?.toDays()?.coerceIn(0, MultiDay.MAX_DAYS.toLong()) ?: 0
+        val keepFrom = from?.minusDays(spanDays.coerceAtLeast(1) + 1) ?: firstLocal.toLocalDate()
+        // Keep full recurrence instants. RDATE can add several times on one date, and EXDATE / RECURRENCE-ID
+        // removes only its matching time, not every appointment that day.
+        val dates = repeat?.dates(firstLocal.toLocalDate(), firstLocal.toLocalTime(), limit, from = keepFrom)
+            ?: listOf(firstLocal.toLocalDate())
+        val starts = dates.map { if (allDay) it.atStartOfDay(ownZone) else it.atTime(firstLocal.toLocalTime()).atZone(ownZone) }.toMutableSet()
+        props.filter { it.name == "RDATE" }.flatMap { values(it, ownZone) }
+            .filter { it.toLocalDate() <= limit }.forEach { starts += it }
         val removed = props.filter { it.name == "EXDATE" }.flatMap { values(it, ownZone) } +
-            moved.mapNotNull { it.firstOrNull { p -> p.name == "RECURRENCE-ID" } }.flatMap { values(it, ownZone) }
-        dates -= removed.toSet()
-        if (dates.isEmpty()) return null
-        // Each date on the phone's clock.
-        val timings = dates.sorted().map { date ->
-            if (allDay) Ics.allDay(date, days) else {
-                val begin = date.atTime(firstLocal.toLocalTime()).atZone(ownZone).withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
+            moved.mapNotNull { it.firstOrNull { p -> p.name == "RECURRENCE-ID" } }
+                .flatMap { runCatching { values(it, ownZone) }.getOrDefault(emptyList()) }
+        val removedInstants = removed.mapTo(hashSetOf()) { it.toInstant() }
+        starts.removeAll { it.toInstant() in removedInstants }
+        if (starts.isEmpty()) return null
+        val timings = starts.sorted().map { occurrence ->
+            if (allDay) Ics.allDay(occurrence.toLocalDate(), days) else {
+                val begin = occurrence.withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
                 Ics.timed(begin.toLocalDateTime(), length?.let { begin.plus(it).truncatedTo(ChronoUnit.MINUTES).toLocalDateTime() })
             }
         }
@@ -184,10 +193,10 @@ object CalendarFileImport {
                 Row(item, group.map { it.date }, plannerRule, e.note)
             }
 
-    // The dates in an EXDATE, RDATE or RECURRENCE-ID (a list of dates or date-times) on the event's own clock.
-    private fun values(p: Ics.Property, zone: ZoneId): List<LocalDate> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
+    // The instants in an EXDATE, RDATE or RECURRENCE-ID, on the event's own clock; DATE values use midnight.
+    private fun values(p: Ics.Property, zone: ZoneId): List<ZonedDateTime> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
         val part = Ics.Property(p.name, p.params, value.trim())
-        if (Ics.isDate(part)) Ics.date(part) else strictTime(part, zone).withZoneSameInstant(zone).toLocalDate()
+        if (Ics.isDate(part)) Ics.date(part).atStartOfDay(zone) else strictTime(part, zone).withZoneSameInstant(zone)
     }
 
     // A date-time in its own zone (unknown zones refuse the event rather than guessing its time).
