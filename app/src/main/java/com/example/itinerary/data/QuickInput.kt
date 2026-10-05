@@ -90,7 +90,7 @@ fun QuickEntrySuggestion.quickProblem(task: Boolean, now: ZonedDateTime): String
         durationMinutes != null && durationMinutes !in 1..1440 -> "Choose a duration from 1 to 1440 minutes."
         !task && durationMinutes != null && time == null -> "Choose a start time for this duration."
         task && repeatCountSpecified -> "Task repeats create the next task after completion. Use Event for a fixed occurrence count."
-        !task && repeat != RepeatRule.NONE && (repeatCount !in 2..365 || runCatching { repeat.dates(date, repeatCount).any { it.year !in 1..9999 } }.getOrDefault(true)) -> "Choose 2–365 occurrences within the supported calendar dates."
+        !task && repeat != RepeatRule.NONE && (repeatCount !in 2..365 || runCatching { repeat.dates(date, repeatCount, repeatAnchorDay).any { it.year !in 1..9999 } }.getOrDefault(true)) -> "Choose 2–365 occurrences within the supported calendar dates."
         task && reminder != null && !dateSpecified -> "Choose a due date for this task reminder."
         reminder != null && reminder <= now -> "This reminder time has passed. Change the date or time, or remove the reminder."
         else -> null
@@ -127,7 +127,7 @@ fun quickConflicts(candidates: List<QuickCandidate>, items: List<ItineraryItem>,
             }
             pendingTasks += task
         } else {
-            val dates = if (s.repeat == RepeatRule.NONE) listOf(s.date) else s.repeat.dates(s.date, s.repeatCount)
+            val dates = if (s.repeat == RepeatRule.NONE) listOf(s.date) else s.repeat.dates(s.date, s.repeatCount, s.repeatAnchorDay)
             dates.forEach { date ->
                 val event = ItineraryItem(tripId = 0, date = date, startTime = s.time, title = s.title, durationMinutes = s.durationMinutes)
                 events.forEach { existing ->

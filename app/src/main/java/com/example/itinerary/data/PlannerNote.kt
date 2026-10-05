@@ -251,7 +251,10 @@ object Notes {
     // Words, a file or a photo: a note the user saves has something in it.
     fun hasContent(note: PlannerNote) = note.title.isNotBlank() || note.content.isNotBlank() || note.attachments.isNotEmpty()
 
-    fun cleanNotebook(name: String) = name.replace('\n', ' ').trim().trim('/').take(MAX_NOTEBOOK)
+    // N16-4: each level trimmed and empty ones dropped, as Nextcloud does, so "Work /" and "/ Work" are "Work"; cut to
+    // the limit without leaving a space or slash at the end, so cleaning again changes nothing.
+    fun cleanNotebook(name: String) = name.replace('\n', ' ').split('/').map { it.trim() }.filter { it.isNotEmpty() }
+        .joinToString("/").take(MAX_NOTEBOOK).trimEnd { it.isWhitespace() || it == '/' }
     fun cleanTag(name: String) = name.replace('\n', ' ').trim().removePrefix("#").trim().take(MAX_TAG)
 
     /**

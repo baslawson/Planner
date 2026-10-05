@@ -36,6 +36,8 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         dateSpecified = dateOverride?.isNotEmpty() ?: dateSpecified,
         time = if (timeOverride != null) timeOverride.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) else time,
         dateChoices = dates, ambiguousTime = ambiguous, error = problem,
+        // T16-3: a month end chosen instead still keeps to month ends; another day is its own.
+        repeatAnchorDay = repeatAnchorDay.takeIf { newDate == date || newDate.dayOfMonth == newDate.lengthOfMonth() } ?: 0,
         // A time chosen by hand is the one time: "8am and 8pm" then adds a single event.
         extraTimes = if (timeOverride != null) emptyList() else extraTimes, nextDayTimes = if (timeOverride != null) 0 else nextDayTimes)
 }
@@ -74,6 +76,7 @@ fun QuickEntrySuggestion.quickReminderTrigger(task: Boolean, zone: java.time.Zon
 
 fun QuickEntrySuggestion.quickTask(): PlannerTask = PlannerTask(
     title = title, dueDate = date.takeIf { dateSpecified }, repeat = repeat.name,
+    repeatAnchorDay = repeatAnchorDay,
     reminderAt = quickReminderTrigger(task = true)?.toInstant()?.toEpochMilli(),
 )
 

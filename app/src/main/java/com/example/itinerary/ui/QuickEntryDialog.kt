@@ -226,7 +226,7 @@ fun QuickEntryEditor(
     val suggestion = remember(currentInput, now) { currentInput.suggestion(now) }
     val reminder = suggestion.quickReminderTrigger(task, now.zone)
     val series = if (!task && suggestion.repeat != RepeatRule.NONE && suggestion.repeatCount in 2..365)
-        runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
+        runCatching { suggestion.repeat.dates(suggestion.date, suggestion.repeatCount, suggestion.repeatAnchorDay).takeIf { dates -> dates.all { it.year in 1..9999 } } }.getOrNull() else null
     val problem = if (currentInput.length > 500) "Use at most 500 characters per entry." else suggestion.quickProblem(task, now)
     val valid = !currentInput.empty && problem == null && !busy && !inputBlocked
     val scope = rememberCoroutineScope()

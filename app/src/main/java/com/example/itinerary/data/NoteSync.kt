@@ -148,9 +148,11 @@ object NoteMapping {
 
     // Nextcloud's title is kept unless it's just the first line again (the card would show it twice), or it's Planner's
     // own title as Nextcloud tidied it (no / \\ : * ? " < > |, cut at 100, " (2)" added): Planner's stays then.
+    // N16-3: the first line is compared the same tolerant way, as Nextcloud tidies it too ("- [ ] milk" → "[ ] milk").
     fun localTitle(remote: RemoteNote, mine: String = "") = when {
         mine.isNotBlank() && sameTitle(mine, remote.title) -> mine
         remote.title.trim() == firstLine(remote.content) -> ""
+        titleKey(remote.title).isNotEmpty() && sameTitle(remote.title, firstLine(remote.content)) -> ""
         else -> remote.title.trim()
     }
 

@@ -142,6 +142,8 @@ fun ItemEditorSheet(
     startWithBillScan: Boolean = false,
     initialAddedReminders: List<Reminder> = emptyList(),
     initialRepeatCount: Int = 12,
+    // A monthly series' day of the month from Quick entry (31: each month's last day); 0 = the date's own.
+    initialRepeatAnchorDay: Int = 0,
     // Opened filled in from a share: unsaved until saved, so Close asks "Save changes?" rather than dropping it.
     prefilled: Boolean = false,
     checkCurrency: Boolean = false,
@@ -166,7 +168,7 @@ fun ItemEditorSheet(
     val current = saved
     if (current == null) ItemEditorForm(initial, existingAttachments, existingReminders, categoryCounts, hiddenCategories,
         onRemoveCategories, onShowCategory, onDismiss, onSave, onSaved, onDelete, startWithScan, startWithBillScan,
-        initialAddedReminders, initialRepeatCount, prefilled = prefilled, checkCurrency = checkCurrency,
+        initialAddedReminders, initialRepeatCount, initialRepeatAnchorDay = initialRepeatAnchorDay, prefilled = prefilled, checkCurrency = checkCurrency,
         initialAddedAttachments = initialAddedAttachments, notice = notice)
     else key(current.first) {
         val (item, attachments, reminders) = current.second
@@ -193,6 +195,7 @@ private fun ItemEditorForm(
     startWithBillScan: Boolean = false,
     initialAddedReminders: List<Reminder> = emptyList(),
     initialRepeatCount: Int = 12,
+    initialRepeatAnchorDay: Int = 0,
     // Opened again right after a Save: the Save button says "Saved" until something changes.
     justSaved: Boolean = false,
     prefilled: Boolean = false,
@@ -483,10 +486,12 @@ private fun ItemEditorForm(
     // A series edit only while the series is there: an event deleted elsewhere is saved as a new single one.
     val seriesEdit = !isNew && !deletedElsewhere && entireSeries
     val changeRepeat = seriesEdit && repeat.name != initial.repeatRule
+    // T16-3: Quick entry's month ends hold while its date and repeat do, as a task's repeatAnchorDay does.
+    val anchorDay = if (date == initial.date && repeat.name == initial.repeatRule) initialRepeatAnchorDay else 0
     val validRepeat = repeat.valid && (!creatingSeries || repeat == RepeatRule.NONE || count != null && count in 2..365)
-    val plannedDates = remember(date, repeat, count, isNew, seriesEdit, allEvents) { runCatching {
+    val plannedDates = remember(date, repeat, count, isNew, seriesEdit, allEvents, anchorDay) { runCatching {
         when {
-            creatingSeries -> repeat.dates(date, count?.coerceIn(1, 365) ?: 1)
+            creatingSeries -> repeat.dates(date, count?.coerceIn(1, 365) ?: 1, anchorDay)
             seriesEdit -> {
                 val shift = java.time.temporal.ChronoUnit.DAYS.between(initial.date, date)
                 val members = allEvents.filter { it.seriesId == initial.seriesId }.sortedBy { it.date }
@@ -608,7 +613,7 @@ private fun ItemEditorForm(
         val remindersToRemove = if (copy) emptyList() else removedReminders.toList()
         val options = EventSaveOptions(if (creatingSeries || changeRepeat) repeat else RepeatRule.NONE,
             if (creatingSeries && repeat != RepeatRule.NONE) count!! else 1, seriesEdit, changeRepeat, draftToken,
-            paymentBaseline = paymentBaseline.takeUnless { copy || isNew })
+            paymentBaseline = paymentBaseline.takeUnless { copy || isNew }, anchorDay = anchorDay)
         scope.launch {
             withContext(NonCancellable) {
                 try {

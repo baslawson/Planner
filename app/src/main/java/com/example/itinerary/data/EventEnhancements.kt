@@ -49,8 +49,9 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
         else -> true
     }
 
-    // Always advance from the original date: Jan 31 → Feb 28 → Mar 31, without month-end drift.
-    fun dates(start: LocalDate, count: Int): List<LocalDate> {
+    // Always advance from the original date: Jan 31 → Feb 28 → Mar 31, without month-end drift. Monthly ones fall on
+    // [anchorDay] (0: the start's own day), or the month's last day when it's shorter: 31 keeps 30 Nov → 31 Dec (T16-3).
+    fun dates(start: LocalDate, count: Int, anchorDay: Int = 0): List<LocalDate> {
         require(count in 1..365) { "Choose between 1 and 365 occurrences" }
         require(valid) { "Choose a complete repeat" }
         return when (kind) {
@@ -65,17 +66,20 @@ data class RepeatRule(val kind: Kind, val every: Int = 1, val days: Set<DayOfWee
                     Kind.DAILY -> start.plusDays(i)
                     Kind.WEEKLY -> start.plusWeeks(i)
                     Kind.FORTNIGHTLY -> start.plusWeeks(i * 2)
-                    Kind.MONTHLY -> start.plusMonths(i)
+                    Kind.MONTHLY -> monthOn(start, i, anchorDay)
                     Kind.YEARLY -> start.plusYears(i)
                     Kind.EVERY_N_DAYS -> start.plusDays(i * every)
                     Kind.EVERY_N_WEEKS -> start.plusWeeks(i * every)
                     // Always from the start date, like MONTHLY: 31 Jan every 3 months → 30 Apr, 31 Jul.
-                    Kind.EVERY_N_MONTHS -> start.plusMonths(i * every)
+                    Kind.EVERY_N_MONTHS -> monthOn(start, i * every, anchorDay)
                     else -> error("Handled above")
                 }
             }
         }
     }
+
+    private fun monthOn(start: LocalDate, months: Long, anchorDay: Int): LocalDate =
+        YearMonth.from(start).plusMonths(months).let { it.atDay(minOf(anchorDay.takeIf { day -> day > 0 } ?: start.dayOfMonth, it.lengthOfMonth())) }
 
     /** Whether [date] is one this rule can fall on: the right weekday, or the right week of the month. */
     fun fits(date: LocalDate): Boolean = when (kind) {
@@ -156,6 +160,8 @@ data class EventSaveOptions(
     val changeRepeat: Boolean = false,
     val draftToken: String? = null,
     val paymentBaseline: PaymentState? = null,
+    /** A new monthly series' day of the month (RepeatRule.dates); 0 = its first date's own. */
+    val anchorDay: Int = 0,
 )
 
 fun millisUntilNextDay(now: java.time.ZonedDateTime): Long =

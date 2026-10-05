@@ -180,7 +180,7 @@ class Repository(
                 if (options.changeRepeat && options.repeat != RepeatRule.NONE)
                     options.repeat.dates(members.first().date.plusDays(shift), members.size)
                 else members.map { it.date.plusDays(shift) }
-            } else options.repeat.dates(item.date, options.count)
+            } else options.repeat.dates(item.date, options.count, options.anchorDay)
             val excluded = if (item.id == 0L) emptySet() else members.mapTo(hashSetOf(item.id)) { it.id }
             Bills.duplicates(item, itemDao.billCandidates(item.billAmountMinor, item.billCurrency, dates), dates.toSet(), excluded)
         }
@@ -863,7 +863,7 @@ class Repository(
             } else item.tripId
             val targets = when {
                 item.id == 0L || original?.seriesId == null && options.repeat != RepeatRule.NONE -> {
-                    val dates = options.repeat.dates(item.date, options.count)
+                    val dates = options.repeat.dates(item.date, options.count, options.anchorDay)
                     val series = if (dates.size > 1) UUID.randomUUID().toString() else null
                     dates.mapIndexed { index, date -> item.startingOn(date).copy(id = if (index == 0) item.id else 0, tripId = owner, seriesId = series,
                         paid = index == 0 && item.paid, payments = if (index == 0) item.payments else emptyList(), skipped = false,

@@ -70,8 +70,9 @@ class QuickRound5Test {
         ok("Team sync bi-weekly Thursday 10am").let { assertEquals(RepeatRule.FORTNIGHTLY, it.repeat); assertEquals(LocalTime.of(10, 0), it.time) }
         assertEquals(RepeatRule.FORTNIGHTLY, ok("Review every other week on Friday").repeat)
         ok("Bills every month on the last day").let {
-            assertEquals("Bills", it.title); assertEquals(RepeatRule.MONTHLY, it.repeat); assertEquals(day(10, 31), it.date)
-            assertEquals(LocalDate.of(2026, 11, 30), RepeatRule.MONTHLY.dates(it.date, 2)[1]) // the last day of shorter months
+            // T16-3: today, 30 Sep, is September's last day, so the series starts today rather than on 31 Oct.
+            assertEquals("Bills", it.title); assertEquals(RepeatRule.MONTHLY, it.repeat); assertEquals(day(9, 30), it.date)
+            assertEquals(listOf(day(9, 30), day(10, 31), day(11, 30)), RepeatRule.MONTHLY.dates(it.date, 3, it.repeatAnchorDay)) // each month's last day
         }
         ok("Walk every weekday morning at 7").let { assertEquals("Walk", it.title); assertEquals(RepeatRule.WEEKDAYS, it.repeat); assertEquals(LocalTime.of(7, 0), it.time) }
         ok("Bins every Tuesday night").let { assertEquals("Bins", it.title); assertEquals(RepeatRule.WEEKLY, it.repeat); assertEquals(day(10, 6), it.date); assertNotNull(it.timePrompt) }

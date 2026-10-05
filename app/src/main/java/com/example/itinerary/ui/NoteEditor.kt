@@ -154,7 +154,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // EU-1, EU-2: whether loading [note] changes what is typed in the fields Undo follows. NO-2: as stored, so a body
     // ending in a new line or a notebook in other capitals isn't a change (spelt as [current] spells it).
     fun wordsDiffer(note: PlannerNote) =
-        noteWordsDiffer(note, title, content.text, Notes.existingSpelling(notebooks, notebook.trim()))
+        noteWordsDiffer(note, title, content.text, Notes.existingSpelling(notebooks, Notes.cleanNotebook(notebook)))
     // NO-2: [words] false leaves the typed fields (and the cursor) as they are: the stored words are the same once cleaned.
     fun load(note: PlannerNote, words: Boolean = true) {
         if (words) { title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook }
@@ -162,7 +162,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null; priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
-    val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,
+    val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, Notes.cleanNotebook(notebook)), color = color, pinned = pinned,
         tags = tags, attachments = attachments, reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, priority = priority)
     // The stored version cleaned once, not again on every letter typed (UI-10).
     val cleanBase = remember(base) { base?.let(Notes::clean) }

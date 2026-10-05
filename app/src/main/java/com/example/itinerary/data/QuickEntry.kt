@@ -50,6 +50,8 @@ data class QuickEntrySuggestion(
     val reminderClock: LocalTime? = null,
     /** -1 means the previous day only when its clock time is later than the event's. */
     val reminderDaysBefore: Int = 0,
+    /** The day of the month a monthly repeat comes back to (31: each month's last day); 0 = the start date's own. */
+    val repeatAnchorDay: Int = 0,
 )
 
 /** Local, explicit grammar. Quoted text is literal; consumed spans keep their original offsets. */
@@ -405,6 +407,9 @@ object QuickEntry {
                 mask(match.range, '\uE000'); return@forEach
             }
             if (following == null) return@forEach
+            // T16-2: "Sat or Sun" is a choice of days, as "Saturday or Sunday" is; "sun or rain" stays words.
+            if (following == "or" && bareWeekday.matches(match.value) &&
+                rx("^[\\s,]*or\\s+(?:$weekdays)\\b").containsMatchIn(remaining.substring(match.range.last + 1))) return@forEach
             // "now" is scheduling only at the end: "Meeting now", but "now and then", "Now TV".
             if (following !in scheduleVocabulary || match.value.equals("now", ignoreCase = true)) mask(match.range, '\uE000')
         }
@@ -721,6 +726,10 @@ object QuickEntry {
         var repeat = RepeatRule.NONE
         var repeatDay: DayOfWeek? = null
         var monthDay: Int? = null
+        // T16-3: "on the last day" is each month's last day, whatever its length; its series and tasks come back to
+        // month ends (31, as a task's repeatAnchorDay).
+        var repeatAnchorDay = 0
+        fun onMonthDay(d: LocalDate) = monthDay == null || d.dayOfMonth == (if (repeatAnchorDay > 0) d.lengthOfMonth() else monthDay)
         val monthDayMatches = monthDayRepeat.findAll(remaining).toList()
         monthDayMatches.firstOrNull()?.let { match ->
             monthDay = match.groupValues[1].toInt().takeIf { it in 1..31 } ?: return error("That date isn't valid.")
@@ -744,10 +753,10 @@ object QuickEntry {
             repeat = if (rx("fortnight|bi-?weekly|other").containsMatchIn(match.groupValues[1])) RepeatRule.FORTNIGHTLY else RepeatRule.WEEKLY
             consume(match.range, QuickPhraseKind.REPEAT)
         }
-        // "monthly on the last day": the 31st, which falls back to the last day of shorter months.
+        // "monthly on the last day": the 31st, which falls back to the last day of shorter months, this month's included.
         val lastDayMatches = lastDayMonthly.findAll(remaining).toList()
         lastDayMatches.firstOrNull()?.let { match ->
-            monthDay = 31; repeat = RepeatRule.MONTHLY
+            monthDay = 31; repeatAnchorDay = 31; repeat = RepeatRule.MONTHLY
             consume(match.range, QuickPhraseKind.REPEAT)
         }
         // Only clearly a repeat: with every/each/on, plural days, separators, or three or more days.
@@ -952,7 +961,7 @@ object QuickEntry {
             val named = today.with(TemporalAdjusters.nextOrSame(weekday))
             val readings = listOfNotNull(true to (a to b), false to (b to a)).filter { dayFirst == null || it.first == dayFirst }.mapNotNull { (_, dm) ->
                 runCatching { LocalDate.of(today.year, dm.second, dm.first).let { if (it < today) it.plusYears(1) else it } }.getOrNull() }
-            return readings.none { d -> d == named && (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay) }
+            return readings.none { d -> d == named && (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && onMonthDay(d) }
         }
         val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
             .filterNot(::hoursNotDate).toList()
@@ -1008,7 +1017,7 @@ object QuickEntry {
             monthDay != null -> "repeating day of the month"
             else -> null
         }
-        fun fitsAnchor(d: LocalDate) = (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && (monthDay == null || d.dayOfMonth == monthDay)
+        fun fitsAnchor(d: LocalDate) = (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && onMonthDay(d)
         var date = relativeAt?.toLocalDate() ?: if (impliedToday) today.minusDays(if (impliedYesterday) 1 else 0) else
             (startFrom ?: today).let { first -> generateSequence(first) { it.plusDays(1) }.take(400).firstOrNull(::fitsAnchor) ?: first }
         rangeStart?.let { date = it }
@@ -1078,7 +1087,7 @@ object QuickEntry {
                 unit.startsWith("m") -> date.plusMonths(count)
                 else -> date.plusYears(count)
             }
-            repeatCount = repeat.dates(date, 365).count { it < end }
+            repeatCount = repeat.dates(date, 365, repeatAnchorDay).count { it < end }
             if (repeatCount !in 2..365) return error("Choose a repeat rule and between 2 and 365 occurrences.")
         }
         // The day an "until" names: a holiday or numeric date on or after [date], any other date counted from [base].
@@ -1104,7 +1113,7 @@ object QuickEntry {
         repeatUntilText?.let { raw ->
             val end = untilEnd(raw, today).let { (end, problem) -> end ?: return error(problem) }
             if (end < date) return error("The repeat ends before it starts. Choose a later end date.")
-            repeatCount = repeat.dates(date, 365).count { it <= end }
+            repeatCount = repeat.dates(date, 365, repeatAnchorDay).count { it <= end }
             if (repeatCount !in 2..365) return error("Choose an end date that gives between 2 and 365 occurrences.")
         }
         // "Away tomorrow until Friday": the Friday from the first day. Until the first day itself is just that day.
@@ -1466,7 +1475,7 @@ object QuickEntry {
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
             reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
             taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle, endTime, reminderUnit,
-            reminderAt, if (reminderAt == null) 0 else if (reminderDaysBack > 0) reminderDaysBack else -1)
+            reminderAt, if (reminderAt == null) 0 else if (reminderDaysBack > 0) reminderDaysBack else -1, repeatAnchorDay)
     }
 
     /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */

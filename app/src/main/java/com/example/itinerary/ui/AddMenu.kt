@@ -298,7 +298,7 @@ fun BoxScope.AddMenuHost(
                 for (i in parts.indices.reversed()) {
                     val part = parts[i]
                     val event = quickEvent(part)
-                    saveEvent(event, emptyList(), emptyList(), part.quickReminders(), emptyList(), EventSaveOptions(repeat = part.repeat, count = if (part.repeat == RepeatRule.NONE) 1 else part.repeatCount, draftToken = quickToken(token, i)))
+                    saveEvent(event, emptyList(), emptyList(), part.quickReminders(), emptyList(), EventSaveOptions(repeat = part.repeat, count = if (part.repeat == RepeatRule.NONE) 1 else part.repeatCount, draftToken = quickToken(token, i), anchorDay = part.repeatAnchorDay))
                     onEventSaved(event)
                 }
             }
@@ -318,6 +318,7 @@ fun BoxScope.AddMenuHost(
             startWithBillScan = state.scanBill,
             initialAddedReminders = quick?.quickReminders().orEmpty(),
             initialRepeatCount = quick?.repeatCount ?: 12,
+            initialRepeatAnchorDay = quick?.repeatAnchorDay ?: 0,
             existingAttachments = emptyList(),
             existingReminders = emptyList(),
             categoryCounts = categoryCounts,
