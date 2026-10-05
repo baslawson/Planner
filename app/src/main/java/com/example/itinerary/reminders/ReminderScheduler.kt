@@ -17,6 +17,9 @@ interface ReminderAlarms {
     fun cancelTask(id: String) {}
     fun scheduleNote(note: com.example.itinerary.data.PlannerNote) {}
     fun cancelNote(id: String) {}
+    // D14-1: only "Ring until I stop it" was turned off: a ringing (or starting) alarm goes quiet, the reminder itself stays.
+    fun ringOffTask(id: String) {}
+    fun ringOffNote(id: String) {}
     fun cancel(reminderId: Long)
     // The time zone task reminders were last set in, so that after a change they keep their clock time (Repository).
     fun reminderZone(): String? = null
@@ -178,6 +181,9 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         delivered.forget(MissedReminders.taskKey(id))
         androidx.core.app.NotificationManagerCompat.from(context).cancel("task:$id", 0)
     }
+
+    override fun ringOffTask(id: String) = AlarmService.quietIfRinging(context, "task", id)
+    override fun ringOffNote(id: String) = AlarmService.quietIfRinging(context, "note", id)
 
     // A note's reminder, set and cleared as a task's is (a note has no "done": Done clears its reminder).
     override fun scheduleNote(note: com.example.itinerary.data.PlannerNote) {

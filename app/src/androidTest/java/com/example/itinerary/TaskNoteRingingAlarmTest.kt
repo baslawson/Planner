@@ -109,6 +109,9 @@ class TaskNoteRingingAlarmTest {
             }
         }
         await("$operation did not silence $kind") { alarm() == null }
+        // D14-1: turned off, it stops ringing but stays a reminder; removed or deleted, it is gone.
+        if (operation == "off") await("Turning ringing off lost the $kind reminder") { manager.activeNotifications.any { it.tag == "$kind:${owner.id}" } }
+        else { Thread.sleep(500); assertFalse(manager.activeNotifications.any { it.tag == "$kind:${owner.id}" }) }
     }
     @Test fun removingTaskReminderSilences() = change("task", "remove")
     @Test fun removingNoteReminderSilences() = change("note", "remove")
@@ -116,6 +119,51 @@ class TaskNoteRingingAlarmTest {
     @Test fun disablingNoteRingSilences() = change("note", "off")
     @Test fun deletingTaskSilences() = change("task", "delete")
     @Test fun deletingNoteSilences() = change("note", "delete")
+    private fun posted(tag: String) = manager.activeNotifications.firstOrNull { it.tag == tag }
+    private fun delivered(kind: String, ring: Boolean = false, ahead: Long = 3_000): String {
+        ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val id = "qa-plain-$kind-${System.nanoTime()}"
+        val at = System.currentTimeMillis() + ahead
+        runBlocking {
+            if (kind == "task") app.repository.saveTask(PlannerTask(id = id, title = "QA plain task", reminderAt = at, ringUntilDismissed = ring))
+            else app.repository.saveNote(PlannerNote(id = id, title = "QA plain note", content = "plain body", reminderAt = at, ringUntilDismissed = ring), true)
+        }
+        return id
+    }
+    private fun setRing(kind: String, id: String, ring: Boolean) = runBlocking {
+        if (kind == "task") app.repository.saveTask(app.repository.snapshot().tasks.single { it.id == id }.copy(ringUntilDismissed = ring), false)
+        else app.repository.saveNote(app.repository.note(id)!!.copy(ringUntilDismissed = ring), false)
+    }
+    // D14-1: choosing to ring next time must not dismiss the reminder already showing.
+    private fun ringOnlyEditKeepsDelivered(kind: String) {
+        val id = delivered(kind)
+        await("$kind reminder was not delivered") { posted("$kind:$id") != null }
+        setRing(kind, id, true)
+        Thread.sleep(1_500)
+        assertNotNull("Ring-only save dismissed the $kind reminder", posted("$kind:$id"))
+        assertNull("A delivered reminder must not ring afterwards", alarm())
+    }
+    @Test fun taskRingOnlyEditKeepsDeliveredReminder() = ringOnlyEditKeepsDelivered("task")
+    @Test fun noteRingOnlyEditKeepsDeliveredReminder() = ringOnlyEditKeepsDelivered("note")
+    // ...and a reminder still ahead is set again with the new choice, without being cancelled first.
+    private fun ringTurnedOnForComingReminder(kind: String) {
+        val id = delivered(kind, ahead = 5_000)
+        setRing(kind, id, true)
+        await("$kind reminder turned to ring didn't ring") { alarm() != null }
+        action("Stop"); await("Stop failed") { alarm() == null }
+    }
+    @Test fun taskRingTurnedOnRingsWhenDue() = ringTurnedOnForComingReminder("task")
+    @Test fun noteRingTurnedOnRingsWhenDue() = ringTurnedOnForComingReminder("note")
+    // A14-3: a ringing note that gives way shows its own words (on an unlocked phone), as its ordinary reminder does.
+    @Test fun displacedRingingNoteShowsItsWords() {
+        val note = start("note")
+        start("task")
+        await("The displaced note didn't show its title") {
+            posted("note:${note.id}")?.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "PRIVATE NOTE WORDS"
+        }
+        assertEquals("PRIVATE BODY", posted("note:${note.id}")!!.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        action("Stop"); await("Stop failed") { alarm() == null }
+    }
     @Test fun anotherOwnerCannotStopTheRingingNoteAndNewAlarmDisplacesItSafely() {
         val note = start("note")
         app.reminderScheduler.cancelTask(note.id)

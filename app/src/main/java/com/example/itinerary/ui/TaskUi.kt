@@ -487,7 +487,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             initial.done -> "Reminders are off while this task is completed."
                             snoozed != null && at == initial.reminderAt -> "Snoozed until ${momentLabel(snoozed)}. Changing the reminder ends the snooze."
                             else -> null
-                        }, onRemove = { reminderAt = null }, enabled = !busy) {
+                        }, onRemove = { reminderAt = null; ringUntilDismissed = false }, enabled = !busy) {
                             RingReminderSwitch(ringUntilDismissed, enabled = !busy) { ringUntilDismissed = it }
                         }
                     }

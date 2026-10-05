@@ -119,7 +119,7 @@ object Notes {
      */
     fun copyOf(note: PlannerNote, now: Long = System.currentTimeMillis()): PlannerNote =
         note.copy(id = UUID.randomUUID().toString(), title = copyTitle(note), pinned = false, reminderAt = null, snoozedUntil = null,
-            created = now, modified = now, position = 0)
+            ringUntilDismissed = false, created = now, modified = now, position = 0)
 
     fun copyTitle(note: PlannerNote): String {
         val base = note.title.trim().ifBlank { label(note).takeUnless { it == "Untitled note" }.orEmpty() }
@@ -242,6 +242,8 @@ object Notes {
         tags = note.tags.map(::cleanTag).filter { it.isNotEmpty() }.distinct().take(MAX_TAGS),
         // Recognised text beyond a task's limit is cut (marked partly read), as Tasks.capText does.
         attachments = Tasks.capText(PlannerTask(title = "x", attachments = note.attachments)).attachments,
+        // U14-2: ringing is a choice of a reminder; without one it is off.
+        ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null,
     )
 
     // Words, a file or a photo: a note the user saves has something in it.

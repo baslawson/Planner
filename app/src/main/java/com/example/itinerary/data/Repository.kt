@@ -119,10 +119,15 @@ class Repository(
         _maintenanceIssues.value = followUp.keys.mapTo(linkedSetOf()) { it.substringBefore(':') }
     }
 
+    // D14-1: a changed reminder time is a new reminder (the old alarm and notification go); a changed ring choice alone
+    // keeps the reminder as it is: it is set again with the choice, and turned off it only stops the ringing.
+    private fun ringTurnedOff(before: Boolean?, after: Boolean?) = before == true && after == false
+
     private suspend fun afterCommit(files: Collection<String> = emptyList(), reminderIds: Collection<Long> = emptyList(),
                                     cancelFirst: Set<Long> = emptySet(), notify: Boolean = true, taskIds: Collection<String> = emptyList(),
                                     resetTaskIds: Set<String> = emptySet(), noteIds: Collection<String> = emptyList(),
-                                    resetNoteIds: Set<String> = emptySet()) {
+                                    resetNoteIds: Set<String> = emptySet(), quietTaskIds: Set<String> = emptySet(),
+                                    quietNoteIds: Set<String> = emptySet()) {
         cleanupFiles.addAll(files.filter { it.isNotBlank() })
         val work = linkedMapOf<String, suspend () -> Unit>()
         if (cleanupFiles.isNotEmpty()) work["cleanup"] = {
@@ -139,14 +144,14 @@ class Repository(
         taskIds.distinct().forEach { id ->
             work["reminders:task:$id"] = {
                 val task = taskDao.byId(id)
-                if (task == null || id in resetTaskIds) scheduler.cancelTask(id)
+                if (task == null || id in resetTaskIds) scheduler.cancelTask(id) else if (id in quietTaskIds) scheduler.ringOffTask(id)
                 if (task != null) scheduler.scheduleTask(task)
             }
         }
         noteIds.distinct().forEach { id ->
             work["reminders:note:$id"] = {
                 val note = noteDao.byId(id)
-                if (note == null || id in resetNoteIds) scheduler.cancelNote(id)
+                if (note == null || id in resetNoteIds) scheduler.cancelNote(id) else if (id in quietNoteIds) scheduler.ringOffNote(id)
                 if (note != null) scheduler.scheduleNote(note)
             }
         }
@@ -201,7 +206,8 @@ class Repository(
     private val taskDao = db.taskDao()
     val tasks = taskDao.observe()
     suspend fun saveTask(task: PlannerTask, create: Boolean = true) = changes.withLock {
-        val clean = Tasks.capText(task.copy(title = task.title.trim(), notes = task.notes.trim()))
+        // U14-2: ringing is a choice of a reminder: without one it is off, so a later reminder doesn't start ringing unseen.
+        val clean = Tasks.capText(task.copy(title = task.title.trim(), notes = task.notes.trim(), ringUntilDismissed = task.ringUntilDismissed && task.reminderAt != null))
         Tasks.validate(clean)
         val allTasks = taskDao.all()
         val oldIds = allTasks.find { it.id == clean.id }?.prerequisiteIds.orEmpty()
@@ -222,7 +228,8 @@ class Repository(
             }
             val saved = taskDao.byId(task.id)
             afterCommit(files = existing?.attachments.orEmpty().map { it.fileName }, taskIds = listOf(task.id),
-                resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt || existing?.ringUntilDismissed != saved?.ringUntilDismissed) setOf(task.id) else emptySet())
+                resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt) setOf(task.id) else emptySet(),
+                quietTaskIds = if (ringTurnedOff(existing?.ringUntilDismissed, saved?.ringUntilDismissed)) setOf(task.id) else emptySet())
         }
     }
     // A task's ⋮ "Due tomorrow", with the same Undo bar as an event's move (see undoMove).
@@ -306,7 +313,8 @@ class Repository(
             }
             else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
             afterCommit(noteIds = listOf(clean.id),
-                resetNoteIds = if (old != null && (old.activeReminderAt != clean.activeReminderAt || old.ringUntilDismissed != clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
+                resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet(),
+                quietNoteIds = if (ringTurnedOff(old?.ringUntilDismissed, clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
         }
         clean
     }
@@ -321,7 +329,8 @@ class Repository(
             // Pinning and archiving only file it differently; the note itself changed only if its words did.
             val stamped = if (changed.content != note.content || changed.title != note.title) changed.copy(modified = System.currentTimeMillis()) else changed
             noteDao.update(stamped)
-            afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt || note.ringUntilDismissed != stamped.ringUntilDismissed) setOf(id) else emptySet())
+            afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt) setOf(id) else emptySet(),
+                quietNoteIds = if (ringTurnedOff(note.ringUntilDismissed, stamped.ringUntilDismissed)) setOf(id) else emptySet())
             stamped
         }
     }
@@ -394,7 +403,8 @@ class Repository(
             val clean = Notes.clean(note.copy(position = current?.position ?: Notes.topPosition(noteDao.all())))
             Notes.validate(clean)
             if (current == null) noteDao.insert(clean) else noteDao.update(clean)
-            afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && (current.activeReminderAt != clean.activeReminderAt || current.ringUntilDismissed != clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
+            afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && current.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet(),
+                quietNoteIds = if (ringTurnedOff(current?.ringUntilDismissed, clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
             true
         }
     }
@@ -447,7 +457,7 @@ class Repository(
         if (note.activeReminderAt != trigger || trigger > System.currentTimeMillis()) return@withLock false
         if (snoozeUntil != null) require(snoozeUntil > System.currentTimeMillis())
         withContext(NonCancellable) {
-            noteDao.update(if (snoozeUntil == null) note.copy(reminderAt = null, snoozedUntil = null) else note.copy(snoozedUntil = snoozeUntil))
+            noteDao.update(if (snoozeUntil == null) note.copy(reminderAt = null, snoozedUntil = null, ringUntilDismissed = false) else note.copy(snoozedUntil = snoozeUntil))
             afterCommit(noteIds = listOf(id), resetNoteIds = setOf(id))
         }
         true

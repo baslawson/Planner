@@ -47,13 +47,17 @@ class TaskNoteRingingDataTest {
         } finally { db.close(); android.database.sqlite.SQLiteDatabase.deleteDatabase(file) }
     }
 
-    @Test fun ringModeChangesCancelOldAlarmButWordsKeepItAndSnoozesSurvive() = runBlocking {
+    // D14-1: a ring choice alone never cancels the reminder (its notification or a late alarm); turned off it goes quiet.
+    @Test fun ringModeChangesKeepTheReminderAndSnoozesSurvive() = runBlocking {
         val cancelled = mutableListOf<String>()
+        val quieted = mutableListOf<String>()
         val alarms = object : ReminderAlarms {
             override fun schedule(item: ItineraryItem, reminder: Reminder) {}
             override fun cancel(reminderId: Long) {}
             override fun cancelTask(id: String) { cancelled += "task:$id" }
             override fun cancelNote(id: String) { cancelled += "note:$id" }
+            override fun ringOffTask(id: String) { quieted += "task:$id" }
+            override fun ringOffNote(id: String) { quieted += "note:$id" }
         }
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
@@ -67,13 +71,46 @@ class TaskNoteRingingDataTest {
             cancelled.clear()
             repo.saveTask(repo.snapshot().tasks.single().copy(ringUntilDismissed = true), false)
             repo.saveNote(repo.note(note.id)!!.copy(ringUntilDismissed = true), false)
-            assertEquals(listOf("task:${task.id}", "note:${note.id}"), cancelled)
+            assertTrue(cancelled.isEmpty()); assertTrue(quieted.isEmpty())
             assertEquals(later, repo.snapshot().tasks.single().snoozedUntil)
             assertEquals(later, repo.note(note.id)!!.snoozedUntil)
+            repo.saveTask(repo.snapshot().tasks.single().copy(ringUntilDismissed = false), false)
+            repo.updateNote(note.id) { it.copy(ringUntilDismissed = false) }
+            assertTrue(cancelled.isEmpty())
+            assertEquals(listOf("task:${task.id}", "note:${note.id}"), quieted)
+            quieted.clear()
+            // A new time is a new reminder: the old one is cancelled.
+            repo.saveTask(repo.snapshot().tasks.single().copy(reminderAt = later + 60_000, ringUntilDismissed = true), false)
+            assertEquals(listOf("task:${task.id}"), cancelled); assertTrue(quieted.isEmpty())
             cancelled.clear()
             repo.saveTask(repo.snapshot().tasks.single().copy(notes = "Words only"), false)
             repo.updateNote(note.id) { it.copy(content = "Words only") }
             assertTrue(cancelled.isEmpty())
+        } finally { db.close() }
+    }
+
+    // U14-2: no reminder, no ringing: the choice doesn't wait unseen for the next reminder.
+    @Test fun ringChoiceEndsWithItsReminder() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val repo = Repository(db, AttachmentStore(context), object : ReminderAlarms {
+                override fun schedule(item: ItineraryItem, reminder: Reminder) {}
+                override fun cancel(reminderId: Long) {}
+            })
+            val due = System.currentTimeMillis() - 1000
+            val task = PlannerTask(title = "QA ring end task", reminderAt = due, ringUntilDismissed = true)
+            repo.saveTask(task)
+            assertTrue(repo.snapshot().tasks.single().ringUntilDismissed)
+            assertFalse(repo.snapshot().tasks.single().duplicateForEditing().ringUntilDismissed)
+            repo.saveTask(repo.snapshot().tasks.single().copy(reminderAt = null), false)
+            assertFalse(repo.snapshot().tasks.single().ringUntilDismissed)
+            val note = repo.saveNote(PlannerNote(title = "QA ring end note", reminderAt = due, ringUntilDismissed = true), true)
+            assertFalse(Notes.copyOf(note).ringUntilDismissed)
+            assertTrue(repo.actOnNoteReminder(note.id, due))
+            assertFalse(repo.note(note.id)!!.ringUntilDismissed)
+            val other = repo.saveNote(PlannerNote(title = "QA ring end note 2", reminderAt = due, ringUntilDismissed = true), true)
+            repo.saveNote(other.copy(reminderAt = null), false)
+            assertFalse(repo.note(other.id)!!.ringUntilDismissed)
         } finally { db.close() }
     }
 

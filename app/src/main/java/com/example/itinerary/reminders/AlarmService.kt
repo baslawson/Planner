@@ -40,21 +40,31 @@ class AlarmService : Service() {
     // process, until that start is stopped by its id: so one that gave way or gave up is never rung again, and stopping it
     // leaves the starts after it (another alarm) to run.
     private var ringingStart = 0
+    // A14-4: the newest start seen, so Stop ends only the starts so far (one queued just behind it still runs). A14-1: the
+    // newest start set aside while ringing (a stale button, a refused alarm), done with when the ringing one ends.
+    private var lastStart = 0
+    private var ignoredStart = 0
     private val handler = Handler(Looper.getMainLooper())
     private val giveUp = Runnable { onGiveUp() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStart = maxOf(lastStart, startId)
         if (intent?.action == ACTION_STOP || intent?.action == ACTION_SNOOZE) {
             if (!RingToken.matches(stopToken, intent.getStringExtra(EXTRA_STOP_ALARM))) {
                 // A stale button must neither stop this ring nor change its process-restart policy.
                 if (ringing == null) { stopSelf(startId); return START_NOT_STICKY }
+                ignoredStart = maxOf(ignoredStart, startId)
                 return START_REDELIVER_INTENT
             }
         }
         when (intent?.action) {
-            ACTION_STOP -> stopRinging()
+            ACTION_STOP -> {
+                // D14-1: ringing turned off while it rang: the reminder stays, as its normal notification.
+                if (intent.getBooleanExtra(EXTRA_KEEP_REMINDER, false)) ringing?.let { postOwnedAlarm(this, it) }
+                stopRinging()
+            }
             ACTION_SNOOZE -> {
                 ringing?.let { extras ->
                     (application as ItineraryApp).reminderScheduler.snooze(extras, SNOOZE_MINUTES)
@@ -67,6 +77,9 @@ class AlarmService : Service() {
                 val accepted = OwnedAlarmStarts.start(this, extras) {
                     startRinging(extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
                 }
+                // Turned quiet on its way (D14-1): its reminder is shown as a normal notification instead.
+                if (!accepted && OwnedAlarmStarts.takeQuiet(this, extras)) extras?.let { postOwnedAlarm(this, it) }
+                if (!accepted && ringing != null) ignoredStart = maxOf(ignoredStart, startId)
                 if (!accepted && ringing == null) {
                     // Fulfil the foreground-start deadline, then end this cancelled start without playing anything.
                     val cancelled = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
@@ -88,7 +101,8 @@ class AlarmService : Service() {
         // A second alarm can arrive while one is ringing; keep the first one as a normal notification.
         val previous = ringing
         val previousStart = ringingStart
-        if (previous != null && extras != null && !postOwnedAlarm(this, previous)) {
+        // A14-5: not one completed, deleted or removed meanwhile (its start no longer stands).
+        if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous) && !postOwnedAlarm(this, previous)) {
             reminderContent(this, previous)?.let {
                 postReminderNotification(
                     this,
@@ -325,7 +339,7 @@ class AlarmService : Service() {
         stopToken = null
         stopUnlockWatch()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        if (startId == null) stopSelf() else stopSelf(startId)
+        if (startId == null) stopSelf(lastStart) else stopSelf(maxOf(startId, ignoredStart))
     }
 
     private fun releasePlayer() {
@@ -376,8 +390,18 @@ class AlarmService : Service() {
         @Volatile private var currentOwner: String? = null
         fun stopIfRinging(context: Context, kind: String, id: String) {
             synchronized(OwnedAlarmStarts) {
-                try { OwnedAlarmStarts.cancel(context, kind, id) }
-                finally { if (currentOwner == "$kind:$id") requestStop(context, stopToken) }
+                // A14-2: a store that can't be written must not keep the caller (cancelTask/cancelNote) from the rest.
+                runCatching { OwnedAlarmStarts.cancel(context, kind, id) }
+                    .onFailure { android.util.Log.w("AlarmService", "Couldn't cancel ringing ownership", it) }
+                if (currentOwner == "$kind:$id") requestStop(context, stopToken)
+            }
+        }
+        /** D14-1: "Ring until I stop it" turned off: this owner's alarm stops ringing (or won't start) but stays a notification. */
+        fun quietIfRinging(context: Context, kind: String, id: String) {
+            synchronized(OwnedAlarmStarts) {
+                runCatching { OwnedAlarmStarts.quiet(context, kind, id) }
+                    .onFailure { android.util.Log.w("AlarmService", "Couldn't quiet ringing ownership", it) }
+                if (currentOwner == "$kind:$id") requestStop(context, stopToken, keepReminder = true)
             }
         }
         @Volatile private var currentReminderId: Long? = null
@@ -409,12 +433,13 @@ class AlarmService : Service() {
                 .setData(Uri.Builder().scheme("planner").authority("alarm-action").appendPath(action).appendPath(token.orEmpty()).build())
                 .putExtra(EXTRA_STOP_ALARM, token)
 
-        private fun requestStop(context: Context, token: String?) {
-            if (token != null) context.startService(alarmAction(context, ACTION_STOP, token))
+        private fun requestStop(context: Context, token: String?, keepReminder: Boolean = false) {
+            if (token != null) context.startService(alarmAction(context, ACTION_STOP, token).putExtra(EXTRA_KEEP_REMINDER, keepReminder))
         }
         const val ACTION_STOP = "com.example.itinerary.alarm.STOP"
         const val ACTION_SNOOZE = "com.example.itinerary.alarm.SNOOZE"
         const val EXTRA_STOP_ALARM = "stop_alarm"
+        private const val EXTRA_KEEP_REMINDER = "keep_reminder"
         const val SNOOZE_MINUTES = 10L
         const val MAX_RING_MINUTES = 10L
         private const val NOTIFICATION_ID = 1_000_000_001

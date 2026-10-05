@@ -35,6 +35,32 @@ class OwnedAlarmStartsTest {
         assertFalse(OwnedAlarmStarts.start(context, extras(old)) { fail("Old start ran") })
         assertTrue(OwnedAlarmStarts.start(context, extras(current)) {})
     }
+    // A14-2: an unreadable store is refused once, then written afresh; cancelling through it doesn't throw.
+    @Test fun unreadableStoreHealsOnNextReservation() {
+        val old = OwnedAlarmStarts.reserve(context, "note", id)
+        File(context.createDeviceProtectedStorageContext().noBackupFilesDir, "ring-starts").writeText("{not json")
+        assertFalse(OwnedAlarmStarts.start(context, extras(old)) { fail("Start from an unreadable store ran") })
+        OwnedAlarmStarts.cancel(context, "task", id)
+        val fresh = OwnedAlarmStarts.reserve(context, "note", id)
+        assertTrue(OwnedAlarmStarts.start(context, extras(fresh)) {})
+    }
+    // D14-1: turned quiet, the start is refused but reported once as quiet; it still stands for displacement (A14-5).
+    @Test fun quietStartIsRefusedButKeepsItsReminder() {
+        val token = OwnedAlarmStarts.reserve(context, "note", id)
+        OwnedAlarmStarts.quiet(context, "note", id)
+        assertTrue(OwnedAlarmStarts.isCurrent(context, extras(token)))
+        assertFalse(OwnedAlarmStarts.start(context, extras(token)) { fail("Quiet start rang") })
+        assertTrue(OwnedAlarmStarts.takeQuiet(context, extras(token)))
+        assertFalse(OwnedAlarmStarts.takeQuiet(context, extras(token)))
+        assertFalse(OwnedAlarmStarts.isCurrent(context, extras(token)))
+    }
+    @Test fun cancelledStartIsNotCurrentAndNotQuiet() {
+        val token = OwnedAlarmStarts.reserve(context, "note", id)
+        OwnedAlarmStarts.cancel(context, "note", id)
+        assertFalse(OwnedAlarmStarts.isCurrent(context, extras(token)))
+        assertFalse(OwnedAlarmStarts.takeQuiet(context, extras(token)))
+        assertTrue(OwnedAlarmStarts.isCurrent(context, android.os.Bundle()))
+    }
     @Test fun cancellingAnotherKindCannotInvalidateNoteWithSameId() {
         val token = OwnedAlarmStarts.reserve(context, "note", id)
         OwnedAlarmStarts.cancel(context, "task", id)

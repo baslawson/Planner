@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.content.ContextCompat
+import com.example.itinerary.data.activeReminderAt
+import kotlinx.coroutines.launch
 
 internal const val EXTRA_OWNER_KIND = "alarm_owner_kind"
 internal const val EXTRA_OWNER_ID = "alarm_owner_id"
@@ -44,7 +46,21 @@ internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = 
     when (extras.getString(EXTRA_OWNER_KIND)) {
         "task" -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") +
             extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger)
-        "note" -> postNoteReminder(context, id, trigger, null, missed = missed)
+        "note" -> {
+            // The alarm carries no word of the note: "Note reminder" at once, then (A14-3) its name and first lines once read,
+            // unless it was dealt with meanwhile. Before the first unlock the words wait, as for any note (DirectBoot).
+            postNoteReminder(context, id, trigger, null, missed = missed)
+            if (DirectBoot.isUnlocked(context)) {
+                val app = context.applicationContext as com.example.itinerary.ItineraryApp
+                app.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        val note = app.repository.note(id)?.takeIf { it.activeReminderAt == trigger } ?: return@runCatching
+                        val shown = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.tag == "note:$id" }
+                        if (shown) postNoteReminder(context, id, trigger, note, quiet = true, missed = missed)
+                    }.onFailure { android.util.Log.w("OwnedAlarm", "Couldn't show the note's words", it) }
+                }
+            }
+        }
         else -> return false
     }
     return true

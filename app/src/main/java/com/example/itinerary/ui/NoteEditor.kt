@@ -511,7 +511,7 @@ private fun NoteReminderSection(reminderAt: Long?, ring: Boolean, onRing: (Boole
         enabled = enabled) {
         reminderAt?.let { at ->
             ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
-                onRemove = { onSet(null) }, enabled = enabled) { RingReminderSwitch(ring, enabled, onRing) }
+                onRemove = { onSet(null); onRing(false) }, enabled = enabled) { RingReminderSwitch(ring, enabled, onRing) }
         }
     }
 }

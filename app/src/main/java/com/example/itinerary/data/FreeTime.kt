@@ -44,7 +44,7 @@ object FreeTime {
 }
 
 fun PlannerTask.duplicateForEditing(): PlannerTask = copy(
-    id = java.util.UUID.randomUUID().toString(), done = false, dueDate = null, reminderAt = null,
+    id = java.util.UUID.randomUUID().toString(), done = false, dueDate = null, reminderAt = null, ringUntilDismissed = false,
     nextTaskId = null, repeatAnchorDay = 0,
     checklist = checklist.map { it.copy(id = java.util.UUID.randomUUID().toString(), done = false) },
     attachments = attachments.map { it.copy(id = 0, itemId = 0) },

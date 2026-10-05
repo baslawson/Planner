@@ -67,6 +67,9 @@ class RingingOwnershipTest {
                 alarm()?.notification?.category == android.app.Notification.CATEGORY_ALARM)
             Thread.sleep(50)
         }
+        // D14-1: turned off on its way, it is still a reminder; removed or deleted, nothing is left.
+        if (operation == "off") waitFor("Turning ringing off lost the queued $kind reminder") { manager.activeNotifications.any { it.tag == "$kind:$id" } }
+        else assertFalse(manager.activeNotifications.any { it.tag == "$kind:$id" })
         val media = android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand("dumpsys media.player"))
             .bufferedReader().use { it.readText() }
         assertFalse("Cancelled alarm still has a native player", media.contains(app.packageName))
@@ -136,6 +139,40 @@ class RingingOwnershipTest {
         old.send()
         Thread.sleep(600)
         assertEquals("QA second", alarm()?.notification?.extras?.getString("android.title"))
+        alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent.send()
+        waitFor("Current Stop failed") { alarm() == null }
+    }
+
+    // A14-4: Stop ends the starts so far, not one queued just behind it.
+    @Test fun stopDoesNotDropAnAlarmQueuedBehindIt() {
+        foreground()
+        start("task", "qa-first", "QA first")
+        val stop = alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent
+        ins.runOnMainSync {
+            stop.send()
+            assertTrue(startOwnedAlarm(app, "task", "qa-behind", "QA behind", System.currentTimeMillis() - 1000, true))
+        }
+        waitFor("The alarm queued behind Stop never rang") { alarm()?.notification?.extras?.getString("android.title") == "QA behind" }
+        alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent.send()
+        waitFor("Current Stop failed") { alarm() == null }
+    }
+
+    // A14-5: an alarm completed while the next one was on its way doesn't come back as a notification.
+    @Test fun completedRingingTaskIsNotRepostedWhenDisplaced() {
+        foreground()
+        val task = PlannerTask(id = "qa-completed", title = "QA completed", reminderAt = System.currentTimeMillis() - 1000, ringUntilDismissed = true)
+        runBlocking { app.repository.saveTask(task) }
+        start("task", task.id, task.title)
+        ins.runOnMainSync {
+            assertTrue(startOwnedAlarm(app, "task", "qa-next", "QA next", System.currentTimeMillis() - 1000, true))
+            runBlocking(Dispatchers.IO) { app.repository.setTaskDone(task.id, true) }
+        }
+        waitFor("The next alarm didn't ring") { alarm()?.notification?.extras?.getString("android.title") == "QA next" }
+        val end = SystemClock.uptimeMillis() + 2000
+        while (SystemClock.uptimeMillis() < end) {
+            assertFalse("Completed task came back as a notification", manager.activeNotifications.any { it.tag == "task:${task.id}" })
+            Thread.sleep(50)
+        }
         alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent.send()
         waitFor("Current Stop failed") { alarm() == null }
     }

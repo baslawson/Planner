@@ -18,7 +18,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -109,11 +108,9 @@ internal fun reminderAlarmHint(exactAllowed: Boolean, hasReminder: Boolean, ring
 
 @Composable
 fun RingReminderSwitch(ring: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Ring until I stop it", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Switch(checked = ring, enabled = enabled, onCheckedChange = onChange)
-    }
+    // U14-3: one switch with its label (TalkBack reads it; a tap on the words toggles it).
+    SwitchRow("Ring until I stop it", ring, onChange, Modifier, enabled,
+        MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
 }
 
 /**

@@ -79,7 +79,7 @@ object TaskEventConversion {
         val id = idSeed?.let { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() } ?: java.util.UUID.randomUUID().toString()
         val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
             checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
-            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = first?.ringUntilDismissed ?: false)
+            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = reminderAt != null && first?.ringUntilDismissed == true)
         return Converted(task, dropped = dropped)
     }
 

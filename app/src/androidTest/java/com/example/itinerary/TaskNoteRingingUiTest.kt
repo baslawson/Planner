@@ -81,6 +81,40 @@ class TaskNoteRingingUiTest {
         screenshot("task-reopened")
         click("Close")
     }
+    // U14-3: the label and the switch are one control: TalkBack reads "Ring until I stop it", and the words toggle it.
+    private fun labelledRing(): AccessibilityNodeInfo? {
+        var node = find("Ring until I stop it")
+        while (node != null && !node.isCheckable) node = node.parent
+        return node
+    }
+    // U14-2: Remove reminder also ends its ringing choice: Close asks nothing, and a new reminder starts quiet.
+    @Test fun taskRingSwitchIsLabelledAndEndsWithItsReminder() {
+        val task = PlannerTask(id = "qa-ui-ring-remove", title = "QA ring remove")
+        runBlocking { app.repository.saveTask(task) }
+        ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        click(task.title)
+        var chip: AccessibilityNodeInfo? = null
+        await("No Tomorrow reminder chip") { chip = nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Tomorrow") == true }; chip != null }
+        while (chip != null && !chip!!.isClickable) chip = chip!!.parent
+        assertTrue(chip!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        reveal("Ring until I stop it")
+        val row = labelledRing()
+        assertNotNull("The ring switch isn't one control with its label", row)
+        assertFalse(row!!.isChecked)
+        assertTrue(row.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("Tapping the labelled row didn't turn ringing on") { labelledRing()?.isChecked == true }
+        screenshot("task-ring-labelled")
+        val remove = nodes().first { it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("Remove reminder") == true }
+        var target: AccessibilityNodeInfo? = remove
+        while (target != null && !target.isClickable) target = target.parent
+        assertTrue(target!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("Reminder wasn't removed") { find("Ring until I stop it") == null }
+        click("Close")
+        Thread.sleep(800)
+        assertNull("Close asked to save an unchanged task", find("Keep editing"))
+        val saved = runBlocking { app.repository.snapshot().tasks.single() }
+        assertNull(saved.reminderAt); assertFalse(saved.ringUntilDismissed)
+    }
     @Test fun noteRingChoiceSavesAndReopens() {
         val initial = NoteCodec.decode(org.json.JSONArray().put(org.json.JSONObject().put("id", "qa-ui-ring-note")
             .put("title", "QA note ring choice").put("content", "").put("reminderAt", System.currentTimeMillis() + 3_600_000))).single()
