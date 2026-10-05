@@ -163,14 +163,15 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             return
         }
         // Distinct receiver and URI keep task alarms independent of event ids and hash collisions.
-        val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt)
+        val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt).putExtra(EXTRA_RING, task.ringUntilDismissed)
         val updated = PendingIntent.getBroadcast(context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        armed(LockedAlarm.Task(task.id, triggerAt, task.title))
+        armed(LockedAlarm.Task(task.id, triggerAt, task.title, task.ringUntilDismissed))
         setAlarm(triggerAt, updated)
     }
 
     override fun cancelTask(id: String) {
+        AlarmService.stopIfRinging(context, "task", id)
         removeDeferred(MissedReminders.taskKey(id))
         taskPending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
         disarmed(MissedReminders.taskKey(id))
@@ -190,13 +191,14 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             disarmed(key)
             return
         }
-        val intent = NoteReminderReceiver.intent(context, note.id).putExtra("trigger", triggerAt)
+        val intent = NoteReminderReceiver.intent(context, note.id).putExtra("trigger", triggerAt).putExtra(EXTRA_RING, note.ringUntilDismissed)
         val updated = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        armed(LockedAlarm.Note(note.id, triggerAt))
+        armed(LockedAlarm.Note(note.id, triggerAt, note.ringUntilDismissed))
         setAlarm(triggerAt, updated)
     }
 
     override fun cancelNote(id: String) {
+        AlarmService.stopIfRinging(context, "note", id)
         removeDeferred(MissedReminders.noteKey(id))
         notePending(id, PendingIntent.FLAG_NO_CREATE)?.let { alarmManager.cancel(it); it.cancel() }
         disarmed(MissedReminders.noteKey(id))

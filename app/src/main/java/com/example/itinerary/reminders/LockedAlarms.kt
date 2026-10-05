@@ -32,11 +32,11 @@ sealed interface LockedAlarm {
         }
     }
 
-    data class Task(val id: String, override val trigger: Long, val title: String) : LockedAlarm {
+    data class Task(val id: String, override val trigger: Long, val title: String, val ring: Boolean = false) : LockedAlarm {
         override val key get() = MissedReminders.taskKey(id)
     }
 
-    data class Note(val id: String, override val trigger: Long) : LockedAlarm {
+    data class Note(val id: String, override val trigger: Long, val ring: Boolean = false) : LockedAlarm {
         override val key get() = MissedReminders.noteKey(id)
     }
 }
@@ -100,8 +100,8 @@ object LockedAlarmCodec {
             when (a) {
                 is LockedAlarm.Event -> line("e", a.reminderId.toString(), a.trigger.toString(), a.title, a.location, a.date, a.time,
                     a.offsetLabel, flag(a.bill), flag(a.ring), a.snoozeToken, a.billToken)
-                is LockedAlarm.Task -> line("t", a.id, a.trigger.toString(), a.title)
-                is LockedAlarm.Note -> line("n", a.id, a.trigger.toString())
+                is LockedAlarm.Task -> line("t", a.id, a.trigger.toString(), a.title, flag(a.ring))
+                is LockedAlarm.Note -> line("n", a.id, a.trigger.toString(), flag(a.ring))
             }
         }
     }
@@ -117,8 +117,8 @@ object LockedAlarmCodec {
                 when (f[0]) {
                     "e" -> LockedAlarm.Event(f[1]!!.toLong(), f[2]!!.toLong(), f[3]!!, f[4]!!, f[5]!!, f[6]!!, f[7]!!,
                         f[8] == "1", f[9] == "1", f[10], f[11])
-                    "t" -> LockedAlarm.Task(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f[3]!!)
-                    "n" -> LockedAlarm.Note(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong())
+                    "t" -> LockedAlarm.Task(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f[3]!!, f.getOrNull(4) == "1")
+                    "n" -> LockedAlarm.Note(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f.getOrNull(3) == "1")
                     else -> null
                 }
             }.getOrNull()

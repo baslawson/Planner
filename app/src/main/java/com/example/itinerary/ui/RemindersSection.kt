@@ -69,18 +69,7 @@ fun RemindersSection(
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
             ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
                 onRemove = { onRemove(reminder) }) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Ring until I stop it",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Switch(
-                        checked = reminder.ringUntilDismissed,
-                        onCheckedChange = { onToggleRing(reminder, it) },
-                    )
-                }
+                RingReminderSwitch(reminder.ringUntilDismissed) { onToggleRing(reminder, it) }
             }
         }
     }
@@ -108,11 +97,23 @@ const val LATE_REMINDER_HINT = "Android may deliver this reminder late. Enable A
  * The warning under [reminders] while exact alarms are off (the default from Android 14): they may come late, and one set
  * to "Ring until I stop it" can't ring at all (Android starts the ringing alarm only from an exact alarm), so it says so.
  */
-internal fun exactAlarmHint(exactAllowed: Boolean, reminders: List<Reminder>): String? = when {
-    exactAllowed || reminders.isEmpty() -> null
-    reminders.any { it.ringUntilDismissed } -> "Exact alarms are off: reminders may come late, and \"Ring until I stop it\" can't " +
+internal fun exactAlarmHint(exactAllowed: Boolean, reminders: List<Reminder>): String? =
+    reminderAlarmHint(exactAllowed, reminders.isNotEmpty(), reminders.any { it.ringUntilDismissed })
+
+internal fun reminderAlarmHint(exactAllowed: Boolean, hasReminder: Boolean, ring: Boolean): String? = when {
+    exactAllowed || !hasReminder -> null
+    ring -> "Exact alarms are off: reminders may come late, and \"Ring until I stop it\" can't " +
         "ring, only notify. Enable Alarms & reminders in app settings so it can ring."
     else -> LATE_REMINDER_HINT
+}
+
+@Composable
+fun RingReminderSwitch(ring: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Ring until I stop it", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Switch(checked = ring, enabled = enabled, onCheckedChange = onChange)
+    }
 }
 
 /**

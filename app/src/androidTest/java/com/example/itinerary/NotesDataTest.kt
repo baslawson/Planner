@@ -159,6 +159,7 @@ class NotesDataTest {
             db.close()
             // Back to version 30: no notes table.
             val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
+            raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
             raw.execSQL("DROP TABLE notes"); raw.execSQL("DROP TABLE sent_notes"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 30; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             assertEquals(task, db.taskDao().all().single())
@@ -182,6 +183,8 @@ class NotesDataTest {
             db.noteDao().insertAll(listOf(older, newer)); db.close()
             // Back to version 32: no place column.
             val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
+            raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
+            raw.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
             raw.execSQL("ALTER TABLE notes DROP COLUMN position"); raw.execSQL("ALTER TABLE notes DROP COLUMN priority")
             raw.execSQL("DELETE FROM room_master_table"); raw.version = 32; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()

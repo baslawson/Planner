@@ -113,6 +113,7 @@ class TaskRemindersTest {
             }
             // Calendar sync tables added in versions 25–27 and reminder deliveries in 29; the upgrade creates them again.
             listOf("sent_events", "outside_events", "calendar_sources", "reminder_deliveries").forEach { old.execSQL("DROP TABLE $it") }
+            old.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
             old.version = 19
         }
         fun open() = Room.databaseBuilder(context, AppDatabase::class.java, file.absolutePath)

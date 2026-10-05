@@ -134,6 +134,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     val attachments by body::attachments
     fun setAttachments(list: List<Attachment>) { body.attachments = list }
     var pendingPhoto by rememberSaveable { mutableStateOf(recovered?.pendingPhoto) }
+    var ringUntilDismissed by rememberSaveable { mutableStateOf(start.ringUntilDismissed) }
     var reminderAt by rememberSaveable { mutableStateOf(start.reminderAt) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
     var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
@@ -157,11 +158,11 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     fun load(note: PlannerNote, words: Boolean = true) {
         if (words) { title = note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook }
         color = note.color
-        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; priority = note.priority
+        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed; priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
     val current = (base ?: start).copy(title = title, content = content.text, notebook = Notes.existingSpelling(notebooks, notebook.trim()), color = color, pinned = pinned,
-        tags = tags, attachments = attachments, reminderAt = reminderAt, priority = priority)
+        tags = tags, attachments = attachments, reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, priority = priority)
     // The stored version cleaned once, not again on every letter typed (UI-10).
     val cleanBase = remember(base) { base?.let(Notes::clean) }
     val unsaved = cleanBase?.let { Notes.clean(current) != it } ?: Notes.hasContent(current)
@@ -269,7 +270,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         // The fields change only if saving changed them (a merge, trimmed text), so typing isn't disturbed otherwise.
         val edited = Notes.clean(current)
         val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color && note.priority == edited.priority &&
-            note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt
+            note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt && note.ringUntilDismissed == edited.ringUntilDismissed
         // EU-1: a merge brings in another device's words: loaded as no step, so Undo can't take them back unseen.
         base = note; if (!same) { val words = noteWordsDiffer(note, edited.title, edited.content, edited.notebook); if (words) undo.reload(); load(note, words) }; justSaved = true
         releaseFiles(); then()
@@ -392,7 +393,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
                         trailingIcon = { if (newTag.isNotBlank()) IconButton(enabled = !busy, onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
-                    NoteReminderSection(reminderAt, base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
+                    NoteReminderSection(reminderAt, ringUntilDismissed, onRing = { ringUntilDismissed = it }, snoozedUntil = base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                         enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                     Text("Importance", style = MaterialTheme.typography.titleSmall)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -490,7 +491,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
 
 // A note's one reminder: In 1 hour, Tomorrow 09:00 or Custom; once set, its time with Remove (and a snooze, if any).
 @Composable
-private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
+private fun NoteReminderSection(reminderAt: Long?, ring: Boolean, onRing: (Boolean) -> Unit, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val notifications = rememberNotificationState()
@@ -499,7 +500,7 @@ private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled:
     val presets = remember(reminderAt, stale) { com.example.itinerary.data.taskReminderPresets(null) }
     val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
     ReminderSectionFrame(notifications.enabled, notifications.enable,
-        hints = listOfNotNull(if (reminderAt != null && !exactAllowed) LATE_REMINDER_HINT else null),
+        hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, ring)),
         chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
             (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
                 // Timed from the tap; a choice that has passed since goes.
@@ -510,7 +511,7 @@ private fun NoteReminderSection(reminderAt: Long?, snoozedUntil: Long?, enabled:
         enabled = enabled) {
         reminderAt?.let { at ->
             ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
-                onRemove = { onSet(null) }, enabled = enabled)
+                onRemove = { onSet(null) }, enabled = enabled) { RingReminderSwitch(ring, enabled, onRing) }
         }
     }
 }

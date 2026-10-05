@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [Trip::class, ItineraryItem::class, Attachment::class, Reminder::class, EventTemplate::class, DeletedEntry::class, PlannerTask::class,
         CalendarSource::class, OutsideEvent::class, SentEvent::class, ReminderDelivery::class, SentTask::class, PlannerNote::class, SentNote::class],
-    version = 33,
+    version = 34,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -354,7 +354,15 @@ val MIGRATION_32_33 = object : Migration(32, 33) {
 // As Room creates it (checked against the generated AppDatabase_Impl).
 private const val SENT_NOTES_TABLE = "CREATE TABLE IF NOT EXISTS `sent_notes` (`noteId` TEXT NOT NULL, `account` TEXT NOT NULL, `remoteId` INTEGER NOT NULL, `etag` TEXT, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `notebook` TEXT NOT NULL, `pinned` INTEGER NOT NULL, PRIMARY KEY(`noteId`))"
 
+// Existing reminders remain notifications unless their owner explicitly enables ringing.
+val MIGRATION_33_34 = object : Migration(33, 34) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `ringUntilDismissed` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `notes` ADD COLUMN `ringUntilDismissed` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 // Every upgrade step, oldest first: the app opens its database with these, and the migration tests use the same list.
 val ALL_MIGRATIONS = arrayOf(
-    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
+    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34,
 )

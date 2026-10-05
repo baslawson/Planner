@@ -69,7 +69,7 @@ class AlarmService : Service() {
         // A second alarm can arrive while one is ringing; keep the first one as a normal notification.
         val previous = ringing
         val previousStart = ringingStart
-        if (previous != null && extras != null) {
+        if (previous != null && extras != null && !postOwnedAlarm(this, previous)) {
             reminderContent(this, previous)?.let {
                 postReminderNotification(
                     this,
@@ -80,7 +80,8 @@ class AlarmService : Service() {
         }
         ringing = extras
         ringingStart = startId
-        currentReminderId = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
+        currentReminderId = extras?.takeUnless { it.containsKey(EXTRA_OWNER_KIND) }?.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
+        currentOwner = extras?.getString(EXTRA_OWNER_KIND)?.let { kind -> "$kind:${extras.getString(EXTRA_OWNER_ID)}" }
         ringingSince = SystemClock.elapsedRealtime()
         stopToken = RingToken.new()
 
@@ -131,6 +132,22 @@ class AlarmService : Service() {
             // the only thing left to do, so it counts as Stop: otherwise it would ring on with nothing to stop it.
             .setDeleteIntent(serviceAction(ACTION_STOP))
             .apply {
+                val owner = extras?.getString(EXTRA_OWNER_ID)
+                val kind = extras?.getString(EXTRA_OWNER_KIND)
+                val trigger = extras?.getLong(ReminderScheduler.EXTRA_TRIGGER) ?: 0L
+                if (owner != null && kind != null) {
+                    if (kind == "task") {
+                        addDataAction(this@AlarmService, "Done", TaskActionReceiver.done(this@AlarmService, owner, trigger))
+                        addAction(0, "Snooze", SnoozeActivity.taskAction(this@AlarmService, owner, trigger))
+                    } else {
+                        addDataAction(this@AlarmService, "Done", NoteActionReceiver.done(this@AlarmService, owner, trigger))
+                        addAction(0, "Snooze", SnoozeActivity.noteAction(this@AlarmService, owner, trigger))
+                        setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                        setPublicVersion(NotificationCompat.Builder(this@AlarmService, ALARM_CHANNEL_ID)
+                            .setSmallIcon(R.drawable.ic_notification).setContentTitle("Note reminder").build())
+                    }
+                    return@apply
+                }
                 val id = extras?.getLong(ReminderScheduler.EXTRA_REMINDER_ID) ?: 0L
                 if (id > 0) {
                     val billToken = extras?.getString(ReminderScheduler.EXTRA_BILL_TOKEN)
@@ -261,6 +278,7 @@ class AlarmService : Service() {
     private fun onGiveUp() {
         val start = ringingStart
         ringing?.let { extras ->
+            if (postOwnedAlarm(this, extras, missed = true)) return@let
             reminderContent(this, extras)?.let {
                 postReminderNotification(
                     this,
@@ -281,6 +299,7 @@ class AlarmService : Service() {
         wakeLock = null
         ringing = null
         currentReminderId = null
+        currentOwner = null
         stopToken = null
         stopUnlockWatch()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -300,6 +319,7 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         currentReminderId = null
+        currentOwner = null
         stopToken = null
         stopUnlockWatch()
         handler.removeCallbacks(giveUp)
@@ -323,12 +343,17 @@ class AlarmService : Service() {
         PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
-            openPlannerIntent(this)
+            (if (ringing?.getString(EXTRA_OWNER_KIND) == "note")
+                NoteReminderReceiver.openIntent(this, ringing!!.getString(EXTRA_OWNER_ID)!!) else openPlannerIntent(this))
                 .putExtra(EXTRA_STOP_ALARM, token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
     companion object {
+        @Volatile private var currentOwner: String? = null
+        fun stopIfRinging(context: Context, kind: String, id: String) {
+            if (currentOwner == "$kind:$id") context.stopService(Intent(context, AlarmService::class.java))
+        }
         @Volatile private var currentReminderId: Long? = null
         @Volatile private var ringingSince = 0L
         @Volatile private var stopToken: String? = null
@@ -340,7 +365,7 @@ class AlarmService : Service() {
         // didn't get through): nothing else could stop it, so opening the app does. The first seconds are left alone,
         // while Android may not list the just-posted notification yet.
         fun stopIfUnseen(context: Context) {
-            if (currentReminderId == null || SystemClock.elapsedRealtime() - ringingSince < 3_000L) return
+            if ((currentReminderId == null && currentOwner == null) || SystemClock.elapsedRealtime() - ringingSince < 3_000L) return
             val shown = runCatching {
                 context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == NOTIFICATION_ID }
             }.getOrDefault(true)

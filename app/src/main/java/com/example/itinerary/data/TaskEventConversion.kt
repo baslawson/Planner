@@ -35,7 +35,7 @@ object TaskEventConversion {
         // RS-3: tasks waiting for it stop waiting (a plain delete leaves them blocked), so it is said.
         if (waiting > 0) dropped += if (waiting == 1) "1 task that waits for it stops waiting." else "$waiting tasks that wait for it stop waiting."
         val reminder = task.reminderAt?.let { at ->
-            reminderBefore(date, null, at, zone)?.also { r ->
+            reminderBefore(date, null, at, zone)?.copy(ringUntilDismissed = task.ringUntilDismissed)?.also { r ->
                 val fires = reminderTrigger(date, null, r, zone).toInstant().toEpochMilli()
                 val off = (fires - at) / 60_000
                 if (off != 0L) dropped += "The reminder: ${kotlin.math.abs(off)} min ${if (off < 0) "earlier" else "later"}, as the clock change leaves no way to say its time."
@@ -70,7 +70,6 @@ object TaskEventConversion {
         val sorted = reminders.sortedByDescending { reminderTrigger(occurrence.date, occurrence.startTime, it, zone).toInstant() }
         val first = sorted.firstOrNull()
         if (sorted.size > 1) dropped += "${sorted.size - 1} more reminder${if (sorted.size > 2) "s" else ""}: a task has one."
-        if (first?.ringUntilDismissed == true) dropped += "Ringing until stopped: a task's reminder is a notification."
         val repeating = event.repeatRule != RepeatRule.NONE.name
         if (repeating && wholeSeries) dropped += "The series' end: a repeating task goes on until you stop it."
         // A reminder already gone would stop the task saving ("Choose a future reminder"): left out, and said (TE-10).
@@ -80,7 +79,7 @@ object TaskEventConversion {
         val id = idSeed?.let { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() } ?: java.util.UUID.randomUUID().toString()
         val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
             checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
-            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt)
+            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = first?.ringUntilDismissed ?: false)
         return Converted(task, dropped = dropped)
     }
 

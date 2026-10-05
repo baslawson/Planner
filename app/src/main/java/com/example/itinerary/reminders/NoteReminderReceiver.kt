@@ -25,7 +25,9 @@ class NoteReminderReceiver : BroadcastReceiver() {
         // and is then shown again with the note's words (DirectBoot.replayFired).
         if (!DirectBoot.isUnlocked(context)) {
             DirectBoot.fired(context, MissedReminders.noteKey(id), trigger)
-            postNoteReminder(context, id, trigger, null)
+            val ring = intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false)
+            if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, ring))
+                postNoteReminder(context, id, trigger, null, couldNotRing = ring)
             return
         }
         val app = context.applicationContext as ItineraryApp
@@ -33,7 +35,10 @@ class NoteReminderReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                app.repository.deliverNoteReminder(id, trigger) { note -> postNoteReminder(context, id, trigger, note) }
+                app.repository.deliverNoteReminder(id, trigger) { note ->
+                    if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, note.ringUntilDismissed))
+                        postNoteReminder(context, id, trigger, note, couldNotRing = note.ringUntilDismissed)
+                }
                 // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
                 withContext(Dispatchers.IO) { DirectBoot.afterRing(app) }
             } catch (e: Exception) {
@@ -63,14 +68,14 @@ class NoteReminderReceiver : BroadcastReceiver() {
  * is locked it leaves the words out of the notification itself too, and is shown again with them after the unlock
  * (NoteWords). [quiet]: shown again with the note's words, without sounding a second time.
  */
-internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false) {
+internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false) {
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     // D6-3: posted while locked (or with the screen off), the note's words wait for the unlock (NoteWords).
     val tag = "note:$id"
     val shown = note?.takeIf { !NoteWords.hide(context) }
-    if (note != null && shown == null) NoteWords.later(context, tag) { postNoteReminder(context, id, trigger, note, quiet = true) }
+    if (note != null && shown == null) NoteWords.later(context, tag) { postNoteReminder(context, id, trigger, note, quiet = true, couldNotRing = couldNotRing, missed = missed) }
     else NoteWords.shown(tag)
     val label = shown?.let(Notes::label) ?: "Note reminder"
     // The text after the name, as the note's card shows it.
@@ -81,7 +86,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setContentTitle(label)
         .setContentText(body.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: "Note reminder")
         .apply { if (body.isNotBlank()) setStyle(NotificationCompat.BigTextStyle().bigText(body)) }
-        .setSubText("Note reminder")
+        .setSubText(when { couldNotRing -> "Couldn’t ring. Check alarm and notification permissions."; missed -> "Missed alarm"; else -> "Note reminder" })
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)

@@ -19,14 +19,20 @@ class TaskReminderReceiver : BroadcastReceiver() {
         // snapshot (BootReceiver), with the task's title; once unlocked it's noted as rung.
         if (!DirectBoot.isUnlocked(context)) {
             DirectBoot.fired(context, MissedReminders.taskKey(id), trigger)
-            postTaskReminder(context, id, intent.getStringExtra(EXTRA_LOCKED_TITLE) ?: "Task reminder", trigger)
+            val title = intent.getStringExtra(EXTRA_LOCKED_TITLE) ?: "Task reminder"
+            val ring = intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false)
+            if (!startOwnedAlarm(context, "task", id, title, trigger, ring))
+                postTaskReminder(context, id, title, trigger, couldNotRing = ring)
             return
         }
         (context.applicationContext as ItineraryApp).reminderScheduler.ledger.fired(MissedReminders.taskKey(id), System.currentTimeMillis())
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                (context.applicationContext as ItineraryApp).repository.deliverTaskReminder(id, trigger) { task -> postTaskReminder(context, id, task.title, trigger) }
+                (context.applicationContext as ItineraryApp).repository.deliverTaskReminder(id, trigger) { task ->
+                    if (!startOwnedAlarm(context, "task", id, task.title, trigger, task.ringUntilDismissed))
+                        postTaskReminder(context, id, task.title, trigger, couldNotRing = task.ringUntilDismissed)
+                }
                 // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
                 withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }
             } catch (e: Exception) {
@@ -45,7 +51,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
 }
 
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
-internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false) {
+internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false) {
     if (!notificationsEnabled(context)) return
     val open = PendingIntent.getActivity(context, 0,
         openPlannerIntent(context),
@@ -53,7 +59,7 @@ internal fun postTaskReminder(context: Context, id: String, title: String, trigg
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText("Task reminder")
+        .setContentText(if (couldNotRing) "Couldn’t ring. Check Alarms & reminders and ringing notifications in app settings." else "Task reminder")
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)

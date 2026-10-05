@@ -32,6 +32,7 @@ data class PlannerNote(
     @ColumnInfo(defaultValue = "0") val position: Long = 0,
     // How important it is (Low / Normal / High, as a task's priority); the page can sort by it. Stays on the phone.
     @ColumnInfo(defaultValue = "'NORMAL'") val priority: TaskPriority = TaskPriority.NORMAL,
+    @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
 )
 
 /** How the Notes page orders its cards; pinned notes stay on top in every one. */
@@ -296,11 +297,11 @@ fun mergeNotes(base: PlannerNote, mine: PlannerNote, theirs: PlannerNote): Plann
     }
     val title = pick { it.title }; val content = pick { it.content }; val notebook = pick { it.notebook }
     val color = pick { it.color }; val pinned = pick { it.pinned }; val tags = pick { it.tags }
-    val attachments = pick { it.attachments }; val reminder = pick { it.reminderAt }; val archived = pick { it.archived }
+    val attachments = pick { it.attachments }; val reminder = pick { it.reminderAt to it.ringUntilDismissed }; val archived = pick { it.archived }
     val priority = pick { it.priority }
     if (!listOf(title, content, notebook, color, pinned, tags, attachments, reminder, archived, priority).all { it.second }) return null
     return theirs.copy(title = title.first, content = content.first, notebook = notebook.first, color = color.first,
-        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first, archived = archived.first,
+        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first.first, ringUntilDismissed = reminder.first.second, archived = archived.first,
         priority = priority.first)
 }
 
@@ -313,6 +314,7 @@ object NoteCodec {
             .put("tags", JSONArray(note.tags))
             .put("attachments", DraftCodec.attachments(note.attachments))
             .put("reminderAt", note.reminderAt ?: JSONObject.NULL)
+            .put("ringUntilDismissed", note.ringUntilDismissed)
             .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)
             .put("position", note.position).put("priority", note.priority.name)) }
     }
@@ -332,7 +334,7 @@ object NoteCodec {
             DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"),
             // Older files have no place: most recently changed first, as the page sorted them then.
             time("position") ?: -(time("modified") ?: created),
-            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL))
+            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL), ringUntilDismissed = value.optBoolean("ringUntilDismissed", false))
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
             .let(Notes::clean)
     }

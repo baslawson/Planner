@@ -101,6 +101,8 @@ class PlanningFiveDataTest {
             // Calendar sync tables added in versions 25–27 and reminder deliveries in 29; the upgrade creates them again.
             listOf("sent_events", "outside_events", "calendar_sources", "reminder_deliveries").forEach { raw.execSQL("DROP TABLE $it") }
             raw.execSQL("DELETE FROM room_master_table")
+            raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
+            raw.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
             raw.version = 21; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             assertNull(db.itemDao().all().single().linkedTaskId)

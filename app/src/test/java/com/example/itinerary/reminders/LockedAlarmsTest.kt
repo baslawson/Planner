@@ -23,9 +23,9 @@ class LockedAlarmsTest {
         assertEquals(LockedSnapshot(null, emptyList()), LockedAlarmCodec.decode(LockedAlarmCodec.encode(LockedSnapshot(null, emptyList()))))
     }
 
-    @Test fun aNoteKeepsNoWordsOnlyItsIdAndTime() {
+    @Test fun aNoteKeepsNoWordsOnlyItsIdTimeAndRingChoice() {
         val text = LockedAlarmCodec.encode(LockedSnapshot(null, listOf(LockedAlarm.Note("n-9", now))))
-        assertEquals(listOf("n", "n-9", now.toString()), text.lines()[1].split('\t'))
+        assertEquals(listOf("n", "n-9", now.toString(), "0"), text.lines()[1].split('\t'))
     }
 
     @Test fun anotherFormatOrVersionIsNotReadAndADamagedLineCostsOnlyItself() {

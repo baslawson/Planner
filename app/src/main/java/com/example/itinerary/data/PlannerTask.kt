@@ -29,6 +29,7 @@ data class PlannerTask(
     @ColumnInfo(defaultValue = "'[]'") val prerequisiteIds: List<String> = emptyList(),
     // Snoozing moves only this reminder; [reminderAt] stays the base a repeating task's next reminder follows.
     val snoozedUntil: Long? = null,
+    @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
 )
 
 /** When the reminder is due now: the snooze if there is one, else [PlannerTask.reminderAt]. Removing the reminder ends the snooze. */
@@ -114,6 +115,7 @@ object TaskCodec {
             .put("dueDate", task.dueDate?.toString() ?: JSONObject.NULL).put("priority", task.priority.name)
             .put("notes", task.notes).put("done", task.done)
             .put("reminderAt", task.reminderAt ?: JSONObject.NULL)
+            .put("ringUntilDismissed", task.ringUntilDismissed)
             .apply { task.snoozedUntil?.let { put("snoozedUntil", it) } }
             .put("repeat", task.repeat).put("repeatDays", task.repeatDays).put("repeatAnchorDay", task.repeatAnchorDay)
             .put("nextTaskId", task.nextTaskId ?: JSONObject.NULL)
@@ -133,6 +135,7 @@ object TaskCodec {
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
             prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),
             // Optional: older backups have no task snoozes.
+            ringUntilDismissed = value.optBoolean("ringUntilDismissed", false),
             snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null
                 else value.strictLong("snoozedUntil") { "Invalid task snooze time" })
             // A task saved before the cap may have more text; it is cut rather than refusing the whole file.

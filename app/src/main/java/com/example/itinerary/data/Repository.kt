@@ -222,7 +222,7 @@ class Repository(
             }
             val saved = taskDao.byId(task.id)
             afterCommit(files = existing?.attachments.orEmpty().map { it.fileName }, taskIds = listOf(task.id),
-                resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt) setOf(task.id) else emptySet())
+                resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt || existing?.ringUntilDismissed != saved?.ringUntilDismissed) setOf(task.id) else emptySet())
         }
     }
     // A task's ⋮ "Due tomorrow", with the same Undo bar as an event's move (see undoMove).
@@ -306,7 +306,7 @@ class Repository(
             }
             else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
             afterCommit(noteIds = listOf(clean.id),
-                resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
+                resetNoteIds = if (old != null && (old.activeReminderAt != clean.activeReminderAt || old.ringUntilDismissed != clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
         }
         clean
     }
@@ -321,7 +321,7 @@ class Repository(
             // Pinning and archiving only file it differently; the note itself changed only if its words did.
             val stamped = if (changed.content != note.content || changed.title != note.title) changed.copy(modified = System.currentTimeMillis()) else changed
             noteDao.update(stamped)
-            afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt) setOf(id) else emptySet())
+            afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt || note.ringUntilDismissed != stamped.ringUntilDismissed) setOf(id) else emptySet())
             stamped
         }
     }
@@ -394,7 +394,7 @@ class Repository(
             val clean = Notes.clean(note.copy(position = current?.position ?: Notes.topPosition(noteDao.all())))
             Notes.validate(clean)
             if (current == null) noteDao.insert(clean) else noteDao.update(clean)
-            afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && current.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet())
+            afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && (current.activeReminderAt != clean.activeReminderAt || current.ringUntilDismissed != clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
             true
         }
     }
