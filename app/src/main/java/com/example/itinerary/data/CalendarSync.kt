@@ -305,7 +305,8 @@ class CalendarSync(
         val known = sentDao.itemIds().toHashSet()
         val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
         db.itemDao().all().filter { sendable(it) && it.id !in known && it.lastDay < today }.forEach {
-            sentDao.put(SentEvent(itemId = it.id, account = target.account, calendar = target.href, uid = null, fingerprint = fingerprint(it)))
+            sentDao.put(SentEvent(itemId = it.id, account = target.account, calendar = target.href, uid = null, fingerprint = fingerprint(it),
+                ics = notedDays(it)))
         }
     }
 
@@ -368,10 +369,12 @@ class CalendarSync(
         // Two-way, new files wait until the calendar has been read since it was chosen: a reconnect first links the
         // files already there to their Planner events (pullLocked) instead of sending every event a second time.
         val checked = planner == null || target.fetchedFor != null
-        // Past events before the pull window are only noted then; one edited since may have a file there already.
+        // Past events before the pull window are only noted then; one edited since may have a file there already. E16-1:
+        // also one moved since into the window or later (its file is still on the days it was noted on).
         if (checked && planner != null) { val start = linkWindow().first
             val (edited, unedited) = items.filter { item -> rows[item.id]?.let { it.uid == null && it.problem == null && sendable(item) &&
-                item.lastDay < start } == true }.partition { !inSync(rows.getValue(it.id).fingerprint, it) }
+                (item.lastDay < start || notedDays(it)?.let { (_, last) -> last < start } == true) } == true }
+                .partition { !inSync(rows.getValue(it.id).fingerprint, it) }
             rows += linkEdited(account, target, rows, edited, unedited)
         }
         // E-1 (as T1 for tasks): a file Nextcloud refuses (not the login or the connection) holds up only its own event: the
@@ -473,7 +476,7 @@ class CalendarSync(
                                    noted: List<ItineraryItem>): Map<Long, SentEvent> {
         if (edited.isEmpty()) return emptyMap()
         val known = rows.values.filter { it.uid != null }.mapTo(HashSet()) { hrefOf(target, it) }
-        val ranges = lookupRanges(edited)
+        val ranges = lookupRanges(edited, edited.mapNotNull { notedDays(rows.getValue(it.id)) })
         val neighbours = noted.filter { item -> ranges.any { (start, end) -> item.date < end && item.lastDay >= start } }
         val found = ranges.flatMap { (start, end) ->
             try { filesBetween(account, target, start, end) }
@@ -664,6 +667,10 @@ class CalendarSync(
                             val result = client.putEvent(account, target.href, uid, body, null) as? WriteResult.Ok ?: changedAgain()
                             sentDao.put(row.copy(uid = uid, href = null, etag = result.etag, ics = body, fingerprint = fingerprint(item), problem = null, conflict = null))
                         }
+                        // E16-3: repeating or cancelled there since (more than Planner can hold, as for Keep Nextcloud's):
+                        // patched, Planner's event would become that series, or stay cancelled. Nothing is written; the
+                        // conflict stays for the user to choose again.
+                        ServerEvents.parse(current.data, zone()).item == null -> throw BackupException(PLANNERS_WONT_FIT)
                         else -> {
                             val body = ServerEvents.patch(current.data, item, zone(), stamp)
                             val result = client.putFile(account, target.href, href, body, current.etag ?: changedAgain()) as? WriteResult.Ok ?: changedAgain()
@@ -1107,14 +1114,24 @@ class CalendarSync(
             listOfNotNull((until.plusDays(1) to until.plusYears(100)).takeIf { unlinked.any { it.lastDay > until } })
 
         // Where to look for the files of [events] (end exclusive): each one's days and a day either side (a file written in
-        // another time zone), ranges less than a month apart taken together.
-        internal fun lookupRanges(events: List<ItineraryItem>): List<Pair<LocalDate, LocalDate>> =
-            events.map { it.date.minusDays(1) to it.lastDay.plusDays(2) }.sortedBy { it.first }.fold(mutableListOf()) { ranges, next ->
-                val last = ranges.lastOrNull()
-                if (last != null && next.first <= last.second.plusMonths(1)) ranges[ranges.lastIndex] = last.first to maxOf(last.second, next.second)
-                else ranges += next
-                ranges
-            }
+        // another time zone), ranges less than a month apart taken together. E16-1: [noted] (first and last day) are the
+        // days the events were on when noted, where their files are even after a move.
+        internal fun lookupRanges(events: List<ItineraryItem>, noted: List<Pair<LocalDate, LocalDate>> = emptyList()): List<Pair<LocalDate, LocalDate>> =
+            (events.map { it.date to it.lastDay } + noted).map { (first, last) -> first.minusDays(1) to last.plusDays(2) }
+                .sortedBy { it.first }.fold(mutableListOf()) { ranges, next ->
+                    val last = ranges.lastOrNull()
+                    if (last != null && next.first <= last.second.plusMonths(1)) ranges[ranges.lastIndex] = last.first to maxOf(last.second, next.second)
+                    else ranges += next
+                    ranges
+                }
+
+        // E16-1: what a noted row keeps of its event (in [SentEvent.ics], as "first/last" day): the days it was on when
+        // noted, so an edit that moves it far is still looked for where its file is. Null for a row noted before this was
+        // kept (an edit is then looked for around its new days only, as before), or one that isn't only noted.
+        internal fun notedDays(item: ItineraryItem): String = "${item.date}/${item.lastDay}"
+        internal fun notedDays(row: SentEvent): Pair<LocalDate, LocalDate>? = if (row.uid == null) notedDays(row.ics) else null
+        internal fun notedDays(text: String?): Pair<LocalDate, LocalDate>? = text?.split('/')?.takeIf { it.size == 2 }?.let { (first, last) ->
+            runCatching { LocalDate.parse(first) to LocalDate.parse(last) }.getOrNull()?.takeIf { (from, to) -> !to.isBefore(from) } }
 
         // [row] (a noted past event, edited since) linked to [file], its file on Nextcloud: counts as synced as Nextcloud
         // has it, so Planner's edit is then sent as an update of that file; changed there too since it was noted, it's a
@@ -1253,6 +1270,10 @@ class CalendarSync(
             val ids = edited.mapTo(HashSet()) { it.id }
             return claimed.filterValues { it in ids }
         }
+
+        // E16-3: why Keep Planner's can't settle a conflict whose Nextcloud side Planner can't hold any more.
+        internal const val PLANNERS_WONT_FIT = "On Nextcloud this event now repeats or was cancelled, so Planner's version can't be " +
+            "written over it. Choose Keep Nextcloud's: Planner's event stays as it is, and Nextcloud's is left alone."
 
         // Which login a calendar belongs to: the server address and username, never the password.
         fun accountKey(account: NextcloudAccount): String = "${account.server}|${account.username}"

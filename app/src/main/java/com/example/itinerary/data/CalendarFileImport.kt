@@ -51,7 +51,7 @@ object CalendarFileImport {
     fun read(text: String, zone: ZoneId = ZoneId.systemDefault(), today: LocalDate = LocalDate.now(zone)): Result {
         val lines = checkedLines(text)
         require(lines.none { it.equals("METHOD:CANCEL", true) }) { "This is a cancellation, not a new appointment." }
-        val (expanded, skipped) = expandAll(lines, zone, today.plusMonths(MONTHS_AHEAD), from = null)
+        val (expanded, skipped) = expandAll(lines, zone, today.plusMonths(MONTHS_AHEAD), from = null, Ics::zone)
         val entries = expanded.flatMap(::rows).map { Entry(0, it.item, it.dates, it.repeat, it.note) }
             .sortedWith(compareBy<Entry> { it.item.date }.thenBy { it.item.startTime }.thenBy { it.item.title })
             .mapIndexed { index, entry -> entry.copy(id = index) }
@@ -62,12 +62,14 @@ object CalendarFileImport {
     }
 
     // A subscribed calendar (step 4): the dates between [from] and [until] as outside events, plus the calendar's own
-    // name and colour when the file has them. An empty window is fine; a file that isn't a calendar is not.
+    // name and colour when the file has them. An empty window is fine; a file that isn't a calendar is not. Also the
+    // synced calendar's read-only files. E16-2: shown read-only like a Nextcloud calendar's (OutsideEventReader), an
+    // unknown time zone (Exchange's "Customized Time Zone") is read as the phone's own rather than the event vanishing.
     class Window(val events: List<OutsideEvent>, val skipped: Int, val name: String?, val color: Int?)
 
     fun window(text: String, zone: ZoneId, from: LocalDate, until: LocalDate): Window {
         val lines = checkedLines(text)
-        val (expanded, skipped) = expandAll(lines, zone, until, from)
+        val (expanded, skipped) = expandAll(lines, zone, until, from) { runCatching { Ics.zone(it) }.getOrDefault(zone) }
         val events = expanded.flatMap { e ->
             e.timings.filter { !(it.endDate ?: it.date).isBefore(from) && !it.date.isAfter(until) }.map { t ->
                 OutsideEvent(sourceId = 0, date = t.date, startTime = t.startTime, durationMinutes = t.durationMinutes, endDate = t.endDate,
@@ -90,7 +92,8 @@ object CalendarFileImport {
     }
 
     // Every event in the file with its dates up to [limit] (and from [from], when given), and how many couldn't be read.
-    private fun expandAll(lines: List<String>, zone: ZoneId, limit: LocalDate, from: LocalDate?): Pair<List<Expanded>, Int> {
+    // [zoneFor]: a TZID as a zone (Ics.zone refuses an unknown one, so its event is skipped and counted).
+    private fun expandAll(lines: List<String>, zone: ZoneId, limit: LocalDate, from: LocalDate?, zoneFor: (String) -> ZoneId): Pair<List<Expanded>, Int> {
         var skipped = 0
         val events = Ics.events(lines, 50_000, "This calendar file has too many events.", unfinished = "This calendar file is incomplete.",
             unreadable = { skipped++ })
@@ -108,7 +111,7 @@ object CalendarFileImport {
                 else -> masterStart?.params?.get("TZID")?.let { runCatching { Ics.zone(it) }.getOrDefault(zone) } ?: zone
             }
             try {
-                identities[props] = values(identity, ownZone).also { require(it.size == 1) }
+                identities[props] = values(identity, ownZone, zoneFor).also { require(it.size == 1) }
                 true
             } catch (_: Exception) { skipped++; false }
         }
@@ -120,12 +123,12 @@ object CalendarFileImport {
         for (props in others + orphans) {
             if (one(props, "STATUS")?.value?.uppercase() == "CANCELLED") continue
             val moved = one(props, "UID")?.let { replaced[it.value] }.orEmpty()
-            try { expand(props, moved.flatMap { identities.getValue(it) }, zone, limit, from)?.let { result += it } }
+            try { expand(props, moved.flatMap { identities.getValue(it) }, zone, limit, from, zoneFor)?.let { result += it } }
             catch (_: Exception) { skipped++ }
             // Each override is an event of its own: a broken master or sibling must not hide the readable ones.
             moved.forEach { override ->
                 if (one(override, "STATUS")?.value?.uppercase() != "CANCELLED") {
-                    try { expand(override, emptyList(), zone, limit, from)?.let { result += it } }
+                    try { expand(override, emptyList(), zone, limit, from, zoneFor)?.let { result += it } }
                     catch (_: Exception) { skipped++ }
                 }
             }
@@ -133,7 +136,8 @@ object CalendarFileImport {
         return result to skipped
     }
 
-    private fun expand(props: List<Ics.Property>, moved: List<ZonedDateTime>, zone: ZoneId, limit: LocalDate, from: LocalDate?): Expanded? {
+    private fun expand(props: List<Ics.Property>, moved: List<ZonedDateTime>, zone: ZoneId, limit: LocalDate, from: LocalDate?,
+                       zoneFor: (String) -> ZoneId): Expanded? {
         fun one(name: String) = props.firstOrNull { it.name == name }
         val start = requireNotNull(one("DTSTART"))
         val end = one("DTEND"); val duration = one("DURATION")
@@ -142,9 +146,9 @@ object CalendarFileImport {
         val ownZone = when {
             allDay -> zone
             start.value.endsWith("Z") -> ZoneOffset.UTC
-            else -> start.params["TZID"]?.let(Ics::zone) ?: zone
+            else -> start.params["TZID"]?.let(zoneFor) ?: zone
         }
-        val first: ZonedDateTime = if (allDay) Ics.date(start).atStartOfDay(zone) else strictTime(start, zone)
+        val first: ZonedDateTime = if (allDay) Ics.date(start).atStartOfDay(zone) else strictTime(start, zone, zoneFor)
         // The explicit DTSTART may resolve a gap; generated dates must keep its original wall clock.
         val firstLocal = if (allDay) first.toLocalDateTime() else Ics.localDateTime(start)
         // An all-day event longer than Planner holds is cut to MultiDay.MAX_DAYS (a one-time copy, or a read-only one in a
@@ -152,7 +156,7 @@ object CalendarFileImport {
         val fullDays = if (allDay) Ics.allDayDays(first.toLocalDate(), end, duration) else 0
         val days = fullDays.coerceAtMost(MultiDay.MAX_DAYS.toLong())
         val length: Duration? = if (allDay || duration != null && end == null) null else when {
-            end != null -> Duration.between(first, strictTime(end, zone)).also { require(!it.isNegative) }
+            end != null -> Duration.between(first, strictTime(end, zone, zoneFor)).also { require(!it.isNegative) }
             else -> null
         }
         val nominal = if (!allDay && end == null) duration?.let { Ics.eventDuration(it.value) } else null
@@ -173,9 +177,9 @@ object CalendarFileImport {
             if (it == firstLocal.toLocalDate()) first
             else if (allDay) it.atStartOfDay(ownZone) else it.atTime(firstLocal.toLocalTime()).atZone(ownZone)
         }.toMutableSet()
-        props.filter { it.name == "RDATE" }.flatMap { values(it, ownZone) }
+        props.filter { it.name == "RDATE" }.flatMap { values(it, ownZone, zoneFor) }
             .filter { it.toLocalDate() <= limit }.forEach { starts += it }
-        val removed = props.filter { it.name == "EXDATE" }.flatMap { values(it, ownZone) } +
+        val removed = props.filter { it.name == "EXDATE" }.flatMap { values(it, ownZone, zoneFor) } +
             moved
         val removedInstants = removed.mapTo(hashSetOf()) { it.toInstant() }
         starts.removeAll { it.toInstant() in removedInstants }
@@ -213,13 +217,13 @@ object CalendarFileImport {
             }
 
     // The instants in an EXDATE, RDATE or RECURRENCE-ID, on the event's own clock; DATE values use midnight.
-    private fun values(p: Ics.Property, zone: ZoneId): List<ZonedDateTime> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
+    private fun values(p: Ics.Property, zone: ZoneId, zoneFor: (String) -> ZoneId): List<ZonedDateTime> = p.value.split(',').filter { it.isNotBlank() }.map { value ->
         val part = Ics.Property(p.name, p.params, value.trim())
-        if (Ics.isDate(part)) Ics.date(part).atStartOfDay(zone) else strictTime(part, zone).withZoneSameInstant(zone)
+        if (Ics.isDate(part)) Ics.date(part).atStartOfDay(zone) else strictTime(part, zone, zoneFor).withZoneSameInstant(zone)
     }
 
-    // A date-time in its own zone (unknown zones refuse the event rather than guessing its time).
-    private fun strictTime(p: Ics.Property, zone: ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false, Ics::zone)
+    // A date-time in its own zone (for an import, unknown zones refuse the event rather than guessing its time; see zoneFor).
+    private fun strictTime(p: Ics.Property, zone: ZoneId, zoneFor: (String) -> ZoneId): ZonedDateTime = Ics.time(p, zone, strictGap = false, zoneFor)
 
     // The Planner events to save for the ticked rows: a repeating row becomes one series (shared seriesId).
     fun events(entries: List<Entry>, today: LocalDate, includePast: Boolean): List<ItineraryItem> {

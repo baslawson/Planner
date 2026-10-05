@@ -257,7 +257,8 @@ class BackupManager(
             send?.let { (target, rows) ->
                 put("account", target.account).put("href", target.href).put("name", target.name)
                 put("sent", rows.toJson { JSONObject().put("itemId", it.itemId).put("uid", it.uid ?: JSONObject.NULL).put("href", it.href ?: JSONObject.NULL)
-                    .put("etag", it.etag ?: JSONObject.NULL).put("fingerprint", it.fingerprint).put("problem", it.problem ?: JSONObject.NULL) })
+                    .put("etag", it.etag ?: JSONObject.NULL).put("fingerprint", it.fingerprint).put("problem", it.problem ?: JSONObject.NULL)
+                    .apply { CalendarSync.notedDays(it)?.let { (first, last) -> put("noted", "$first/$last") } } }) // E16-1
             }
         })
         // Optional (older app versions ignore it): the ticked Nextcloud calendars and the subscribed links (account
@@ -527,6 +528,8 @@ class BackupManager(
                     uid = if (it.isNull("uid")) null else storableUid(it.optString("uid"), file) ?: return@mapNotNull null,
                     etag = if (it.isNull("etag")) null else it.optString("etag"), fingerprint = it.optString("fingerprint"),
                     problem = if (it.isNull("problem")) null else it.optString("problem"), href = file)
+                    // E16-1: a noted row's days, kept so an edit that moves its event still finds its file.
+                    .let { row -> if (row.uid == null) row.copy(ics = CalendarSync.notedDays(it.optString("noted"))?.let { (first, last) -> "$first/$last" }) else row }
             }.distinctBy { it.itemId }
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud calendar" }.take(200), null, false) to rows
         }

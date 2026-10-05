@@ -136,14 +136,25 @@ class CalendarSyncRulesTest {
     private val gymNoted = gym.associate { it.id to CalendarSync.fingerprint(it) }
     private fun edited(files: List<Triple<String, String?, ItineraryItem>>, edited: ItineraryItem, noted: Map<Long, String> = gymNoted) =
         CalendarSync.editedFiles(files, listOf(edited), gym.filter { it.id != edited.id }, noted, ZoneOffset.UTC)
+    // E16-1: only the files send downloads for [edited] take part, as on a device: those around its days now and the days
+    // it was noted on (its row's, see CalendarSync.notedDays), not the whole calendar.
+    private fun downloaded(files: List<Triple<String, String?, ItineraryItem>>, edited: ItineraryItem): List<Triple<String, String?, ItineraryItem>> {
+        val row = SentEvent(itemId = edited.id, account = "a", calendar = "/c/", uid = null, fingerprint = gymNoted.getValue(edited.id),
+            ics = CalendarSync.notedDays(gym.single { it.id == edited.id }))
+        val ranges = CalendarSync.lookupRanges(listOf(edited), listOfNotNull(CalendarSync.notedDays(row)))
+        return files.filter { (_, _, event) -> ranges.any { (start, end) -> event.date < end && event.lastDay >= start } }
+    }
 
     @Test fun anEditedOccurrenceOfASeriesFindsItsOwnFileNotANeighbours() {
         val own = gymFiles[2].first
         // Moved to 8:00: its file is the one exactly as it was noted.
-        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(startTime = LocalTime.of(8, 0))))
+        assertEquals(mapOf(own to 3L), edited(downloaded(gymFiles, gym[2].copy(startTime = LocalTime.of(8, 0))), gym[2].copy(startTime = LocalTime.of(8, 0))))
         // Renamed, or moved onto the next day's slot: still its own file; the neighbours keep theirs.
-        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(title = "Gym with Sam")))
-        assertEquals(mapOf(own to 3L), edited(gymFiles, gym[2].copy(date = day.plusDays(4))))
+        assertEquals(mapOf(own to 3L), edited(downloaded(gymFiles, gym[2].copy(title = "Gym with Sam")), gym[2].copy(title = "Gym with Sam")))
+        assertEquals(mapOf(own to 3L), edited(downloaded(gymFiles, gym[2].copy(date = day.plusDays(4))), gym[2].copy(date = day.plusDays(4))))
+        // Moved a month on (E16-1): its file is still downloaded, from the days it was noted on, and found.
+        val far = gym[2].copy(date = day.plusDays(33))
+        assertEquals(mapOf(own to 3L), edited(downloaded(gymFiles, far), far))
         // Its own file gone from Nextcloud: none (sent as a new file), whatever else is there.
         assertTrue(edited(gymFiles - gymFiles[2], gym[2].copy(startTime = LocalTime.of(8, 0))).isEmpty())
         assertTrue(edited(gymFiles - gymFiles[2], gym[2].copy(date = day.plusDays(4))).isEmpty())

@@ -499,6 +499,80 @@ class CalendarTwoWayTest {
         assertOtherCalendarUntouched()
     }
 
+    // E16-1: a noted past event moved two days or more (within the past, or into the window) still updates its own file:
+    // it is looked for on the days it was noted on, where the file is, not only around its new days. A backup keeps them.
+    @Test fun aNotedPastEventMovedFarUpdatesItsOwnFileNotASecondOne() = runBlocking {
+        val uids = listOf("planner-00000001-aaaa-bbbb-cccc-dddddddddddd@planner", "planner-00000002-aaaa-bbbb-cccc-dddddddddddd@planner",
+            "planner-00000003-aaaa-bbbb-cccc-dddddddddddd@planner")
+        listOf("QA Long ago", "QA Next week", "QA Restored").zip(listOf(5, 10, 15)).zip(uids).forEach { (event, uid) ->
+            repo.saveItem(ItineraryItem(tripId = 0, date = LocalDate.of(2026, 3, event.second), startTime = LocalTime.of(9, 0), durationMinutes = 60, title = event.first))
+            dav.put("${synced}$uid.ics", ics(uid, event.first, "202603${"%02d".format(event.second)}T090000Z"))
+        }
+        start()
+        assertEquals(3, rows().count { it.uid == null && it.problem == null })
+        fun moved(title: String, uid: String, date: LocalDate) = runBlocking {
+            repo.saveItem(item(title).copy(date = date))
+            sync.send()
+            assertEquals(1, dav.files.count { it.key.startsWith(synced) && it.value.second.contains("SUMMARY:$title") })
+            assertTrue(dav.files["${synced}$uid.ics"]!!.second.contains("DTSTART:${date.toString().replace("-", "")}T090000Z"))
+            assertEquals(uid, rows().single { it.itemId == item(title).id }.uid)
+        }
+        moved("QA Long ago", uids[0], LocalDate.of(2026, 3, 20)) // within the past
+        moved("QA Next week", uids[1], day.plusDays(7)) // into the pull window
+        // After a backup restore the noted days are still known.
+        val backup = BackupManager(context, repo, AttachmentStore(context), SettingsRepository(context), sync)
+        val zip = File(context.cacheDir, "twoway-noted-backup.zip")
+        backup.export(android.net.Uri.fromFile(zip), trackStatus = false)
+        sync.restoreSend(null, emptyList())
+        backup.restore(backup.stage(android.net.Uri.fromFile(zip)))
+        syncAgain()
+        moved("QA Restored", uids[2], LocalDate.of(2026, 4, 1))
+        assertEquals(3, plannerFiles().size)
+        assertTrue(conflicts().isEmpty())
+        assertOtherCalendarUntouched()
+    }
+
+    // E16-2: a file in a zone Planner doesn't know (Exchange's own, defined in the file) is shown read-only at the phone's
+    // time, as the comments promise, instead of being neither a Planner event nor a read-only one.
+    @Test fun anEventInAnUnknownTimeZoneIsShownReadOnly() = runBlocking {
+        dav.put("${synced}exchange.ics", "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Microsoft//EN\r\nBEGIN:VTIMEZONE\r\nTZID:Customized Time Zone\r\n" +
+            "BEGIN:STANDARD\r\nDTSTART:16010101T000000\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n" +
+            "BEGIN:VEVENT\r\nUID:ex-1\r\nDTSTART;TZID=Customized Time Zone:20261007T090000\r\nDTEND;TZID=Customized Time Zone:20261007T100000\r\n" +
+            "SUMMARY:QA Exchange\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+        start()
+        assertTrue(items().none { it.title == "QA Exchange" })
+        val shown = sync.shown.first().values.single { it.event.title == "QA Exchange" }.event
+        assertEquals(LocalDate.of(2026, 10, 7) to LocalTime.of(9, 0), shown.date to shown.startTime) // the phone's zone (UTC here)
+        assertTrue(writes().isEmpty())
+        assertOtherCalendarUntouched()
+    }
+
+    // E16-3: Keep Planner's on a conflict whose Nextcloud side has since become repeating (or cancelled) writes nothing:
+    // patched, Planner's one-off event would have become the series there. Keep Nextcloud's then settles it as before.
+    @Test fun keepPlannersDoesntWriteOverAFileThatNowRepeats() = runBlocking {
+        save("QA Clash")
+        start()
+        val (path, _) = plannerFile("QA Clash")
+        dav.edit(path) { it.replace("SUMMARY:QA Clash", "SUMMARY:QA Clash web") }
+        repo.saveItem(item("QA Clash").copy(location = "Planner room"))
+        syncAgain()
+        val row = conflicts().single()
+        dav.edit(path) { it.replace("SUMMARY:QA Clash web", "SUMMARY:QA Clash web\r\nRRULE:FREQ=WEEKLY;COUNT=3") }
+        syncAgain()
+        val file = dav.files[path]!!
+        val before = writes().size
+        val refused = runCatching { sync.resolve(row.id, CalendarSync.Resolution.PLANNER) }.exceptionOrNull()
+        assertEquals(CalendarSync.PLANNERS_WONT_FIT, refused?.message)
+        assertEquals(before, writes().size)
+        assertEquals(file, dav.files[path])
+        assertEquals(SentEvent.CONFLICT, rows().single().problem)
+        sync.resolve(row.id, CalendarSync.Resolution.NEXTCLOUD)
+        assertEquals(SentEvent.DETACHED, rows().single().problem)
+        assertEquals("Planner room", item("QA Clash").location) // Planner's event stays as it is
+        assertEquals(file, dav.files[path])
+        assertOtherCalendarUntouched()
+    }
+
     @Test fun anEditedPastDayOfASeriesUpdatesItsOwnFileNotANeighbours() = runBlocking {
         // A daily gym from 3 to 7 March (before the pull window), each day already on Nextcloud as Planner wrote it.
         val uids = (3..7).associateWith { "planner-0000000$it-aaaa-bbbb-cccc-dddddddddddd@planner" }

@@ -116,7 +116,8 @@ interface SentTaskDao {
 // which side. No foreign key on purpose: a row whose event is gone is how a deletion in Planner is noticed. [uid] null =
 // a past event that was only noted, not sent (it's sent once it's edited). [href]: the file on the server (null = the
 // uid's own name, as Planner names what it creates). [ics]: that file as last synced, so an update changes only what
-// Planner manages and keeps the rest (attendees, alarms…). [problem]: CHANGED/DELETED — a write found the server copy
+// Planner manages and keeps the rest (attendees, alarms…); for a noted row, the days its event was on when noted (E16-1,
+// see CalendarSync.notedDays). [problem]: CHANGED/DELETED — a write found the server copy
 // changed or gone (the next check sorts it out); CONFLICT — changed on both sides, [conflict] holds Nextcloud's version
 // ("" = deleted there) until the user chooses.
 @Entity(tableName = "sent_events", indices = [Index(value = ["itemId"], unique = true)])
