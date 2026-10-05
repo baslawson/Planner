@@ -169,8 +169,9 @@ object NoteMapping {
         notebook = Notes.cleanNotebook(remote.category), pinned = remote.favorite,
         modified = if (remote.modified > 0) remote.modified * 1000 else base.modified))
 
-    // Too long for Planner: such a note stays on Nextcloud only, so it's never cut short there.
-    fun fits(remote: RemoteNote) = remote.content.length <= Notes.MAX_CONTENT && remote.title.length <= Notes.MAX_TITLE
+    // Leave notes that cannot map losslessly untouched, including notebooks that cleaning would shorten or rename.
+    fun fits(remote: RemoteNote) = remote.content.length <= Notes.MAX_CONTENT && remote.title.length <= Notes.MAX_TITLE &&
+        Notes.cleanNotebook(remote.category) == remote.category
 
     fun row(note: PlannerNote, account: String, remote: RemoteNote) =
         SentNote(note.id, account, remote.id, remote.etag, note.title, note.content, note.notebook, note.pinned)

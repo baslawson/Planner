@@ -254,4 +254,19 @@ class NotesTest {
         assertEquals("Plans: 2026/27?", NoteMapping.localTitle(remote, "Plans: 2026/27?"))
         assertTrue(NoteMapping.sameText("a\r\nb\n", "a\nb"))
     }
+
+    @Test fun remoteNotebooksMustRoundTripWithoutRenaming() {
+        val remote = RemoteNote(1, "e", "Title", "Body", "", false)
+        val boundary = "A".repeat(49) + "/" + "B".repeat(50)
+        for (category in listOf("", "Parent/Child", boundary)) {
+            val incoming = remote.copy(category = category)
+            assertTrue(category, NoteMapping.fits(incoming))
+            assertEquals(category, NoteMapping.apply(PlannerNote(), incoming).notebook)
+        }
+        for (category in listOf(boundary + "B", " Parent/Child", "Parent/Child ", "/Parent/Child/", "Parent\nChild")) {
+            assertFalse(category, NoteMapping.fits(remote.copy(category = category)))
+        }
+        assertFalse(NoteMapping.fits(remote.copy(title = "T".repeat(Notes.MAX_TITLE + 1))))
+        assertFalse(NoteMapping.fits(remote.copy(content = "B".repeat(Notes.MAX_CONTENT + 1))))
+    }
 }

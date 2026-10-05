@@ -17,9 +17,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 
-// A one-line dropdown for a Settings choice: a read-only field showing [current] with an arrow, and a list of [options]
+// A dropdown for a Settings choice: a read-only field showing [current] with an arrow, and a list of [options]
 // that opens under it. Tapping an option chooses it and closes the list. [entry] draws one option in the list, so each
 // setting decides how its choices look (in their own font, with an example under them, and so on).
+// Most settings use one line; long selections can wrap by setting [singleLine] to false.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> SettingsDropdown(
@@ -27,6 +28,7 @@ fun <T> SettingsDropdown(
     current: String,
     options: List<T>,
     onSelect: (T) -> Unit,
+    singleLine: Boolean = true,
     entry: @Composable (T) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -35,7 +37,7 @@ fun <T> SettingsDropdown(
             value = current,
             onValueChange = {},
             readOnly = true,
-            singleLine = true,
+            singleLine = singleLine,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),

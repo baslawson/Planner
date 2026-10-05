@@ -10,8 +10,8 @@ class NotesFixesOct4bUiTest {
     @Test fun syncMessageKeepsBothCounts() {
         assertEquals("", syncCounts(0, 0))
         assertEquals(" · 1 conflict copy made (changed in both places)", syncCounts(1, 0))
-        assertEquals(" · 2 notes left as they are (too long for Planner, or Nextcloud wouldn't take the change)", syncCounts(0, 2))
-        assertEquals(" · 3 conflict copies made (changed in both places) · 1 note left as they are (too long for Planner, " +
+        assertEquals(" · 2 notes left as they are (text or notebook doesn't fit Planner, or Nextcloud wouldn't take the change)", syncCounts(0, 2))
+        assertEquals(" · 3 conflict copies made (changed in both places) · 1 note left as they are (text or notebook doesn't fit Planner, " +
             "or Nextcloud wouldn't take the change)", syncCounts(3, 1))
     }
 

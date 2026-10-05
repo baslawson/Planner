@@ -123,6 +123,57 @@ class NotesUiTest {
         await { find("Search notes") != null || find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
     }
 
+    @Test fun longSelectionsAndLargeTextGridStayReadable() {
+        val oldSize = app.settings.textSizePercent.value
+        val notebook = "Household administration and documents"
+        val firstTitle = "Prepare household insurance and renewal documents for the appointment"
+        val secondTitle = "Research additional appointment information and supporting paperwork"
+        runBlocking {
+            app.repository.saveNote(PlannerNote(title = firstTitle, content = "Bring renewal forms.",
+                notebook = notebook, pinned = true), create = true)
+            app.repository.saveNote(PlannerNote(title = secondTitle,
+                content = List(8) { "Read the letter and prepare questions for the appointment." }.joinToString("\n"),
+                notebook = notebook, reminderAt = System.currentTimeMillis() + 86_400_000), create = true)
+        }
+        fun bounds(n: AccessibilityNodeInfo) = android.graphics.Rect().also(n::getBoundsInScreen)
+        try {
+            app.settings.setTextSizePercent(100)
+            openNotes()
+            show(notebook)
+            click("Sort"); pick(NoteSort.CHANGED.label)
+            await { find(firstTitle) != null && find(secondTitle) != null }
+            val usableDp = context.resources.configuration.screenWidthDp - 32
+            if (usableDp < 600) {
+                assertTrue("Selected controls must stack on a phone-width screen",
+                    bounds(find("Sort")!!).top > bounds(find("Show")!!).bottom)
+            }
+            screenshot("responsive-grid-100")
+            app.settings.setTextSizePercent(125)
+            // Recomposition and staggered-grid remeasurement must settle before positions are compared.
+            await {
+                val a = find(firstTitle); val b = find(secondTitle)
+                a != null && b != null && (usableDp >= 400 ||
+                    bounds(a).left == bounds(b).left && bounds(b).top >= bounds(a).bottom)
+            }
+            assertFalse("Responsive one-column grid must retain the saved grid choice", app.settings.notesAsList.value)
+            assertNotNull(find("Show as list"))
+            screenshot("responsive-grid-125")
+            repeat(8) {
+                page()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                Thread.sleep(250)
+            }
+            await {
+                val reminder = nodes().firstOrNull { it.isVisibleToUser &&
+                    it.contentDescription?.toString()?.startsWith("Reminder, ") == true }
+                val fab = find("New note")
+                reminder != null && fab != null && bounds(reminder).bottom <= bounds(fab).top
+            }
+            screenshot("responsive-grid-reminder-scrolled-125")
+        } finally {
+            app.settings.setTextSizePercent(oldSize)
+        }
+    }
+
     @Test fun writeTickFileAndManageANote() {
         openNotes()
         await { find("No notes yet. Tap New note to write one.") != null }

@@ -436,6 +436,50 @@ class NoteSyncTest {
         assertTrue(what, condition())
     }
 
+    @Test fun unrepresentableRemoteNotebookIsSkippedWithoutBlockingOrdinaryNotes() = rig("note-sync-notebook-limit") { r ->
+        val longCategory = "A".repeat(60) + "/" + "B".repeat(60)
+        val longId = r.fake.add("Long category", "Original long", longCategory)
+        val controls = listOf("Parent/Child", "A".repeat(49) + "/" + "B".repeat(50))
+        val controlIds = controls.mapIndexed { index, category -> r.fake.add("Control $index", "Original $index", category) }
+        assertTrue(r.sync.sync())
+        assertEquals(2, r.repo.allNotes().size)
+        assertTrue(r.repo.allNotes().none { it.title == "Long category" })
+        assertEquals(1, r.sync.state.value.skipped)
+        r.repo.allNotes().forEach { r.repo.saveNote(it.copy(content = it.content + " edited"), create = false) }
+        assertTrue(r.sync.sync())
+        assertEquals("Original long", r.fake.notes[longId]!!.content)
+        assertEquals(longCategory, r.fake.notes[longId]!!.category)
+        controlIds.forEachIndexed { index, id ->
+            assertEquals("Original $index edited", r.fake.notes[id]!!.content)
+            assertEquals(controls[index], r.fake.notes[id]!!.category)
+        }
+        assertTrue(r.fake.requests.none { it == "PUT /index.php/apps/notes/api/v1/notes/$longId" })
+        assertEquals(1, r.sync.state.value.skipped)
+        assertNull(r.sync.state.value.error)
+    }
+
+    @Test fun legacyShortenedLinkedNotebookCannotMoveTheRemoteNote() = rig("note-sync-legacy-notebook") { r ->
+        val id = r.fake.add("Legacy", "Original", "Parent/Child")
+        assertTrue(r.sync.sync())
+        // Recreate an old client's truncated import and its last-synced baseline, including the current remote ETag.
+        val longCategory = "A".repeat(60) + "/" + "B".repeat(60)
+        r.fake.edit(id) { it.copy(category = longCategory) }
+        val baseline = r.note("Legacy").copy(notebook = longCategory.take(Notes.MAX_NOTEBOOK))
+        r.repo.saveNote(baseline, create = false)
+        val row = r.db.sentNoteDao().all().single()
+        r.db.sentNoteDao().put(row.copy(notebook = baseline.notebook, etag = r.fake.notes[id]!!.etag))
+        r.repo.saveNote(r.note("Legacy").copy(content = "Edited locally"), create = false)
+        assertTrue(r.sync.sync())
+        assertEquals("Edited locally", r.note("Legacy").content)
+        assertEquals("Original", r.fake.notes[id]!!.content)
+        assertEquals(longCategory, r.fake.notes[id]!!.category)
+        assertEquals(1, r.sync.state.value.skipped)
+        assertNull(r.sync.state.value.error)
+        assertTrue(r.fake.requests.none { it == "PUT /index.php/apps/notes/api/v1/notes/$id" })
+        assertEquals(1, r.fake.notes.size)
+        assertEquals(1, r.db.sentNoteDao().all().size)
+    }
+
     // Bug hunt 3 Oct, SY-1: a restore confirmed while a notes pass runs waits for it. Before, the pass carried on across
     // the restore and put back a link for a note the backup doesn't have, so the next pass deleted it on Nextcloud too.
     @Test fun aRestoreWaitsForANotesPassUnderWay() = rig("note-sync-restore") { r ->

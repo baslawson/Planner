@@ -83,6 +83,9 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     }
     val sort by app.settings.noteSort.collectAsStateWithLifecycle()
     val asList by app.settings.notesAsList.collectAsStateWithLifecycle()
+    // Typography already includes the app size and font choice; density adds only Android's font scale.
+    val textScale = (MaterialTheme.typography.bodyLarge.fontSize.value / 16f *
+        androidx.compose.ui.platform.LocalDensity.current.fontScale).coerceAtLeast(1f)
     // Each note's text normalised once per change to the notes while a search is typed (UI-3), and not at all without
     // one: every save, pin or sync would otherwise redo it for nothing (L5-1).
     val searching = query.isNotBlank()
@@ -360,10 +363,10 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                     is NoteFilter.Tag -> "#${choice.name}"
                     NoteFilter.Archive -> "Archive"
                 }
-                // What shows, and in which order, side by side.
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1f)) {
-                        SettingsDropdown("Show", name(filter), choices, onSelect = { showFilter(it.key()) }) { choice ->
+                // Phone-width choices stack so selected notebook/sort names have room to wrap.
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    @Composable fun showChoice() {
+                        SettingsDropdown("Show", name(filter), choices, onSelect = { showFilter(it.key()) }, singleLine = false) { choice ->
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(name(choice), Modifier.weight(1f))
                                 Text((counts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
@@ -371,8 +374,18 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                             }
                         }
                     }
-                    Box(Modifier.weight(1f)) {
-                        SettingsDropdown("Sort", sort.label, com.example.itinerary.data.NoteSort.entries, onSelect = app.settings::setNoteSort) { Text(it.label) }
+                    @Composable fun sortChoice() {
+                        SettingsDropdown("Sort", sort.label, com.example.itinerary.data.NoteSort.entries,
+                            onSelect = app.settings::setNoteSort, singleLine = false) { Text(it.label) }
+                    }
+                    if (maxWidth >= 600.dp * textScale) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f)) { showChoice() }
+                            Box(Modifier.weight(1f)) { sortChoice() }
+                        }
+                    } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        showChoice()
+                        sortChoice()
                     }
                 }
                 when {
@@ -395,7 +408,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                     val placeOf = remember(displayed) { displayed.withIndex().associate { it.value.id to it.index } }
                     fun canMove(index: Int, by: Int) = displayed.getOrNull(index + by)?.pinned == displayed.getOrNull(index)?.pinned
                     LazyVerticalStaggeredGrid(
-                        columns = if (asList) StaggeredGridCells.Fixed(1) else StaggeredGridCells.Adaptive(160.dp),
+                        columns = if (asList) StaggeredGridCells.Fixed(1) else StaggeredGridCells.Adaptive(160.dp * textScale),
                         state = grid,
                         modifier = Modifier.fillMaxSize(),
                         // Room under the last cards for the New note button.
@@ -613,7 +626,7 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
 // second was lost whenever there was a first).
 internal fun syncCounts(conflicts: Int, skipped: Int): String = listOfNotNull(
     if (conflicts > 0) "$conflicts conflict cop${if (conflicts == 1) "y" else "ies"} made (changed in both places)" else null,
-    if (skipped > 0) "$skipped note${if (skipped == 1) "" else "s"} left as they are (too long for Planner, or Nextcloud wouldn't take the change)" else null,
+    if (skipped > 0) "$skipped note${if (skipped == 1) "" else "s"} left as they are (text or notebook doesn't fit Planner, or Nextcloud wouldn't take the change)" else null,
 ).joinToString("") { " · $it" }
 
 /** White or black, whichever reads better on [background] (4.5:1 or more on all the card colours): a card's text and marks. */
