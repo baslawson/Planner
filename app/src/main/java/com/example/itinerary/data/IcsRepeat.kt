@@ -13,6 +13,7 @@ import java.time.temporal.TemporalAdjusters
 // the caller then keeps only the first date.
 internal class IcsRepeat private constructor(
     private val freq: String,
+    private val zone: ZoneId,
     private val interval: Int,
     private val count: Int?,
     private val until: LocalDateTime?, // on the event's own clock
@@ -25,7 +26,7 @@ internal class IcsRepeat private constructor(
     // each later date the rule picks, up to [limit] and the rule's own end, at most the latest [max] kept. Dates before
     // [from] still count towards COUNT but aren't kept. Past [max] the oldest go rather than the rule stopping, so an old
     // repeating event with no end (daily since 2010) still reaches today and [limit].
-    fun dates(start: LocalDate, startTime: java.time.LocalTime, limit: LocalDate, max: Int = 5000, from: LocalDate = start): List<LocalDate> {
+    fun dates(start: LocalDate, startTime: java.time.LocalTime, limit: LocalDate, max: Int = 5000, from: LocalDate = start, allDay: Boolean = false): List<LocalDate> {
         val result = ArrayDeque<LocalDate>()
         var counted = 0
         // True when the rule has ended.
@@ -40,6 +41,7 @@ internal class IcsRepeat private constructor(
             for (date in candidates(start, period)) {
                 if (date <= start) continue
                 if (date > limit || until != null && date.atTime(startTime).isAfter(until)) return result
+                if (!allDay && zone.rules.getValidOffsets(date.atTime(startTime)).isEmpty()) continue
                 if (take(date)) return result
             }
         }
@@ -148,7 +150,7 @@ internal class IcsRepeat private constructor(
                 "YEARLY" -> if (days.size > 1 || days.any { it.first == null } || days.isNotEmpty() && monthDay != null ||
                     month == null && (days.isNotEmpty() || monthDay != null) || month != null && days.isEmpty() && monthDay == null && month != start.monthValue) return null
             }
-            IcsRepeat(freq, interval, count, until, days, monthDay, month, weekStart)
+            IcsRepeat(freq, zone, interval, count, until, days, monthDay, month, weekStart)
         }.getOrNull()
     }
 }

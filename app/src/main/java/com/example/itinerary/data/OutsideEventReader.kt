@@ -33,7 +33,9 @@ object OutsideEventReader {
             val begin = time(start, zone)
             val finish = when {
                 end != null -> time(end, zone)
-                duration != null -> begin.plus(Ics.duration(duration.value))
+                duration != null -> Ics.eventDuration(duration.value).end(
+                    Ics.time(start, zone, strictGap = false, { runCatching { Ics.zone(it) }.getOrDefault(zone) }))
+                    .withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
                 else -> null
             }
             Ics.timed(begin.toLocalDateTime(), finish?.toLocalDateTime())

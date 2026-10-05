@@ -36,7 +36,9 @@ object ServerEvents {
             val begin = Ics.time(start, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
             val finish = when {
                 end != null -> Ics.time(end, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
-                duration != null -> begin.plus(Ics.duration(duration.value))
+                duration != null -> Ics.eventDuration(duration.value).end(
+                    Ics.time(start, zone, strictGap = false, Ics::zone))
+                    .withZoneSameInstant(zone).truncatedTo(ChronoUnit.MINUTES)
                 else -> null
             }
             Ics.timed(begin.toLocalDateTime(), finish?.toLocalDateTime())

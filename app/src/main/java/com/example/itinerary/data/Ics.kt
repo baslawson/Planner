@@ -70,12 +70,14 @@ internal object Ics {
 
     private val dateTime = DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss").withResolverStyle(ResolverStyle.STRICT)
 
+    fun localDateTime(p: Property): LocalDateTime = LocalDateTime.parse(p.value.removeSuffix("Z"), dateTime)
+
     // A DATE-TIME value as a moment: UTC ("…Z"), in its TZID, or floating (read as [localZone]). [zoneFor] decides what an
     // unknown TZID means; [strictGap] refuses a clock time that doesn't exist because of a daylight-saving change.
     fun time(p: Property, localZone: ZoneId, strictGap: Boolean, zoneFor: (String) -> ZoneId): ZonedDateTime {
         val utc = p.value.endsWith("Z")
         require(p.params["VALUE"] in listOf(null, "DATE-TIME")) { "Unsupported date type." }
-        val local = LocalDateTime.parse(p.value.removeSuffix("Z"), dateTime)
+        val local = localDateTime(p)
         val zone = if (utc) ZoneOffset.UTC else p.params["TZID"]?.let(zoneFor) ?: localZone
         if (strictGap) require(zone.rules.getValidOffsets(local).isNotEmpty()) { "An invitation time falls in a daylight-saving gap." }
         return local.atZone(zone)
@@ -204,12 +206,29 @@ internal object Ics {
 
     fun date(p: Property): LocalDate = LocalDate.parse(p.value.take(8), DateTimeFormatter.BASIC_ISO_DATE)
 
-    // iCalendar durations may be in weeks ("P2W"), which java.time.Duration doesn't read.
-    fun duration(value: String): Duration {
-        val weeks = Regex("([+-]?)P([0-9]+)W").matchEntire(value) ?: return Duration.parse(value)
-        val length = Duration.ofDays(weeks.groupValues[2].toLong() * 7)
-        return if (weeks.groupValues[1] == "-") length.negated() else length
+    // RFC 5545: days/weeks are nominal calendar units; clock units are elapsed time. Apply the largest first.
+    data class EventDuration(val days: Long, val clock: Duration) {
+        fun end(start: ZonedDateTime): ZonedDateTime = start.plusDays(days).plus(clock)
+        fun elapsedDays(): Long = Duration.ofDays(days).plus(clock).toDays()
     }
+
+    fun eventDuration(value: String): EventDuration {
+        val weeks = Regex("([+-]?)P([0-9]+)W").matchEntire(value)
+        if (weeks != null) {
+            val days = Math.multiplyExact(weeks.groupValues[2].toLong(), 7L)
+            return EventDuration(if (weeks.groupValues[1] == "-") -days else days, Duration.ZERO)
+        }
+        val match = Regex("([+-]?)P(?:([0-9]+)D)?(T.*)?").matchEntire(value)
+            ?: error("Invalid calendar duration.")
+        require(match.groupValues[2].isNotEmpty() || match.groupValues[3].isNotEmpty())
+        val sign = if (match.groupValues[1] == "-") -1 else 1
+        val days = Math.multiplyExact(match.groupValues[2].ifEmpty { "0" }.toLong(), sign.toLong())
+        val clock = match.groupValues[3].takeIf { it.isNotEmpty() }?.let { Duration.parse("P$it") } ?: Duration.ZERO
+        return EventDuration(days, if (sign < 0) clock.negated() else clock)
+    }
+
+    // For date-only lengths: an elapsed day and a nominal day both cover one calendar date.
+    fun duration(value: String): Duration = eventDuration(value).let { Duration.ofDays(it.days).plus(it.clock) }
 
     // How long an all-day event lasts in days as its file says: from its exclusive end date or its duration; one day when
     // it has neither. At least one day.

@@ -7,6 +7,26 @@ import java.time.LocalDate
 class PaymentsTest {
     private fun bill() = ItineraryItem(tripId=1, date=LocalDate.of(2026,9,26), startTime=null,
         title="Power", category="Bills", billAmountMinor=10000, payments=listOf(BillPayment(amount=3000)))
+    @Test fun manualSettlementLabelSurvivesRepeatedToggle() {
+        val manual = BillPayment(id = "manual", amount = 4000, note = "Marked paid")
+        val paid = Payments.setPaid(bill().copy(payments = listOf(manual)), true)
+        assertEquals(false, paid.payments.first().automaticSettlement)
+        assertEquals(true, paid.payments.last().automaticSettlement)
+        val unpaid = Payments.setPaid(paid, false)
+        assertEquals(manual, unpaid.payments.first())
+        assertTrue(unpaid.payments.last().reversed)
+        assertEquals(6000L, Payments.remaining(10000, false, unpaid.payments))
+        val again = Payments.setPaid(Payments.setPaid(unpaid, true), false)
+        assertEquals(listOf(false, true, true), again.payments.map { it.reversed })
+        assertEquals(4000L, Payments.total(again.payments))
+    }
+    @Test fun settlementIdentityDoesNotDependOnItsDisplayNote() {
+        val paid = Payments.setPaid(bill(), true)
+        val changedNote = paid.copy(payments = paid.payments.map {
+            if (it.automaticSettlement == true) it.copy(note = "Different display text") else it
+        })
+        assertEquals(listOf(false, true), Payments.setPaid(changedNote, false).payments.map { it.reversed })
+    }
     @Test fun settlementRecordsOnlyRemainingAndReversalKeepsHistory() {
         val settled=Payments.setPaid(bill(),true)
         assertEquals(listOf(3000L,7000L),settled.payments.map { it.amount })

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -164,23 +163,24 @@ class BackupManager(
         val created = mutableListOf<File>()
         // A file may unpack to far more than it holds: each attachment is copied up to a size no real one comes near, and
         // all of them only while space is left on the phone.
-        var room = context.filesDir.usableSpace - MIN_FREE_BYTES
-        try {
-            ZipFile(staged.file).use { zip ->
-                staged.data.storedAttachments.forEach { attachment ->
-                    if (attachment.url != null) return@forEach // a link has no file to copy
-                    // Written below, so the attachments folder must exist even on a fresh install.
-                    val target = store.writableFileFor(attachment.fileName)
-                    if (target.exists()) return@forEach
-                    created += target
-                    val entry = zip.getEntry("$ATTACHMENTS_DIR/${attachment.fileName}") ?: error("Missing entry")
-                    zip.getInputStream(entry).use { source -> target.outputStream().use { room -= copyLimited(source, it, minOf(MAX_ATTACHMENT_BYTES, room)) } }
+        suspend fun installFiles() {
+            var room = context.filesDir.usableSpace - MIN_FREE_BYTES
+            try {
+                ZipFile(staged.file).use { zip ->
+                    staged.data.storedAttachments.forEach { attachment ->
+                        if (attachment.url != null) return@forEach // a link has no file to copy
+                        // Written below, so the attachments folder must exist even on a fresh install.
+                        val target = store.writableFileFor(attachment.fileName)
+                        if (target.exists()) return@forEach
+                        created += target
+                        val entry = zip.getEntry("$ATTACHMENTS_DIR/${attachment.fileName}") ?: error("Missing entry")
+                        zip.getInputStream(entry).use { source -> target.outputStream().use { room -= copyLimited(source, it, minOf(MAX_ATTACHMENT_BYTES, room)) } }
+                    }
                 }
+            } catch (e: Exception) {
+                throw BackupException(if (e is TooLargeException && e.space) "There isn't enough free space on this phone to restore this backup. Nothing was changed."
+                    else "Couldn't copy the attachments out of the backup. Nothing was changed.")
             }
-        } catch (e: Exception) {
-            created.forEach { it.delete() }
-            throw BackupException(if (e is TooLargeException && e.space) "There isn't enough free space on this phone to restore this backup. Nothing was changed."
-                else "Couldn't copy the attachments out of the backup. Nothing was changed.")
         }
         var failure: Exception? = null
         // No calendar or task send or pull, and no notes pass, runs from before the events, tasks and notes are replaced
@@ -196,23 +196,23 @@ class BackupManager(
         }
         paused {
             try {
-                repo.replaceAll(staged.data)
+                repo.restoreWithFiles(staged.data, ::installFiles, { created.forEach { it.delete() } }) {
+                    // Once replacement starts, finish settings and sync records even if the owning screen goes away.
+                    // Each step runs even if an earlier one failed; report the first failure after completing them all.
+                    suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
+                    step { settings.applySnapshot(staged.settings) }
+                    step { staged.calendars?.let { calendars?.restoreChoices(it, keepSend = staged.send == null, keepTasks = staged.taskSend == null) } }
+                    // The backup's sent record (or none for older backups) replaces IDs that now mean other events.
+                    step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
+                    // After the calendars, whose restore rebuilds the list rows.
+                    step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
+                    // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
+                    step { notes?.forgetLocked() }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                created.forEach { it.delete() }
-                throw BackupException("Couldn't restore the backup. Nothing was changed.")
-            }
-            // The data is in: each remaining step runs even if one before it failed (the first failure is reported after).
-            // What was sent to Nextcloud always gets replaced: by the backup's record, or by none (an older backup), since
-            // the current record names events that are gone or are other events now.
-            suspend fun step(action: suspend () -> Unit) { try { action() } catch (e: Exception) { if (failure == null) failure = e } }
-            withContext(NonCancellable) {
-                step { settings.applySnapshot(staged.settings) }
-                step { staged.calendars?.let { calendars?.restoreChoices(it, keepSend = staged.send == null, keepTasks = staged.taskSend == null) } }
-                step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
-                // After the calendars, whose restore rebuilds the list rows.
-                step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
-                // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
-                step { notes?.forgetLocked() }
+                throw e as? BackupException ?: BackupException("Couldn't restore the backup. Nothing was changed.")
             }
         }
         failure?.let { throw it }

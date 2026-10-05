@@ -6,7 +6,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class BillPayment(val id: String = UUID.randomUUID().toString(), val amount: Long,
-    val date: LocalDate = LocalDate.now(), val note: String = "", val reversed: Boolean = false)
+    val date: LocalDate = LocalDate.now(), val note: String = "", val reversed: Boolean = false,
+    val automaticSettlement: Boolean? = false)
 
 class PaymentUpdateException(message: String) : IllegalArgumentException(message)
 
@@ -33,7 +34,7 @@ object Payments {
     }
 
     fun total(payments: List<BillPayment>): Long = payments.filterNot { it.reversed }.sumOf { it.amount }
-    // Payments that still count: unticking "paid" keeps them only as reversed history.
+    // Payments that still count toward the balance.
     fun anyLive(payments: List<BillPayment>): Boolean = payments.any { !it.reversed }
     fun validate(payments: List<BillPayment>) {
         if (payments.size > MAX_ENTRIES) throw PaymentUpdateException(LIMIT_MESSAGE)
@@ -70,9 +71,13 @@ object Payments {
         if (paid == item.paid) return item
         val amount = remaining(item.billAmountMinor, false, item.payments)
         val entries = if (paid && amount != null && amount > 0)
-            item.payments + BillPayment(amount = amount, note = MARKED_PAID)
+            item.payments + BillPayment(amount = amount, note = MARKED_PAID, automaticSettlement = true)
         else if (!paid) {
-            val unmarked = item.payments.map { if (it.note == MARKED_PAID) it.copy(reversed = true) else it }
+            // Only old unclassified records retain the historical marker rule. New manual entries carry false.
+            val unmarked = item.payments.map {
+                if (it.automaticSettlement == true || it.automaticSettlement == null && it.note == MARKED_PAID)
+                    it.copy(reversed = true) else it
+            }
             val bill = item.billAmountMinor
             if (bill != null && anyLive(unmarked) && total(unmarked) >= bill) item.payments.map { it.copy(reversed = true) } else unmarked
         } else item.payments
@@ -81,12 +86,15 @@ object Payments {
     private const val MARKED_PAID = "Marked paid"
     fun encode(payments: List<BillPayment>): String = JSONArray().apply {
         validate(payments)
-        payments.forEach { put(JSONObject().put("id", it.id).put("amount", it.amount)
-            .put("date", it.date.toString()).put("note", it.note).put("reversed", it.reversed)) }
+        payments.forEach { payment -> put(JSONObject().put("id", payment.id).put("amount", payment.amount)
+            .put("date", payment.date.toString()).put("note", payment.note).put("reversed", payment.reversed)
+            .apply { payment.automaticSettlement?.let { put("automaticSettlement", it) } }) }
     }.toString()
     fun decode(text: String): List<BillPayment> = JSONArray(text).let { a -> List(a.length()) { i ->
         val p = a.getJSONObject(i)
         BillPayment(p.getString("id"), p.getLong("amount"), LocalDate.parse(p.getString("date")),
-            p.optString("note"), p.optBoolean("reversed"))
+            // Preserve legacy classification separately from new manual entries; it cannot be recovered reliably.
+            p.optString("note"), p.optBoolean("reversed"),
+            if (p.has("automaticSettlement") && !p.isNull("automaticSettlement")) p.getBoolean("automaticSettlement") else null)
     } }.also(::validate)
 }

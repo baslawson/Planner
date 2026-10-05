@@ -106,6 +106,14 @@ suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
             if (afterBoot) 0L else MissedReminders.openGraceMs(app.reminderScheduler.canScheduleExact()),
             app.reminderScheduler::disarm) { postMissedReminders(app, it, now, afterBoot) }
     } catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't show missed reminders", e) }
+    finally {
+        // Draining dropped alarms frees slots even when the same-process full-reschedule gate is closed.
+        // Finish that repair if the screen closes after the ledger was drained, and leave a full window alone.
+        if (app.reminderScheduler.needsArmRefill()) {
+            try { kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { app.repository.refillReminders() } }
+            catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't refill waiting reminders", e) }
+        }
+    }
 }
 
 // D6-10: an event or bill reminder shown before the first unlock, shown again with its buttons (Mark paid), quietly.

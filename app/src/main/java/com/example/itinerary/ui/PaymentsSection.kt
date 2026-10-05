@@ -76,7 +76,7 @@ fun PaymentsSection(amount: Long?, currency: String, paid: Boolean, payments: Li
     if (payments.size >= Payments.MAX_ENTRIES) Text(Payments.LIMIT_MESSAGE, style = MaterialTheme.typography.bodySmall)
     if (amount == null) Text("Enter the bill amount to record a payment.", style = MaterialTheme.typography.bodySmall)
     PaymentHistory(payments, currency, onReverse = { reverse = it })
-    if (payments.isNotEmpty()) Text("Marking the bill unpaid reverses its recorded payments. History is kept.", style = MaterialTheme.typography.bodySmall)
+    if (payments.isNotEmpty()) Text("Marking unpaid reverses the automatic settlement. Other payments stay unless they fully cover the bill. History is kept.", style = MaterialTheme.typography.bodySmall)
     reverse?.let { payment -> PlannerDialog("Reverse payment?", { reverse = null },
         primary = DialogAction("Reverse payment", danger = true) { onChange(payments.map { if (it.id == payment.id) it.copy(reversed = true) else it }); reverse = null },
         dismiss = DialogAction("Cancel") { reverse = null }) {

@@ -1303,7 +1303,36 @@ class Repository(
 
     // Throws away all current data and puts [data] in its place, keeping its ids. The attachment
     // files named in [data] must already be in the store. Old files nothing refers to any more are removed.
-    suspend fun replaceAll(data: DataSnapshot) = changes.withLock {
+    suspend fun replaceAll(data: DataSnapshot) = changes.withLock { replaceAllLocked(data) }
+
+    // Restore owns both newly installed and existing files until their database references commit.
+    // Waits for ownership remain cancellable; once copying starts, finish or roll back under the same lock.
+    internal suspend fun restoreWithFiles(data: DataSnapshot, installFiles: suspend () -> Unit, rollbackFiles: () -> Unit,
+                                          afterReplace: suspend () -> Unit = {}) =
+        changes.withLock {
+            withContext(NonCancellable) {
+                var committed = false
+                var maintenanceFailure: Throwable? = null
+                try {
+                    installFiles()
+                    replaceAllLocked(data) { committed = true }
+                } catch (e: Throwable) {
+                    if (!committed) {
+                        rollbackFiles()
+                        throw e
+                    }
+                    maintenanceFailure = e
+                }
+                // Committed files stay owned even if cleanup failed; finish settings and sync records regardless.
+                afterReplace()
+                if (maintenanceFailure != null) {
+                    Log.w("Repository", "Restored backup; cleanup failed", maintenanceFailure)
+                    throw BackupException("The backup data was restored, but some cleanup did not finish.")
+                }
+            }
+        }
+
+    private suspend fun replaceAllLocked(data: DataSnapshot, committed: () -> Unit = {}) {
         data.tasks.forEach(Tasks::validate)
         TaskDependencies.validateGraph(data.tasks)
         require(data.tasks.map { it.id }.distinct().size == data.tasks.size)
@@ -1348,6 +1377,8 @@ class Repository(
             dropUncommitted(deleted)
             throw e
         }
+        // The transaction has committed: failures below must never remove newly restored attachment files.
+        committed()
         oldDeleted.forEach { payloads.delete(it.payload) }
         _pendingDeletions.value = emptyList()
         _pendingMoves.value = emptyList()
