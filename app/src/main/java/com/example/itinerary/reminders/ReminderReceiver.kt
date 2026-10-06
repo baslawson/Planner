@@ -27,10 +27,13 @@ class ReminderReceiver : BroadcastReceiver() {
                 (context.applicationContext as ItineraryApp).repository.deliverReminder(id, trigger) { item, reminder ->
                     show(context, reminderIntent(context, item, reminder, trigger))
                 }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
-                withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }
             } catch (e: Exception) { android.util.Log.w("ReminderReceiver", "Couldn't deliver reminder", e) }
-            finally { pending.finish() }
+            finally {
+                pending.finish()
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept
+                // fresh. H17-R1: after finish(), so the next alarm's receiver isn't held up by it.
+                DirectBoot.afterRingLater(context.applicationContext as ItineraryApp)
+            }
         }
     }
 
@@ -46,7 +49,8 @@ class ReminderReceiver : BroadcastReceiver() {
                 // Android 12+ lets a background app start the ringing service from an exact alarm only. Without "Alarms &
                 // reminders" (off by default from Android 14) this alarm came inexact, and nothing else allowed then can
                 // ring: setAlarmClock needs the same permission, and full-screen intents are for calling and clock apps.
-                // So the notification itself keeps sounding until it is seen, and says why it didn't ring.
+                // So the notification itself keeps sounding until it is seen, and says why it didn't ring. H17-R2: with exact
+                // alarms allowed (always from Android 13) the cause is elsewhere, battery use say (CouldNotRing).
                 android.util.Log.w("ReminderReceiver", "Couldn't start the ringing alarm", e)
                 couldNotRing = true
             }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
-                Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED, ACTION_REFRESH_LOCKED)) return
+                Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED, ACTION_EXACT_ALARMS_ALLOWED, ACTION_REFRESH_LOCKED)) return
         // RB-3: directBootAware, so this also runs before the first unlock, when the database can't be read. Then the
         // nearest alarms are set from the locked snapshot; BOOT_COMPLETED, which Android sends once the phone is
         // unlocked, sets them all from the database (the same request codes: each replaces its snapshot one). A time
@@ -41,5 +41,8 @@ class BootReceiver : BroadcastReceiver() {
     companion object {
         // Planner's own: the locked-boot snapshot is due to be written again (ReminderScheduler).
         const val ACTION_REFRESH_LOCKED = "com.example.itinerary.REFRESH_LOCKED_ALARMS"
+        // H17-R3: "Alarms & reminders" turned back on (Android 12/12L; from 13 USE_EXACT_ALARM keeps it on). The alarms set
+        // inexact meanwhile are set again exact, as after a time change. AlarmManager's constant, which needs API 31.
+        const val ACTION_EXACT_ALARMS_ALLOWED = "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
     }
 }

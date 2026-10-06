@@ -99,6 +99,8 @@ class NotesUiTest {
         toolbarAnchorWindowId = null
         Thread.sleep(300)
     }
+    // Chooses [choice] (Show as list or grid, Settings) in the Notes page's ⋮ menu.
+    private fun layout(choice: String) { click("More options"); click(choice); await { find("More options") != null } }
     // Opens the Show box under the toolbar and its list.
     private fun openShowList() { click("Show"); click("Choose what to show") }
     // Chooses [choice] in the Notes page's Show list, then closes the Show box so the page looks as before.
@@ -156,7 +158,7 @@ class NotesUiTest {
         assertTrue("Sync belongs left of search", cloudBounds.right <= bounds("Search notes").left)
         assertTrue("Search belongs left of Show", bounds("Search notes").right <= bounds("Show").left)
         assertTrue("Show belongs left of sort", bounds("Show").right <= bounds("Sort").left)
-        assertTrue("Sort belongs left of view style", bounds("Sort").right <= bounds("Show as list").left)
+        assertTrue("Sort belongs left of the menu", bounds("Sort").right <= bounds("More options").left)
         val topWithoutSearch = bounds("QA orchard").top
         screenshot("search-hidden")
         click("Search notes")
@@ -208,7 +210,7 @@ class NotesUiTest {
             screenshot("scroll-grid-top")
             reveal("QA scroll 29")
             screenshot("scroll-grid-bottom")
-            click("Show as list")
+            layout("Show as list")
             await { app.settings.notesAsList.value }
             reveal("QA scroll 00")
             screenshot("scroll-list-top")
@@ -255,7 +257,7 @@ class NotesUiTest {
                     bounds(a).left == bounds(b).left && bounds(b).top >= bounds(a).bottom)
             }
             assertFalse("Responsive one-column grid must retain the saved grid choice", app.settings.notesAsList.value)
-            assertNotNull(find("Show as list"))
+            assertNotNull(find("More options"))
             screenshot("responsive-grid-125")
             click("Sort"); await { listShows(NoteSort.CHANGED.label) }
             screenshot("sort-menu-125")
@@ -385,6 +387,18 @@ class NotesUiTest {
         screenshot("card-reminder")
     }
 
+    // The ⋮ menu opens Settings over the page, and Back returns to Notes.
+    @Test fun menuOpensSettings() {
+        openNotes()
+        click("More options"); await { find("Show as list") != null && find("Settings") != null }
+        screenshot("notes-menu")
+        click("Settings")
+        reveal("Start and notes")
+        screenshot("settings-from-notes")
+        ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        await { find("NOTES") != null && find("Start and notes") == null }
+    }
+
     @Test fun syncSwitchAndCloud() {
         val store = com.example.itinerary.data.NextcloudAccountStore(context)
         // Without a Nextcloud login: the dialog says where to sign in, and the switch waits.
@@ -421,6 +435,14 @@ class NotesUiTest {
             await { find("From Nextcloud") != null && find("Web") != null }
             assertTrue(fake.notes.values.any { it.title == "From the phone" && it.content == "Typed here" })
             screenshot("synced-grid")
+            // Up to date, a tap on the cloud syncs now (as on Agenda): a note written on the web since comes in, no dialog.
+            fake.add("Written since", "Written since\nOn the web")
+            click("Notes sync: up to date")
+            await { find("Written since") != null && find("Notes sync: up to date") != null }
+            assertNull(find("Sync notes with Nextcloud"))
+            // A long press still opens the sync settings.
+            hold("Notes sync: up to date"); await { find("Sync notes with Nextcloud") != null }
+            click("Close"); await { find("Sync notes with Nextcloud") == null }
         } finally {
             runBlocking { app.noteSync.setEnabled(false) }
             app.noteSync.api = original
@@ -821,7 +843,7 @@ class NotesUiTest {
             fun left(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.left
             fun top(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.top
             assertNotEquals(left("QA a"), left("QA c")) // a grid: two columns
-            click("Show as list"); await { app.settings.notesAsList.value && find("Show as grid") != null }
+            layout("Show as list"); await { app.settings.notesAsList.value }
             await { left("QA a") == left("QA c") && left("QA c") == left("QA b") } // one column
             screenshot("notes-list")
             // Sort by title.
@@ -848,7 +870,7 @@ class NotesUiTest {
             await { app.settings.noteSort.value == NoteSort.MY_ORDER }
             await { pageOrder().first() == "QA b" }
             // Back to a grid; the choice is kept.
-            click("Show as grid"); await { !app.settings.notesAsList.value }
+            layout("Show as grid"); await { !app.settings.notesAsList.value }
         } finally { app.settings.setNotesAsList(false); app.settings.setNoteSort(NoteSort.MY_ORDER) }
     }
 
@@ -899,7 +921,7 @@ class NotesUiTest {
         try {
             runBlocking { listOf("QA b", "QA c", "QA a").forEach { app.repository.saveNote(PlannerNote(title = it), create = true); Thread.sleep(5) } }
             openNotes()
-            click("Show as list"); await { app.settings.notesAsList.value }
+            layout("Show as list"); await { app.settings.notesAsList.value }
             fun top(t: String) = android.graphics.Rect().also { find(t)!!.getBoundsInScreen(it) }.top
             await { find("QA a") != null && top("QA a") < top("QA c") && top("QA c") < top("QA b") } // newest first
             // Held, moved sideways past the touch slop over its own card, and let go: no place changes.
@@ -946,10 +968,10 @@ class NotesUiTest {
         }
         openNotes()
         show("Work"); await { find("QA work note") != null && find("QA home note") == null }
-        click("Show as list"); await { app.settings.notesAsList.value }
+        layout("Show as list"); await { app.settings.notesAsList.value }
         click("Sort"); pick("Title A–Z")
         openNotes(fresh = false) // a fresh start of the app's screen
-        await { find("QA work note") != null && find("QA home note") == null && find("Show as grid") != null }
+        await { find("QA work note") != null && find("QA home note") == null && app.settings.notesAsList.value }
         assertEquals(NoteSort.TITLE, app.settings.noteSort.value)
         // The Work notebook empties: back to all notes.
         runBlocking { app.repository.deleteNotes(notes().filter { it.notebook == "Work" }.map { it.id }) }

@@ -65,6 +65,11 @@ data class DeletedContents(val trips: List<Trip>, val items: List<ItineraryItem>
     val storedAttachments: List<Attachment> get() = attachments + tasks.flatMap { it.attachments } + notes.flatMap { it.attachments }
 }
 
+// H17-D3: Recently deleted bundles read one at a time, null for one that can't be read (a damaged row or file), which
+// goes to [unreadable]: one such bundle mustn't stop cleanup, purging and backups for good.
+fun <T> readEachDeleted(entries: List<T>, read: (T) -> DeletedContents, unreadable: (T, Exception) -> Unit): List<DeletedContents?> =
+    entries.map { entry -> try { read(entry) } catch (e: Exception) { unreadable(entry, e); null } }
+
 object DeletedCodec {
     fun encode(data: DeletedContents): String = JSONObject().apply {
         put("tasks", TaskCodec.encode(data.tasks))

@@ -16,7 +16,8 @@ data class PhoneCalendar(val id: Long, val name: String, val accountName: String
 data class PhoneInstance(val calendarId: Long, val begin: Long, val end: Long, val allDay: Boolean, val title: String?,
                          val location: String?, val description: String?, val cancelled: Boolean = false, val declined: Boolean = false)
 
-// What CalendarSync needs from the phone; the Android version is AndroidPhoneCalendars, tests use a fake.
+// What CalendarSync needs from the phone; the Android version is AndroidPhoneCalendars, tests use a fake. H17-S3: a
+// query the phone can't answer throws (CalendarSync then changes nothing), rather than reading as an empty list.
 interface PhoneCalendarReader {
     fun permitted(): Boolean
     fun calendars(): List<PhoneCalendar>

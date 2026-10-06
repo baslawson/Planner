@@ -11,6 +11,7 @@ import android.util.AtomicFile
 import androidx.core.app.NotificationCompat
 import com.example.itinerary.data.Repository
 import java.io.File
+import kotlinx.coroutines.launch
 
 /**
  * RB-3, see LockedAlarm. Before the first unlock after a reboot only device-protected storage can be read; these are the
@@ -36,7 +37,8 @@ object DirectBoot {
     suspend fun afterRing(app: com.example.itinerary.ItineraryApp, now: Long = System.currentTimeMillis()) {
         // T16-1: from the last full write; a partial one (a Done in a fresh process) doesn't put the refresh off.
         fun stale(at: Long) = runCatching { LockedAlarmSelection.stale(store(app).read()?.fullAt ?: store(app).writtenAt(), at) }.getOrDefault(false)
-        if (!stale(now)) {
+        val soon = runCatching { LockedAlarmSelection.ringSoon(app.reminderScheduler.ledger.all().values, now) }.getOrDefault(false)
+        if (!stale(now) || soon) {
             app.repository.refillReminders()
             deliverDeferredReminders(app, now)
             return
@@ -45,6 +47,24 @@ object DirectBoot {
         // Nothing had changed, so that wrote nothing: written now, so the next ring doesn't do it all again.
         if (stale(System.currentTimeMillis())) app.reminderScheduler.saveLockedAlarms(force = true)
         deliverDeferredReminders(app, now)
+    }
+
+    // H17-R1: rings waiting for [afterRingLater]; above zero, a run is going and runs once more for those that came during it.
+    private val afterRingQueued = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * H17-R1: [afterRing] for a ringing receiver, in the app's scope once the receiver has finished. Android sends the next
+     * alarm's broadcast only after this one finishes, and its window to start the ringing service is short, so the full
+     * reschedule mustn't hold either up. Rings close together share a run.
+     */
+    fun afterRingLater(app: com.example.itinerary.ItineraryApp) {
+        if (afterRingQueued.getAndIncrement() > 0) return
+        app.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            do {
+                val seen = afterRingQueued.get()
+                try { afterRing(app) } catch (e: Exception) { android.util.Log.w("DirectBoot", "Couldn't refresh alarms after a ring", e) }
+            } while (afterRingQueued.addAndGet(-seen) > 0)
+        }
     }
 
     /** At LOCKED_BOOT_COMPLETED: the snapshot's alarms still ahead are set. The number set. */

@@ -19,6 +19,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -149,14 +152,22 @@ fun AppLockSettingsSection() {
     val enabled by appLock.enabled.collectAsStateWithLifecycle()
     val lockAfter by appLock.lockAfter.collectAsStateWithLifecycle()
     // Turning it on or off asks first, so someone holding the unlocked phone can't simply switch it off.
+    // H17-U2: the setting asked for, kept from the tap, so a second confirmation (a quick double tap) sets the same value
+    // again rather than switching it back.
+    var wanted by rememberSaveable { mutableStateOf<Boolean?>(null) }
     val confirm = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) appLock.setEnabled(!appLock.enabled.value)
+        val want = wanted
+        if (result.resultCode == Activity.RESULT_OK && want != null) appLock.setEnabled(want)
+        wanted = null
     }
     SettingsHeading("App lock")
     SwitchRow("Lock Planner", enabled, onChange = {
         if (!enabled && !AppLockRule.canAsk(context))
             Toast.makeText(context, "Set a screen lock on your phone first", Toast.LENGTH_LONG).show()
-        else confirm.launch(Intent(context, LockActivity::class.java).putExtra(LockActivity.EXTRA_CONFIRM, true))
+        else if (wanted == null) {
+            wanted = !enabled
+            confirm.launch(Intent(context, LockActivity::class.java).putExtra(LockActivity.EXTRA_CONFIRM, true))
+        }
     })
     // Android 13 and later get a blank card in recent apps (MainActivity); earlier versions have no way to hide it short
     // of blocking screenshots.

@@ -23,9 +23,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.graphics.Color as ComposeColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.example.itinerary.data.ThemeMode
 import com.example.itinerary.data.TimeFormat
@@ -55,6 +57,34 @@ internal fun actsOnLaunchIntent(flags: Int, savedStateNull: Boolean): Boolean =
  * which another app must not be able to make it open.
  */
 internal fun opensCalendarFile(scheme: String?): Boolean = scheme == "content"
+
+/** The files or photos a share carries (one with ACTION_SEND, several with ACTION_SEND_MULTIPLE): content: URIs only, as [opensCalendarFile]. */
+internal fun sharedStreams(intent: Intent?): List<android.net.Uri> {
+    val uris = when (intent?.action) {
+        Intent.ACTION_SEND -> listOfNotNull(androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java))
+        Intent.ACTION_SEND_MULTIPLE -> androidx.core.content.IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java).orEmpty()
+        else -> emptyList()
+    }
+    return uris.filter { opensCalendarFile(it.scheme) }.distinct()
+}
+
+/**
+ * Shares of files copied and ready, in the order they came, each as the text and subject a share opens with (SharedFiles.key,
+ * or just the text when none of the files could be read). A window on screen takes the first once it has no share open
+ * or waiting, so one never replaces another (whose files would then be left behind).
+ */
+internal object SharedFileArrivals {
+    val queue = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<String, String?>>>(emptyList())
+    fun add(share: Pair<String, String?>) = queue.update { it + share }
+    /** Takes [share] off the queue; false if another window took it first. */
+    fun take(share: Pair<String, String?>): Boolean {
+        while (true) {
+            val now = queue.value
+            if (now.firstOrNull() != share) return false
+            if (queue.compareAndSet(now, now.drop(1))) return true
+        }
+    }
+}
 
 /**
  * Whether Planner opens on the chosen start screen (Settings → Open Planner on): only when it is opened itself, from the
@@ -104,8 +134,13 @@ class MainActivity : ComponentActivity() {
     private fun launchFields() = LaunchFields(sharedText, sharedSubject, widgetTaskId, calendarUri, entryAction, widgetDate, noteId)
     private fun launchFieldsOf(intent: Intent?): LaunchFields<android.net.Uri> {
         // Q-5: only as much as Planner can use is kept, since it goes into the saved state.
-        val sharedText = if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            com.example.itinerary.data.SharedText.kept(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: "") else null
+        // A share of files (with or without text) is read by importSharedFiles instead. Text that looks like a share of
+        // files (SharedFiles.MARKER) is refused, so another app can't make Planner open one.
+        // H17-A3: text that comes under another type (an app sharing a link as "*/*") is read as text too.
+        val sharedText = if (intent?.action == Intent.ACTION_SEND && sharedStreams(intent).isEmpty() &&
+            (intent.type?.startsWith("text/") == true || !intent.getCharSequenceExtra(Intent.EXTRA_TEXT).isNullOrBlank()))
+            com.example.itinerary.data.SharedText.kept(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: "")
+                .takeUnless { it.startsWith(com.example.itinerary.data.SharedFiles.MARKER) } else null
         return LaunchFields(
             sharedText = sharedText,
             sharedSubject = if (sharedText != null) com.example.itinerary.data.SharedText.keptSubject(intent?.getStringExtra(Intent.EXTRA_SUBJECT)) else null,
@@ -151,6 +186,45 @@ class MainActivity : ComponentActivity() {
         // task editor: only what this intent carries is replaced.
         setLaunchFields(launchFields().mergedWith(launchFieldsOf(intent)))
         stopAlarmIfRequested(intent)
+        importSharedFiles(intent)
+    }
+
+    // Files or photos shared to Planner: copied into the attachment store now, while Android lets Planner read them, then
+    // offered like a shared text (SharedFiles). In the app's scope, so turning the phone meanwhile doesn't stop it.
+    private fun importSharedFiles(intent: Intent?) {
+        val uris = sharedStreams(intent)
+        val app = application as ItineraryApp
+        // H17-A3: a share with nothing Planner can take (files it can't open, as a file: path, and no text) says so,
+        // rather than Planner just opening.
+        if (intent != null && uris.isEmpty() && (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) &&
+            intent.type?.startsWith("text/") != true && intent.getCharSequenceExtra(Intent.EXTRA_TEXT).isNullOrBlank())
+            android.widget.Toast.makeText(app, "Planner can't add what was shared.", android.widget.Toast.LENGTH_LONG).show()
+        if (intent == null || uris.isEmpty()) return
+        val caption = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            ?.let(com.example.itinerary.data.SharedText::kept)?.takeIf { it.isNotBlank() }
+        val subject = com.example.itinerary.data.SharedText.keptSubject(intent.getStringExtra(Intent.EXTRA_SUBJECT))
+        android.widget.Toast.makeText(app, if (uris.size == 1) "Adding the file to Planner…" else "Adding ${uris.size} files to Planner…",
+            android.widget.Toast.LENGTH_SHORT).show()
+        app.appScope.launch {
+            val files = uris.take(com.example.itinerary.data.SharedFiles.MAX_FILES).mapNotNull { app.attachmentStore.import(it) }
+            val missed = uris.size - files.size
+            val staged = if (files.isEmpty()) null else runCatching {
+                java.util.UUID.randomUUID().toString().also { id ->
+                    com.example.itinerary.data.SharedFilesStore(app).write(id, com.example.itinerary.data.SharedFiles.Staged(caption, subject, files))
+                }
+            }.getOrNull()
+            if (staged == null) runCatching { app.repository.releaseTaskFiles(files.map { it.fileName }) }
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                when {
+                    staged == null -> android.widget.Toast.makeText(app, "Couldn't read the shared ${if (uris.size == 1) "file" else "files"}" +
+                        if (caption != null) ". Its text opens on its own." else ".", android.widget.Toast.LENGTH_LONG).show()
+                    missed > 0 -> android.widget.Toast.makeText(app, "Couldn't add $missed of the shared files.", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            // With none of the files read, text that came with them is still offered, as a text share would be.
+            if (staged != null) SharedFileArrivals.add(com.example.itinerary.data.SharedFiles.key(staged) to null)
+            else if (caption != null && !caption.startsWith(com.example.itinerary.data.SharedFiles.MARKER)) SharedFileArrivals.add(caption to subject)
+        }
     }
 
     // Tapping a ringing alarm's notification acknowledges it (with that ring's own token, A6-7).
@@ -225,7 +299,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (actsOnLaunchIntent(intent?.flags ?: 0, savedInstanceState == null)) { stopAlarmIfRequested(intent); readWidgetIntent(intent) }
+        if (actsOnLaunchIntent(intent?.flags ?: 0, savedInstanceState == null)) { stopAlarmIfRequested(intent); readWidgetIntent(intent); importSharedFiles(intent) }
+        // Shares of files left behind a week ago or more (Android ended Planner mid-share): their files go, unless used.
+        if (savedInstanceState == null) (application as ItineraryApp).let { app -> app.appScope.launch(Dispatchers.IO) {
+            runCatching { com.example.itinerary.data.SharedFilesStore(app).sweep().takeIf { it.isNotEmpty() }?.let { app.repository.releaseTaskFiles(it) } }
+        } }
+        // Shared files, once copied, open like a shared text, in the window on screen: only a started one takes them, so a
+        // window closing as a new share opens Planner (CLEAR_TASK) can't take them away with it. One at a time, once this
+        // window has no share open or waiting.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                kotlinx.coroutines.flow.combine(SharedFileArrivals.queue, androidx.compose.runtime.snapshotFlow { sharedText }) { queue, open ->
+                    queue.firstOrNull().takeIf { open == null }
+                }.collect { share ->
+                    // Not a window that is closing (a new share opened Planner with CLEAR_TASK): it is still started a moment.
+                    if (share != null && !isFinishing && SharedFileArrivals.take(share))
+                        setLaunchFields(launchFields().mergedWith(LaunchFields(sharedText = share.first, sharedSubject = share.second)))
+                }
+            }
+        }
         if (savedInstanceState != null) {
             sharedText = savedInstanceState.getString("sharedText")
             sharedSubject = savedInstanceState.getString("sharedSubject")

@@ -95,7 +95,28 @@ fun ringingAlarmsEnabled(context: Context): Boolean = ringsAsAlarm(
     NotificationManagerCompat.from(context).areNotificationsEnabled(),
     context.getSystemService(NotificationManager::class.java).getNotificationChannel(ALARM_CHANNEL_ID)?.importance)
 
-const val COULD_NOT_RING = "Android didn't let this ring as an alarm. Allow Alarms & reminders for Planner so it can."
+/**
+ * H17-R2: why a "Ring until I stop it" reminder didn't ring, as each notification says it. Only with exact alarms refused
+ * (Android 12, or 14+ when not allowed) is "Alarms & reminders" the cause; with them allowed (always from Android 13, by
+ * USE_EXACT_ALARM) it is notifications or battery use, which app settings reach.
+ */
+internal enum class CouldNotRing(val full: String, val short: String, val brief: String) {
+    ALLOW_ALARMS("Android didn't let this ring as an alarm. Allow Alarms & reminders for Planner so it can.",
+        "Couldn’t ring. Allow Alarms & reminders for Planner in app settings.",
+        "Couldn’t ring. Allow Alarms & reminders."),
+    CHECK_SETTINGS("Android didn't let this ring as an alarm. Check that Planner's notifications are on and its battery use isn't restricted.",
+        "Couldn’t ring. Check Planner’s notification and battery settings.",
+        "Couldn’t ring. Check notification and battery settings.");
+
+    companion object {
+        fun of(exactAllowed: Boolean): CouldNotRing = if (exactAllowed) CHECK_SETTINGS else ALLOW_ALARMS
+        fun now(context: Context): CouldNotRing = of(exactAlarmsAllowed(context))
+    }
+}
+
+/** As ReminderScheduler.canScheduleExact, without the scheduler (it also runs before the first unlock). */
+internal fun exactAlarmsAllowed(context: Context): Boolean = android.os.Build.VERSION.SDK_INT < 31 ||
+    runCatching { context.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms() }.getOrDefault(true)
 
 // Returns false if it could not be shown because notifications are off.
 fun postReminderNotification(
@@ -135,9 +156,13 @@ fun postReminderNotification(
                 if (snoozeToken != null) addAction(0, "Snooze", SnoozeActivity.action(context, reminderId, snoozeToken))
             }
             if (couldNotRing) {
-                setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$COULD_NOT_RING"))
-                if (android.os.Build.VERSION.SDK_INT >= 31) addAction(0, "Allow alarms", PendingIntent.getActivity(context, 0,
-                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", context.packageName, null)),
+                val why = CouldNotRing.now(context)
+                setStyle(NotificationCompat.BigTextStyle().bigText("$text\n${why.full}"))
+                // H17-R2: "Allow alarms" only when that is what's missing; otherwise app settings (notifications, battery).
+                val (label, settings) = if (why == CouldNotRing.ALLOW_ALARMS) "Allow alarms" to Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM
+                    else "App settings" to Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                addAction(0, label, PendingIntent.getActivity(context, 0,
+                    Intent(settings, Uri.fromParts("package", context.packageName, null)),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             }
         }

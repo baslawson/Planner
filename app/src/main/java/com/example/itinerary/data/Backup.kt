@@ -3,6 +3,7 @@ package com.example.itinerary.data
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -84,7 +85,12 @@ class BackupManager(
     private suspend fun writeExport(uri: Uri) = withContext(Dispatchers.IO) {
         val files = File.createTempFile("backup-files-", "", context.cacheDir).apply { delete(); mkdirs() }
         try {
-            val snapshot = repo.withSnapshotFiles { data ->
+            val snapshot = repo.withSnapshotFiles { all ->
+                // H17-D3: a Recently deleted bundle that can't be read is left out of the backup, not the whole backup.
+                val readable = readEachDeleted(all.deleted, { DeletedCodec.decode(it.payload) }) { entry, e ->
+                    Log.w("BackupManager", "Left unreadable Recently deleted entry ${entry.id} out of the backup", e)
+                }
+                val data = all.copy(deleted = all.deleted.filterIndexed { i, _ -> readable[i] != null })
                 data.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
                     val source = store.fileFor(name)
                     if (source.exists()) source.copyTo(File(files, name))
@@ -97,25 +103,39 @@ class BackupManager(
             val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { File(files, it.fileName).exists() },
                 notes = filterNoteAttachments(snapshot.notes) { File(files, it.fileName).exists() })
             val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
-            try {
-                val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
-                ZipOutputStream(out.buffered()).use { zip ->
-                    zip.putNextEntry(ZipEntry(DATA_ENTRY))
-                    zip.write(json.toByteArray(Charsets.UTF_8))
+                .toByteArray(Charsets.UTF_8)
+            // H17-D1: stage() refuses a data.json over this, so a backup that couldn't be restored is never written.
+            if (json.size > MAX_DATA_BYTES) throw tooLargeToRestore()
+            val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
+            ZipOutputStream(out.buffered()).use { zip ->
+                zip.putNextEntry(ZipEntry(DATA_ENTRY))
+                zip.write(json)
+                zip.closeEntry()
+                saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
+                    zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
+                    File(files, name).inputStream().use { it.copyTo(zip) }
                     zip.closeEntry()
-                    saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
-                        zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
-                        File(files, name).inputStream().use { it.copyTo(zip) }
-                        zip.closeEntry()
-                    }
                 }
-            } catch (e: Exception) {
-                // Don't leave a half-written file behind that looks like a good backup.
-                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
-                throw BackupException("Couldn't write the backup file.")
+            }
+        } catch (e: Throwable) {
+            // H17-D2: any failure, the copy into the cache included, leaves no half-written (or empty) file behind that
+            // looks like a good backup. The cache copies go in finally.
+            runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            throw when {
+                e is BackupException -> e
+                e is OutOfMemoryError -> tooLargeToRestore()
+                e !is Exception -> e
+                generateSequence<Throwable>(e) { it.cause }.any { it.message.orEmpty().let { m -> "ENOSPC" in m || "No space left" in m } } ->
+                    BackupException("There isn't enough free space on this phone to make the backup. Free some space and try again.")
+                else -> BackupException("Couldn't write the backup file.")
             }
         } finally { files.deleteRecursively() }
     }
+
+    // H17-D1: one limit for both directions (see MAX_DATA_BYTES).
+    private fun tooLargeToRestore() = BackupException("This backup would be too large to restore: its data (mostly long recognised text in " +
+        "attachments) passes the limit. Delete some attachments or their recognised text, then try again.")
 
     // Reads and checks the file. Throws [BackupException] if it isn't a usable backup.
     suspend fun stage(uri: Uri): StagedBackup = withContext(Dispatchers.IO) {
@@ -153,6 +173,10 @@ class BackupManager(
         } catch (e: Exception) {
             file.delete()
             throw e as? BackupException ?: notABackup()
+        } catch (e: OutOfMemoryError) {
+            // H17-D1: data.json within the limit can still be too much to parse on a small phone: refuse it, don't crash.
+            file.delete()
+            throw BackupException("That backup is too large to restore on this phone.")
         }
     }
 

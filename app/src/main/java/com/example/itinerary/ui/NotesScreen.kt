@@ -5,6 +5,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -33,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onLongClick
@@ -69,7 +72,8 @@ private fun filterOf(key: String): NoteFilter = when {
 @Composable
 // [newNote]: a note not saved yet (made from a share) to open in the editor, once; [onNewNoteOpened] says it was taken.
 fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: () -> Unit = {},
-                newNote: PlannerNote? = null, onNewNoteOpened: () -> Unit = {}) {
+                newNote: PlannerNote? = null, onNewNoteOpened: () -> Unit = {}, onOpenSettings: () -> Unit = {},
+                onEditorOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val repo = app.repository
@@ -93,6 +97,7 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     fun showFilter(key: String) { filterKey = key; app.settings.noteFilter = key }
     // The note open in the editor: its id, and whether it is a new one not saved yet.
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(editingId) { if (editingId != null) onEditorOpened() }
     var editingNew by rememberSaveable { mutableStateOf(false) }
     val all = notes.orEmpty()
     val notebooks = remember(all) { Notes.notebooks(all) }
@@ -300,8 +305,11 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     LaunchedEffect(newNote, notes != null, draftChecked) {
         val note = newNote ?: return@LaunchedEffect
         if (notes == null || !draftChecked) return@LaunchedEffect
-        if (editingId != null) android.widget.Toast.makeText(context, "A note is already open. Close it, then share again.", android.widget.Toast.LENGTH_LONG).show()
-        else { filterKey = "all"; query = ""; pendingCopy = note; copyOfId = null
+        if (editingId != null) {
+            android.widget.Toast.makeText(context, "A note is already open. Close it, then share again.", android.widget.Toast.LENGTH_LONG).show()
+            // Shared files it brought go with it, unless something else uses them.
+            if (note.attachments.isNotEmpty()) app.appScope.launch { runCatching { app.repository.releaseTaskFiles(note.attachments.map { it.fileName }) } }
+        } else { filterKey = "all"; query = ""; pendingCopy = note; copyOfId = null
             editingNew = true; editingId = note.id }
         onNewNoteOpened()
     }
@@ -330,12 +338,12 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
         NoteFilter.Archive -> "Archive"
     }
 
-    // Notes sync: a pass on opening the page (when it's on), and its cloud in the top bar opens its settings.
+    // Notes sync: a pass on opening the page (when it's on), and its cloud in the top bar syncs now or opens its settings.
     val sync = app.noteSync
     val syncOn by sync.enabled.collectAsStateWithLifecycle()
     val syncState by sync.state.collectAsStateWithLifecycle()
     var showSync by rememberSaveable { mutableStateOf(false) }
-    // Opening the page syncs, unless "Sync changes automatically" is off (then the cloud's Sync now does).
+    // Opening the page syncs, unless "Sync changes automatically" is off (then a tap on the cloud does).
     val autoSync by app.settings.autoSync.collectAsStateWithLifecycle()
     LaunchedEffect(syncOn) { if (syncOn && autoSync) sync.request(delayMs = 0) }
     val overlayMenu = remember { OverlayMenuState() }
@@ -351,20 +359,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             HeadingText("NOTES", modifier = Modifier.weight(1f, fill = false),
                                 style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true)
-                            val label = when {
-                                !syncOn -> "Notes sync: off"
-                                syncState.running -> "Notes sync: syncing"
-                                syncState.error != null -> "Notes sync: problem"
-                                else -> "Notes sync: up to date"
-                            }
-                            IconButton(onClick = { showSync = true }) {
-                                when {
-                                    !syncOn -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
-                                    syncState.running -> SyncCloud(CloudLook.RAINING, MaterialTheme.colorScheme.primary, label)
-                                    syncState.error != null -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.error, label)
-                                    else -> SyncCloud(CloudLook.SYNCED, MaterialTheme.colorScheme.primary, label)
-                                }
-                            }
+                            NotesSyncCloud(syncOn, syncState.running, syncState.error != null,
+                                onSyncNow = { app.appScope.launch { sync.sync() } }, onOpenSettings = { showSync = true })
                         }
                     },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
@@ -380,10 +376,19 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                         }
                         NotesToolbarMenu("Sort", SortIcon, sort.label, com.example.itinerary.data.NoteSort.entries, sort,
                             onSelect = app.settings::setNoteSort) { Text(it.label) }
-                        // Grid or list: the button shows the layout it switches to.
-                        IconButton(onClick = { app.settings.setNotesAsList(!asList) }) {
-                            Text(if (asList) "▦" else "☰", style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.semantics { contentDescription = if (asList) "Show as grid" else "Show as list" })
+                        // The ⋮ menu, as on Agenda and Calendar: grid or list (the item names the layout it switches to)
+                        // and Settings.
+                        OverlayMenuAnchor(title = "More options", items = { close ->
+                            // H17-A2: the symbol is hidden from TalkBack, which reads the item's words instead.
+                            DropdownMenuItem(text = { Text(if (asList) "Show as grid" else "Show as list") },
+                                leadingIcon = { Text(if (asList) "▦" else "☰", style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.clearAndSetSemantics {}) },
+                                onClick = { close(); app.settings.setNotesAsList(!asList) })
+                            DropdownMenuItem(text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                                onClick = { close(); onOpenSettings() })
+                        }) { open ->
+                            IconButton(onClick = open) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
                         }
                     },
                 )
@@ -521,6 +526,36 @@ private fun <T> NotesToolbarMenu(label: String, icon: androidx.compose.ui.graphi
     }
 }
 
+// Notes sync at a glance, tapped like the cloud on Agenda and Calendar: a tap syncs now while all is well and does nothing
+// while a sync runs; with sync off or a problem it opens the sync settings, as a long press always does.
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun NotesSyncCloud(on: Boolean, running: Boolean, problem: Boolean, onSyncNow: () -> Unit, onOpenSettings: () -> Unit) {
+    val label = when {
+        !on -> "Notes sync: off"
+        running -> "Notes sync: syncing"
+        problem -> "Notes sync: problem"
+        else -> "Notes sync: up to date"
+    }
+    val synced = on && !running && !problem
+    Box(
+        Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+            .combinedClickable(
+                onClick = { if (synced) onSyncNow() else if (!running) onOpenSettings() },
+                onClickLabel = if (synced) "Sync now" else if (running) null else "Open sync settings",
+                onLongClick = onOpenSettings, onLongClickLabel = "Open sync settings",
+                role = androidx.compose.ui.semantics.Role.Button),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            !on -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.onSurfaceVariant, label)
+            running -> SyncCloud(CloudLook.RAINING, MaterialTheme.colorScheme.primary, label)
+            problem -> SyncCloud(CloudLook.STRUCK, MaterialTheme.colorScheme.error, label)
+            else -> SyncCloud(CloudLook.SYNCED, MaterialTheme.colorScheme.primary, label)
+        }
+    }
+}
+
 // The Show choices as a box like the search field: it names the current choice, and tapping it drops the list down
 // under it, as wide as the box.
 @Composable
@@ -529,12 +564,13 @@ private fun <T> NotesShowBox(currentLabel: String, choices: List<T>, current: T,
     var open by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        OutlinedTextField(currentLabel, {}, Modifier.fillMaxWidth(), readOnly = true, singleLine = true,
+        // H17-A5: one TalkBack stop, the drop-down below; the box itself is only what it looks like.
+        OutlinedTextField(currentLabel, {}, Modifier.fillMaxWidth().clearAndSetSemantics {}, readOnly = true, singleLine = true,
             label = { Text("Show") }, trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) })
         // Over the box, so a tap anywhere on it opens the list rather than placing a cursor.
         Box(Modifier.matchParentSize().padding(top = 8.dp)
             .semantics { contentDescription = "Choose what to show"; stateDescription = currentLabel }
-            .clickable { open = true })
+            .clickable(role = androidx.compose.ui.semantics.Role.DropdownList) { open = true })
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll,
             modifier = Modifier.width(maxWidth).heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp)) {
             choices.forEach { choice ->

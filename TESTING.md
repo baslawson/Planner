@@ -196,6 +196,23 @@ com.example.itinerary.HarnessStage io.github.baslawson.planner.uitest.test/com.e
   until the photo is taken.
 - Anything a test writes to shared storage (Downloads) must be removed by the test afterwards.
 
+#### Emulator for long test runs
+The full suite is about 500 tests; on an emulator short of memory it crashes partway (system_server restarts, ANRs
+waiting for focus) and tests time out at random. Before a full run:
+- Give the AVD enough: `hw.ramSize=6144` and `hw.cpu.ncore=6` in its `config.ini` (4 GB filled up after a few hours of
+  tests). Check with `adb shell head -1 /proc/meminfo` and `adb shell nproc`.
+- Start it fresh (`emulator -avd <name> -no-snapshot-load`), not from a snapshot left after earlier runs.
+- Turn animations off for the run and back on after, so the emulator still feels normal when used by hand:
+  `adb shell settings put global window_animation_scale 0` (and `transition_animation_scale`,
+  `animator_duration_scale`); afterwards `settings delete global …` for each, which restores the default.
+- `connectedUitestAndroidTest` with a comma-separated `class=` runner argument runs only the first class. To run
+  several, install both uitest APKs and use `am instrument -e class A,B,…`; split the full list into a few runs so one
+  crash doesn't end them all.
+- A Notes test that fails with a note open leaves its draft for the next tests, which then open on "Recovered unsaved
+  changes" and fail too: re-run the failing ones on their own (reinstall the uitest APKs first to clear the state).
+- Before blaming a change for a failure, run the same test on the last commit (a `git worktree` of HEAD, its uitest
+  APKs built there): if it fails there too, it isn't the change.
+
 ## Finishing up
 
 - [ ] Test data deleted through the app, and the database restored from your backup.

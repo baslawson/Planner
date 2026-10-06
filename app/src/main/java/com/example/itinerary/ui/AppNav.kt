@@ -109,7 +109,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     }
     val sharedEvent = shareOpen?.let { open -> key(open) {
         // With another share waiting it opens next; otherwise the share is done.
-        SharedTextReview(open.first, open.second, onDismiss = {
+        SharedTextReview(open.first, open.second, onClosed = {
             shareOpen = null
             if (shareWanted == null || shareWanted == open) onSharedOpened()
         }, onNote = { note ->
@@ -329,8 +329,26 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
-            composable("notes") { entry -> NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null },
-                newNote = sharedNote, onNewNoteOpened = { sharedNote = null }) }
+            composable("notes") { entry ->
+                // Settings from the Notes ⋮ menu, drawn over the page as on Calendar.
+                var showSettings by rememberSaveable { mutableStateOf(false) }
+                var settingsOpened by rememberSaveable { mutableStateOf(false) }
+                var showCalendars by rememberSaveable { mutableStateOf(false) }
+                Box(Modifier.fillMaxSize()) {
+                    NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null },
+                        newNote = sharedNote, onNewNoteOpened = { sharedNote = null },
+                        onOpenSettings = { settingsOpened = true; showSettings = true },
+                        // H17-A1: a note opening (a reminder tapped, a share, a draft) closes Settings, which would hide it
+                        // while Back went to the editor underneath.
+                        onEditorOpened = { showSettings = false; showCalendars = false })
+                    // Once opened, keep the host for outstanding picker/backup results even after closing it.
+                    if (settingsOpened) {
+                        val settingsVm: TripsViewModel = viewModel(factory = tripsFactory)
+                        SettingsHost(vm = settingsVm, show = showSettings, onDismiss = { showSettings = false },
+                            showCalendars = showCalendars, onShowCalendars = { showCalendars = it })
+                    }
+                }
+            }
             composable("search") { entry ->
                 val vm: SearchViewModel = viewModel(
                     factory = viewModelFactory { initializer { SearchViewModel(app.repository, app.settings, app.calendarSync.shown) } },

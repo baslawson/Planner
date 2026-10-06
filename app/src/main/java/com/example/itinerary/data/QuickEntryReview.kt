@@ -37,7 +37,14 @@ fun QuickEntrySuggestion.corrected(dateOverride: String?, timeOverride: String?)
         time = if (timeOverride != null) timeOverride.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) else time,
         dateChoices = dates, ambiguousTime = ambiguous, error = problem,
         // T16-3: a month end chosen instead still keeps to month ends; another day is its own.
-        repeatAnchorDay = repeatAnchorDay.takeIf { newDate == date || newDate.dayOfMonth == newDate.lengthOfMonth() } ?: 0,
+        repeatAnchorDay = when {
+            newDate == date -> repeatAnchorDay
+            // H17-Q1: a monthly series moved onto a shorter month's end (31 Oct → 30 Nov) keeps its own day, 31 Dec next.
+            repeat.kind in setOf(RepeatRule.Kind.MONTHLY, RepeatRule.Kind.EVERY_N_MONTHS) && newDate.dayOfMonth == newDate.lengthOfMonth() &&
+                (repeatAnchorDay.takeIf { it > 0 } ?: date.dayOfMonth) > newDate.dayOfMonth -> repeatAnchorDay.takeIf { it > 0 } ?: date.dayOfMonth
+            newDate.dayOfMonth == newDate.lengthOfMonth() -> repeatAnchorDay
+            else -> 0
+        },
         // A time chosen by hand is the one time: "8am and 8pm" then adds a single event.
         extraTimes = if (timeOverride != null) emptyList() else extraTimes, nextDayTimes = if (timeOverride != null) 0 else nextDayTimes)
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -122,9 +123,39 @@ internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOp
 // unsaved, so Close asks before dropping it.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNote: (PlannerNote) -> Unit = {}): ItineraryItem? {
+fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNote: (PlannerNote) -> Unit = {}): ItineraryItem? {
     val app = LocalContext.current.applicationContext as ItineraryApp
-    val content = remember(text, subject) { runCatching { SharedText.draft(text, subject) } }
+    // A share of files (SharedFiles): its text stands for the files, already copied, and what came with them.
+    val filesId = remember(text) { SharedFiles.idOf(text) }
+    val staged = remember(filesId) { filesId?.let { SharedFilesStore(app).read(it) } }
+    val files = staged?.files.orEmpty()
+    val content = remember(text, subject) { runCatching {
+        if (filesId == null) SharedText.draft(text, subject)
+        else SharedFiles.draft(staged ?: throw IllegalStateException("These shared files are no longer here. Share them again."))
+    } }
+    // A note takes the files with it to the Notes page, whose editor keeps or removes them; otherwise, once the share is
+    // closed (its editor saved or discarded, or Cancel), those nothing uses are removed.
+    var filesToNote by rememberSaveable(text) { mutableStateOf(false) }
+    val onDismiss = {
+        if (filesId != null) {
+            val names = files.map { it.fileName }
+            val handedOn = filesToNote
+            app.appScope.launch {
+                if (!handedOn) {
+                    // Discard closes the share before its editor has gone (its draft, holding the files, still there): wait
+                    // for the editors to close, so the files are released once nothing holds them.
+                    kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                        EditorDraftStore.openEditors.first { it == 0 }; TaskDraftStore.openEditors.first { it == 0 }
+                    }
+                    runCatching { app.repository.releaseTaskFiles(names) }
+                    runCatching { SharedFilesStore(app).delete(filesId) }
+                }
+                // H17-A6: handed to a note, the staging file stays until the week-old sweep, which releases whatever no
+                // note took (one closed before the Notes page opened it), not files a saved note uses.
+            }
+        }
+        onClosed()
+    }
     // The day the share came in, kept when the window is rebuilt on a later day so its event stays the one its draft
     // was made from (SH-11).
     val today = LocalDate.parse(rememberSaveable(text, subject) { LocalDate.now().toString() })
@@ -170,7 +201,10 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
             (window?.let { it.events + it.tasks } ?: (EditorDraftStore.openEditors.value + TaskDraftStore.openEditors.value)) > 0,
             newTaskEditorOpen = TaskDraftStore.isOpen("new"))
         if (blocked != null) error = blocked
-        else if (value == "note") content.getOrNull()?.let { onNote(PlannerNote(title = it.title, content = it.notes)); onDismiss() }
+        else if (value == "note") content.getOrNull()?.let {
+            filesToNote = true
+            onNote(PlannerNote(title = it.title, content = it.notes, attachments = files)); onDismiss()
+        }
         else {
             val forBill = value == "bill"
             chosen = org.json.JSONObject()
@@ -192,6 +226,7 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
             DialogAction("Add bill", enabled = content.isSuccess && ready && !checking) { choose("bill") },
             DialogAction("Add note", enabled = content.isSuccess && ready && !checking) { choose("note") })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
+            if (files.isNotEmpty()) Text(SharedFiles.summary(files))
             if (!ready) Text("Reading the text…")
             found?.date?.let { date ->
                 Text("Date in the text: " + date.dayLabel(dateFormat) + (found.time?.let { ", " + it.label(is24Hour) }.orEmpty()))
@@ -213,7 +248,8 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
             // A bill's due date from its own label, when that isn't the date above (SH-7).
             bill?.date?.takeIf { it != found?.date }?.let { Text("Due date for a bill: " + it.dayLabel(dateFormat)) }
             bill?.warnings?.get("amount")?.let { Text("$it in the text. Enter the bill's amount in the editor.") }
-            Text("Choose where to put this text, then review and save.")
+            Text(if (filesId != null) "Choose where to put ${if (files.size == 1) "this file" else "these files"}, then review and save."
+                else "Choose where to put this text, then review and save.")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     val shared = content.getOrNull() ?: return null
@@ -221,7 +257,7 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
     fun field(name: String) = fields.optString(name).takeIf { fields.has(name) && !fields.isNull(name) && it.isNotEmpty() }
     val date = field("date")?.let(LocalDate::parse)
     if (destination == "task") PlanningOverlay(onDismiss) {
-        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes, dueDate = date), true, prefilled = true, onDismiss = onDismiss)
+        TaskEditor(PlannerTask(id = id, title = shared.title, notes = shared.notes, dueDate = date, attachments = files), true, prefilled = true, onDismiss = onDismiss)
     }
     if (destination != "event" && destination != "bill") return null
     val event = remember(destination, chosen) {
@@ -231,6 +267,6 @@ fun SharedTextReview(text: String, subject: String?, onDismiss: () -> Unit, onNo
         else ItineraryItem(tripId = 0, date = date ?: today, startTime = date?.let { field("time")?.let(java.time.LocalTime::parse) },
             title = shared.title, notes = shared.notes)
     }
-    NewPlanningEventEditor(event, prefilled = true, checkCurrency = fields.optBoolean("checkCurrency"), onDismiss = onDismiss)
+    NewPlanningEventEditor(event, prefilled = true, checkCurrency = fields.optBoolean("checkCurrency"), initialAddedAttachments = files, onDismiss = onDismiss)
     return event
 }

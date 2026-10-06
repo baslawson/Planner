@@ -33,11 +33,14 @@ class TaskReminderReceiver : BroadcastReceiver() {
                     if (!startOwnedAlarm(context, "task", id, task.title, trigger, task.ringUntilDismissed))
                         postTaskReminder(context, id, task.title, trigger, couldNotRing = task.ringUntilDismissed)
                 }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
-                withContext(Dispatchers.IO) { DirectBoot.afterRing(context.applicationContext as ItineraryApp) }
             } catch (e: Exception) {
                 android.util.Log.w("TaskReminderReceiver", "Couldn't deliver task reminder", e)
-            } finally { pending.finish() }
+            } finally {
+                pending.finish()
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept
+                // fresh. H17-R1: after finish(), so the next alarm's receiver isn't held up by it.
+                DirectBoot.afterRingLater(context.applicationContext as ItineraryApp)
+            }
         }
     }
 
@@ -59,7 +62,7 @@ internal fun postTaskReminder(context: Context, id: String, title: String, trigg
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText(if (couldNotRing) "Couldn’t ring. Check Alarms & reminders and ringing notifications in app settings." else "Task reminder")
+        .setContentText(if (couldNotRing) CouldNotRing.now(context).short /* H17-R2 */ else "Task reminder")
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)

@@ -39,11 +39,14 @@ class NoteReminderReceiver : BroadcastReceiver() {
                     if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, note.ringUntilDismissed))
                         postNoteReminder(context, id, trigger, note, couldNotRing = note.ringUntilDismissed)
                 }
-                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept fresh.
-                withContext(Dispatchers.IO) { DirectBoot.afterRing(app) }
             } catch (e: Exception) {
                 android.util.Log.w("NoteReminderReceiver", "Couldn't deliver note reminder", e)
-            } finally { pending.finish() }
+            } finally {
+                pending.finish()
+                // One alarm fewer: a reminder waiting for one gets it (AlarmWindow); and the locked-reboot snapshot is kept
+                // fresh. H17-R1: after finish(), so the next alarm's receiver isn't held up by it.
+                DirectBoot.afterRingLater(app)
+            }
         }
     }
 
@@ -86,7 +89,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setContentTitle(label)
         .setContentText(body.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: "Note reminder")
         .apply { if (body.isNotBlank()) setStyle(NotificationCompat.BigTextStyle().bigText(body)) }
-        .setSubText(when { couldNotRing -> "Couldn’t ring. Check alarm and notification permissions."; missed -> "Missed alarm"; else -> "Note reminder" })
+        .setSubText(when { couldNotRing -> CouldNotRing.now(context).brief /* H17-R2 */; missed -> "Missed alarm"; else -> "Note reminder" })
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)

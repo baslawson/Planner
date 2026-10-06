@@ -194,7 +194,10 @@ class Repository(
         keep.addAll(store.taskDraftFiles())
         keep.addAll(store.noteDraftFiles())
         keep.addAll(store.eventDraftFiles())
-        deletedDao.all().flatMap { contents(it).storedAttachments }.forEach { keep.add(it.fileName) }
+        val bundles = readableContents(deletedDao.all())
+        // H17-D3: a bundle that can't be read may hold any of these files: delete none this round rather than guess.
+        if (bundles.any { it == null }) { Log.w("Repository", "Kept unused files: a Recently deleted bundle couldn't be read"); return }
+        bundles.forEach { data -> data!!.storedAttachments.forEach { keep.add(it.fileName) } }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
         candidates.filter { it.isNotBlank() && it !in keep }.distinct().forEach(store::delete)
     }
@@ -568,6 +571,10 @@ class Repository(
     private val deletedDao = db.deletedDao()
     private val payloads = store.deletedPayloads()
     private fun contents(entry: DeletedEntry) = DeletedCodec.decode(payloads.read(entry.payload))
+    // H17-D3: null for a bundle that can't be read (logged), so one damaged entry doesn't block every cleanup.
+    private fun readableContents(entries: List<DeletedEntry>) = readEachDeleted(entries, ::contents) { entry, e ->
+        Log.w("Repository", "Couldn't read Recently deleted entry ${entry.id}", e)
+    }
     val recentlyDeleted = deletedDao.observe().map { entries ->
         entries.filter { it.deletedAt > System.currentTimeMillis() - TRASH_RETENTION_MS }
     }
@@ -700,7 +707,8 @@ class Repository(
 
     suspend fun permanentlyDelete(id: String) = changes.withLock {
         val entry = deletedDao.byId(id)
-        val files = entry?.let { contents(it).storedAttachments.map { a -> a.fileName } }.orEmpty()
+        // H17-D3: an entry that can't be read still goes; files only it held are left (cleanup can't tell they're unused).
+        val files = entry?.let { readableContents(listOf(it)).single()?.storedAttachments?.map { a -> a.fileName } }.orEmpty()
         deletedDao.delete(id)
         entry?.let { payloads.delete(it.payload) }
         val dropped = dropPending { it.token == id }
@@ -720,7 +728,8 @@ class Repository(
     private suspend fun purgeExpiredDeleted() {
         val expired = deletedDao.all().filter { it.deletedAt <= System.currentTimeMillis() - TRASH_RETENTION_MS }
         if (expired.isEmpty()) return
-        val files = expired.flatMap { contents(it).storedAttachments }.map { it.fileName }
+        // H17-D3: an expired entry that can't be read is removed all the same.
+        val files = readableContents(expired).flatMap { it?.storedAttachments.orEmpty() }.map { it.fileName }
         db.withTransaction { expired.forEach { deletedDao.delete(it.id) } }
         expired.forEach { payloads.delete(it.payload) }
         val ids = expired.map { it.id }.toSet()
@@ -1315,7 +1324,11 @@ class Repository(
 
     suspend fun snapshot(): DataSnapshot = db.withTransaction {
         DataSnapshot(tripDao.all(), itemDao.all(), reminderDao.all(), attachmentDao.all(), db.templateDao().all(),
-            deletedDao.all().map { it.copy(payload = payloads.read(it.payload)) }, taskDao.all(), noteDao.all())
+            // H17-D3: a bundle whose file can't be read is left out (logged) rather than failing every backup.
+            deletedDao.all().mapNotNull { entry ->
+                try { entry.copy(payload = payloads.read(entry.payload)) }
+                catch (e: Exception) { Log.w("Repository", "Left unreadable Recently deleted entry ${entry.id} out", e); null }
+            }, taskDao.all(), noteDao.all())
     }
 
     // Throws away all current data and puts [data] in its place, keeping its ids. The attachment
@@ -1359,7 +1372,7 @@ class Repository(
         val oldNotes = noteDao.all()
         val oldReminders = reminderDao.all()
         val oldDeleted = deletedDao.all()
-        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + oldNotes.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + oldDeleted.flatMap { contents(it).storedAttachments }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
+        val oldFiles = oldTasks.flatMap { it.attachments }.map { it.fileName } + oldNotes.flatMap { it.attachments }.map { it.fileName } + attachmentDao.allFileNames() + readableContents(oldDeleted).flatMap { it?.storedAttachments.orEmpty() }.map { it.fileName } + _pendingDeletions.value.flatMap { it.attachments }.map { it.fileName }
         // New files for big bundles; the old ones go once the new data is in.
         val deleted = mutableListOf<DeletedEntry>()
         try {

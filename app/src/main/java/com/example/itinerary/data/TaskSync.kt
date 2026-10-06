@@ -389,6 +389,9 @@ class TaskSync(
                             val result = client().putEvent(account, target.href, uid, body, null) as? WriteResult.Ok ?: changedAgain()
                             rowsDao.put(row.copy(uid = uid, href = null, etag = result.etag, ics = body, fingerprint = ServerTasks.fingerprint(task), problem = null, conflict = null))
                         }
+                        // H17-S2: as E16-3 for events: repeating, cancelled or unreadable there since, patching would make
+                        // Planner's task that series (or keep it cancelled). Nothing is written; the conflict stays.
+                        ServerTasks.parse(current.data, zone()).fields == null -> throw BackupException(PLANNERS_WONT_FIT)
                         else -> {
                             val body = ServerTasks.patch(current.data, task, zone(), stamp())
                             val result = client().putFile(account, target.href, href, body, current.etag ?: changedAgain()) as? WriteResult.Ok ?: changedAgain()
@@ -454,6 +457,10 @@ class TaskSync(
     }
 
     companion object {
+        // H17-S2: why Keep Planner's can't settle a conflict whose Nextcloud side Planner can't hold any more.
+        internal const val PLANNERS_WONT_FIT = "On Nextcloud this task now repeats, was cancelled or can't be read by Planner, so " +
+            "Planner's version can't be written over it. Choose Keep Nextcloud's: Planner's task stays as it is, and Nextcloud's is left alone."
+
         // What the user is told when Nextcloud refused [count] tasks (the first with HTTP [code]).
         internal fun refusedMessage(count: Int, code: Int) = CalendarSync.refusedMessage(count, code, "task")
 

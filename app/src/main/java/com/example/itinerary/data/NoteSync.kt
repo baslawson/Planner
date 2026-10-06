@@ -163,6 +163,21 @@ object NoteMapping {
     // The same words, whatever the line ends and trailing space.
     fun sameText(a: String, b: String) = a.replace("\r\n", "\n").trimEnd() == b.replace("\r\n", "\n").trimEnd()
 
+    // Planner's unlinked note that is [remote] already: the same words and title (as Nextcloud tidied it), else the same
+    // words where one side's title is only the first line (or none). H17-S1: never by words alone when the titles
+    // clearly differ, or the text is blank (every title-only note would match). [content] is Nextcloud's text as
+    // Planner keeps it (Notes.clean).
+    fun twin(free: List<PlannerNote>, remote: RemoteNote,
+             content: String = Notes.clean(PlannerNote(content = remote.content)).content): PlannerNote? {
+        // Titles with no letters or digits (emoji only) have no tolerant key, so they must match exactly.
+        fun same(a: String, b: String) = a.trim() == b.trim() || titleKey(a).isNotEmpty() && sameTitle(a, b)
+        val sameWords = free.filter { sameText(it.content, content) }
+        sameWords.firstOrNull { same(remoteTitle(it), remote.title) }?.let { return it }
+        if (content.isBlank()) return null
+        val theirsDerived = remote.title.isBlank() || same(remote.title, firstLine(content))
+        return sameWords.firstOrNull { theirsDerived || it.title.isBlank() }
+    }
+
     fun fields(note: PlannerNote) = listOf(note.title, note.content, note.notebook, note.pinned.toString())
     fun fields(row: SentNote) = listOf(row.title, row.content, row.notebook, row.pinned.toString())
 
@@ -482,8 +497,7 @@ class NoteSync(
                 skipped++; return@each
             }
             val incoming = NoteMapping.apply(PlannerNote(), theirs)
-            val sameWords = free.filter { NoteMapping.sameText(it.content, incoming.content) }
-            val twin = sameWords.firstOrNull { NoteMapping.sameTitle(NoteMapping.remoteTitle(it), theirs.title) } ?: sameWords.firstOrNull()
+            val twin = NoteMapping.twin(free, theirs, incoming.content)
             if (twin != null) {
                 // Linked, with Nextcloud's notebook and favourite (Planner's title, colour, tags and so on stay).
                 free.remove(twin)

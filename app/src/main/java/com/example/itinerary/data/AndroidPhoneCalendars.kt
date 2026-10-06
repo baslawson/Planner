@@ -28,7 +28,8 @@ class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
                 while (row.moveToNext()) add(PhoneCalendar(row.getLong(0), row.getString(1)?.takeIf { it.isNotBlank() } ?: "Calendar",
                     row.getString(2).orEmpty(), row.getString(3).orEmpty(), if (row.isNull(4)) null else row.getInt(4) or 0xFF000000.toInt()))
             }
-        }.orEmpty()
+        // H17-S3: no answer (calendar storage unavailable) isn't "no calendars": that would drop every ticked one.
+        } ?: throw IllegalStateException("The phone's calendar storage didn't answer.")
     }
 
     override fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> {
@@ -48,7 +49,8 @@ class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
                     cancelled = !row.isNull(7) && row.getInt(7) == CalendarContract.Events.STATUS_CANCELED,
                     declined = !row.isNull(8) && row.getInt(8) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED))
             }
-        }.orEmpty()
+        // H17-S3: likewise, not "no dates" (the ticked calendars' events would be cleared).
+        } ?: throw IllegalStateException("The phone's calendar storage didn't answer.")
     }
 
     // Calls [onChange] (on the main thread, at most once every 2 seconds) when the phone's calendars change, until the

@@ -70,7 +70,8 @@ data class QuickInput(
 /** The first repeat date still ahead: today counts unless the event's time today has passed. */
 fun QuickEntrySuggestion.nextRepeatDate(task: Boolean, now: ZonedDateTime): LocalDate {
     val today = now.toLocalDate()
-    fun after(day: LocalDate) = PlannerTask(dueDate = date, repeat = repeat.name).nextOccurrence(day)!!.dueDate!!
+    // H17-Q1: with its month-end anchor, as the saved series has.
+    fun after(day: LocalDate) = PlannerTask(dueDate = date, repeat = repeat.name, repeatAnchorDay = repeatAnchorDay).nextOccurrence(day)!!.dueDate!!
     val first = after(today.minusDays(1))
     return if (first == today && !task && time != null && time <= now.toLocalTime()) after(today) else first
 }

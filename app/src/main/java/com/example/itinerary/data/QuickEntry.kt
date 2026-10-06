@@ -288,6 +288,8 @@ object QuickEntry {
     private val repeatUntil = rx("\\b(?:until|till|til|through|thru|up\\s+(?:to|until))\\s+(?:and\\s+including\\s+)?($holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{1,2}[/-]\\d{1,2})\\b")
     // A repeat's first date: "starting next week", "from 6 Oct", "beginning Monday".
     private val repeatStart = rx("\\b(?:starting|beginning|from)\\s+(?:on\\s+)?(next\\s+week|$datePhrases)\\b")
+    // H17-Q2: "every day except Sunday", "weekdays but not Fri or Mon": days left out of a repeat, never a start date.
+    private val exceptDays = rx("\\b(?:except|excluding|but\\s+not|apart\\s+from|other\\s+than)\\s+(?:on\\s+)?(?:$pluralWeekdays|$weekdays)\\b(?:\\s*(?:,|/|&|\\band\\b|\\bor\\b)?\\s*(?:(?:and|or)\\s+)?(?:on\\s+)?(?:$pluralWeekdays|$weekdays)\\b)*")
     // "weekly on Tuesdays", "fortnightly on Friday": the rule with its weekday.
     private val ruleOnWeekday = rx("\\b(weekly|fortnightly|bi-?weekly|every\\s+(?:week|fortnight|other\\s+week))\\s+on\\s+(?:the\\s+)?($pluralWeekdays|$weekdays)\\b")
     // "every month on the last day", "the last day of every month": monthly on the 31st, so shorter months get their last day.
@@ -391,7 +393,7 @@ object QuickEntry {
         hoursBeforeMonthDay.findAll(remaining).toList().forEach { separate(it.groups[1]!!.range) }
         titleWordCandidates.findAll(remaining).toList().forEach { match ->
             val clockWord = match.value.lowercase(Locale.ROOT) in setOf("noon", "midnight", "midday")
-            val lead = if (clockWord) "at|from|until|till?|to|by" else "on|next|this|last|every|each|from|until|till?|to|by"
+            val lead = if (clockWord) "at|from|until|till?|to|by" else "on|next|this|last|every|each|from|until|till?|to|by|except|excluding|but\\s+not|than"
             val before = remaining.substring(0, match.range.first)
             if (rx("(?:\\b(?:$lead)\\s+|[-–—]\\s*)$").containsMatchIn(before)) return@forEach
             val following = nextWord.find(remaining.substring(match.range.last + 1))?.groupValues?.get(1)?.lowercase(Locale.ROOT)
@@ -641,6 +643,12 @@ object QuickEntry {
             noReminderSaid = true
             consumeReminder(found.first())
         }
+        // H17-Q2: read before weekday lists, ranges and dates, so the days left out are none of those.
+        val exceptMatches = exceptDays.findAll(remaining).toList()
+        if (exceptMatches.size > 1) return error("Use one list of days to leave out.")
+        val exceptMatch = exceptMatches.firstOrNull()
+        val excludedDays = exceptMatch?.let { m -> rx("\\b(?:$pluralWeekdays|$weekdays)\\b").findAll(m.value).map { weekdayOf(it.value) }.toSet() }
+        exceptMatch?.let { consume(it.range, QuickPhraseKind.REPEAT) }
         val allDayMatches = allDay.findAll(remaining).toList()
         allDayMatches.forEach { consume(it.range, QuickPhraseKind.TIME) }
         // A date range, read before times (so "3–7" in "3–7 Oct" isn't 3 to 7 o'clock) and before weekday repeats.
@@ -817,6 +825,30 @@ object QuickEntry {
             // A leading "Weekly report": the repeat is read, the word stays in the title.
             if (match.range == leadingRepeat) { phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.REPEAT); mask(match.range, '\uE000') }
             else consume(match.range, QuickPhraseKind.REPEAT)
+        }
+        if (exceptMatch != null && excludedDays != null) {
+            val workdays = (1..5).map { DayOfWeek.of(it) }.toSet()
+            val base = when {
+                repeatDay != null -> null
+                repeat == RepeatRule.DAILY -> DayOfWeek.entries.toSet()
+                repeat == RepeatRule.WEEKDAYS -> workdays
+                repeat.kind == RepeatRule.Kind.DAYS_OF_WEEK -> repeat.days
+                else -> null
+            }
+            val left = base?.minus(excludedDays)
+            if (left.isNullOrEmpty()) {
+                // No daily or several-day repeat to take them from: refused, as an unsupported phrase is.
+                phrases.removeAll { it.start == exceptMatch.range.first && it.kind == QuickPhraseKind.REPEAT }
+                phrases += QuickEntryPhrase(exceptMatch.range.first, exceptMatch.range.last + 1, QuickPhraseKind.UNSUPPORTED)
+                return error(if (base != null) "‘${exceptMatch.value.trim()}’ leaves no days to repeat on. Edit it."
+                    else "‘${exceptMatch.value.trim()}’ works with a repeat on several days, like every day or weekdays. Edit it, or open More options → Adjust recognised text to keep it in the title.")
+            }
+            repeat = when {
+                left.size == 7 -> RepeatRule.DAILY
+                left == workdays -> RepeatRule.WEEKDAYS
+                left.size == 1 -> { repeatDay = left.single(); RepeatRule.WEEKLY }
+                else -> RepeatRule.onDays(left)
+            }
         }
         val countMatches = repeatCounts.findAll(remaining).toList()
         if (countMatches.size > 1) return error("Use one occurrence count.")
@@ -1614,11 +1646,12 @@ object QuickEntry {
             val base = readTime(if (ampm.isEmpty()) "$hour:00" else "$hour$ampm") ?: return raw
             val result = if (direction == "past") base.plusMinutes(minutes.toLong()) else base.minusMinutes(minutes.toLong())
             // Written back with am/pm so it is not mistaken for an ambiguous 12-hour time.
-            return "${(result.hour % 12).let { if (it == 0) 12 else it }}:%02d${if (result.hour < 12) "am" else "pm"}".format(result.minute)
+            // H17-Q3: ROOT digits, so an Arabic or Persian phone still reads it back as a clock time.
+            return "${(result.hour % 12).let { if (it == 0) 12 else it }}:%02d${if (result.hour < 12) "am" else "pm"}".format(Locale.ROOT, result.minute)
         }
         val total = hour % 12 * 60 + if (direction == "past") minutes else -minutes
         val twelve = Math.floorMod(total, 720)
-        return "${(twelve / 60).let { if (it == 0) 12 else it }}:%02d".format(twelve % 60)
+        return "${(twelve / 60).let { if (it == 0) 12 else it }}:%02d".format(Locale.ROOT, twelve % 60)
     }
 
     private fun normaliseClock(raw: String): String = raw.lowercase(Locale.ROOT)

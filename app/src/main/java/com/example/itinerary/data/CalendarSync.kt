@@ -215,6 +215,7 @@ class CalendarSync(
             onChanged()
             return State(message = "Planner may no longer read this phone's calendars.", error = true)
         }
+        // H17-S3: throws when the phone gives no answer, before the reconcile below could drop every (ticked) calendar.
         val calendars = reader.calendars().associateBy { phoneHref(it.id) }
         var changed = false
         db.withTransaction {

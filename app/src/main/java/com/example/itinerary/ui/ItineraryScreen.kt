@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -117,17 +118,21 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         }
                     },
                     title = {
-                        HeadingText(
-                            "CALENDAR",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            shrinkToFit = true,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        // The sync cloud sits right after the heading, as on Notes.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            HeadingText(
+                                "CALENDAR",
+                                modifier = Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.headlineLarge,
+                                fontWeight = FontWeight.Bold,
+                                shrinkToFit = true,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            SyncIndicator(onOpenCalendars = onOpenCalendars)
+                        }
                     },
                     actions = {
-                        SyncIndicator(onOpenCalendars = onOpenCalendars)
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }

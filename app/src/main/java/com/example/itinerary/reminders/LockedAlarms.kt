@@ -71,6 +71,15 @@ object LockedAlarmSelection {
     /** Whether a snapshot written at [writtenAt] (null: none) is due for that ([REFRESH_MS]; or the clock went back). */
     fun stale(writtenAt: Long?, now: Long): Boolean = writtenAt == null || writtenAt > now || now - writtenAt >= REFRESH_MS
 
+    /** H17-R1: a full reschedule holds the repository lock, which a ringing receiver waits on before starting its alarm. */
+    const val RING_CLEAR_MS = 2 * 60_000L
+
+    /**
+     * H17-R1: another armed alarm ([triggers], the ledger's) is due within [RING_CLEAR_MS] of [now] (or just was, and may not
+     * have rung yet), so the full rewrite waits for a later ring or the refresh alarm instead of making that one miss its start.
+     */
+    fun ringSoon(triggers: Collection<Long>, now: Long): Boolean = triggers.any { it > now - RING_CLEAR_MS && it <= now + RING_CLEAR_MS }
+
     /** The alarms still ahead of [now], within [HORIZON_MS] or among the [MIN_KEPT] nearest, nearest first, at most [MAX]. */
     fun select(alarms: Collection<LockedAlarm>, now: Long): List<LockedAlarm> =
         alarms.filter { it.trigger > now }.sortedBy { it.trigger }

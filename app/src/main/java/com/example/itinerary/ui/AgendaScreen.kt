@@ -197,15 +197,19 @@ fun AgendaScreen(
                         }
                     },
                     title = {
-                        HeadingText(
-                            "AGENDA",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            shrinkToFit = true,
-                        )
+                        // The sync cloud sits right after the heading, as on Notes.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            HeadingText(
+                                "AGENDA",
+                                modifier = Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.headlineLarge,
+                                fontWeight = FontWeight.Bold,
+                                shrinkToFit = true,
+                            )
+                            SyncIndicator(onOpenCalendars = { showCalendars = true })
+                        }
                     },
                     actions = {
-                        SyncIndicator(onOpenCalendars = { showCalendars = true })
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
