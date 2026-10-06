@@ -52,7 +52,7 @@ class NotesUiTest {
     private var toolbarAnchorWindowId: Int? = null
     private fun click(text: String) {
         reveal(text)
-        if (text == "Sort" || text == "Show") toolbarAnchorWindowId = ins.uiAutomation.freshRoot?.windowId
+        if (text == "Sort" || text == "Choose what to show") toolbarAnchorWindowId = ins.uiAutomation.freshRoot?.windowId
         await { var n = find(text); while (n != null && !n.isClickable) n = n.parent; n?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true }
         Thread.sleep(400)
     }
@@ -99,8 +99,10 @@ class NotesUiTest {
         toolbarAnchorWindowId = null
         Thread.sleep(300)
     }
-    // Chooses [choice] in the Notes page's Show list.
-    private fun show(choice: String) { click("Show"); pick(choice) }
+    // Opens the Show box under the toolbar and its list.
+    private fun openShowList() { click("Show"); click("Choose what to show") }
+    // Chooses [choice] in the Notes page's Show list, then closes the Show box so the page looks as before.
+    private fun show(choice: String) { openShowList(); pick(choice); click("Close Show choices"); await { find("Show") != null } }
     // The editor's box labelled [label], focused, with [value] typed into it.
     private fun typeInto(label: String, value: String): AccessibilityNodeInfo {
         reveal(label)
@@ -695,10 +697,12 @@ class NotesUiTest {
         }
         openNotes()
         await { find("QA one") != null && find("QA two") != null }
-        click("Show")
+        openShowList()
         await { listOf("All notes", "Home", "Work", "#errands", "#ideas", "Archive").all(::listShows) }
         screenshot("show-list")
-        pick("Work"); await { find("QA two") != null && find("QA one") == null }
+        // The choice applies at once; the box stays open, naming it, until closed.
+        pick("Work"); await { find("QA two") != null && find("QA one") == null && find("Close Show choices") != null }
+        click("Close Show choices"); await { find("Show") != null && find("Choose what to show") == null }
         show("#errands"); await { find("QA one") != null && find("QA two") == null }
         show("Archive"); await { find("QA old") != null && find("QA one") == null }
         show("All notes"); await { find("QA one") != null && find("QA two") != null && find("QA old") == null }

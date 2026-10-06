@@ -4,6 +4,8 @@ import kotlinx.coroutines.flow.first
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -74,6 +76,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     val notes by repo.notes.collectAsStateWithLifecycle(initialValue = null)
     var query by rememberSaveable { mutableStateOf("") }
     var showSearch by rememberSaveable { mutableStateOf(false) }
+    // The Show choices open as a box under the toolbar, like the search field; closing it keeps the choice.
+    var showFilters by rememberSaveable { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -118,7 +122,8 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
     LaunchedEffect(shown, notes) { if (notes != null) shown.mapTo(HashSet()) { it.id }.let { ids -> selectedIds.filter { it in ids } }
         .let { if (it != selectedIds) selectedIds = it } }
     val selecting = selectedIds.isNotEmpty()
-    // Selection ends first; the next Back closes search before leaving Notes.
+    // Selection ends first; the next Backs close search, then the Show choices, before leaving Notes.
+    androidx.activity.compose.BackHandler(showFilters && !selecting && editingId == null) { showFilters = false }
     androidx.activity.compose.BackHandler(showSearch && !selecting && editingId == null) { closeSearch() }
     androidx.activity.compose.BackHandler(selecting) { selectedIds = emptyList() }
     LaunchedEffect(showSearch, editingId) {
@@ -368,13 +373,10 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                             Icon(if (showSearch) Icons.Filled.Close else Icons.Filled.Search,
                                 contentDescription = if (showSearch) "Close search" else "Search notes")
                         }
-                        NotesToolbarMenu("Show", FilterIcon, filterName(filter), filterChoices, filter,
-                            onSelect = { showFilter(it.key()) }) { choice ->
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(filterName(choice), Modifier.weight(1f))
-                                Text((filterCounts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                        IconButton(onClick = { showFilters = !showFilters },
+                            modifier = Modifier.semantics { stateDescription = filterName(filter) }) {
+                            Icon(if (showFilters) Icons.Filled.Close else FilterIcon,
+                                contentDescription = if (showFilters) "Close Show choices" else "Show")
                         }
                         NotesToolbarMenu("Sort", SortIcon, sort.label, com.example.itinerary.data.NoteSort.entries, sort,
                             onSelect = app.settings::setNoteSort) { Text(it.label) }
@@ -406,6 +408,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).focusRequester(searchFocus),
                     label = { Text("Search notes") }, singleLine = true,
                     trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, contentDescription = "Clear search") } })
+                if (showFilters) NotesShowBox(filterName(filter), filterChoices, filter, onSelect = { showFilter(it.key()) },
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = if (showSearch) 8.dp else 0.dp)) { choice ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(filterName(choice), Modifier.weight(1f))
+                        Text((filterCounts[choice] ?: 0).toString(), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 when {
                     notes == null -> {}
                     shown.isEmpty() -> Text(
@@ -501,6 +511,32 @@ private fun <T> NotesToolbarMenu(label: String, icon: androidx.compose.ui.graphi
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll,
             modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp)) {
+            choices.forEach { choice ->
+                DropdownMenuItem(text = { choiceText(choice) },
+                    leadingIcon = { if (current == choice) Icon(Icons.Filled.Check, contentDescription = "Selected") },
+                    modifier = Modifier.semantics { selected = current == choice },
+                    onClick = { onSelect(choice); open = false })
+            }
+        }
+    }
+}
+
+// The Show choices as a box like the search field: it names the current choice, and tapping it drops the list down
+// under it, as wide as the box.
+@Composable
+private fun <T> NotesShowBox(currentLabel: String, choices: List<T>, current: T, onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier, choiceText: @Composable (T) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val scroll = rememberScrollState()
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        OutlinedTextField(currentLabel, {}, Modifier.fillMaxWidth(), readOnly = true, singleLine = true,
+            label = { Text("Show") }, trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) })
+        // Over the box, so a tap anywhere on it opens the list rather than placing a cursor.
+        Box(Modifier.matchParentSize().padding(top = 8.dp)
+            .semantics { contentDescription = "Choose what to show"; stateDescription = currentLabel }
+            .clickable { open = true })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, scrollState = scroll,
+            modifier = Modifier.width(maxWidth).heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp)) {
             choices.forEach { choice ->
                 DropdownMenuItem(text = { choiceText(choice) },
                     leadingIcon = { if (current == choice) Icon(Icons.Filled.Check, contentDescription = "Selected") },

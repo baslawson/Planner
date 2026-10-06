@@ -92,7 +92,7 @@ class WishListSmallUiTest {
     @Test fun aLongNotebookListScrollsToItsEnd() = runBlocking {
         (1..30).forEach { app.repository.saveNote(PlannerNote(title = "QA nb $it", content = "x", notebook = "QA Book %02d".format(it)), create = true) }
         openNotes()
-        click("Show")
+        click("Show"); click("Choose what to show")
         await { find("QA Book 01") != null }
         assertNull(find("QA Book 30"))
         screenshot("show-list-top")
