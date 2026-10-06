@@ -25,7 +25,9 @@ class BackupTransferTest {
     private val bytes = ByteArray(64 * 1024) { (it * 7).toByte() }
 
     @Before fun setUp() {
-        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        // Both names: on some Windows machines the server's address comes back as 127.0.0.1, not localhost.
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost")
+            .addSubjectAlternativeName("127.0.0.1").build()
         server = MockWebServer()
         server.useHttps(HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(), false)
         server.start()

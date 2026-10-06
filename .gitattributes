@@ -1,0 +1,2 @@
+# Test data is compared line by line; keep it exactly as stored (LF), even with core.autocrlf on Windows.
+app/src/test/resources/** -text
