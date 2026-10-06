@@ -168,7 +168,7 @@ class NextcloudBackupTest {
     }
 
     @Test fun testInvalidAccountAndInsecureUrlAreRejectedBeforeNetworking() {
-        for (url in listOf("http://localhost/", "https://bas:secret@example.com", "https://example.com/?token=secret", "not a url")) {
+        for (url in listOf("http://localhost/", "https://user:secret@example.com", "https://example.com/?token=secret", "not a url")) {
             expectFailure { NextcloudAccount.create(url, "bas", "secret") }
         }
         for (user in listOf("", "..", "bas/other", "bas:other", "ba\ns")) {

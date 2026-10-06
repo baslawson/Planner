@@ -1,0 +1,29 @@
+# Scans the whole history for secrets (keys, passwords, tokens) on every push and every release; a find fails the run.
+# The same check runs locally before each push (tools/git-hooks/pre-push).
+name: gitleaks
+
+on:
+  push:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          VERSION: 8.30.1
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan history
+        run: gitleaks git . --redact --no-banner
