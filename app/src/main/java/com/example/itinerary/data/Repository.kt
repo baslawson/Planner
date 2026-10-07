@@ -56,6 +56,8 @@ class Repository(
     private val onChanged: (local: Boolean) -> Unit = {},
     // A deletion's Undo is no longer on offer (calendar sync may now delete Planner's copy on Nextcloud).
     private val onDeletionFinished: () -> Unit = {},
+    // Bill payments for MyBudget (BudgetLink), kept until sent (BudgetOutbox), wherever they were made.
+    private val onBudgetMessages: (List<BudgetLink.Message>) -> Unit = {},
     // DA-7: where allItems is shared among its collectors (the app's scope); null (tests) leaves it a plain Room query.
     shareScope: kotlinx.coroutines.CoroutineScope? = null,
 ) {
@@ -98,12 +100,12 @@ class Repository(
         }
     }
 
-    // Bill payments made or undone here, for MyBudget (BudgetLink). Only a started MainActivity collects them, so one
-    // made from a notification with Planner closed isn't sent.
+    // Bill payments made or undone here, for MyBudget (BudgetLink): kept in BudgetOutbox (onBudgetMessages) and
+    // signalled here, so a started MainActivity sends them now and others wait until it next starts.
     private val _budgetMessages = kotlinx.coroutines.flow.MutableSharedFlow<List<BudgetLink.Message>>(extraBufferCapacity = 16)
     val budgetMessages = _budgetMessages.asSharedFlow()
     private fun tellBudget(before: ItineraryItem, after: ItineraryItem) {
-        BudgetLink.changes(before, after).takeIf { it.isNotEmpty() }?.let { _budgetMessages.tryEmit(it) }
+        BudgetLink.changes(before, after).takeIf { it.isNotEmpty() }?.let { onBudgetMessages(it); _budgetMessages.tryEmit(it) }
     }
     // Upcoming bills for MyBudget (BudgetLink.upcoming); MainActivity sends them when Planner opens and closes.
     suspend fun upcomingBills(today: java.time.LocalDate = java.time.LocalDate.now()): List<BudgetLink.Upcoming> =

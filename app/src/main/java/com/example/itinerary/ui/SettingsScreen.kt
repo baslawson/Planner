@@ -135,7 +135,7 @@ fun SettingsScreen(
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
                     SwitchRow("Send paid bills to MyBudget", sendBillsToBudget, onChange = { on ->
                         settings.setSendBillsToBudget(on)
-                        if (!on) sendUpcomingBills(context, emptyList()) // MyBudget drops the upcoming bills it had
+                        if (!on) { sendUpcomingBills(context, emptyList()); (context.applicationContext as com.example.itinerary.ItineraryApp).budgetOutbox.clear() } // MyBudget drops the upcoming bills; nothing waits
                     })
                     Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. MyBudget also sees your upcoming bills, to plan for them. AUD bills only."
                         else "MyBudget isn't installed on this phone, so nothing is sent.", style = MaterialTheme.typography.bodySmall)

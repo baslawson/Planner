@@ -43,7 +43,8 @@ class ItineraryApp : Application() {
         Repository(database, attachmentStore, reminderScheduler,
             // S6-5: what a sync pull wrote is no change to send (see SyncWrite).
             onChanged = { local -> com.example.itinerary.widget.TodayWidget.requestUpdate(this); if (local) sendChanges() },
-            onDeletionFinished = { sendChanges() }, shareScope = appScope)
+            onDeletionFinished = { sendChanges() }, shareScope = appScope,
+            onBudgetMessages = { if (settings.sendBillsToBudget.value) budgetOutbox.add(it) })
     }
 
     // Planner's changes go to Nextcloud a few seconds later, while "Sync changes automatically" is on (see AutoSync).
@@ -102,6 +103,8 @@ class ItineraryApp : Application() {
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.notes }.mapTo(HashSet()) { it.id } }, scope = appScope)
     }
 
+    // Messages for MyBudget not answered yet (see BudgetOutbox).
+    val budgetOutbox by lazy { com.example.itinerary.data.BudgetOutbox(this) }
     val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }
 
     val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync, noteSync) }

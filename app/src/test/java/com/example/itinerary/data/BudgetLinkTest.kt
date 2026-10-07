@@ -9,6 +9,33 @@ class BudgetLinkTest {
         date = LocalDate.of(2026, 10, 9), startTime = null, title = "Electricity", category = "Bills",
         billAmountMinor = amount, billCurrency = currency)
 
+    @Test fun outboxLinesRoundTripEveryMessage() {
+        val messages = listOf(
+            BudgetLink.Message.Add("pay-1", "planner-series-s", "Tab\there, new\nline and back\\slash", 14280, LocalDate.of(2026, 10, 7), "planner-bill-7"),
+            BudgetLink.Message.Add("planner-paid-3", "planner-bill-3", "No amount", null, LocalDate.of(2026, 10, 8)),
+            BudgetLink.Message.Undone("pay-1"),
+            BudgetLink.Message.NotAud("USD"))
+        for (m in messages) {
+            val line = BudgetLink.encode(m)
+            assertFalse("one line: $line", line.contains('\n'))
+            assertEquals(m, BudgetLink.decode(line))
+        }
+        assertNull(BudgetLink.decode("Z\tfrom a newer Planner"))
+        assertNull(BudgetLink.decode("A\ttoo\tfew"))
+        // Written before the upcoming id existed: still read.
+        assertEquals(BudgetLink.Message.Add("p", "k", "x", 5, LocalDate.of(2026, 1, 2)), BudgetLink.decode("A\tp\tk\tx\t5\t2026-01-02"))
+    }
+
+    @Test fun paidBillsNameTheirUpcomingEntry() {
+        val before = bill()
+        val add = BudgetLink.changes(before, Payments.setPaid(before, true)).single() as BudgetLink.Message.Add
+        assertEquals("planner-bill-7", add.upcomingId)
+        assertEquals(add.upcomingId, BudgetLink.upcoming(listOf(before), before.date).single().id)
+        val unpriced = bill(amount = null)
+        val paidNow = BudgetLink.changes(unpriced, unpriced.copy(paid = true)).single() as BudgetLink.Message.Add
+        assertEquals("planner-bill-7", paidNow.upcomingId)
+    }
+
     @Test fun upcomingBillsAreUnpaidAudBillsNearToday() {
         val today = LocalDate.of(2026, 10, 7)
         fun at(id: Long, date: LocalDate, amount: Long? = 5000) = bill(amount).copy(id = id, date = date, title = "Bill $id")

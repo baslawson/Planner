@@ -19,6 +19,8 @@ object BudgetLink {
     const val EXTRA_CURRENCY = "currency"
     const val EXTRA_DATE = "date"
     const val EXTRA_NOTE = "note"
+    // The paid bill's entry in the upcoming list (Upcoming.id), so MyBudget drops it from there at once.
+    const val EXTRA_UPCOMING_ID = "upcomingId"
     // MyBudget's reply: one line Planner shows as a toast ("Added to MyBudget: Utilities −$142.80").
     const val EXTRA_SUMMARY = "summary"
     const val NOTE = "From Planner"
@@ -48,11 +50,41 @@ object BudgetLink {
         }
         .sortedWith(compareBy({ it.first.date }, { it.first.id }))
         .take(MAX_UPCOMING)
-        .map { (item, left) -> Upcoming("planner-bill-${item.id}", billKey(item), item.title.take(80), item.date, left) }
+        .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left) }
         .toList()
 
+    fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}"
+
+    // Messages waiting for MyBudget are kept on disk (BudgetOutbox), one line each: fields separated by tabs, with
+    // backslash, tab and line breaks escaped. null for a line this version can't read (it's dropped).
+    fun encode(m: Message): String = when (m) {
+        is Message.Add -> listOf("A", m.paymentId, m.billKey, m.payee, m.amount?.toString() ?: "", m.date.toString(), m.upcomingId)
+        is Message.Undone -> listOf("U", m.paymentId)
+        is Message.NotAud -> listOf("N", m.currency)
+    }.joinToString("\t") { it.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r") }
+
+    fun decode(line: String): Message? = runCatching {
+        val f = mutableListOf<String>(); val cell = StringBuilder(); var i = 0
+        while (i < line.length) {
+            val c = line[i]
+            when {
+                c == '\\' && i + 1 < line.length -> { cell.append(when (line[i + 1]) { 't' -> '\t'; 'n' -> '\n'; 'r' -> '\r'; else -> line[i + 1] }); i++ }
+                c == '\t' -> { f += cell.toString(); cell.clear() }
+                else -> cell.append(c)
+            }
+            i++
+        }
+        f += cell.toString()
+        when (f[0]) {
+            "A" -> Message.Add(f[1], f[2], f[3], f[4].takeIf { it.isNotEmpty() }?.toLong(), LocalDate.parse(f[5]), f.getOrElse(6) { "" })
+            "U" -> Message.Undone(f[1])
+            "N" -> Message.NotAud(f[1])
+            else -> null
+        }
+    }.getOrNull()
+
     sealed interface Message {
-        data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate) : Message
+        data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate, val upcomingId: String = "") : Message
         data class Undone(val paymentId: String) : Message
         data class NotAud(val currency: String) : Message
     }
@@ -76,7 +108,7 @@ object BudgetLink {
         // MyBudget never had a payment in another currency, so it isn't told about one being undone either.
         if (after.billCurrency != CURRENCY) return if (added.isNotEmpty() || paidNow) listOf(Message.NotAud(after.billCurrency)) else emptyList()
         return undone.map { Message.Undone(it) } +
-            added.map { Message.Add(it.id, billKey(after), after.title, it.amount, it.date) } +
-            listOfNotNull(if (paidNow) Message.Add(unpricedPaymentId(after), billKey(after), after.title, null, LocalDate.now()) else null)
+            added.map { Message.Add(it.id, billKey(after), after.title, it.amount, it.date, upcomingId(after)) } +
+            listOfNotNull(if (paidNow) Message.Add(unpricedPaymentId(after), billKey(after), after.title, null, LocalDate.now(), upcomingId(after)) else null)
     }
 }

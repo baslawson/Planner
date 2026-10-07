@@ -257,10 +257,12 @@ class MainActivity : ComponentActivity() {
     private val appLock get() = (application as ItineraryApp).appLock
 
     // Registered with the activity (before it starts), as ActivityResult launchers must be.
-    private val budgetLink = com.example.itinerary.ui.BudgetLinkSender(this).also { sender ->
-        sender.launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) {
-            sender.answered(it.resultCode, it.data)
-        }
+    // (The sender needs the application, so it's made on first use; the launcher can't wait.)
+    private val budgetLauncher: androidx.activity.result.ActivityResultLauncher<Intent> = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) {
+        budgetLink.answered(it.resultCode, it.data)
+    }
+    private val budgetLink: com.example.itinerary.ui.BudgetLinkSender by lazy {
+        com.example.itinerary.ui.BudgetLinkSender(this, (application as ItineraryApp).budgetOutbox).also { it.launcher = budgetLauncher }
     }
 
     // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
@@ -366,11 +368,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        // Bills paid or unpaid while Planner is on screen go to MyBudget when the setting is on (BudgetLink).
+        // Bills paid or unpaid go to MyBudget when the setting is on (BudgetLink): those waiting in BudgetOutbox when Planner
+        // starts, and new ones as they happen.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 val app = application as ItineraryApp
-                app.repository.budgetMessages.collect { if (app.settings.sendBillsToBudget.value) budgetLink.send(it) }
+                if (app.settings.sendBillsToBudget.value) budgetLink.resume() // waiting from a notification or an earlier run
+                app.repository.budgetMessages.collect { if (app.settings.sendBillsToBudget.value) budgetLink.resume() }
             }
         }
         if (savedInstanceState != null) {
