@@ -90,6 +90,7 @@ fun AgendaScreen(
     var anytimeExpanded by rememberSaveable { mutableStateOf(true) }
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingBillId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
     val backupStore = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).backup.status
     val backupReminder by backupStore.reminder.collectAsStateWithLifecycle()
@@ -330,7 +331,7 @@ fun AgendaScreen(
                             items(eventsByDate[date]?.entries.orEmpty(), key = { if (it.continuing) "under-way-${it.event.id}" else it.event.id },
                                 contentType = { "event" }) { entry ->
                                 AgendaEventCard(entry, today, selection,
-                                    onMove = { vm.moveToTomorrow(entry.event.id) },
+                                    onMove = { vm.moveToTomorrow(entry.event.id) }, onEdit = { editingEventId = entry.event.id },
                                     onCopy = { newEvent.start(it.event.plannerCopy()) }) {
                                     // One under way shown under Today opens the calendar on today, the day it was shown under.
                                     if (selection.active) { if (!OutsideCalendars.isOutside(entry.event.id)) selection.toggle(entry.event.id) }
@@ -360,6 +361,7 @@ fun AgendaScreen(
             onQuickAdded = { following = it },
         )
         editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
+        editingEventId?.let { id -> StoredEventEditor(id, { editingEventId = null }) }
         editingTaskId?.let { id ->
             val task = rememberEditedTask(id, tasks.find { it.id == id })
             if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
@@ -437,7 +439,7 @@ private fun AgendaDayHeading(date: LocalDate, today: LocalDate) {
 
 // One event: time, colour and title.
 @Composable
-private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: EventSelection, onMove: suspend () -> Unit,
+private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: EventSelection, onMove: suspend () -> Unit, onEdit: () -> Unit,
                             onCopy: (com.example.itinerary.data.OutsideInfo) -> Unit, onClick: () -> Unit) {
     val event = entry.event
     val accent = event.accentColor()
@@ -487,7 +489,7 @@ private fun AgendaEventCard(entry: AgendaEntry, today: LocalDate, selection: Eve
         else EventActionsMenu(event.id, event.title, event.date, today, onMove,
             billId = event.id.takeIf { event.category == "Bills" }, paid = event.paid,
             repeatId = event.id.takeIf { event.seriesId != null || event.skipped }, skipped = event.skipped, repeating = event.seriesId != null,
-            onShare = { shareEvent(context, event.title, event.date, event.startTime, event.durationMinutes, event.location, format) })
+            onShare = { shareEvent(context, event.title, event.date, event.startTime, event.durationMinutes, event.location, format) }, onEdit = onEdit)
     }
 }
 

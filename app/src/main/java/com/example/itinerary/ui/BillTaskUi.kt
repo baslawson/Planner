@@ -1,4 +1,6 @@
 package com.example.itinerary.ui
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberCoroutineScope
 import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import androidx.activity.compose.BackHandler
@@ -64,37 +66,51 @@ fun BillTaskCard(bill: PlanEvent, today: LocalDate, selection: EventSelection,
         if (selection.active) Checkbox(checked = selection.isSelected(bill.id), onCheckedChange = null)
         else EventActionsMenu(bill.id, bill.title, bill.date, today, onMove = { repo.moveToTomorrow(bill.id) },
             onShare = { shareEvent(context, bill.title, bill.date, bill.startTime, null, bill.location, format) },
-            billId = bill.id, paid = bill.paid, repeatId = bill.id.takeIf { bill.seriesId != null || bill.skipped }, skipped = bill.skipped, repeating = bill.seriesId != null)
+            billId = bill.id, paid = bill.paid, repeatId = bill.id.takeIf { bill.seriesId != null || bill.skipped }, skipped = bill.skipped, repeating = bill.seriesId != null,
+            onEdit = onEdit)
     }
 }
 
 /** Open a bill directly, with its existing attachments/reminders loaded atomically before editing. */
 @Composable
-fun BillTaskEditor(id: Long, onDismiss: () -> Unit) {
-    val repo = (LocalContext.current.applicationContext as ItineraryApp).repository
+fun BillTaskEditor(id: Long, onDismiss: () -> Unit) = StoredEventEditor(id, onDismiss, billOnly = true)
+
+/**
+ * Open a saved event or bill in the editor (Agenda's and Search's ⋮ › Edit; a bill card's tap), with its attachments and
+ * reminders loaded before editing, and the event categories as the calendar offers them.
+ */
+@Composable
+fun StoredEventEditor(id: Long, onDismiss: () -> Unit, billOnly: Boolean = false) {
+    val app = LocalContext.current.applicationContext as ItineraryApp
+    val repo = app.repository
+    val scope = rememberCoroutineScope()
+    val categories = remember { CategoryState(repo, app.settings, scope) }
+    val counts by categories.counts.collectAsStateWithLifecycle()
+    val hidden by categories.hidden.collectAsStateWithLifecycle()
+    val noun = if (billOnly) "bill" else "event"
     var details by remember(id) { mutableStateOf<Triple<ItineraryItem, List<Attachment>, List<Reminder>>?>(null) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id) {
-        // U2: AppNav's recovery editor has this bill's unsaved edits open already; this one leaves them to it.
+        // U2: AppNav's recovery editor has this item's unsaved edits open already; this one leaves them to it.
         if (com.example.itinerary.data.EditorDraftStore.recoveryOwns(id)) { onDismiss(); return@LaunchedEffect }
         try {
             details = repo.eventDetails(id)
-            if (details?.first?.category != "Bills") failure = "This bill is no longer available."
+            if (details == null || (billOnly && details?.first?.category != "Bills")) failure = "This $noun is no longer available."
         } catch (e: CancellationException) { throw e }
-        catch (_: Exception) { failure = "Couldn't open this bill. Close and try again." }
+        catch (_: Exception) { failure = "Couldn't open this $noun. Close and try again." }
     }
     if (failure != null) {
-        PlannerDialog("Bill payment", onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) { Text(failure!!) }
+        PlannerDialog(if (billOnly) "Bill payment" else "Event", onDismiss, dismiss = DialogAction("Close", onClick = onDismiss)) { Text(failure!!) }
     } else details?.let { (bill, attachments, reminders) ->
         key(id) { ItemEditorSheet(initial = bill, existingAttachments = attachments, existingReminders = reminders,
-            categoryCounts = emptyMap(), hiddenCategories = emptySet(), onRemoveCategories = {}, onShowCategory = {},
+            categoryCounts = counts, hiddenCategories = hidden, onRemoveCategories = categories::remove, onShowCategory = categories::show,
             onDismiss = onDismiss,
             onSave = { item, added, removed, addedReminders, removedReminders, options ->
                 repo.saveItemId(item, added, removed, addedReminders, removedReminders, options)
             }, onDelete = { item, entireSeries -> repo.deleteWithUndo(item, entireSeries) }) }
     } ?: run {
         BackHandler(onBack = onDismiss)
-        PlannerDialog("Opening bill…", onDismiss, dismiss = DialogAction("Cancel", onClick = onDismiss)) { CircularProgressIndicator() }
+        PlannerDialog("Opening $noun…", onDismiss, dismiss = DialogAction("Cancel", onClick = onDismiss)) { CircularProgressIndicator() }
     }
 }
 

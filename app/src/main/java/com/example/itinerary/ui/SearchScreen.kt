@@ -106,6 +106,7 @@ fun SearchScreen(
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     val blockerCounts = remember(tasks) { taskBlockerCounts(tasks) }
     var editingBillId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var showCompleted by rememberSaveable { mutableStateOf(false) }
     val today = rememberCurrentDate()
@@ -223,13 +224,14 @@ fun SearchScreen(
                                 "Try words like tomorrow, next friday or 12 june, or pick a category above.",
                         ) }
                         visibleOutcome.hits.isEmpty() && taskHits.isEmpty() -> item(key = "hint") { Hint("Nothing found. Try fewer words or check the spelling.") }
-                        else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, blockerCounts, today, onBill = { editingBillId = it }) { editingTaskId = it.id }
+                        else -> results(visibleOutcome, grouped, selection, onOpenResult, taskHits, blockerCounts, today, onBill = { editingBillId = it }, onEdit = { editingEventId = it }) { editingTaskId = it.id }
                     }
                 } }
             }
         }
     }
     editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
+    editingEventId?.let { id -> StoredEventEditor(id, { editingEventId = null }) }
     editingTaskId?.let { id -> rememberEditedTask(id, tasks.find { it.id == id })?.let { task ->
         key(id) { TaskEditor(task, creating = false) { editingTaskId = null } }
     } }
@@ -255,7 +257,7 @@ private fun groupResults(outcome: SearchOutcome) = GroupedResults(
 )
 
 private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResults, selection: EventSelection, onOpenResult: (LocalDate) -> Unit,
-    taskHits: List<com.example.itinerary.data.PlannerTask>, blockerCounts: Map<String, Int>, today: LocalDate, onBill: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
+    taskHits: List<com.example.itinerary.data.PlannerTask>, blockerCounts: Map<String, Int>, today: LocalDate, onBill: (Long) -> Unit, onEdit: (Long) -> Unit, onTask: (com.example.itinerary.data.PlannerTask) -> Unit) {
     val dayGroups = grouped.dayGroups
     val billHits = grouped.billHits
     val count = outcome.hits.size + taskHits.size
@@ -284,7 +286,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
         }
         hits.forEach { hit ->
             item(key = "item-${hit.item.id}") {
-                HitRow(hit, outcome.tokens, selection, today) {
+                HitRow(hit, outcome.tokens, selection, today, onEdit = { onEdit(hit.item.id) }) {
                     if (selection.active) { if (!OutsideCalendars.isOutside(hit.item.id)) selection.toggle(hit.item.id) }
                     else onOpenResult(hit.item.date)
                 }
@@ -294,7 +296,7 @@ private fun LazyListScope.results(outcome: SearchOutcome, grouped: GroupedResult
 }
 
 @Composable
-private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelection, today: LocalDate, onClick: () -> Unit) {
+private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelection, today: LocalDate, onEdit: () -> Unit, onClick: () -> Unit) {
     val item = hit.item
     // Same colours as in the plan's day list, so an event looks the same everywhere.
     val accent = item.accentColor()
@@ -354,7 +356,7 @@ private fun HitRow(hit: SearchHit, tokens: List<String>, selection: EventSelecti
             EventActionsMenu(item.id, item.title, item.date, today, onMove = { repo.moveToTomorrow(item.id) },
                 billId = item.id.takeIf { item.category == "Bills" }, paid = item.paid,
                 repeatId = item.id.takeIf { item.seriesId != null || item.skipped }, skipped = item.skipped, repeating = item.seriesId != null,
-                onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) })
+                onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) }, onEdit = onEdit)
         }
     }
 }

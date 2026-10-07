@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
-fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: LocalDate, onMove: suspend () -> Unit, onShare: () -> Unit, billId: Long? = null, paid: Boolean = false, repeatId: Long? = null, skipped: Boolean = false, repeating: Boolean = false) {
+fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: LocalDate, onMove: suspend () -> Unit, onShare: () -> Unit, billId: Long? = null, paid: Boolean = false, repeatId: Long? = null, skipped: Boolean = false, repeating: Boolean = false, onEdit: (() -> Unit)? = null) {
     val exportCalendar = rememberCalendarExporter(eventId)
     var history by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
@@ -37,6 +37,8 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
             Icon(Icons.Default.MoreVert, contentDescription = "Actions for $title")
         }
     }, items = { close ->
+        // Bug notes 5: straight to the editor, from screens where a tap on the card opens something else.
+        if (onEdit != null) DropdownMenuItem(text = { Text(if (billId != null) "Edit bill" else "Edit event") }, onClick = { close(); onEdit() })
         if (repeatId != null) DropdownMenuItem(text = { Text(if (skipped) "Restore occurrence" else "Skip this occurrence") }, onClick = {
             close(); busy = true
             scope.launch {
