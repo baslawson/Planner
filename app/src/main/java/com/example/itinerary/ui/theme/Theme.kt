@@ -85,6 +85,7 @@ private val DarkColors = darkColorScheme(
 internal fun plannerColorScheme(theme: AppTheme, dark: Boolean): androidx.compose.material3.ColorScheme {
     val base = if (dark) DarkColors else LightColors
     if (theme == AppTheme.MATRIX) return base
+    if (theme == AppTheme.SYNTHWAVE) return synthwave(base, dark)
     if (theme == AppTheme.COLOUR_BLIND) {
         val background = if (dark) Color(0xFF101418) else Color(0xFFFAFAFA)
         val foreground = if (dark) Color(0xFFF3F5F7) else Color(0xFF182028)
@@ -134,10 +135,33 @@ internal fun plannerColorScheme(theme: AppTheme, dark: Boolean): androidx.compos
     )
 }
 
+// Synthwave: neon pink controls and cyan headings on deep purple; in light mode magenta and teal on pale pink. Every text
+// and control colour keeps at least 4.5:1 against the surfaces it sits on (ThemeContrastTest).
+private fun synthwave(base: androidx.compose.material3.ColorScheme, dark: Boolean): androidx.compose.material3.ColorScheme = if (dark) base.copy(
+    primary = Color(0xFFFF5CD6), onPrimary = Color(0xFF2B0021), primaryContainer = Color(0xFF3D1450), onPrimaryContainer = Color(0xFFFF8DE3),
+    secondary = Color(0xFFFF5CD6), onSecondary = Color(0xFF2B0021), secondaryContainer = Color(0xFF3D1450), onSecondaryContainer = Color(0xFFFF8DE3),
+    tertiary = Color(0xFF4DEBFF), onTertiary = Color(0xFF00262C), tertiaryContainer = Color(0xFF0E3440), onTertiaryContainer = Color(0xFF4DEBFF),
+    background = Color(0xFF160B2E), onBackground = Color(0xFFF5ECFF), surface = Color(0xFF160B2E), onSurface = Color(0xFFF5ECFF),
+    surfaceVariant = Color(0xFF2A1B4A), onSurfaceVariant = Color(0xFFCDBDEB), outline = Color(0xFFA893C9), outlineVariant = Color(0xFF5A4780),
+    surfaceContainerLowest = Color(0xFF100821), surfaceContainerLow = Color(0xFF1D1238), surfaceContainer = Color(0xFF221640),
+    surfaceContainerHigh = Color(0xFF2A1B4A), surfaceContainerHighest = Color(0xFF33235A),
+    inverseSurface = Color(0xFFF5ECFF), inverseOnSurface = Color(0xFF160B2E), inversePrimary = Color(0xFFA6007C), surfaceTint = Color.Transparent,
+    error = Color(0xFFFF6B8A), onError = Color(0xFF2B0010),
+) else base.copy(
+    primary = Color(0xFFA6007C), onPrimary = Color.White, primaryContainer = Color(0xFFFFE0F4), onPrimaryContainer = Color(0xFF8A0067),
+    secondary = Color(0xFFA6007C), onSecondary = Color.White, secondaryContainer = Color(0xFFFFE0F4), onSecondaryContainer = Color(0xFF8A0067),
+    tertiary = Color(0xFF00687A), onTertiary = Color.White, tertiaryContainer = Color(0xFFD4F6FC), onTertiaryContainer = Color(0xFF00586A),
+    background = Color(0xFFFFF6FC), onBackground = Color(0xFF2A1240), surface = Color(0xFFFFF6FC), onSurface = Color(0xFF2A1240),
+    surfaceVariant = Color(0xFFF3E3F5), onSurfaceVariant = Color(0xFF5B4470), outline = Color(0xFF7D6A8E), outlineVariant = Color(0xFFCDBBD6),
+    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFFCEEF8), surfaceContainer = Color(0xFFF8E8F5),
+    surfaceContainerHigh = Color(0xFFF3E1F0), surfaceContainerHighest = Color(0xFFEEDAEB),
+    inverseSurface = Color(0xFF2A1240), inverseOnSurface = Color(0xFFFFF6FC), inversePrimary = Color(0xFFFF5CD6), surfaceTint = Color.Transparent,
+)
+
 internal fun plannerHeadingColor(theme: AppTheme, colors: androidx.compose.material3.ColorScheme, custom: Color): Color = when (theme) {
     AppTheme.MATRIX -> custom
     AppTheme.HIGH_CONTRAST -> colors.onBackground
-    AppTheme.COLOUR_BLIND -> colors.tertiary
+    AppTheme.COLOUR_BLIND, AppTheme.SYNTHWAVE -> colors.tertiary
 }
 
 val LocalColourBlindFriendly = compositionLocalOf { false }

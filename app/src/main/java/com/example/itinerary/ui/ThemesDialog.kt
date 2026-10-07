@@ -49,7 +49,7 @@ fun ThemesDialog(onDismiss: () -> Unit) {
                                     Text("Heading", color = readableHeading(plannerHeadingColor(theme, palette, androidx.compose.ui.graphics.Color(heading))),
                                         style = MaterialTheme.typography.titleMedium)
                                 }
-                                Text(if (theme == AppTheme.COLOUR_BLIND) "Blue controls · amber headings" else "Text and details", style = MaterialTheme.typography.bodySmall)
+                                Text(when (theme) { AppTheme.COLOUR_BLIND -> "Blue controls · amber headings"; AppTheme.SYNTHWAVE -> "Neon pink controls · cyan headings"; else -> "Text and details" }, style = MaterialTheme.typography.bodySmall)
                                 Surface(color = palette.primaryContainer, contentColor = palette.primary,
                                     shape = MaterialTheme.shapes.small, border = BorderStroke(2.dp, palette.primary)) {
                                     Text("Button", Modifier.padding(horizontal = 12.dp, vertical = 6.dp))

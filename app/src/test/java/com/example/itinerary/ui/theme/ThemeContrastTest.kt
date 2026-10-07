@@ -54,6 +54,24 @@ class ThemeContrastTest {
             assertNotEquals(c.primary,c.tertiary)
         }
     }
+    @Test fun synthwaveKeepsTextAndControlsReadableInBothModes() {
+        for (dark in listOf(false, true)) {
+            val c = plannerColorScheme(AppTheme.SYNTHWAVE, dark)
+            for (surface in listOf(c.background,c.surface,c.surfaceContainerLowest,c.surfaceContainerLow,
+                c.surfaceContainer,c.surfaceContainerHigh,c.surfaceContainerHighest,c.surfaceVariant)) {
+                for (text in listOf(c.onSurface,c.onSurfaceVariant,c.primary,c.tertiary,c.error))
+                    assertTrue("Text $text on $surface dark=$dark",contrast(text,surface)>=4.5f)
+                assertTrue("Outline on $surface dark=$dark",contrast(c.outline,surface)>=3f)
+            }
+            for ((text,background) in listOf(c.onPrimary to c.primary,c.onSecondary to c.secondary,
+                c.onTertiary to c.tertiary,c.onError to c.error,c.onPrimaryContainer to c.primaryContainer,
+                c.primary to c.primaryContainer,c.onSecondaryContainer to c.secondaryContainer,c.onTertiaryContainer to c.tertiaryContainer,
+                c.onErrorContainer to c.errorContainer,c.inverseOnSurface to c.inverseSurface))
+                assertTrue("Pair $text on $background dark=$dark",contrast(text,background)>=4.5f)
+            assertEquals(c.tertiary, plannerHeadingColor(AppTheme.SYNTHWAVE, c, Color(0xFFFF6FB5)))
+            assertEquals(AppTheme.SYNTHWAVE, AppTheme.fromStored("SYNTHWAVE"))
+        }
+    }
     @Test fun presetHeadingsDoNotOverwriteCustomMatrixColour() {
         val custom=Color(0xFFFF6FB5)
         for (dark in listOf(false,true)) {

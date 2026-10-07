@@ -11,7 +11,9 @@ import java.time.YearMonth
 enum class AppTheme(val label: String) {
     MATRIX("Matrix Green"),
     HIGH_CONTRAST("High Contrast"),
-    COLOUR_BLIND("Colour-blind friendly");
+    COLOUR_BLIND("Colour-blind friendly"),
+    // Bug notes 4: a fun one. Neon pink and cyan on deep purple (light: magenta and teal on pale pink).
+    SYNTHWAVE("Synthwave");
 
     companion object {
         fun fromStored(value: String?): AppTheme = entries.firstOrNull { it.name == value } ?: MATRIX
