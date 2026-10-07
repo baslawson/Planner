@@ -377,6 +377,7 @@ class NotesUiTest {
         openNotes()
         click("New note"); await { find("Title") != null }
         type(0, "QA remind me")
+        click("Add reminder") // the ways to add one are a dropdown list
         click("Tomorrow 09:00")
         await { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ") == true } }
         screenshot("editor-reminder")

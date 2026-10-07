@@ -477,7 +477,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             val at = taskReminderPresetAt(preset, date?.let(LocalDate::parse))
                             if (at != null) { reminderAt = at; error = null } else presetsStale += 1
                         }
-                    } + ("Custom" to {
+                    } + ("Pick date and time…" to {
                         reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
                         choosingReminderDate = true
                     }),

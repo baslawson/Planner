@@ -127,8 +127,20 @@ data class Reminder(
     // Units are equivalent below one day; at or above it, calendar days and elapsed time are different.
     val scheduleKey: Pair<Long, Boolean> get() = offsetMinutes to (unit == ReminderUnit.DAYS && amount != 0)
 
+    // A long offset in hours or minutes (from "Pick date and time") reads as days, hours and minutes: "2 days, 3 hours
+    // and 15 minutes before" rather than "3,075 minutes before".
     val label: String
-        get() = if (amount == 0) "At the time" else "$amount ${if (amount == 1) unit.singular else unit.plural} before"
+        get() = when {
+            amount == 0 -> "At the time"
+            unit == ReminderUnit.DAYS || offsetMinutes < (if (unit == ReminderUnit.HOURS) 1_440 else 60) ->
+                "$amount ${if (amount == 1) unit.singular else unit.plural} before"
+            else -> {
+                fun part(n: Long, u: ReminderUnit) = if (n == 0L) null else "$n ${if (n == 1L) u.singular else u.plural}"
+                val parts = listOfNotNull(part(offsetMinutes / 1_440, ReminderUnit.DAYS), part(offsetMinutes % 1_440 / 60, ReminderUnit.HOURS),
+                    part(offsetMinutes % 60, ReminderUnit.MINUTES))
+                (if (parts.size == 1) parts[0] else parts.dropLast(1).joinToString(", ") + " and " + parts.last()) + " before"
+            }
+        }
 }
 
 // The last on-time (not snoozed) delivery of each reminder, keyed by the event's local date, time and offset. Those don't

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +56,9 @@ fun RemindersSection(
     billTask: Boolean = false,
 ) {
     var customOpen by remember { mutableStateOf(false) }
+    var pickingDate by remember { mutableStateOf(false) }
+    var pickingTime by remember { mutableStateOf(false) }
+    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
     val zone = rememberCurrentZoneId()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -63,7 +67,8 @@ fun RemindersSection(
 
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
     ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
-        chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom" to { customOpen = true })) {
+        chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom…" to { customOpen = true }) +
+            ("Pick date and time…" to { pickedDate = null; pickingDate = true })) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
             ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
@@ -79,6 +84,17 @@ fun RemindersSection(
             onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
         )
     }
+    // Bug notes 1: a reminder at a date and time, from the calendar then the clock (as tasks and notes set theirs). It's kept
+    // as the time before the event (reminderAt), so it moves with the event.
+    val eventStartTime = eventTime ?: java.time.LocalTime.of(9, 0)
+    if (pickingDate) SingleDateDialog(pickedDate ?: eventDate, onDismiss = { pickingDate = false },
+        onConfirm = { pickedDate = it; pickingDate = false; pickingTime = true })
+    if (pickingTime) TimePickerDialog(eventStartTime, onDismiss = { pickingTime = false }, onConfirm = { time ->
+        pickingTime = false
+        val offset = com.example.itinerary.data.reminderAt(eventDate, eventTime, pickedDate!!.atTime(time), zone)
+        if (offset == null) android.widget.Toast.makeText(context, "Choose a time before the event starts.", android.widget.Toast.LENGTH_LONG).show()
+        else onAdd(offset.first, offset.second)
+    })
 }
 
 // Whether Android lets Planner set exact alarms. Checked again on resume, because the user grants this in system settings,
@@ -147,8 +163,24 @@ fun ReminderSectionFrame(
         }
         hints.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         rows()
-        if (chips.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            chips.forEach { (text, onClick) -> AssistChip(onClick = onClick, enabled = enabled, label = { Text(text) }) }
+        // Bug notes 2: the ways to add one are a dropdown list, not a row of chips that scrolls sideways.
+        if (chips.isNotEmpty()) DropdownChoice("Add reminder", chips, enabled)
+    }
+}
+
+/** An outlined "[label] ▾" button whose list runs one of [choices] (its own text and action). */
+@Composable
+internal fun DropdownChoice(label: String, choices: List<Pair<String, () -> Unit>>, enabled: Boolean = true) {
+    var open by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Box {
+        OutlinedButton(onClick = { open = true }, enabled = enabled) {
+            Text(label)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            choices.forEach { (text, onClick) ->
+                androidx.compose.material3.DropdownMenuItem(text = { Text(text) }, onClick = { open = false; onClick() })
+            }
         }
     }
 }
@@ -188,15 +220,8 @@ private fun CustomReminderDialog(onDismiss: () -> Unit, onConfirm: (Int, Reminde
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.width(160.dp),
                 )
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ReminderUnit.entries.forEach { option ->
-                        FilterChip(
-                            selected = option == unit,
-                            onClick = { unit = option },
-                            label = { Text(option.plural) },
-                        )
-                    }
-                }
+                DropdownChoice(unit.plural.replaceFirstChar { it.uppercase() }, ReminderUnit.entries.map { option ->
+                    option.plural.replaceFirstChar { it.uppercase() } to { unit = option } })
             }
     }
 }

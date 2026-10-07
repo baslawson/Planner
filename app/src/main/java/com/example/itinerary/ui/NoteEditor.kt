@@ -508,7 +508,7 @@ private fun NoteReminderSection(reminderAt: Long?, ring: Boolean, onRing: (Boole
                 val at = com.example.itinerary.data.taskReminderPresetAt(preset, null)
                 if (at != null) onSet(at) else stale += 1
             }
-        } + ("Custom" to onCustom),
+        } + ("Pick date and time…" to onCustom),
         enabled = enabled) {
         reminderAt?.let { at ->
             ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
