@@ -168,7 +168,7 @@ object CalendarFileImport {
         // multi-day date that began before the window still covers it.
         var note: String? = null
         val rule = one("RRULE")?.value
-        val repeat = rule?.let { IcsRepeat.parse(it, ownZone, firstLocal.toLocalDate()) }
+        val repeat = rule?.let { IcsRepeat.parse(it, ownZone, firstLocal.toLocalDate(), allDay) }
         if (rule != null && repeat == null) note = "Repeats in a way Planner can't copy, so only the first date is imported."
         if (fullDays > MultiDay.MAX_DAYS) note = listOfNotNull(note, "Lasts $fullDays days; Planner imports the first ${MultiDay.MAX_DAYS}.").joinToString(" ")
         val spanDays = if (allDay) days else (length?.toDays() ?: nominal?.elapsedDays() ?: 0).coerceIn(0, MultiDay.MAX_DAYS.toLong())

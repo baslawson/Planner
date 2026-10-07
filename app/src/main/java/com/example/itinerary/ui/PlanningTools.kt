@@ -433,7 +433,7 @@ private fun ImportRow(entry: CalendarFileImport.Entry, dates: List<LocalDate>, c
 // [checkCurrency]: the share's amount had only "$", so the currency shown is a default to check (SH-13).
 fun NewPlanningEventEditor(item: ItineraryItem, onSaved: (Long) -> Unit = {}, prefilled: Boolean = false, checkCurrency: Boolean = false,
                            initialAddedReminders: List<Reminder> = emptyList(), initialAddedAttachments: List<Attachment> = emptyList(),
-                           notice: String? = null, onDismiss: () -> Unit) {
+                           notice: String? = null, initialRepeatAnchorDay: Int = 0, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val scope = rememberCoroutineScope()
     val categories = remember(app) { CategoryState(app.repository, app.settings, scope) }
@@ -444,7 +444,7 @@ fun NewPlanningEventEditor(item: ItineraryItem, onSaved: (Long) -> Unit = {}, pr
         onSave = { event, added, removed, reminders, removedReminders, options ->
             app.repository.saveItemId(event, added, removed, reminders, removedReminders, options).also(onSaved) },
         onDelete = { event, series -> app.repository.deleteWithUndo(event, series) }, initialAddedReminders = initialAddedReminders,
-        prefilled = prefilled, checkCurrency = checkCurrency, initialAddedAttachments = initialAddedAttachments, notice = notice)
+        prefilled = prefilled, checkCurrency = checkCurrency, initialAddedAttachments = initialAddedAttachments, notice = notice, initialRepeatAnchorDay = initialRepeatAnchorDay)
     }
 }
 

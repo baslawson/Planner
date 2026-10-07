@@ -1,4 +1,6 @@
 package com.example.itinerary.ui
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -180,8 +182,10 @@ fun AgendaActionsButton(
         }
         if (open) Popup(popupPositionProvider = position, onDismissRequest = { onOpenChange(false) },
             properties = PopupProperties(focusable = true)) {
+            // Bug hunt 19: scrolls when taller than the window (landscape, large text), starting at the bottom, by the button.
             Column(
-                Modifier.width(menuWidth),
+                Modifier.width(menuWidth).heightIn(max = (configuration.screenHeightDp - 24).coerceAtLeast(0).dp)
+                    .verticalScroll(rememberScrollState(), reverseScrolling = true),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {

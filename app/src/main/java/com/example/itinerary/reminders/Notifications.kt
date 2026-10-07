@@ -55,6 +55,7 @@ fun createReminderChannel(context: Context) {
             enableVibration(false)
         },
     )
+    ReminderChime.createChannel(manager)
 }
 
 class ReminderContent(val title: String, val text: String, val subText: String)
@@ -134,16 +135,17 @@ fun postReminderNotification(
     quiet: Boolean = false,
 ): Boolean {
     if (!notificationsEnabled(context)) return false
-    // Its sound is Planner's chime instead (ReminderChime), which silent and vibrate mode don't mute; not when shown again,
-    // or for a "Ring until I stop it" that couldn't ring (its insistent sound stays).
-    val chime = !quiet && !couldNotRing && ReminderChime.enabled(context)
+    // Its sound is Planner's chime instead (ReminderChime, posted on its soundless channel), which silent and vibrate mode
+    // don't mute; not when shown again, or for a "Ring until I stop it" that couldn't ring (its insistent sound stays), or
+    // when the Reminders category is silent in Android's settings.
+    val chime = ReminderChime.use(context, !quiet && !couldNotRing)
     val open = PendingIntent.getActivity(
         context,
         notificationId,
         openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
+    val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
         .setContentText(text)
@@ -153,7 +155,6 @@ fun postReminderNotification(
         .setAutoCancel(true)
         .setContentIntent(open)
         .setOnlyAlertOnce(quiet)
-        .setSilent(chime)
         .apply {
             if (reminderId != null && reminderId > 0) {
                 if (billToken != null) addDataAction(context, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))

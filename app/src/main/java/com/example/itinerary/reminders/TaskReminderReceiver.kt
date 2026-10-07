@@ -56,18 +56,18 @@ class TaskReminderReceiver : BroadcastReceiver() {
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
 internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false) {
     if (!notificationsEnabled(context)) return
-    val chime = !quiet && !silent && !couldNotRing && ReminderChime.enabled(context) // see postReminderNotification
+    val chime = ReminderChime.use(context, !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0,
         openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
+    val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
         .setContentText(if (couldNotRing) CouldNotRing.now(context).short /* H17-R2 */ else "Task reminder")
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)
-        .setOnlyAlertOnce(quiet).setSilent(silent || chime)
+        .setOnlyAlertOnce(quiet).setSilent(silent)
         .addDataAction(context, "Done", TaskActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.taskAction(context, id, trigger)).build()
     try {

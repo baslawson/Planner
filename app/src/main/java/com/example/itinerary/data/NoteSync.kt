@@ -44,7 +44,10 @@ data class RemoteNote(val id: Long, val etag: String?, val title: String, val co
 class NotesApiException(message: String, val code: Int = 0) : Exception(message)
 
 /** The Nextcloud Notes app's API, version 1 (/index.php/apps/notes/api/v1/notes), with the backup login. */
-class NotesApi(private val http: OkHttpClient) {
+class NotesApi(client: OkHttpClient) {
+    // Bug hunt 19, P7: as NextcloudClient. A note POST isn't sent twice after a dropped reply (two copies on the server),
+    // and a redirect (to http:// too) isn't followed with the note's words.
+    private val http = client.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
     private val json = "application/json; charset=utf-8".toMediaType()
 
     private fun notes(account: NextcloudAccount, id: Long? = null): HttpUrl = account.server.newBuilder()

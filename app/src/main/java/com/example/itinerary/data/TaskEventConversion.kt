@@ -53,7 +53,8 @@ object TaskEventConversion {
      */
     fun toTask(event: ItineraryItem, reminders: List<Reminder>, attachments: List<Attachment>, wholeSeries: Boolean,
                zone: ZoneId = ZoneId.systemDefault(), now: Long = System.currentTimeMillis(), seriesCount: Int = 1,
-               occurrence: ItineraryItem = event, idSeed: String? = null, firstComing: ItineraryItem? = null): Converted<PlannerTask> {
+               occurrence: ItineraryItem = event, idSeed: String? = null, firstComing: ItineraryItem? = null,
+               seriesStart: LocalDate? = null): Converted<PlannerTask> {
         val dropped = mutableListOf<String>()
         if (event.startTime != null) dropped += "The time" + (if (event.durationMinutes != null) " and length" else "") + ": tasks have a due day only."
         if (event.endDate != null) dropped += "The days before the last: the task is due on the last day."
@@ -79,8 +80,19 @@ object TaskEventConversion {
         val id = idSeed?.let { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() } ?: java.util.UUID.randomUUID().toString()
         val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
             checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
-            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = reminderAt != null && first?.ringUntilDismissed == true)
+            repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = reminderAt != null && first?.ringUntilDismissed == true,
+            repeatAnchorDay = if (wholeSeries) monthDay(event.repeatRule, seriesStart) else 0)
         return Converted(task, dropped = dropped)
+    }
+
+    /**
+     * Bug hunt 19, P6: the month day a monthly or yearly series keeps to (the 31st through 30 Apr, 29 Feb through 28 Feb),
+     * from its first date; 0 (the due date's own day) for other repeats.
+     */
+    fun monthDay(repeat: String, start: LocalDate?): Int {
+        val kind = RepeatRule.parse(repeat)?.kind ?: return 0
+        if (start == null || kind !in setOf(RepeatRule.Kind.MONTHLY, RepeatRule.Kind.EVERY_N_MONTHS, RepeatRule.Kind.YEARLY)) return 0
+        return start.dayOfMonth
     }
 
     /**

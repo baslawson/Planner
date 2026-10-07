@@ -94,7 +94,7 @@ internal fun conversionBlock(toEvent: Boolean, eventDraft: Boolean, eventEditorO
 }
 
 private sealed interface Prepared {
-    data class ToEvent(val converted: Converted<ItineraryItem>, val files: List<Attachment>) : Prepared
+    data class ToEvent(val converted: Converted<ItineraryItem>, val files: List<Attachment>, val anchorDay: Int = 0) : Prepared
     data class ToTask(val converted: Converted<PlannerTask>, val ids: Set<Long>) : Prepared
 }
 
@@ -139,7 +139,7 @@ fun ConversionHost(conversions: Conversions) {
             val ready = if (toEvent) {
                 val task = app.repository.task(parts[1]) ?: error("This task no longer exists.")
                 Prepared.ToEvent(TaskEventConversion.toEvent(task, today, hasTimeBlocks = app.repository.hasTimeBlocks(task.id),
-                    waiting = app.repository.waitingOn(task.id)), task.attachments)
+                    waiting = app.repository.waitingOn(task.id)), task.attachments, task.repeatAnchorDay)
             } else {
                 val id = parts[1].toLong()
                 val whole = parts[2].toBoolean()
@@ -150,6 +150,7 @@ fun ConversionHost(conversions: Conversions) {
                 val occurrence = if (!whole) event else TaskEventConversion.dueOccurrence(series, reminders, today, System.currentTimeMillis())
                 val firstComing = if (!whole) null else series.filter { !(it.endDate ?: it.date).isBefore(today) }.minByOrNull { it.date }
                 Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence, firstComing = firstComing,
+                    seriesStart = series.minOfOrNull { it.date },
                     idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
             val eventDraft = runCatching { EditorDraftStore(app).read() }.getOrNull()
@@ -191,11 +192,11 @@ fun ConversionHost(conversions: Conversions) {
     }
     when (val ready = result.getOrThrow()) {
       is Prepared.ToEvent -> {
-        val (converted, files) = ready
+        val (converted, files, anchorDay) = ready
         val event = remember(request) { converted.result }
         NewPlanningEventEditor(event, onSaved = { id -> replace(id.toString()) { app.repository.replaceTaskWithEvent(parts[1], id) } }, prefilled = true,
             initialAddedReminders = converted.reminders, initialAddedAttachments = files.map { it.copy(id = 0, itemId = 0) },
-            notice = conversionNotice("event", converted.dropped), onDismiss = done)
+            notice = conversionNotice("event", converted.dropped), initialRepeatAnchorDay = anchorDay, onDismiss = done)
       }
       is Prepared.ToTask -> {
         val (converted, ids) = ready

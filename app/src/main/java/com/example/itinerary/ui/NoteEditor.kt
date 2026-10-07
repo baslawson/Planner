@@ -420,7 +420,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     }
                     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         base?.let { saved ->
-                            Text("Created ${momentLabel(saved.created)}\nLast modified ${momentLabel(saved.modified)}",
+                            // Bug hunt 19: a note from an old backup may have no creation time (0, 1 Jan 1970): left out.
+                            Text(listOfNotNull(saved.created.takeIf { it > 0 }?.let { "Created ${momentLabel(it)}" },
+                                saved.modified.takeIf { it > 0 }?.let { "Last modified ${momentLabel(it)}" }).joinToString("\n"),
                                 style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = colors.onSurfaceVariant)
                         }
                         if (!preview) {
@@ -489,7 +491,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                 }
             }
             // Under the note, where they can't be missed.
-            if (deletedElsewhere || error != null) Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Bug hunt 19: clear of the eye button on the right.
+            if (deletedElsewhere || error != null) Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 88.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = colors.error)
                 error?.let { Text(it, color = colors.error) }
             }

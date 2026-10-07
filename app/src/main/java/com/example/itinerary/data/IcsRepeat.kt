@@ -123,7 +123,9 @@ internal class IcsRepeat private constructor(
         private val KNOWN = setOf("FREQ", "INTERVAL", "COUNT", "UNTIL", "BYDAY", "BYMONTHDAY", "BYMONTH", "WKST")
 
         // [zone] is the event's own time zone (UNTIL in UTC is moved onto its clock); [start] is its first date.
-        fun parse(value: String, zone: ZoneId, start: LocalDate): IcsRepeat? = runCatching {
+        // [allDay]: a date-time UNTIL (which should be a date) counts by the date written, not moved onto the phone's clock,
+        // where west of UTC "20261231T000000Z" would be the evening before and drop the last day (bug hunt 19).
+        fun parse(value: String, zone: ZoneId, start: LocalDate, allDay: Boolean = false): IcsRepeat? = runCatching {
             val parts = value.split(';').filter { it.isNotBlank() }.associate { it.substringBefore('=').uppercase() to it.substringAfter('=') }
             if (parts.keys.any { it !in KNOWN }) return null
             val freq = parts["FREQ"]?.uppercase()?.takeIf { it in setOf("DAILY", "WEEKLY", "MONTHLY", "YEARLY") } ?: return null
@@ -131,7 +133,7 @@ internal class IcsRepeat private constructor(
             if (interval !in 1..1000) return null
             val count = parts["COUNT"]?.toInt()?.also { if (it < 1) return null }
             val until = parts["UNTIL"]?.let { text ->
-                if (text.length == 8) LocalDate.parse(text, java.time.format.DateTimeFormatter.BASIC_ISO_DATE).atTime(23, 59, 59)
+                if (text.length == 8 || allDay && text.length >= 8) LocalDate.parse(text.take(8), java.time.format.DateTimeFormatter.BASIC_ISO_DATE).atTime(23, 59, 59)
                 else Ics.time(Ics.Property("UNTIL", emptyMap(), text), zone, strictGap = false) { zone }.withZoneSameInstant(zone).toLocalDateTime()
             }
             val days = parts["BYDAY"]?.split(',')?.map { code ->

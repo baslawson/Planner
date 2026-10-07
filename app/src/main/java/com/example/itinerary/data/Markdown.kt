@@ -180,6 +180,12 @@ object Markdown {
         val first = text.lastIndexOf('\n', s - 1) + 1
         val last = text.indexOf('\n', e).let { if (it < 0) text.length else it }
         val lines = text.substring(first, last).split('\n')
+        // A quote holds the line as it is (a list item or heading stays one inside it): "> " goes in front, or comes off
+        // when every line has it (bug hunt 19, P4: it was taken for a bullet).
+        if (prefix.startsWith('>')) {
+            val off = lines.all { it.startsWith(">") }
+            return shifted(text, s, e, first, last, lines, lines.map { if (off) it.removePrefix(">").removePrefix(" ") else prefix + it })
+        }
         val kind = markKind(prefix)
         fun markOf(line: String) = lineMark.find(line)?.groupValues?.get(2).orEmpty()
         // Off only when every line has this mark ("- " on a checklist line is a different mark, not this one).
@@ -198,6 +204,11 @@ object Markdown {
                 else -> indent + prefix + rest
             }
         }
+        return shifted(text, s, e, first, last, lines, changed)
+    }
+
+    // The lines first..last of [text] replaced by [changed], with the selection [s]..[e] moved to match.
+    private fun shifted(text: String, s: Int, e: Int, first: Int, last: Int, lines: List<String>, changed: List<String>): Edit {
         val block = changed.joinToString("\n")
         val result = text.substring(0, first) + block + text.substring(last)
         // The selection keeps to the same text: the first line's start moves by its own change, the end by the total.

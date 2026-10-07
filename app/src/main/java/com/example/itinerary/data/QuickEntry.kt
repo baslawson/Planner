@@ -1143,7 +1143,7 @@ object QuickEntry {
                 unit.startsWith("m") -> date.plusMonths(count)
                 else -> date.plusYears(count)
             }
-            repeatCount = repeat.dates(date, 365, repeatAnchorDay).count { it < end }
+            repeatCount = occurrencesWhile(repeat, date, repeatAnchorDay) { it < end }
             if (repeatCount !in 2..365) return error("Choose a repeat rule and between 2 and 365 occurrences.")
         }
         // The day an "until" names: a holiday or numeric date on or after [date], any other date counted from [base].
@@ -1175,7 +1175,7 @@ object QuickEntry {
         repeatUntilText?.let { raw ->
             val end = untilEnd(raw, today).let { (end, problem) -> end ?: return error(problem) }
             if (end < date) return error("The repeat ends before it starts. Choose a later end date.")
-            repeatCount = repeat.dates(date, 365, repeatAnchorDay).count { it <= end }
+            repeatCount = occurrencesWhile(repeat, date, repeatAnchorDay) { it <= end }
             if (repeatCount !in 2..365) return error("Choose an end date that gives between 2 and 365 occurrences.")
         }
         // "Away tomorrow until Friday": the Friday from the first day. Until the first day itself is just that day.
@@ -1434,7 +1434,7 @@ object QuickEntry {
         }
         // "by midnight Friday", "Friday midnight": the end of that day, like "midnight tonight", not the night before it.
         // 00:00 of the next day, so a deadline or a start then is exact. "midnight" with no date stays tonight's 00:00.
-        if (midnightSaid && time == LocalTime.MIDNIGHT && (ds.isNotEmpty() || numeric.isNotEmpty() || orDates != null)) {
+        if (midnightSaid && time == LocalTime.MIDNIGHT && (ds.isNotEmpty() || numeric.isNotEmpty() || orDates != null || holiday)) { // holiday: "Christmas Eve at midnight" (bug hunt 19)
             date = date.plusDays(1); dateChoices = dateChoices.map { it.plusDays(1) }
         }
         if (relative && (timePrompt != null || ts.isNotEmpty() || rs.isNotEmpty() || extraTimes.isNotEmpty()))
@@ -1825,4 +1825,17 @@ object QuickEntry {
             }
         }
     }.getOrNull()?.takeIf { it.year in 1..9999 }
+}
+
+/**
+ * How many of [repeat]'s dates from [date] pass [keep] (they run in order, so up to the first that doesn't), counting one
+ * past the 365 limit when there are more, so a longer end is refused rather than quietly cut short (bug hunt 19, P5).
+ * The 366th is the next one after the 365th, on the same month day ([anchorDay], else the start's).
+ */
+internal fun occurrencesWhile(repeat: RepeatRule, date: LocalDate, anchorDay: Int, keep: (LocalDate) -> Boolean): Int {
+    val dates = repeat.dates(date, 365, anchorDay)
+    val count = dates.count(keep)
+    if (count < 365) return count
+    val next = repeat.dates(dates.last(), 2, anchorDay.takeIf { it > 0 } ?: date.dayOfMonth).last()
+    return if (keep(next)) 366 else 365
 }

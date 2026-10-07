@@ -5,7 +5,6 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import com.example.itinerary.reminders.ReminderAlarms
 import com.example.itinerary.reminders.MissedReminders
@@ -724,7 +723,8 @@ class Repository(
         try { permanentlyDelete(id); false } catch (e: CancellationException) { throw e } catch (_: Exception) { failedIds += id; true }
     }
 
-    suspend fun permanentlyDelete(id: String) = changes.withLock {
+    // Bug hunt 19: not cut off by leaving Recently deleted mid-way, which would leave its files and held-back sync delete.
+    suspend fun permanentlyDelete(id: String) = withContext(NonCancellable) { changes.withLock {
         val entry = deletedDao.byId(id)
         // H17-D3: an entry that can't be read still goes; files only it held are left (cleanup can't tell they're unused).
         val files = entry?.let { readableContents(listOf(it)).single()?.storedAttachments?.map { a -> a.fileName } }.orEmpty()
@@ -733,7 +733,7 @@ class Repository(
         val dropped = dropPending { it.token == id }
         afterCommit(files = files, notify = false)
         if (dropped) onDeletionFinished()
-    }
+    } }
 
     // S5-1: a deletion whose Undo was still on offer, deleted for good (Delete forever, or gone from Recently deleted):
     // its Undo has passed too, so sync may now delete Planner's copy on Nextcloud: the caller says so (onDeletionFinished,
@@ -1326,7 +1326,10 @@ class Repository(
     // ringing for about 10 s after the alarm, and kills a receiver that takes a minute. Past that it's checked and shown
     // without the lock; its delivery record still keeps it from ringing twice.
     private suspend fun <T> forDelivery(block: suspend () -> T): T {
-        val locked = withTimeoutOrNull(DELIVERY_LOCK_WAIT_MS) { changes.lock(); true } == true
+        // Bug hunt 19: tried, not lock() under a timeout, which can take the lock just as it times out and never give it back.
+        val deadline = System.nanoTime() + DELIVERY_LOCK_WAIT_MS * 1_000_000
+        var locked = changes.tryLock()
+        while (!locked && System.nanoTime() - deadline < 0) { kotlinx.coroutines.delay(20); locked = changes.tryLock() }
         if (!locked) Log.w("Repository", "Reminder delivered without waiting any longer for a change in progress")
         try { return block() } finally { if (locked) changes.unlock() }
     }

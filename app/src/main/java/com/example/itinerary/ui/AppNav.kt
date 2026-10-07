@@ -43,10 +43,11 @@ private fun NavController.popFrom(entry: NavBackStackEntry) {
 // the search icon) lands on the screen that is already animating away; without this it would push a second copy of the
 // destination, so one tap on back would appear to do nothing. launchSingleTop is a second guard, for when both taps
 // aim at the same destination.
-private fun NavController.navigateFrom(entry: NavBackStackEntry, route: String) {
-    if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
-        navigate(route) { launchSingleTop = true }
-    }
+// Whether it went: not while [entry] is on its way in or out (a second tap during a transition).
+private fun NavController.navigateFrom(entry: NavBackStackEntry, route: String): Boolean {
+    if (entry.lifecycle.currentState != Lifecycle.State.RESUMED) return false
+    navigate(route) { launchSingleTop = true }
+    return true
 }
 
 private const val CALENDAR_ROUTE = "calendar?date={date}"
@@ -328,7 +329,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     onOpenEvent = { date -> nav.openCalendar(entry, date) },
                     onOpenSearch = { nav.navigateFrom(entry, "search") },
                     onOpenNotes = { nav.navigateFrom(entry, "notes") },
-                    onAddNote = { startNewNote = true; nav.navigateFrom(entry, "notes") },
+                    onAddNote = { if (nav.navigateFrom(entry, "notes")) startNewNote = true },
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
@@ -393,7 +394,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                         onOpenCalendars = { settingsOpened = true; showCalendars = true },
                         onOpenSearch = { nav.navigateFrom(entry, "search") },
                         onOpenNotes = { nav.navigateFrom(entry, "notes") },
-                        onAddNote = { startNewNote = true; nav.navigateFrom(entry, "notes") },
+                        onAddNote = { if (nav.navigateFrom(entry, "notes")) startNewNote = true },
                         onAgenda = {
                             if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
                                 // Save just Calendar, not a Search screen that may sit underneath it.

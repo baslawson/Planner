@@ -25,6 +25,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,10 +56,12 @@ fun RemindersSection(
     onToggleRing: (Reminder, Boolean) -> Unit,
     billTask: Boolean = false,
 ) {
-    var customOpen by remember { mutableStateOf(false) }
-    var pickingDate by remember { mutableStateOf(false) }
-    var pickingTime by remember { mutableStateOf(false) }
-    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    // Bug hunt 19: kept through a rotation, so a date picked survives while the clock is open.
+    var customOpen by rememberSaveable { mutableStateOf(false) }
+    var pickingDate by rememberSaveable { mutableStateOf(false) }
+    var pickingTime by rememberSaveable { mutableStateOf(false) }
+    var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    val pickedDate = pickedDay?.let(java.time.LocalDate::parse)
     val zone = rememberCurrentZoneId()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -68,7 +71,7 @@ fun RemindersSection(
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
     ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
         chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom…" to { customOpen = true }) +
-            ("Pick date and time…" to { pickedDate = null; pickingDate = true })) {
+            ("Pick date and time…" to { pickedDay = null; pickingDate = true })) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
             ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
@@ -88,7 +91,7 @@ fun RemindersSection(
     // as the time before the event (reminderAt), so it moves with the event.
     val eventStartTime = eventTime ?: java.time.LocalTime.of(9, 0)
     if (pickingDate) SingleDateDialog(pickedDate ?: eventDate, onDismiss = { pickingDate = false },
-        onConfirm = { pickedDate = it; pickingDate = false; pickingTime = true })
+        onConfirm = { pickedDay = it.toString(); pickingDate = false; pickingTime = true })
     if (pickingTime) TimePickerDialog(eventStartTime, onDismiss = { pickingTime = false }, onConfirm = { time ->
         pickingTime = false
         val offset = com.example.itinerary.data.reminderAt(eventDate, eventTime, pickedDate!!.atTime(time), zone)
