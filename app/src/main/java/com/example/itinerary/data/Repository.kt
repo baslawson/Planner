@@ -13,6 +13,7 @@ import com.example.itinerary.reminders.AlarmWindow
 import com.example.itinerary.reminders.eventReminderAt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.temporal.ChronoUnit
@@ -95,6 +96,14 @@ class Repository(
             kotlinx.coroutines.delay(PaymentUndos.UNDO_MS + 1_000)
             changes.withLock { _pendingPayments.value = paymentUndo.live(_pendingPayments.value, System.currentTimeMillis()) }
         }
+    }
+
+    // Bill payments made or undone here, for MyBudget (BudgetLink). Only a started MainActivity collects them, so one
+    // made from a notification with Planner closed isn't sent.
+    private val _budgetMessages = kotlinx.coroutines.flow.MutableSharedFlow<List<BudgetLink.Message>>(extraBufferCapacity = 16)
+    val budgetMessages = _budgetMessages.asSharedFlow()
+    private fun tellBudget(before: ItineraryItem, after: ItineraryItem) {
+        BudgetLink.changes(before, after).takeIf { it.isNotEmpty() }?.let { _budgetMessages.tryEmit(it) }
     }
 
     private val _pendingMoves = MutableStateFlow<List<PendingMove>>(emptyList())
@@ -853,6 +862,7 @@ class Repository(
         val removedFiles = mutableListOf<String>()
         val scheduled = mutableListOf<Pair<ItineraryItem, List<Reminder>>>()
         val payments = mutableListOf<PendingPayment>()
+        val budgetChanges = mutableListOf<Pair<ItineraryItem, ItineraryItem>>()
         val editedId = db.withTransaction {
             if (options.draftToken != null && itemDao.hasDraftToken(options.draftToken))
                 return@withTransaction item.id.takeIf { it != 0L } ?: itemDao.firstIdForDraftToken(options.draftToken) ?: 0L
@@ -924,6 +934,8 @@ class Repository(
                 }
                 val rowId = itemDao.upsert(normalized)
                 val saved = normalized.copy(id = if (rowId > 0) rowId else target.id)
+                // A new bill saved as paid counts as paid from unpaid.
+                budgetChanges += (previous ?: saved.copy(paid = false, payments = emptyList())) to saved
                 if (newSeries && saved.id != item.id) {
                     selectedAttachments.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                 } else if (seriesSave && saved.id != item.id) {
@@ -962,6 +974,7 @@ class Repository(
             if (item.id != 0L) item.id else scheduled.first().first.id
         }
         payments.forEach(::recordPayment)
+        budgetChanges.forEach { (before, after) -> tellBudget(before, after) }
         afterCommit(removedFiles, cancelled.map { it.id } + scheduled.flatMap { it.second }.map { it.id }, cancelFirst = resetReminders)
         editedId
     }
@@ -1245,6 +1258,7 @@ class Repository(
                 remindersAfter = reminderDao.forItem(id), paymentsAfter = updated.payments)
         } ?: return false
         recordPayment(change)
+        tellBudget(change.before, change.before.copy(paid = change.paid, payments = change.paymentsAfter))
         val ids = change.remindersAfter.map { it.id }
         afterCommit(reminderIds = ids, cancelFirst = ids.toSet())
         return true
@@ -1265,11 +1279,13 @@ class Repository(
             return@withLock false
         }
         val ids = mutableListOf<Long>()
+        var undone: ItineraryItem? = null
         val restored = db.withTransaction {
             val current = itemDao.byId(change.before.id)
             if (current == null || current.category != "Bills" || current.paid != change.paid || current.payments != change.paymentsAfter) false
             else {
                 itemDao.upsert(current.copy(paid = change.before.paid, payments = change.before.payments))
+                undone = current
                 reminderDao.forItem(current.id).forEach { reminder ->
                     ids += reminder.id
                     // Keep reminders edited or snoozed since payment; restore only unchanged ones.
@@ -1282,6 +1298,7 @@ class Repository(
             }
         }
         _pendingPayments.value = _pendingPayments.value.filterNot { it.token == token }
+        undone?.takeIf { restored }?.let { tellBudget(it, it.copy(paid = change.before.paid, payments = change.before.payments)) }
         if (restored) afterCommit(reminderIds = ids, cancelFirst = ids.toSet())
         restored
     }

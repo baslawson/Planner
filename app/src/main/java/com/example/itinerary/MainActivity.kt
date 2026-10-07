@@ -256,6 +256,13 @@ class MainActivity : ComponentActivity() {
 
     private val appLock get() = (application as ItineraryApp).appLock
 
+    // Registered with the activity (before it starts), as ActivityResult launchers must be.
+    private val budgetLink = com.example.itinerary.ui.BudgetLinkSender(this).also { sender ->
+        sender.launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) {
+            sender.answered(it.resultCode, it.data)
+        }
+    }
+
     // App lock: anything Planner opens itself (file picker, camera scanner, browser, Settings' lock confirmation) goes
     // through one of these two, so leaving for it is not treated like going to the home screen (see AppLockRule).
     // A plain startActivity on this activity (or on a screen's LocalContext, which wraps it) ends up here as well; one on
@@ -347,6 +354,13 @@ class MainActivity : ComponentActivity() {
                         } }
                     }
                 }
+            }
+        }
+        // Bills paid or unpaid while Planner is on screen go to MyBudget when the setting is on (BudgetLink).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val app = application as ItineraryApp
+                app.repository.budgetMessages.collect { if (app.settings.sendBillsToBudget.value) budgetLink.send(it) }
             }
         }
         if (savedInstanceState != null) {

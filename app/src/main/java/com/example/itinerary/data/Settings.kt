@@ -254,6 +254,15 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _showBillsSummary.value = show
     }
 
+    // Off until chosen. Device-local, like MyBudget itself: a backup restored on another phone doesn't turn it on there.
+    private val _sendBillsToBudget = MutableStateFlow(prefs.getBoolean("send_bills_to_budget", false))
+    val sendBillsToBudget: StateFlow<Boolean> = _sendBillsToBudget.asStateFlow()
+
+    fun setSendBillsToBudget(on: Boolean) {
+        prefs.edit { putBoolean("send_bills_to_budget", on) }
+        _sendBillsToBudget.value = on
+    }
+
     private val _billsExpanded = MutableStateFlow(prefs.getBoolean("bills_expanded", true))
     val billsExpanded: StateFlow<Boolean> = _billsExpanded.asStateFlow()
 

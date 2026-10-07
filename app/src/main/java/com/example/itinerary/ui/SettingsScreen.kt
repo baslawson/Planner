@@ -89,6 +89,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val settings = (context.applicationContext as ItineraryApp).settings
     val showBillsSummary by settings.showBillsSummary.collectAsStateWithLifecycle()
+    val sendBillsToBudget by settings.sendBillsToBudget.collectAsStateWithLifecycle()
+    val budgetInstalled = remember(sendBillsToBudget) { budgetLinkInstalled(context) }
     val noteOpenView by settings.noteOpenView.collectAsStateWithLifecycle()
     val startScreen by settings.startScreen.collectAsStateWithLifecycle()
     val scheduler = remember { (context.applicationContext as ItineraryApp).reminderScheduler }
@@ -131,6 +133,9 @@ fun SettingsScreen(
                     SettingsHeading("Agenda")
                     SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
+                    SwitchRow("Send paid bills to MyBudget", sendBillsToBudget, settings::setSendBillsToBudget)
+                    Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. AUD bills only."
+                        else "MyBudget isn't installed on this phone, so nothing is sent.", style = MaterialTheme.typography.bodySmall)
                     // RS-4: not Agenda settings: a heading of their own.
                     SettingsHeading("Start and notes")
                     SettingsSection(

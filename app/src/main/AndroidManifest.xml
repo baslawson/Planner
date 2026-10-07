@@ -20,6 +20,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- "Send paid bills to MyBudget" (BudgetLink): Android 11 and later hide other apps unless they are named here. -->
+    <queries>
+        <package android:name="com.mybudget.app" />
+    </queries>
+
     <application
         android:name=".ItineraryApp"
         android:allowBackup="true"
