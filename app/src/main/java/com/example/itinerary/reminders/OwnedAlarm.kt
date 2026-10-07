@@ -12,7 +12,11 @@ import kotlinx.coroutines.launch
 internal const val EXTRA_OWNER_KIND = "alarm_owner_kind"
 internal const val EXTRA_OWNER_ID = "alarm_owner_id"
 
-internal fun ownedAlarmExtras(kind: String, id: String, title: String, trigger: Long): Bundle = Bundle().apply {
+// [ringFor]: seconds it rings, 0 until stopped (AlarmService.EXTRA_RING_FOR). [notes]: a task's notes, shown while it rings
+// (R5); never a note's words.
+internal fun ownedAlarmExtras(kind: String, id: String, title: String, trigger: Long, ringFor: Int = 0, notes: String = ""): Bundle = Bundle().apply {
+    putInt(AlarmService.EXTRA_RING_FOR, ringFor)
+    if (kind == "task" && notes.isNotBlank()) putString(ReminderScheduler.EXTRA_NOTES, notes.trim().take(2_000))
     putString(EXTRA_OWNER_KIND, kind)
     putString(EXTRA_OWNER_ID, id)
     // Notes deliberately carry no words into an intent or direct-boot storage.
@@ -25,14 +29,17 @@ internal fun ownedAlarmExtras(kind: String, id: String, title: String, trigger: 
     putLong(ReminderScheduler.EXTRA_TRIGGER, trigger)
 }
 
-/** False means the receiver must still post its notification, including a truthful fallback message. */
-internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: String, trigger: Long, ring: Boolean): Boolean {
-    if (!ring || !ringingAlarmsEnabled(context)) return false
+/**
+ * False means the receiver must still post its notification, including a truthful fallback message. [ringFor]: seconds it
+ * rings, 0 until stopped, null not at all (ringSecondsNow).
+ */
+internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: String, trigger: Long, ringFor: Int?, notes: String = ""): Boolean {
+    if (ringFor == null || !ringingAlarmsEnabled(context)) return false
     var token: String? = null
     return try {
         token = OwnedAlarmStarts.reserve(context, kind, id)
         ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java)
-            .putExtras(ownedAlarmExtras(kind, id, title, trigger)).putExtra(EXTRA_OWNER_START, token))
+            .putExtras(ownedAlarmExtras(kind, id, title, trigger, ringFor, notes)).putExtra(EXTRA_OWNER_START, token))
         true
     } catch (e: Exception) {
         token?.let { runCatching { OwnedAlarmStarts.cancel(context, kind, id, it) } }
@@ -45,15 +52,16 @@ internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: 
  * An alarm displaced by another, or timed out, keeps its own normal notification and actions. [silent]: ringing was just
  * turned off, so it doesn't sound again (A15-3).
  */
-internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false, silent: Boolean = false, allowChime: Boolean = true): Boolean {
+internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false, silent: Boolean = false): Boolean {
     val id = extras.getString(EXTRA_OWNER_ID) ?: return false
     val trigger = extras.getLong(ReminderScheduler.EXTRA_TRIGGER)
     val kind = extras.getString(EXTRA_OWNER_KIND)
     when (kind) {
         "task" -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") +
-            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger, silent = silent, allowChime = allowChime)
+            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger, silent = silent,
+            notes = extras.getString(ReminderScheduler.EXTRA_NOTES).orEmpty())
         // The alarm carries no word of the note: "Note reminder" at once, its words once read (below).
-        "note" -> postNoteReminder(context, id, trigger, null, missed = missed, silent = silent, allowChime = allowChime)
+        "note" -> postNoteReminder(context, id, trigger, null, missed = missed, silent = silent)
         else -> return false
     }
     refreshOwnedAlarm(context, kind, id, trigger, missed, silent)

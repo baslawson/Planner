@@ -30,6 +30,8 @@ data class PlannerTask(
     // Snoozing moves only this reminder; [reminderAt] stays the base a repeating task's next reminder follows.
     val snoozedUntil: Long? = null,
     @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
+    // The reminder's sound otherwise (ReminderSound): 0 = the Settings default, -1 = notification sound only, 10/30/60 s.
+    @ColumnInfo(defaultValue = "0") val ringSeconds: Int = 0,
 )
 
 /** When the reminder is due now: the snooze if there is one, else [PlannerTask.reminderAt]. Removing the reminder ends the snooze. */
@@ -47,7 +49,7 @@ interface TaskDao {
     @Insert suspend fun insert(task: PlannerTask)
     @Insert suspend fun insertAll(tasks: List<PlannerTask>)
     // U15-1: a ring choice left without its reminder (builds before that rule) is cleared.
-    @Query("UPDATE tasks SET ringUntilDismissed = 0 WHERE ringUntilDismissed = 1 AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
+    @Query("UPDATE tasks SET ringUntilDismissed = 0, ringSeconds = 0 WHERE (ringUntilDismissed = 1 OR ringSeconds != 0) AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
     @Update suspend fun update(task: PlannerTask)
     @Query("DELETE FROM tasks WHERE id = :id") suspend fun delete(id: String)
     @Query("DELETE FROM tasks") suspend fun deleteAll()
@@ -117,7 +119,7 @@ object TaskCodec {
             .put("dueDate", task.dueDate?.toString() ?: JSONObject.NULL).put("priority", task.priority.name)
             .put("notes", task.notes).put("done", task.done)
             .put("reminderAt", task.reminderAt ?: JSONObject.NULL)
-            .put("ringUntilDismissed", task.ringUntilDismissed)
+            .put("ringUntilDismissed", task.ringUntilDismissed).put("ringSeconds", task.ringSeconds)
             .apply { task.snoozedUntil?.let { put("snoozedUntil", it) } }
             .put("repeat", task.repeat).put("repeatDays", task.repeatDays).put("repeatAnchorDay", task.repeatAnchorDay)
             .put("nextTaskId", task.nextTaskId ?: JSONObject.NULL)
@@ -138,6 +140,8 @@ object TaskCodec {
             prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),
             // Optional: older backups have no task snoozes.
             ringUntilDismissed = value.optBoolean("ringUntilDismissed", false) && !value.isNull("reminderAt"),
+            // Older files have no length: Default (ReminderSound).
+            ringSeconds = ReminderSound.cleanSeconds(value.optBoolean("ringUntilDismissed", false), value.optInt("ringSeconds", 0), !value.isNull("reminderAt")),
             snoozedUntil = if (!value.has("snoozedUntil") || value.isNull("snoozedUntil")) null
                 else value.strictLong("snoozedUntil") { "Invalid task snooze time" })
             // A task saved before the cap may have more text; it is cut rather than refusing the whole file.

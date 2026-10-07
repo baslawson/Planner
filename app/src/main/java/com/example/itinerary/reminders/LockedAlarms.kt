@@ -11,7 +11,7 @@ import com.example.itinerary.data.Reminder
  * it is unlocked BOOT_COMPLETED sets every alarm from the database with the same request codes, replacing these.
  *
  * Only what a notification on the lock screen needs is kept: an event reminder's title, place, day, time, offset label,
- * bill and ring flags and the two tokens its Snooze and Mark paid buttons check (hashes); a task's title; a note's id
+ * bill flag, its sound (ring flag and length) and the two tokens its Snooze and Mark paid buttons check (hashes); a task's title; a note's id
  * and time only — on the lock screen a note reminder says just "Note reminder" (R-2), so no word of the note is stored.
  */
 sealed interface LockedAlarm {
@@ -20,7 +20,7 @@ sealed interface LockedAlarm {
 
     data class Event(val reminderId: Long, override val trigger: Long, val title: String, val location: String,
                      val date: String, val time: String, val offsetLabel: String, val bill: Boolean, val ring: Boolean,
-                     val snoozeToken: String?, val billToken: String?) : LockedAlarm {
+                     val snoozeToken: String?, val billToken: String?, val ringSeconds: Int = 0) : LockedAlarm {
         override val key get() = MissedReminders.eventKey(reminderId)
 
         companion object {
@@ -28,15 +28,16 @@ sealed interface LockedAlarm {
             fun of(item: ItineraryItem, reminder: Reminder, trigger: Long) = Event(reminder.id, trigger, item.title,
                 item.location, item.date.toString(), item.startTime?.toString() ?: "", reminder.label, item.category == "Bills",
                 reminder.ringUntilDismissed, com.example.itinerary.data.eventReminderToken(item, reminder),
-                if (item.category == "Bills" && !item.paid && !item.skipped) com.example.itinerary.data.billReminderToken(item, reminder) else null)
+                if (item.category == "Bills" && !item.paid && !item.skipped) com.example.itinerary.data.billReminderToken(item, reminder) else null,
+                reminder.ringSeconds)
         }
     }
 
-    data class Task(val id: String, override val trigger: Long, val title: String, val ring: Boolean = false) : LockedAlarm {
+    data class Task(val id: String, override val trigger: Long, val title: String, val ring: Boolean = false, val ringSeconds: Int = 0) : LockedAlarm {
         override val key get() = MissedReminders.taskKey(id)
     }
 
-    data class Note(val id: String, override val trigger: Long, val ring: Boolean = false) : LockedAlarm {
+    data class Note(val id: String, override val trigger: Long, val ring: Boolean = false, val ringSeconds: Int = 0) : LockedAlarm {
         override val key get() = MissedReminders.noteKey(id)
     }
 }
@@ -110,9 +111,9 @@ object LockedAlarmCodec {
         snapshot.alarms.forEach { a ->
             when (a) {
                 is LockedAlarm.Event -> line("e", a.reminderId.toString(), a.trigger.toString(), a.title, a.location, a.date, a.time,
-                    a.offsetLabel, flag(a.bill), flag(a.ring), a.snoozeToken, a.billToken)
-                is LockedAlarm.Task -> line("t", a.id, a.trigger.toString(), a.title, flag(a.ring))
-                is LockedAlarm.Note -> line("n", a.id, a.trigger.toString(), flag(a.ring))
+                    a.offsetLabel, flag(a.bill), flag(a.ring), a.snoozeToken, a.billToken, a.ringSeconds.toString())
+                is LockedAlarm.Task -> line("t", a.id, a.trigger.toString(), a.title, flag(a.ring), a.ringSeconds.toString())
+                is LockedAlarm.Note -> line("n", a.id, a.trigger.toString(), flag(a.ring), a.ringSeconds.toString())
             }
         }
     }
@@ -127,9 +128,9 @@ object LockedAlarmCodec {
             runCatching {
                 when (f[0]) {
                     "e" -> LockedAlarm.Event(f[1]!!.toLong(), f[2]!!.toLong(), f[3]!!, f[4]!!, f[5]!!, f[6]!!, f[7]!!,
-                        f[8] == "1", f[9] == "1", f[10], f[11])
-                    "t" -> LockedAlarm.Task(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f[3]!!, f.getOrNull(4) == "1")
-                    "n" -> LockedAlarm.Note(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f.getOrNull(3) == "1")
+                        f[8] == "1", f[9] == "1", f[10], f[11], seconds(f, 12))
+                    "t" -> LockedAlarm.Task(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f[3]!!, f.getOrNull(4) == "1", seconds(f, 5))
+                    "n" -> LockedAlarm.Note(f[1]!!.takeIf { it.isNotEmpty() }!!, f[2]!!.toLong(), f.getOrNull(3) == "1", seconds(f, 4))
                     else -> null
                 }
             }.getOrNull()
@@ -145,6 +146,10 @@ object LockedAlarmCodec {
     }
 
     private fun flag(value: Boolean) = if (value) "1" else "0"
+
+    // The reminder sound's length (ReminderSound), added at the end of each line: a snapshot written before has none (Default),
+    // and a build from before reads these lines as it always did, leaving it out.
+    private fun seconds(f: List<String?>, index: Int): Int = f.getOrNull(index)?.toIntOrNull() ?: 0
 
     private fun StringBuilder.line(vararg values: String?) {
         values.joinTo(this, "\t") { escape(it) }

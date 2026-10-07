@@ -129,7 +129,7 @@ internal fun showEventAgain(context: Context, item: com.example.itinerary.data.I
     val couldNotRing = shown != null && shown.flags and android.app.Notification.FLAG_INSISTENT != 0
     postReminderNotification(context, id, title, content.text, content.subText, reminder.id,
         intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-        couldNotRing = couldNotRing, quiet = true, details = content.details)
+        couldNotRing = couldNotRing, quiet = true, details = content.details, publicText = content.whenText)
 }
 
 private const val MISSED_GROUP = "planner.missed"

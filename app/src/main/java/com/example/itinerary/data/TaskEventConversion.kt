@@ -35,7 +35,7 @@ object TaskEventConversion {
         // RS-3: tasks waiting for it stop waiting (a plain delete leaves them blocked), so it is said.
         if (waiting > 0) dropped += if (waiting == 1) "1 task that waits for it stops waiting." else "$waiting tasks that wait for it stop waiting."
         val reminder = task.reminderAt?.let { at ->
-            reminderBefore(date, null, at, zone)?.copy(ringUntilDismissed = task.ringUntilDismissed)?.also { r ->
+            reminderBefore(date, null, at, zone)?.withSound(task.sound)?.also { r ->
                 val fires = reminderTrigger(date, null, r, zone).toInstant().toEpochMilli()
                 val off = (fires - at) / 60_000
                 if (off != 0L) dropped += "The reminder: ${kotlin.math.abs(off)} min ${if (off < 0) "earlier" else "later"}, as the clock change leaves no way to say its time."
@@ -81,6 +81,7 @@ object TaskEventConversion {
         val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
             checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
             repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = reminderAt != null && first?.ringUntilDismissed == true,
+            ringSeconds = if (reminderAt != null) first?.ringSeconds ?: 0 else 0,
             repeatAnchorDay = if (wholeSeries) monthDay(event.repeatRule, seriesStart) else 0)
         return Converted(task, dropped = dropped)
     }

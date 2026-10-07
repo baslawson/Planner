@@ -96,6 +96,7 @@ class BugHunt18DataTest {
             db.taskDao().insert(task); db.close()
             android.database.sqlite.SQLiteDatabase.openDatabase(base.getDatabasePath(name).path, null, 0).use { raw ->
                 raw.execSQL("ALTER TABLE calendar_sources DROP COLUMN note")
+                listOf("reminders", "tasks", "notes").forEach { raw.execSQL("ALTER TABLE $it DROP COLUMN ringSeconds") } // added in version 36
                 raw.execSQL("DELETE FROM room_master_table"); raw.version = 34
             }
             db = Room.databaseBuilder(base, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()

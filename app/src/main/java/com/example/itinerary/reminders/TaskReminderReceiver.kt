@@ -20,9 +20,10 @@ class TaskReminderReceiver : BroadcastReceiver() {
         if (!DirectBoot.isUnlocked(context)) {
             DirectBoot.fired(context, MissedReminders.taskKey(id), trigger)
             val title = intent.getStringExtra(EXTRA_LOCKED_TITLE) ?: "Task reminder"
-            val ring = intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false)
-            if (!startOwnedAlarm(context, "task", id, title, trigger, ring))
-                postTaskReminder(context, id, title, trigger, couldNotRing = ring)
+            val ringFor = ringSecondsNow(context, intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false),
+                intent.getIntExtra(ReminderScheduler.EXTRA_RING_SECONDS, 0))
+            if (!startOwnedAlarm(context, "task", id, title, trigger, ringFor))
+                postTaskReminder(context, id, title, trigger, couldNotRing = ringFor != null)
             return
         }
         (context.applicationContext as ItineraryApp).reminderScheduler.ledger.fired(MissedReminders.taskKey(id), System.currentTimeMillis())
@@ -30,8 +31,9 @@ class TaskReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 (context.applicationContext as ItineraryApp).repository.deliverTaskReminder(id, trigger) { task ->
-                    if (!startOwnedAlarm(context, "task", id, task.title, trigger, task.ringUntilDismissed))
-                        postTaskReminder(context, id, task.title, trigger, couldNotRing = task.ringUntilDismissed, notes = task.notes)
+                    val ringFor = ringSecondsNow(context, task.ringUntilDismissed, task.ringSeconds)
+                    if (!startOwnedAlarm(context, "task", id, task.title, trigger, ringFor, task.notes))
+                        postTaskReminder(context, id, task.title, trigger, couldNotRing = ringFor != null, notes = task.notes)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("TaskReminderReceiver", "Couldn't deliver task reminder", e)
@@ -55,26 +57,34 @@ class TaskReminderReceiver : BroadcastReceiver() {
 
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
 // [notes]: the task's notes, what it is for: their first line instead of "Task reminder", all of them when opened.
-internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false, allowChime: Boolean = true, notes: String = "") {
+// R6 (hunt 21): one that couldn't ring keeps its notes too, with the reason under them. R2: on the lock screen only the
+// title and time (publicReminder), not the notes.
+internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false, notes: String = "") {
     if (!notificationsEnabled(context)) return
-    val chime = ReminderChime.use(context, allowChime && !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0,
         openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
+    val firstLine = notes.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+    val why = if (couldNotRing) CouldNotRing.now(context) else null // H17-R2
+    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText(if (couldNotRing) CouldNotRing.now(context).short /* H17-R2 */ else notes.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: "Task reminder")
-        .apply { if (notes.isNotBlank() && !couldNotRing) setStyle(NotificationCompat.BigTextStyle().bigText(notes.trim())) }
+        .setContentText(firstLine ?: why?.short ?: "Task reminder")
+        .apply {
+            val big = listOfNotNull(notes.trim().takeIf { it.isNotEmpty() }, why?.full).joinToString("\n")
+            if (big.isNotEmpty()) setStyle(NotificationCompat.BigTextStyle().bigText(big))
+            if (why != null && firstLine != null) setSubText(why.brief)
+        }
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)
         .setOnlyAlertOnce(quiet).setSilent(silent)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setPublicVersion(publicReminder(context, REMINDER_CHANNEL_ID, title, reminderMoment(context, trigger)))
         .addDataAction(context, "Done", TaskActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.taskAction(context, id, trigger)).build()
     try {
         NotificationManagerCompat.from(context).notify("task:$id", 0, notification)
-        if (chime) ReminderChime.play(context)
     } catch (_: SecurityException) {
         // Permission can be revoked after notificationsEnabled was checked.
     }

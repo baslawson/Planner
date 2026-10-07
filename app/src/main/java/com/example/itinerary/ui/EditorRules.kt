@@ -64,8 +64,8 @@ object EditorRules {
     // series) isn't passed in: it changes nothing until something else does.
     fun eventUnsaved(saved: EventEdit, now: EventEdit, recovered: Boolean = false): Boolean {
         fun EventEdit.stored() = copy(added = added.map { it.copy(id = 0, itemId = 0) }, removed = removed.sortedBy { it.id }.map { Attachment(it.id, 0, "", "", "") },
-            reminders = reminders.map { Reminder(itemId = 0, amount = it.amount, unit = it.unit, ringUntilDismissed = it.ringUntilDismissed) }
-                .sortedWith(compareBy({ it.offsetMinutes }, { it.unit }, { it.ringUntilDismissed })))
+            reminders = reminders.map { Reminder(itemId = 0, amount = it.amount, unit = it.unit, ringUntilDismissed = it.ringUntilDismissed, ringSeconds = it.ringSeconds) }
+                .sortedWith(compareBy({ it.offsetMinutes }, { it.unit }, { it.ringUntilDismissed }, { it.ringSeconds })))
         return recovered || saved.stored() != now.stored()
     }
 
@@ -97,7 +97,7 @@ object EditorRules {
     fun taskChangedElsewhere(baseline: com.example.itinerary.data.PlannerTask, stored: com.example.itinerary.data.PlannerTask?): Boolean =
         stored != null && stored.id == baseline.id && (stored.title != baseline.title || stored.notes != baseline.notes ||
             stored.dueDate != baseline.dueDate || stored.priority != baseline.priority || stored.reminderAt != baseline.reminderAt ||
-            stored.ringUntilDismissed != baseline.ringUntilDismissed ||
+            stored.ringUntilDismissed != baseline.ringUntilDismissed || stored.ringSeconds != baseline.ringSeconds ||
             stored.repeat != baseline.repeat || stored.repeatDays != baseline.repeatDays || stored.checklist != baseline.checklist)
 
     fun taskChangedElsewhereBanner(): String = "This task was changed elsewhere"
@@ -109,7 +109,8 @@ object EditorRules {
     // The same for a task. Save trims the title, notes and checklist, so whitespace there alone stores nothing new.
     fun taskUnsaved(saved: com.example.itinerary.data.PlannerTask, now: com.example.itinerary.data.PlannerTask, recovered: Boolean = false): Boolean {
         fun com.example.itinerary.data.PlannerTask.stored() = copy(title = title.trim(), notes = notes.trim(),
-            checklist = checklist.map { it.copy(text = it.text.trim()) }, ringUntilDismissed = ringUntilDismissed && reminderAt != null)
+            checklist = checklist.map { it.copy(text = it.text.trim()) }, ringUntilDismissed = ringUntilDismissed && reminderAt != null,
+            ringSeconds = com.example.itinerary.data.ReminderSound.cleanSeconds(ringUntilDismissed, ringSeconds, reminderAt != null))
         return recovered || saved.stored() != now.stored()
     }
 }

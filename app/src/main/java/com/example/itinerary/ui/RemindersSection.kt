@@ -32,8 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.Reminder
+import com.example.itinerary.data.ReminderSound
 import com.example.itinerary.data.ReminderUnit
+import com.example.itinerary.data.sound
 
 private class Preset(val amount: Int, val unit: ReminderUnit, val text: String)
 
@@ -53,7 +56,7 @@ fun RemindersSection(
     onEnableNotifications: () -> Unit,
     onAdd: (Int, ReminderUnit) -> Unit,
     onRemove: (Reminder) -> Unit,
-    onToggleRing: (Reminder, Boolean) -> Unit,
+    onSound: (Reminder, com.example.itinerary.data.ReminderSound) -> Unit,
     billTask: Boolean = false,
 ) {
     // Bug hunt 19: kept through a rotation, so a date picked survives while the clock is open.
@@ -67,16 +70,17 @@ fun RemindersSection(
 
     val scheduler = (context.applicationContext as com.example.itinerary.ItineraryApp).reminderScheduler
     val exactAllowed by rememberExactAlarmsAllowed(scheduler)
+    val defaultSound = rememberDefaultReminderSound()
 
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
-    ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders)),
+    ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders, defaultSound)),
         chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom…" to { customOpen = true }) +
             ("Pick date and time…" to { pickedDay = null; pickingDate = true })) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
             ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
                 onRemove = { onRemove(reminder) }) {
-                RingReminderSwitch(reminder.ringUntilDismissed) { onToggleRing(reminder, it) }
+                ReminderSoundChoice(reminder.sound, defaultSound) { onSound(reminder, it) }
             }
         }
     }
@@ -113,23 +117,39 @@ const val LATE_REMINDER_HINT = "Android may deliver this reminder late. Enable A
 
 /**
  * The warning under [reminders] while exact alarms are off (the default from Android 14): they may come late, and one set
- * to "Ring until I stop it" can't ring at all (Android starts the ringing alarm only from an exact alarm), so it says so.
+ * to ring (for a few seconds or until stopped, [default] for those left at Default) can't ring at all (Android starts the
+ * ringing alarm only from an exact alarm), so it says so.
  */
-internal fun exactAlarmHint(exactAllowed: Boolean, reminders: List<Reminder>): String? =
-    reminderAlarmHint(exactAllowed, reminders.isNotEmpty(), reminders.any { it.ringUntilDismissed })
+internal fun exactAlarmHint(exactAllowed: Boolean, reminders: List<Reminder>, default: ReminderSound): String? =
+    reminderAlarmHint(exactAllowed, reminders.isNotEmpty(), reminders.any { rings(it.ringUntilDismissed, it.ringSeconds, default) })
+
+/** Whether a reminder with this choice rings (through AlarmService) rather than only notifying. */
+internal fun rings(ring: Boolean, seconds: Int, default: ReminderSound): Boolean =
+    ReminderSound.resolve(ring, seconds, default).alarmSeconds != null
 
 internal fun reminderAlarmHint(exactAllowed: Boolean, hasReminder: Boolean, ring: Boolean): String? = when {
     exactAllowed || !hasReminder -> null
-    ring -> "Exact alarms are off: reminders may come late, and \"Ring until I stop it\" can't " +
-        "ring, only notify. Enable Alarms & reminders in app settings so it can ring."
+    ring -> "Exact alarms are off: reminders may come late, and can't ring, only notify. " +
+        "Enable Alarms & reminders in app settings so they can ring."
     else -> LATE_REMINDER_HINT
 }
 
+/** Settings › Notifications › "Reminder sound", what a reminder left at Default does. */
 @Composable
-fun RingReminderSwitch(ring: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
-    // U14-3: one switch with its label (TalkBack reads it; a tap on the words toggles it).
-    SwitchRow("Ring until I stop it", ring, onChange, Modifier, enabled,
-        MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+internal fun rememberDefaultReminderSound(): ReminderSound {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp
+    val sound by app.settings.reminderSound.collectAsStateWithLifecycle()
+    return sound
+}
+
+/**
+ * A reminder's sound (bugnotes 7 Oct, in place of the "Ring until I stop it" switch): "Sound: Default (10 s) ▾", whose
+ * list is Default, the notification sound only, 10 s, 30 s, 1 min or until stopped ([ReminderSound]).
+ */
+@Composable
+fun ReminderSoundChoice(sound: ReminderSound, default: ReminderSound, enabled: Boolean = true, onChange: (ReminderSound) -> Unit) {
+    DropdownChoice("Sound: ${sound.choiceLabel(default)}", ReminderSound.entries.map { choice ->
+        choice.choiceLabel(default) to { onChange(choice) } }, enabled)
 }
 
 /**

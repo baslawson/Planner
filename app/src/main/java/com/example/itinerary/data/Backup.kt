@@ -375,7 +375,7 @@ class BackupManager(
         })
         put("reminders", data.reminders.toJson {
             JSONObject().put("id", it.id).put("itemId", it.itemId).put("amount", it.amount)
-                .put("unit", it.unit.name).put("ringUntilDismissed", it.ringUntilDismissed)
+                .put("unit", it.unit.name).put("ringUntilDismissed", it.ringUntilDismissed).put("ringSeconds", it.ringSeconds)
                 .put("snoozedUntil", it.snoozedUntil ?: JSONObject.NULL)
         })
         put("attachments", data.attachments.toJson {
@@ -467,6 +467,8 @@ class BackupManager(
                 unit = ReminderUnit.valueOf(it.getString("unit")),
                 ringUntilDismissed = it.optBoolean("ringUntilDismissed", false),
                 snoozedUntil = if (it.isNull("snoozedUntil")) null else it.getLong("snoozedUntil"),
+                // An older backup has no length: Default, the Settings choice (ReminderSound).
+                ringSeconds = ReminderSound.cleanSeconds(it.optBoolean("ringUntilDismissed", false), it.optInt("ringSeconds", 0)),
             )
         }
         val attachments = root.getJSONArray("attachments").objects().mapNotNull {

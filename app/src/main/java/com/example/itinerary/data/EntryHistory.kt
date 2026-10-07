@@ -27,14 +27,43 @@ object EntryHistory {
 
     /** Event titles ([bills]: bill titles) like [typed]; [except] is the event being edited. */
     fun titles(items: List<ItineraryItem>, typed: String, bills: Boolean, today: LocalDate = LocalDate.now(), except: Long? = null): List<Past> =
-        newestFirst(items.filter { it.id != except && (it.category == "Bills") == bills && it.title.isNotBlank() && matches(it.title, typed) }, today) { it.date }
-            .distinctBy { Search.normalize(it.title.trim()) }.take(MAX)
-            .map { Past(it.title.trim(), it.location.trim(), it.category, it.billAmountMinor, it.billCurrency) }
+        prepare(items, today).titles(typed, bills, except)
 
     /** Places (a bill's payee too) like [typed]. */
     fun locations(items: List<ItineraryItem>, typed: String, today: LocalDate = LocalDate.now()): List<String> =
-        newestFirst(items.filter { it.location.isNotBlank() && matches(it.location, typed) }, today) { it.date }
-            .map { it.location.trim() }.distinctBy(Search::normalize).take(MAX)
+        prepare(items, today).locations(typed)
+
+    /**
+     * The events made ready to suggest from, once per change to them (hunt 21 S5): each title and place normalised once,
+     * the newest first, each once (by event kind for titles). An editor then only filters these as letters are typed,
+     * instead of normalising every event (each occurrence of a series too) again on each letter.
+     */
+    fun prepare(items: List<ItineraryItem>, today: LocalDate = LocalDate.now()): Prepared {
+        val sorted = newestFirst(items, today) { it.date }
+        // Two of each title (the newest and the one before), so the event being edited can't hide its title's history.
+        val seen = HashMap<Pair<Boolean, String>, Int>()
+        val titles = sorted.filter { it.title.isNotBlank() }
+            .map { Prepared.Title(it.id, it.category == "Bills", Search.normalize(it.title.trim()),
+                Past(it.title.trim(), it.location.trim(), it.category, it.billAmountMinor, it.billCurrency)) }
+            .filter { t -> seen.merge(t.bill to t.key, 1, Int::plus)!! <= 2 }
+        val places = sorted.filter { it.location.isNotBlank() }.map { it.location.trim() }.distinctBy(Search::normalize)
+            .map { it to Search.normalize(it) }
+        return Prepared(titles, places)
+    }
+
+    class Prepared internal constructor(private val titles: List<Title>, private val places: List<Pair<String, String>>) {
+        internal class Title(val id: Long, val bill: Boolean, val key: String, val past: Past)
+        // [except]: the event being edited; when its own title is its kind's newest, an older one with that title stands in.
+        fun titles(typed: String, bills: Boolean, except: Long? = null): List<Past> {
+            val needle = Search.normalize(typed.trim()); if (needle.isEmpty()) return emptyList()
+            return titles.filter { it.bill == bills && it.id != except && it.key.contains(needle) && !it.past.title.equals(typed.trim(), ignoreCase = true) }
+                .distinctBy { it.key }.take(MAX).map { it.past }
+        }
+        fun locations(typed: String): List<String> {
+            val needle = Search.normalize(typed.trim()); if (needle.isEmpty()) return emptyList()
+            return places.filter { (place, key) -> key.contains(needle) && !place.equals(typed.trim(), ignoreCase = true) }.take(MAX).map { it.first }
+        }
+    }
 
     /** Task titles like [typed], those due most recently first (then ones with no due date). */
     fun taskTitles(tasks: List<PlannerTask>, typed: String, today: LocalDate = LocalDate.now(), except: String? = null): List<String> =

@@ -38,7 +38,7 @@ class RingingOwnershipTest {
             else app.repository.saveNote(PlannerNote(id=id, title="QA queued note", reminderAt=at, ringUntilDismissed=true), true)
         }
         ins.runOnMainSync {
-            assertTrue(startOwnedAlarm(app, kind, id, "QA queued task", at, true))
+            assertTrue(startOwnedAlarm(app, kind, id, "QA queued task", at, ringFor = 0))
             runBlocking(Dispatchers.IO) {
                 if (kind == "task") {
                     val task = app.repository.task(id)!!
@@ -75,7 +75,7 @@ class RingingOwnershipTest {
         assertFalse("Cancelled alarm still has a native player", media.contains(app.packageName))
         waitFor("Cancelled-start status was not removed") { alarm() == null }
         // A later valid start must still work: rejecting one owner cannot poison the service.
-        assertTrue(startOwnedAlarm(app, "task", "qa-control", "QA valid control", at, true))
+        assertTrue(startOwnedAlarm(app, "task", "qa-control", "QA valid control", at, ringFor = 0))
         waitFor("Later valid control did not ring") { alarm()?.notification?.extras?.getString("android.title") == "QA valid control" }
         alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent.send()
         waitFor("Current control Stop failed") { alarm() == null }
@@ -89,7 +89,7 @@ class RingingOwnershipTest {
 
     private fun start(kind: String, id: String, title: String) {
         if (kind == "event") assertTrue(AlarmService.startTest(app))
-        else assertTrue(startOwnedAlarm(app, kind, id, title, System.currentTimeMillis()-1000, true))
+        else assertTrue(startOwnedAlarm(app, kind, id, title, System.currentTimeMillis()-1000, ringFor = 0))
         val expected = if (kind == "event") "Test alarm" else if (kind == "note") "Note reminder" else title
         waitFor("$kind alarm absent") { alarm()?.notification?.extras?.getString("android.title") == expected }
     }
@@ -119,7 +119,7 @@ class RingingOwnershipTest {
         val note = PlannerNote(id="qa-cancelled", title="QA cancelled note", reminderAt=System.currentTimeMillis()-1000, ringUntilDismissed=true)
         runBlocking { app.repository.saveNote(note, true) }
         ins.runOnMainSync {
-            assertTrue(startOwnedAlarm(app, "note", note.id, "Note reminder", note.reminderAt!!, true))
+            assertTrue(startOwnedAlarm(app, "note", note.id, "Note reminder", note.reminderAt!!, ringFor = 0))
             runBlocking(Dispatchers.IO) { app.repository.saveNote(note.copy(ringUntilDismissed=false), false) }
         }
         val end = SystemClock.uptimeMillis() + 3000
@@ -150,7 +150,7 @@ class RingingOwnershipTest {
         val stop = alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent
         ins.runOnMainSync {
             stop.send()
-            assertTrue(startOwnedAlarm(app, "task", "qa-behind", "QA behind", System.currentTimeMillis() - 1000, true))
+            assertTrue(startOwnedAlarm(app, "task", "qa-behind", "QA behind", System.currentTimeMillis() - 1000, ringFor = 0))
         }
         waitFor("The alarm queued behind Stop never rang") { alarm()?.notification?.extras?.getString("android.title") == "QA behind" }
         alarm()!!.notification.actions.single { it.title.toString() == "Stop" }.actionIntent.send()
@@ -164,7 +164,7 @@ class RingingOwnershipTest {
         runBlocking { app.repository.saveTask(task) }
         start("task", task.id, task.title)
         ins.runOnMainSync {
-            assertTrue(startOwnedAlarm(app, "task", "qa-next", "QA next", System.currentTimeMillis() - 1000, true))
+            assertTrue(startOwnedAlarm(app, "task", "qa-next", "QA next", System.currentTimeMillis() - 1000, ringFor = 0))
             runBlocking(Dispatchers.IO) { app.repository.setTaskDone(task.id, true) }
         }
         waitFor("The next alarm didn't ring") { alarm()?.notification?.extras?.getString("android.title") == "QA next" }

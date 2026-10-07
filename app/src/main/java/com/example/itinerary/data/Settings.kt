@@ -155,6 +155,7 @@ fun StartScreen.page(lastCalendar: Boolean): StartScreen = when (this) {
 
 class SettingsRepository(context: Context, private val onChanged: () -> Unit = {}) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val appContext: Context = context.applicationContext ?: context
 
     private val _savedSearches = kotlinx.coroutines.flow.MutableStateFlow(runCatching {
         SavedSearchCodec.decode(org.json.JSONArray(prefs.getString("saved_searches", "[]")))
@@ -276,13 +277,16 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _sendBillsToBudget.value = on
     }
 
-    // Normal reminders sound through silent and vibrate mode (ReminderChime reads the same key, also from receivers).
-    private val _reminderChime = MutableStateFlow(prefs.getBoolean(com.example.itinerary.reminders.ReminderChime.PREF, true))
-    val reminderChime: StateFlow<Boolean> = _reminderChime.asStateFlow()
+    // Settings › Notifications › "Reminder sound": what a reminder left at Default does (ReminderSound). Device-local, as
+    // the switch it replaces was. Kept also where it can be read before the first unlock (ReminderSoundSetting).
+    private val _reminderSound = MutableStateFlow(com.example.itinerary.reminders.ReminderSoundSetting.read(prefs))
+    val reminderSound: StateFlow<ReminderSound> = _reminderSound.asStateFlow()
+    init { com.example.itinerary.reminders.ReminderSoundSetting.mirror(appContext, _reminderSound.value) }
 
-    fun setReminderChime(on: Boolean) {
-        prefs.edit { putBoolean(com.example.itinerary.reminders.ReminderChime.PREF, on) }
-        _reminderChime.value = on
+    fun setReminderSound(sound: ReminderSound) {
+        if (sound == ReminderSound.DEFAULT) return
+        com.example.itinerary.reminders.ReminderSoundSetting.write(appContext, prefs, sound)
+        _reminderSound.value = sound
     }
 
     private val _billsExpanded = MutableStateFlow(prefs.getBoolean("bills_expanded", true))

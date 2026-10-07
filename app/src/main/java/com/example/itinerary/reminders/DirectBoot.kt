@@ -171,9 +171,11 @@ class LockedAlarmManager(private val context: Context) : LockedAlarmSetter {
             is LockedAlarm.Event -> PendingIntent.getBroadcast(context, alarm.reminderId.toInt(),
                 eventIntent(context, alarm), flags)
             is LockedAlarm.Task -> PendingIntent.getBroadcast(context, 0, TaskReminderReceiver.intent(context, alarm.id)
-                .putExtra("trigger", alarm.trigger).putExtra(TaskReminderReceiver.EXTRA_LOCKED_TITLE, alarm.title).putExtra(ReminderScheduler.EXTRA_RING, alarm.ring), flags)
+                .putExtra("trigger", alarm.trigger).putExtra(TaskReminderReceiver.EXTRA_LOCKED_TITLE, alarm.title).putExtra(ReminderScheduler.EXTRA_RING, alarm.ring)
+                .putExtra(ReminderScheduler.EXTRA_RING_SECONDS, alarm.ringSeconds), flags)
             is LockedAlarm.Note -> PendingIntent.getBroadcast(context, 0, NoteReminderReceiver.intent(context, alarm.id)
-                .putExtra("trigger", alarm.trigger).putExtra(ReminderScheduler.EXTRA_RING, alarm.ring), flags)
+                .putExtra("trigger", alarm.trigger).putExtra(ReminderScheduler.EXTRA_RING, alarm.ring)
+                .putExtra(ReminderScheduler.EXTRA_RING_SECONDS, alarm.ringSeconds), flags)
         }
         setReminderAlarm(alarmManager, alarm.trigger, pending)
     }

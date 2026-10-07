@@ -36,6 +36,7 @@ class TaskNoteRingingDataTest {
                 raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
                 raw.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
                 raw.execSQL("ALTER TABLE calendar_sources DROP COLUMN note") // added in version 35
+                listOf("reminders", "tasks", "notes").forEach { raw.execSQL("ALTER TABLE $it DROP COLUMN ringSeconds") } // added in version 36
                 raw.execSQL("DELETE FROM room_master_table"); raw.version = 33
             }
             db = open()

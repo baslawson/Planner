@@ -122,6 +122,8 @@ data class Reminder(
     // Rings like an alarm until the user stops it, instead of a single notification.
     @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
     val snoozedUntil: Long? = null,
+    // How long it rings otherwise (ReminderSound): 0 = the Settings default, -1 = notification sound only, 10/30/60 s.
+    @ColumnInfo(defaultValue = "0") val ringSeconds: Int = 0,
 ) {
     val offsetMinutes: Long get() = amount * unit.minutes
     // Units are equivalent below one day; at or above it, calendar days and elapsed time are different.

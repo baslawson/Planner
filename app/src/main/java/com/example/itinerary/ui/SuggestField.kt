@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 
 // A text box that offers existing names as you type (a note's notebook, its tags): while it has focus, [suggestions]
@@ -40,17 +41,27 @@ fun SuggestField(
     var open by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     val expanded = open && focused && enabled && suggestions.isNotEmpty()
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it }) {
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Hunt 21 S3: the text with its cursor. Typing keeps the cursor where it is; a new value from outside (a suggestion
+    // picked) puts it at the end, so typing on adds to the end, not into the middle of the picked words.
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(value, androidx.compose.ui.text.TextRange(value.length))) }
+    if (field.text != value) field = androidx.compose.ui.text.input.TextFieldValue(value, androidx.compose.ui.text.TextRange(value.length))
+    // S7: Done closes the list too, then does what it did (the caller's action, else closing the keyboard).
+    val actions = KeyboardActions(onDone = { open = false; keyboardActions.onDone?.invoke(this) ?: defaultKeyboardAction(androidx.compose.ui.text.input.ImeAction.Done) },
+        onGo = keyboardActions.onGo, onNext = keyboardActions.onNext, onPrevious = keyboardActions.onPrevious,
+        onSearch = keyboardActions.onSearch, onSend = keyboardActions.onSend)
+    // S1: the box's own tap (what TalkBack's double-tap reaches, as the drop-down anchor) also puts the cursor in it.
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it; if (enabled) runCatching { focus.requestFocus() } }) {
         OutlinedTextField(
-            value = value,
-            onValueChange = { onValueChange(it); open = true },
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, enabled)
+            value = field,
+            onValueChange = { typed -> val changed = typed.text != field.text; field = typed; if (changed) { onValueChange(typed.text); open = true } },
+            modifier = Modifier.fillMaxWidth().focusRequester(focus).menuAnchor(MenuAnchorType.PrimaryEditable, enabled)
                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) open = true },
             label = { Text(label) },
             singleLine = singleLine,
             enabled = enabled,
             keyboardOptions = keyboardOptions,
-            keyboardActions = keyboardActions,
+            keyboardActions = actions,
             trailingIcon = trailingIcon,
         )
         // Back to the top each time it opens rather than where it was left (ED-14); not as it closes, which would flick

@@ -32,6 +32,8 @@ import java.time.LocalTime
 
 // Rings like an alarm clock: looping alarm sound and vibration until the user taps Stop or Snooze.
 // It gives up after [MAX_RING_MINUTES] and leaves a "missed" notification, so a forgotten phone stays quiet.
+// Reminder sound (bugnotes 7 Oct): a reminder set to ring for a few seconds ([EXTRA_RING_FOR]) rings the same way, then
+// stops by itself and leaves its normal notification (not a missed one), as its Stop button does.
 class AlarmService : Service() {
     private var player: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -45,7 +47,8 @@ class AlarmService : Service() {
     private var lastStart = 0
     private var ignoredStart = 0
     private val handler = Handler(Looper.getMainLooper())
-    private val giveUp = Runnable { onGiveUp() }
+    // Its time is up: a timed ring ends as its normal notification, one until stopped as missed.
+    private val giveUp = Runnable { if (timed(ringing)) onRangOut() else onGiveUp() }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,11 +64,12 @@ class AlarmService : Service() {
         }
         when (intent?.action) {
             ACTION_STOP -> {
-                // D14-1: ringing turned off while it rang: the reminder stays, as its normal notification.
+                // D14-1: ringing turned off while it rang: the reminder stays, as its normal notification. So does a timed
+                // ring's Stop: it stops the sound, the reminder stays to act on.
                 // A15-1: only one that still stands (not completed or deleted meanwhile), checked and posted under the lock
                 // that cancelling takes, and without sounding again (A15-3).
                 if (intent.getBooleanExtra(EXTRA_KEEP_REMINDER, false)) ringing?.let { extras ->
-                    synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.isCurrent(this, extras)) postOwnedAlarm(this, extras, silent = true) }
+                    synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.isCurrent(this, extras)) showAsNotification(extras, silent = true) }
                 }
                 stopRinging()
             }
@@ -106,16 +110,8 @@ class AlarmService : Service() {
         val previous = ringing
         val previousStart = ringingStart
         // A14-5: not one completed, deleted or removed meanwhile (its start no longer stands).
-        if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous) && !postOwnedAlarm(this, previous, allowChime = false)) {
-            reminderContent(this, previous)?.let {
-                postReminderNotification(
-                    this,
-                    previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
-                    it.title, it.text, it.subText, previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID), previous.getString(ReminderScheduler.EXTRA_BILL_TOKEN), previous.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-                    allowChime = false, details = it.details, // it has rung already: no chime over the new one
-                )
-            }
-        }
+        // It has rung already: quietly, under the new one's sound.
+        if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous)) showAsNotification(previous, silent = true)
         if (previous?.getString(EXTRA_OWNER_START) != extras?.getString(EXTRA_OWNER_START))
             OwnedAlarmStarts.finish(this, previous)
         ringing = extras
@@ -146,9 +142,11 @@ class AlarmService : Service() {
         if (builtLocked) rebuildAtUnlock()
 
         // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
-        // alarm long past that is left as missed.
-        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis())
-        if (ringFor == null) { onGiveUp(); return }
+        // alarm long past that is left as missed. A timed one rings only what is left of its seconds; with none left it is
+        // its normal notification.
+        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis(),
+            extras.getInt(EXTRA_RING_FOR, 0))
+        if (ringFor == null) { if (timed(extras)) onRangOut() else onGiveUp(); return }
         startSound()
         startVibration()
         handler.removeCallbacks(giveUp)
@@ -158,10 +156,16 @@ class AlarmService : Service() {
     // The ringing notification for [extras]. [quiet]: built again, without popping up a second time.
     private fun notification(extras: Bundle?, quiet: Boolean = false): android.app.Notification {
         val content = reminderContent(this, extras)
+        val timed = timed(extras)
         return NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(content?.title ?: "Alarm")
-            .setContentText(content?.text.orEmpty())
+            // R5 (hunt 21): what it is for, as the reminder's own notification says it: the notes' first line after the time,
+            // all of them when opened. R2: none of it on the lock screen (the public version below: title and time).
+            .setContentText(contentWithDetails(content?.text.orEmpty(), content?.details.orEmpty()))
+            .apply { content?.details?.takeIf { it.isNotBlank() }?.let { setStyle(NotificationCompat.BigTextStyle().bigText("${content.text}\n$it")) } }
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(lockScreen(content?.title ?: "Alarm", content?.whenText.orEmpty(), timed))
             .setSubText(content?.subText.orEmpty())
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -183,8 +187,7 @@ class AlarmService : Service() {
                         addDataAction(this@AlarmService, "Done", NoteActionReceiver.done(this@AlarmService, owner, trigger))
                         addAction(0, "Snooze", SnoozeActivity.noteAction(this@AlarmService, owner, trigger))
                         setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                        setPublicVersion(NotificationCompat.Builder(this@AlarmService, ALARM_CHANNEL_ID)
-                            .setSmallIcon(R.drawable.ic_notification).setContentTitle("Note reminder").build())
+                        setPublicVersion(lockScreen("Note reminder", "", timed))
                     }
                     return@apply
                 }
@@ -198,8 +201,44 @@ class AlarmService : Service() {
                     }
                 } else addAction(0, "Snooze $SNOOZE_MINUTES min", serviceAction(ACTION_SNOOZE))
             }
-            .addAction(0, "Stop", serviceAction(ACTION_STOP))
+            // A timed ring's Stop leaves the reminder's normal notification, as its end does; a swipe (delete intent) or a tap
+            // (opens Planner) is done with it, as with a normal reminder.
+            .addAction(0, "Stop", serviceAction(ACTION_STOP, keepReminder = timed))
             .build()
+    }
+
+    // R2: what the lock screen shows while it rings, where the phone hides sensitive content: [title] and [text] (its time),
+    // no notes, and its Stop, so it can still be stopped without unlocking.
+    private fun lockScreen(title: String, text: String, timed: Boolean): android.app.Notification =
+        NotificationCompat.Builder(this, ALARM_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification).setContentTitle(title)
+            .apply { if (text.isNotBlank()) setContentText(text) }.setCategory(NotificationCompat.CATEGORY_ALARM)
+            .addAction(0, "Stop", serviceAction(ACTION_STOP, keepReminder = timed)).build()
+
+    // Rings for a few seconds ([EXTRA_RING_FOR] above 0), not until stopped.
+    private fun timed(extras: Bundle?): Boolean = (extras?.getInt(EXTRA_RING_FOR, 0) ?: 0) > 0
+
+    /**
+     * [extras]' reminder as its normal notification: a task's or note's (postOwnedAlarm), an event's or bill's with its
+     * notes, Snooze and Mark paid. [missed]: it rang unanswered ("Missed alarm: …"). [silent]: it has just rung.
+     */
+    private fun showAsNotification(extras: Bundle, missed: Boolean = false, silent: Boolean = false) {
+        if (postOwnedAlarm(this, extras, missed = missed, silent = silent)) return
+        val id = extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID)
+        reminderContent(this, extras)?.let {
+            postReminderNotification(
+                this, id.toInt(), (if (missed) "Missed alarm: " else "") + it.title, it.text, it.subText, id,
+                extras.getString(ReminderScheduler.EXTRA_BILL_TOKEN), extras.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
+                details = it.details, silent = silent, publicText = it.whenText,
+            )
+        }
+    }
+
+    // A timed ring's seconds are up (or were, before Android restarted the service): the sound stops and the reminder stays
+    // as its normal notification, quietly, with its buttons. Like a give-up, it ends its own start only (R6-2).
+    private fun onRangOut() {
+        val start = ringingStart
+        ringing?.let { extras -> showAsNotification(extras, silent = true) }
+        stopRinging(start)
     }
 
     private var unlockWatch: android.content.BroadcastReceiver? = null
@@ -317,17 +356,7 @@ class AlarmService : Service() {
     // Given up on, it ends its own start only: an alarm started after it still rings (R6-2).
     private fun onGiveUp() {
         val start = ringingStart
-        ringing?.let { extras ->
-            if (postOwnedAlarm(this, extras, missed = true, allowChime = false)) return@let
-            reminderContent(this, extras)?.let {
-                postReminderNotification(
-                    this,
-                    extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
-                    "Missed alarm: ${it.title}", it.text, it.subText, extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID), extras.getString(ReminderScheduler.EXTRA_BILL_TOKEN), extras.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-                    allowChime = false, details = it.details, // it rang unanswered: no chime on top
-                )
-            }
-        }
+        ringing?.let { extras -> showAsNotification(extras, missed = true) }
         stopRinging(start)
     }
 
@@ -372,11 +401,13 @@ class AlarmService : Service() {
         super.onDestroy()
     }
 
-    private fun serviceAction(action: String): PendingIntent =
+    // [keepReminder]: a Stop that leaves the reminder's notification (a timed ring's button). Its own request code and data,
+    // so it doesn't replace the swipe's plain Stop, the same action.
+    private fun serviceAction(action: String, keepReminder: Boolean = false): PendingIntent =
         PendingIntent.getService(
             this,
-            action.hashCode(),
-            alarmAction(this, action, stopToken),
+            action.hashCode() + if (keepReminder) 1 else 0,
+            alarmAction(this, action, stopToken, keepReminder).putExtra(EXTRA_KEEP_REMINDER, keepReminder),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -434,9 +465,10 @@ class AlarmService : Service() {
         fun stopFromTap(context: Context, token: String?) {
             if (RingToken.matches(stopToken, token)) requestStop(context, token)
         }
-        private fun alarmAction(context: Context, action: String, token: String?): Intent =
+        private fun alarmAction(context: Context, action: String, token: String?, keepReminder: Boolean = false): Intent =
             Intent(context, AlarmService::class.java).setAction(action)
-                .setData(Uri.Builder().scheme("planner").authority("alarm-action").appendPath(action).appendPath(token.orEmpty()).build())
+                .setData(Uri.Builder().scheme("planner").authority("alarm-action").appendPath(action).appendPath(token.orEmpty())
+                    .apply { if (keepReminder) appendPath("keep") }.build())
                 .putExtra(EXTRA_STOP_ALARM, token)
 
         private fun requestStop(context: Context, token: String?, keepReminder: Boolean = false) {
@@ -448,6 +480,8 @@ class AlarmService : Service() {
         private const val EXTRA_KEEP_REMINDER = "keep_reminder"
         const val SNOOZE_MINUTES = 10L
         const val MAX_RING_MINUTES = 10L
+        // Seconds a reminder rings (ringSecondsNow): above 0 a timed ring, 0 (or none) until stopped.
+        const val EXTRA_RING_FOR = "ring_for"
         private const val NOTIFICATION_ID = 1_000_000_001
 
         // Rings a sample alarm so the sound, vibration and buttons can be checked from Settings.
@@ -462,6 +496,7 @@ class AlarmService : Service() {
                 .putExtra(ReminderScheduler.EXTRA_TIME, LocalTime.now().withSecond(0).withNano(0).toString())
                 .putExtra(ReminderScheduler.EXTRA_OFFSET_LABEL, "Test")
                 .putExtra(ReminderScheduler.EXTRA_RING, true)
+                .putExtra(EXTRA_RING_FOR, 0)
                 .putExtra(ReminderScheduler.EXTRA_TRIGGER, System.currentTimeMillis())
             ContextCompat.startForegroundService(context, intent)
             return true
@@ -471,8 +506,16 @@ class AlarmService : Service() {
 
 // How long an alarm rings: its full time when it starts; after Android restarted the service, what is left counted from
 // the reminder's time (at least a minute), or null (missed) once that is long gone. A trigger of 0 (not known) rings fully.
+// [seconds]: a timed ring's length (above 0): it rings that long; after a restart only what is left of it counted from the
+// reminder's time, and null (its normal notification, not missed) once none is left.
 internal object AlarmRestart {
-    fun ringFor(redelivered: Boolean, trigger: Long, now: Long): Long? {
+    fun ringFor(redelivered: Boolean, trigger: Long, now: Long, seconds: Int = 0): Long? {
+        if (seconds > 0) {
+            val timed = seconds * 1_000L
+            if (!redelivered || trigger <= 0L) return timed
+            val left = trigger + timed - now
+            return left.takeIf { it > 0L }?.coerceAtMost(timed)
+        }
         val full = AlarmService.MAX_RING_MINUTES * 60_000L
         if (!redelivered || trigger <= 0L) return full
         val left = trigger + full - now

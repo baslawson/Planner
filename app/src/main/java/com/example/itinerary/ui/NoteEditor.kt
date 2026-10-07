@@ -160,6 +160,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var pendingPhoto by rememberSaveable { mutableStateOf(recovered?.pendingPhoto) }
     // U15-1: no reminder, no ringing, whatever an earlier build stored.
     var ringUntilDismissed by rememberSaveable { mutableStateOf(start.ringUntilDismissed && start.reminderAt != null) }
+    // The reminder's sound otherwise (ReminderSound): 0 = Default.
+    var ringSeconds by rememberSaveable { mutableStateOf(com.example.itinerary.data.ReminderSound.cleanSeconds(start.ringUntilDismissed, start.ringSeconds, start.reminderAt != null)) }
     var reminderAt by rememberSaveable { mutableStateOf(start.reminderAt) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
     var reminderDateDraft by rememberSaveable { mutableStateOf<String?>(null) }
@@ -183,11 +185,12 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     fun load(note: PlannerNote, words: Boolean = true) {
         if (words) { autoTitle = autoTitleFor(note); title = if (autoTitle) "" else note.title; content = TextFieldValue(note.content, TextRange(note.content.length)); notebook = note.notebook }
         color = note.color
-        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null; priority = note.priority
+        pinned = note.pinned; tags = note.tags; setAttachments(note.attachments); reminderAt = note.reminderAt; ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null
+        ringSeconds = com.example.itinerary.data.ReminderSound.cleanSeconds(note.ringUntilDismissed, note.ringSeconds, note.reminderAt != null); priority = note.priority
     }
     // A notebook typed in other capitals goes into the existing one ("home" → "Home").
     val current = (base ?: start).copy(title = shownTitle, content = content.text, notebook = Notes.existingSpelling(notebooks, Notes.cleanNotebook(notebook)), color = color, pinned = pinned,
-        tags = tags, attachments = attachments, reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, priority = priority)
+        tags = tags, attachments = attachments, reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, ringSeconds = ringSeconds, priority = priority)
     // The stored version cleaned once, not again on every letter typed (UI-10).
     val cleanBase = remember(base) { base?.let(Notes::clean) }
     // An auto title alone isn't a change: opening a saved note with no title (one from Nextcloud, say) doesn't save it.
@@ -309,7 +312,8 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         // The fields change only if saving changed them (a merge, trimmed text), so typing isn't disturbed otherwise.
         val edited = Notes.clean(current)
         val same = note.title == edited.title && note.content == edited.content && note.notebook == edited.notebook && note.color == edited.color && note.priority == edited.priority &&
-            note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt && note.ringUntilDismissed == edited.ringUntilDismissed
+            note.pinned == edited.pinned && note.tags == edited.tags && note.attachments == edited.attachments && note.reminderAt == edited.reminderAt && note.ringUntilDismissed == edited.ringUntilDismissed &&
+            note.ringSeconds == edited.ringSeconds
         // EU-1: a merge brings in another device's words: loaded as no step, so Undo can't take them back unseen.
         base = note; if (!same) { val words = noteWordsDiffer(note, edited.title, edited.content, edited.notebook); if (words) undo.reload(); load(note, words) }; justSaved = true
         // An auto save keeps the files: the editor is still open and may use them (Close releases them).
@@ -334,10 +338,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     var discardAfterAutoSave by remember { mutableStateOf(false) }
     // Whether the Save button reads out its state (after a tap on it; not for auto saves).
     var announceSave by remember { mutableStateOf(false) }
+    // A Save tapped during an auto save, with what was to follow it: run once that is done.
+    var saveAfterAutoSave by remember { mutableStateOf<(() -> Unit)?>(null) }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     fun save(then: () -> Unit = {}) {
-        // An auto save under way finishes first (two at once could make the new note twice); it saves what's here anyway.
-        if (busy || autoSaving) return
+        // An auto save under way finishes first (two at once could make the new note twice); this Save then follows it
+        // (hunt 21 N3: it used to do nothing, silently).
+        if (busy) return
+        if (autoSaving) { saveAfterAutoSave = then; announceSave = true; return }
         announceSave = true
         // A reminder set or changed here must be ahead; one already saved that has rung can stay as it is.
         if (reminderAt != null && reminderAt != base?.reminderAt && reminderAt!! <= System.currentTimeMillis()) {
@@ -386,7 +394,11 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // [theirs] (a merge with a change made elsewhere) into the fields [mine] (what was sent) didn't change since: [now].
     fun takeTheirs(theirs: PlannerNote, mine: PlannerNote, now: PlannerNote) {
         var words = false
-        if (!autoTitle && now.title == mine.title && theirs.title != mine.title) { title = theirs.title; words = true }
+        // Hunt 21 N1: also while the title is automatic: a title given elsewhere comes in (and stops it being automatic,
+        // unless it is the first line), or the next save would write the first line back over it.
+        if (now.title == mine.title && theirs.title != mine.title) {
+            autoTitle = autoTitleFor(theirs); title = if (autoTitle) "" else theirs.title; words = true
+        }
         if (now.content == mine.content && theirs.content != mine.content) {
             content = TextFieldValue(theirs.content, TextRange(theirs.content.length)); words = true
         }
@@ -396,8 +408,9 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
         if (now.pinned == mine.pinned) pinned = theirs.pinned
         if (now.tags == mine.tags) tags = theirs.tags
         if (now.attachments == mine.attachments) setAttachments(theirs.attachments)
-        if (now.reminderAt == mine.reminderAt && now.ringUntilDismissed == mine.ringUntilDismissed) {
+        if (now.reminderAt == mine.reminderAt && now.ringUntilDismissed == mine.ringUntilDismissed && now.ringSeconds == mine.ringSeconds) {
             reminderAt = theirs.reminderAt; ringUntilDismissed = theirs.ringUntilDismissed && theirs.reminderAt != null
+            ringSeconds = com.example.itinerary.data.ReminderSound.cleanSeconds(theirs.ringUntilDismissed, theirs.ringSeconds, theirs.reminderAt != null)
         }
         if (now.priority == mine.priority) priority = theirs.priority
     }
@@ -448,6 +461,10 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // A Close that waited for an auto save: run once the screen has its result (the saved note as base), not from the
     // save's own coroutine, which still sees the note as it was before.
     LaunchedEffect(closeAfterAutoSave, autoSaving) { if (closeAfterAutoSave && !autoSaving) { closeAfterAutoSave = false; busy = false; closeNow() } }
+    LaunchedEffect(saveAfterAutoSave, autoSaving) {
+        val then = saveAfterAutoSave
+        if (then != null && !autoSaving) { saveAfterAutoSave = null; if (unsaved) save(then) else { justSaved = true; then() } }
+    }
     // E3: Discard really discards a new note: not saved, and if its first auto save got there first, removed again.
     fun discardNote() { if (autoSaving) { discardAfterAutoSave = true; busy = true } else discard() }
     LaunchedEffect(discardAfterAutoSave, autoSaving) {
@@ -550,8 +567,14 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                     androidx.compose.material3.TextField(shownTitle, { typed ->
                             // Any change makes it the user's own title; deleting it all leaves the note without one (no
                             // auto title, remembered for this note).
+                            val wasAuto = autoTitle
                             title = typed.replace('\n', ' ').take(Notes.MAX_TITLE); autoTitle = false
-                            app.settings.setNoAutoTitle(initial.id, title.isBlank()) },
+                            app.settings.setNoAutoTitle(initial.id, title.isBlank())
+                            // Hunt 21 N2: deleting an automatic title changes no typed text (it was "" underneath), so it is
+                            // made a step of its own: Undo brings the automatic title back.
+                            if (wasAuto && title.isBlank()) undo.around(
+                                undo = { autoTitle = true; app.settings.setNoAutoTitle(initial.id, false) },
+                                redo = { autoTitle = false; app.settings.setNoAutoTitle(initial.id, true) }) },
                         Modifier.fillMaxWidth().onSizeChanged { titleHeight = with(density) { it.height.toDp() } },
                         placeholder = { Text("Title", style = MaterialTheme.typography.headlineSmall) }, singleLine = true, enabled = !busy,
                         textStyle = MaterialTheme.typography.headlineSmall, colors = plain,
@@ -664,7 +687,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
                             trailingIcon = { if (newTag.isNotBlank()) IconButton(enabled = !busy, onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
-                        NoteReminderSection(reminderAt, ringUntilDismissed, onRing = { ringUntilDismissed = it }, snoozedUntil = base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
+                        NoteReminderSection(reminderAt, com.example.itinerary.data.ReminderSound.of(ringUntilDismissed, ringSeconds), onSound = { ringUntilDismissed = it.ring; ringSeconds = it.seconds }, snoozedUntil = base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
                             enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
                         Text("Importance", style = MaterialTheme.typography.titleSmall)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -752,16 +775,17 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
 
 // A note's one reminder: In 1 hour, Tomorrow 09:00 or Custom; once set, its time with Remove (and a snooze, if any).
 @Composable
-private fun NoteReminderSection(reminderAt: Long?, ring: Boolean, onRing: (Boolean) -> Unit, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
+private fun NoteReminderSection(reminderAt: Long?, sound: com.example.itinerary.data.ReminderSound, onSound: (com.example.itinerary.data.ReminderSound) -> Unit, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
     val notifications = rememberNotificationState()
     val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
+    val defaultSound = rememberDefaultReminderSound()
     var stale by remember { mutableIntStateOf(0) }
     val presets = remember(reminderAt, stale) { com.example.itinerary.data.taskReminderPresets(null) }
     val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
     ReminderSectionFrame(notifications.enabled, notifications.enable,
-        hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, ring)),
+        hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, rings(sound.ring, sound.seconds, defaultSound))),
         chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
             (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
                 // Timed from the tap; a choice that has passed since goes.
@@ -772,7 +796,8 @@ private fun NoteReminderSection(reminderAt: Long?, ring: Boolean, onRing: (Boole
         enabled = enabled) {
         reminderAt?.let { at ->
             ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
-                onRemove = { onSet(null); onRing(false) }, enabled = enabled) { RingReminderSwitch(ring, enabled, onRing) }
+                onRemove = { onSet(null); onSound(com.example.itinerary.data.ReminderSound.DEFAULT) }, enabled = enabled) {
+                ReminderSoundChoice(sound, defaultSound, enabled, onSound) }
         }
     }
 }

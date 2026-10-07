@@ -236,9 +236,13 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val repo = app.repository
     val notifications = rememberNotificationState()
     val exactAllowed by rememberExactAlarmsAllowed(app.reminderScheduler)
+    val defaultSound = rememberDefaultReminderSound()
     // U15-1: no reminder, no ringing, whatever an earlier build stored.
     val initialRing = initial.ringUntilDismissed && initial.reminderAt != null
     var ringUntilDismissed by rememberSaveable(initial.id) { mutableStateOf(draft?.optBoolean("ringUntilDismissed", initialRing) ?: initialRing) }
+    // The reminder's sound otherwise (ReminderSound): 0 = Default. A draft from before has none.
+    val initialSeconds = com.example.itinerary.data.ReminderSound.cleanSeconds(initial.ringUntilDismissed, initial.ringSeconds, initial.reminderAt != null)
+    var ringSeconds by rememberSaveable(initial.id) { mutableStateOf(draft?.optInt("ringSeconds", initialSeconds) ?: initialSeconds) }
     var reminderAt by rememberSaveable(initial.id) { mutableStateOf(if (draft != null && !draft.isNull("reminderAt")) draft.getLong("reminderAt") else if (draft != null) null else initial.reminderAt) }
     var reminderSuggestion by rememberSaveable(initial.id) { mutableStateOf<String?>(null) }
     var choosingReminderDate by rememberSaveable { mutableStateOf(false) }
@@ -293,7 +297,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val attachmentStore = app.attachmentStore
     val snapshot = JSONObject().put("id", initial.id).put("title", title).put("notes", notes)
         .put("date", date.orEmpty()).put("priority", priority).put("reminderAt", reminderAt ?: JSONObject.NULL)
-        .put("ringUntilDismissed", ringUntilDismissed)
+        .put("ringUntilDismissed", ringUntilDismissed).put("ringSeconds", ringSeconds)
         .put("prerequisiteIds", JSONArray(prerequisiteIds))
         .put("repeat", repeat).put("repeatDays", repeatDays).put("checklist", JSONArray(ChecklistCodec.encode(checklist)))
         .put("attachments", DraftCodec.attachments(attachments)).put("pendingPhoto", pendingPhoto.orEmpty())
@@ -324,7 +328,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     // or a new one as offered); a resumed draft always counts. Save greys out without them (a new task can still be
     // saved as it is) and Close only asks "Save changes?" with them.
     fun currentTask() = initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority),
-        reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, repeat = repeat, repeatDays = repeatDays.toIntOrNull() ?: -1, checklist = checklist,
+        reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, ringSeconds = ringSeconds, repeat = repeat, repeatDays = repeatDays.toIntOrNull() ?: -1, checklist = checklist,
         attachments = attachments, prerequisiteIds = prerequisiteIds)
     val openedWith = remember { currentTask() }
     val unsaved = EditorRules.taskUnsaved(openedWith, currentTask(), recovered = draft != null || prefilled)
@@ -349,7 +353,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         // A new task (also one handed over from Quick entry) never saves a reminder that has passed.
         if (reminderAt != null && (creating || reminderAt != initial.reminderAt) && reminderAt!! <= System.currentTimeMillis()) {
             error = "Choose a future reminder date and time."
-        } else action(keepOpen = !close) { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed,
+        } else action(keepOpen = !close) { repo.saveTask(initial.copy(title = title, notes = notes, dueDate = date?.let(LocalDate::parse), priority = TaskPriority.valueOf(priority), reminderAt = reminderAt, ringUntilDismissed = ringUntilDismissed, ringSeconds = ringSeconds,
             repeat = repeat, repeatDays = repeatDays.toIntOrNull()?.coerceIn(1, 3650) ?: 7,
             repeatAnchorDay = if (date != initial.dueDate?.toString() || repeat != initial.repeat) 0 else initial.repeatAnchorDay,
             checklist = checklist.map { it.copy(text = it.text.trim()) }, attachments = attachments, prerequisiteIds = prerequisiteIds), create = creating)
@@ -469,7 +473,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 val presets = remember(date, reminderAt, presetsStale) { taskReminderPresets(date?.let(LocalDate::parse)) }
                 val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
                 ReminderSectionFrame(notifications.enabled, notifications.enable,
-                    hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, ringUntilDismissed)),
+                    hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, rings(ringUntilDismissed, ringSeconds, defaultSound))),
                     chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
                         when (preset) {
                             TaskReminderPreset.ON_THE_DAY -> "On the day $nine"
@@ -493,8 +497,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             initial.done -> "Reminders are off while this task is completed."
                             snoozed != null && at == initial.reminderAt -> "Snoozed until ${momentLabel(snoozed)}. Changing the reminder ends the snooze."
                             else -> null
-                        }, onRemove = { reminderAt = null; ringUntilDismissed = false }, enabled = !busy) {
-                            RingReminderSwitch(ringUntilDismissed, enabled = !busy) { ringUntilDismissed = it }
+                        }, onRemove = { reminderAt = null; ringUntilDismissed = false; ringSeconds = 0 }, enabled = !busy) {
+                            ReminderSoundChoice(com.example.itinerary.data.ReminderSound.of(ringUntilDismissed, ringSeconds), defaultSound, enabled = !busy) {
+                                ringUntilDismissed = it.ring; ringSeconds = it.seconds }
                         }
                     }
                 }

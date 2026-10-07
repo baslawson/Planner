@@ -33,6 +33,8 @@ data class PlannerNote(
     // How important it is (Low / Normal / High, as a task's priority); the page can sort by it. Stays on the phone.
     @ColumnInfo(defaultValue = "'NORMAL'") val priority: TaskPriority = TaskPriority.NORMAL,
     @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
+    // The reminder's sound otherwise (ReminderSound): 0 = the Settings default, -1 = notification sound only, 10/30/60 s.
+    @ColumnInfo(defaultValue = "0") val ringSeconds: Int = 0,
 )
 
 /** How the Notes page orders its cards; pinned notes stay on top in every one. */
@@ -81,7 +83,7 @@ interface NoteDao {
     @Insert suspend fun insert(note: PlannerNote)
     @Insert suspend fun insertAll(notes: List<PlannerNote>)
     // U15-1: a ring choice left without its reminder (builds before that rule) is cleared.
-    @Query("UPDATE notes SET ringUntilDismissed = 0 WHERE ringUntilDismissed = 1 AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
+    @Query("UPDATE notes SET ringUntilDismissed = 0, ringSeconds = 0 WHERE (ringUntilDismissed = 1 OR ringSeconds != 0) AND reminderAt IS NULL") suspend fun clearRingWithoutReminder(): Int
     @Update suspend fun update(note: PlannerNote)
     // Room for a note placed at [from] (Duplicate): every note there or after it moves down one place, or [by] places.
     @Query("UPDATE notes SET position = position + 1 WHERE position >= :from") suspend fun makeRoomAt(from: Long)
@@ -121,7 +123,7 @@ object Notes {
      */
     fun copyOf(note: PlannerNote, now: Long = System.currentTimeMillis()): PlannerNote =
         note.copy(id = UUID.randomUUID().toString(), title = copyTitle(note), pinned = false, reminderAt = null, snoozedUntil = null,
-            ringUntilDismissed = false, created = now, modified = now, position = 0)
+            ringUntilDismissed = false, ringSeconds = 0, created = now, modified = now, position = 0)
 
     fun copyTitle(note: PlannerNote): String {
         val base = note.title.trim().ifBlank { label(note).takeUnless { it == "Untitled note" }.orEmpty() }
@@ -250,6 +252,7 @@ object Notes {
         attachments = Tasks.capText(PlannerTask(title = "x", attachments = note.attachments)).attachments,
         // U14-2: ringing is a choice of a reminder; without one it is off.
         ringUntilDismissed = note.ringUntilDismissed && note.reminderAt != null,
+        ringSeconds = ReminderSound.cleanSeconds(note.ringUntilDismissed, note.ringSeconds, note.reminderAt != null),
     )
 
     // Words, a file or a photo: a note the user saves has something in it.
@@ -308,11 +311,11 @@ fun mergeNotes(base: PlannerNote, mine: PlannerNote, theirs: PlannerNote): Plann
     }
     val title = pick { it.title }; val content = pick { it.content }; val notebook = pick { it.notebook }
     val color = pick { it.color }; val pinned = pick { it.pinned }; val tags = pick { it.tags }
-    val attachments = pick { it.attachments }; val reminder = pick { it.reminderAt to it.ringUntilDismissed }; val archived = pick { it.archived }
+    val attachments = pick { it.attachments }; val reminder = pick { Triple(it.reminderAt, it.ringUntilDismissed, it.ringSeconds) }; val archived = pick { it.archived }
     val priority = pick { it.priority }
     if (!listOf(title, content, notebook, color, pinned, tags, attachments, reminder, archived, priority).all { it.second }) return null
     return theirs.copy(title = title.first, content = content.first, notebook = notebook.first, color = color.first,
-        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first.first, ringUntilDismissed = reminder.first.second, archived = archived.first,
+        pinned = pinned.first, tags = tags.first, attachments = attachments.first, reminderAt = reminder.first.first, ringUntilDismissed = reminder.first.second, ringSeconds = reminder.first.third, archived = archived.first,
         priority = priority.first)
 }
 
@@ -325,7 +328,7 @@ object NoteCodec {
             .put("tags", JSONArray(note.tags))
             .put("attachments", DraftCodec.attachments(note.attachments))
             .put("reminderAt", note.reminderAt ?: JSONObject.NULL)
-            .put("ringUntilDismissed", note.ringUntilDismissed)
+            .put("ringUntilDismissed", note.ringUntilDismissed).put("ringSeconds", note.ringSeconds)
             .put("snoozedUntil", note.snoozedUntil ?: JSONObject.NULL)
             .put("position", note.position).put("priority", note.priority.name)) }
     }
@@ -345,7 +348,9 @@ object NoteCodec {
             DraftCodec.attachments(value.optJSONArray("attachments")), time("reminderAt"), time("snoozedUntil"),
             // Older files have no place: most recently changed first, as the page sorted them then.
             time("position") ?: -(time("modified") ?: created),
-            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL), ringUntilDismissed = value.optBoolean("ringUntilDismissed", false) && time("reminderAt") != null)
+            runCatching { TaskPriority.valueOf(value.optString("priority", "NORMAL")) }.getOrDefault(TaskPriority.NORMAL), ringUntilDismissed = value.optBoolean("ringUntilDismissed", false) && time("reminderAt") != null,
+            // Older files have no length: Default (ReminderSound). Notes.clean keeps only one on offer.
+            ringSeconds = value.optInt("ringSeconds", 0))
             // A note saved by a later version with longer text is cut rather than refusing the whole file.
             .let(Notes::clean)
     }

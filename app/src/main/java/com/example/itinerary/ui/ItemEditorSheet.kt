@@ -756,8 +756,31 @@ private fun ItemEditorForm(
             )
             // Titles used before, as you type: picking one fills in what went with it last time where nothing is entered
             // yet (an event's place and category; a bill's payee, amount and currency).
-            val pastTitles = remember(title, allEvents, category) {
-                com.example.itinerary.data.EntryHistory.titles(allEvents, title, bills = category == "Bills", except = initial.id.takeIf { it != 0L })
+            // Prepared once per change to the events (hunt 21 S5), so each letter only filters, not every event again.
+            val history = remember(allEvents) { com.example.itinerary.data.EntryHistory.prepare(allEvents) }
+            val pastTitles = remember(title, history, category) {
+                history.titles(title, bills = category == "Bills", except = initial.id.takeIf { it != 0L })
+            }
+            // A pick is one Undo step: the title and what it filled in (hunt 21 S4), the way a template is.
+            fun pickTitle(t: String) {
+                val past = pastTitles.firstOrNull { it.title == t }
+                val kept = listOf(UndoKept({ category }) { category = it }, UndoKept({ billAmountText }) { billAmountText = it },
+                    UndoKept({ billCurrency }) { billCurrency = it })
+                // S8: within the editor's limits, as if typed.
+                title = t.take(EventText.MAX_TITLE)
+                if (past != null) {
+                    if (location.isBlank()) location = past.location.take(EventText.MAX_LOCATION)
+                    // S6: a new event takes the category it had last time; a saved one keeps its own.
+                    if (initial.id == 0L && category == initial.category && past.category != category && past.category != "Bills" && category != "Bills") category = past.category
+                    // S2: the amount and its currency together, only when the amount was still empty; a currency chosen
+                    // (or an amount typed) stays.
+                    if (category == "Bills" && billAmountText.isBlank() && past.amountMinor != null) {
+                        billAmountText = Bills.input(past.amountMinor)
+                        if (payments.isEmpty()) billCurrency = past.currency
+                    }
+                }
+                kept.forEach { it.applied() }
+                if (kept.any { it.changed }) undo.around(undo = { kept.forEach { it.back() } }, redo = { kept.forEach { it.again() } })
             }
             SuggestField(
                 value = title,
@@ -765,18 +788,7 @@ private fun ItemEditorForm(
                 label = if (billTask) "Bill title" else "What are you doing?",
                 suggestions = pastTitles.map { it.title },
                 shown = { t -> pastTitles.firstOrNull { it.title == t }?.location?.takeIf { it.isNotBlank() }?.let { "$t · $it" } ?: t },
-                onPick = { t ->
-                    val past = pastTitles.firstOrNull { it.title == t }
-                    title = t
-                    if (past != null) {
-                        if (location.isBlank()) location = past.location
-                        if (category == initial.category && past.category != category && past.category != "Bills" && category != "Bills") category = past.category
-                        if (category == "Bills") {
-                            if (billAmountText.isBlank() && past.amountMinor != null) billAmountText = Bills.input(past.amountMinor)
-                            if (payments.isEmpty()) billCurrency = past.currency
-                        }
-                    }
-                },
+                onPick = ::pickTitle,
                 enabled = !busy,
                 // Grows as the text wraps; Done closes the keyboard instead of adding a line break.
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -972,13 +984,13 @@ private fun ItemEditorForm(
                 )
             }
             // Places (and payees) used before, as you type.
-            val pastPlaces = remember(location, allEvents) { com.example.itinerary.data.EntryHistory.locations(allEvents, location) }
+            val pastPlaces = remember(location, history) { history.locations(location) }
             SuggestField(
                 value = location,
                 onValueChange = { location = EventText.typed(location, it.replace('\n', ' '), EventText.MAX_LOCATION) },
                 label = if (billTask) "Payee / location (optional)" else "Location",
                 suggestions = pastPlaces,
-                onPick = { location = it },
+                onPick = { location = it.take(EventText.MAX_LOCATION) },
                 enabled = !busy,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 singleLine = false,
@@ -1058,8 +1070,8 @@ private fun ItemEditorForm(
                 onRemove = { reminder ->
                     if (reminder in addedReminders) addedReminders.remove(reminder) else removedReminders += reminder
                 },
-                onToggleRing = { reminder, ring ->
-                    val changed = reminder.copy(ringUntilDismissed = ring)
+                onSound = { reminder, sound ->
+                    val changed = reminder.copy(ringUntilDismissed = sound.ring, ringSeconds = sound.seconds)
                     val index = addedReminders.indexOf(reminder)
                     if (index >= 0) {
                         addedReminders[index] = changed

@@ -109,10 +109,12 @@ object DraftCodec {
     }
     fun reminders(values: List<Reminder>): JSONArray = JSONArray().apply { values.forEach { r -> put(JSONObject()
         .put("id", r.id).put("itemId", r.itemId).put("amount", r.amount).put("unit", r.unit.name)
-        .put("ring", r.ringUntilDismissed).put("snoozedUntil", r.snoozedUntil)) } }
+        .put("ring", r.ringUntilDismissed).put("ringSeconds", r.ringSeconds).put("snoozedUntil", r.snoozedUntil)) } }
     fun reminders(json: JSONArray?): List<Reminder> = if (json == null) emptyList() else List(json.length()) { i ->
         val r = json.getJSONObject(i)
         Reminder(r.getLong("id"), r.getLong("itemId"), r.getInt("amount"), ReminderUnit.valueOf(r.getString("unit")),
-            r.getBoolean("ring"), if (r.has("snoozedUntil")) r.getLong("snoozedUntil") else null)
+            r.getBoolean("ring"), if (r.has("snoozedUntil")) r.getLong("snoozedUntil") else null,
+            // A draft from before has no length: Default.
+            ReminderSound.cleanSeconds(r.getBoolean("ring"), r.optInt("ringSeconds", 0)))
     }
 }

@@ -170,9 +170,10 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         }
         // Distinct receiver and URI keep task alarms independent of event ids and hash collisions.
         val intent = TaskReminderReceiver.intent(context, task.id).putExtra("trigger", triggerAt).putExtra(EXTRA_RING, task.ringUntilDismissed)
+            .putExtra(EXTRA_RING_SECONDS, task.ringSeconds)
         val updated = PendingIntent.getBroadcast(context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        armed(LockedAlarm.Task(task.id, triggerAt, task.title, task.ringUntilDismissed))
+        armed(LockedAlarm.Task(task.id, triggerAt, task.title, task.ringUntilDismissed, task.ringSeconds))
         setAlarm(triggerAt, updated)
     }
 
@@ -201,8 +202,9 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
             return
         }
         val intent = NoteReminderReceiver.intent(context, note.id).putExtra("trigger", triggerAt).putExtra(EXTRA_RING, note.ringUntilDismissed)
+            .putExtra(EXTRA_RING_SECONDS, note.ringSeconds)
         val updated = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        armed(LockedAlarm.Note(note.id, triggerAt, note.ringUntilDismissed))
+        armed(LockedAlarm.Note(note.id, triggerAt, note.ringUntilDismissed, note.ringSeconds))
         setAlarm(triggerAt, updated)
     }
 
@@ -327,7 +329,10 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         const val EXTRA_OFFSET_LABEL = "offset_label"
         // The event's notes: what it is for (bugnotes 7 Oct). Not in the locked-reboot snapshot, which shows title and time.
         const val EXTRA_NOTES = "notes"
+        // "Until I stop it" (ringUntilDismissed), and the length otherwise (ringSeconds, ReminderSound), as stored: the
+        // receiver resolves Default with the setting as it is when the reminder rings.
         const val EXTRA_RING = "ring"
+        const val EXTRA_RING_SECONDS = "ring_seconds"
     }
 }
 
@@ -350,6 +355,7 @@ internal fun eventIntent(context: Context, e: LockedAlarm.Event): Intent =
         .putExtra(ReminderScheduler.EXTRA_TIME, e.time)
         .putExtra(ReminderScheduler.EXTRA_OFFSET_LABEL, e.offsetLabel)
         .putExtra(ReminderScheduler.EXTRA_RING, e.ring)
+        .putExtra(ReminderScheduler.EXTRA_RING_SECONDS, e.ringSeconds)
         .putExtra(ReminderScheduler.EXTRA_BILL_TOKEN, e.billToken)
 
 // Exact when Android allows it; otherwise a little late (see ReminderScheduler.canScheduleExact).

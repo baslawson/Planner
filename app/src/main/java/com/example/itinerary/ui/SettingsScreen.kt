@@ -226,10 +226,18 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    val reminderChime by settings.reminderChime.collectAsStateWithLifecycle()
-                    SwitchRow("Play reminder sounds in silent and vibrate mode", reminderChime, settings::setReminderChime)
-                    Text(if (reminderChime) "Reminders play a short sound at alarm volume, even when the phone is on silent or vibrate. Not during Do Not Disturb or a call, or when the notification sound is None."
-                        else "Reminders use the notification sound, which silent and vibrate mode mute. \"Ring until I stop it\" always rings.",
+                    // Bugnotes 7 Oct: what a reminder left at "Default" does (ReminderSound); each reminder can choose its own.
+                    val reminderSound by settings.reminderSound.collectAsStateWithLifecycle()
+                    Spacer(Modifier.height(8.dp))
+                    Text("Reminder sound", style = MaterialTheme.typography.bodyMedium)
+                    DropdownChoice(reminderSound.label, com.example.itinerary.data.ReminderSound.settingChoices.map { choice ->
+                        choice.label to { settings.setReminderSound(choice) } })
+                    Text(when (reminderSound) {
+                        com.example.itinerary.data.ReminderSound.NOTIFICATION -> "Reminders use the notification sound, which silent and vibrate mode mute."
+                        com.example.itinerary.data.ReminderSound.UNTIL_STOPPED -> "Reminders ring like an alarm until you stop them, even on silent or vibrate and on the lock screen."
+                        else -> "Reminders ring like an alarm for ${reminderSound.label.lowercase()}, even on silent or vibrate and on the lock screen. " +
+                            "Not during Do Not Disturb or a call: then they use the notification sound."
+                    } + " Each reminder can choose its own sound.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     StackedButton("Send test notification") {
                         if (!sendTestNotification(context)) {

@@ -161,6 +161,7 @@ class NotesDataTest {
             val raw = android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, 0)
             raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
             raw.execSQL("ALTER TABLE calendar_sources DROP COLUMN note") // added in version 35
+            listOf("reminders", "tasks", "notes").forEach { raw.execSQL("ALTER TABLE $it DROP COLUMN ringSeconds") } // added in version 36
             raw.execSQL("DROP TABLE notes"); raw.execSQL("DROP TABLE sent_notes"); raw.execSQL("DELETE FROM room_master_table"); raw.version = 30; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             assertEquals(task, db.taskDao().all().single())
@@ -188,6 +189,7 @@ class NotesDataTest {
             raw.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
             raw.execSQL("ALTER TABLE notes DROP COLUMN position"); raw.execSQL("ALTER TABLE notes DROP COLUMN priority")
             raw.execSQL("ALTER TABLE calendar_sources DROP COLUMN note") // added in version 35
+            listOf("reminders", "tasks", "notes").forEach { raw.execSQL("ALTER TABLE $it DROP COLUMN ringSeconds") } // added in version 36
             raw.execSQL("DELETE FROM room_master_table"); raw.version = 32; raw.close()
             db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
             val upgraded = db.noteDao().all()

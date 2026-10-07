@@ -411,7 +411,7 @@ class NoteSync(
         }
         suspend fun conflictCopy(mine: PlannerNote) {
             val copy = mine.copy(id = java.util.UUID.randomUUID().toString(),
-                title = (Notes.label(mine) + " (conflict copy)").take(Notes.MAX_TITLE), reminderAt = null, snoozedUntil = null, ringUntilDismissed = false)
+                title = (Notes.label(mine) + " (conflict copy)").take(Notes.MAX_TITLE), reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
             if (put(copy, null)) conflicts++
         }
         // One note Nextcloud refuses (a shared note it won't let Planner change, say) is left as it is; the rest go on.

@@ -123,13 +123,6 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- A normal reminder's chime in silent and vibrate mode: Android mutes background sound otherwise. -->
-        <service
-            android:name=".reminders.ChimeService"
-            android:directBootAware="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
-
         <receiver
             android:name=".reminders.BootReceiver"
             android:directBootAware="true"

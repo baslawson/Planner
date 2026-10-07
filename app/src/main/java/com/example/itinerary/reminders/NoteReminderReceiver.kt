@@ -25,9 +25,10 @@ class NoteReminderReceiver : BroadcastReceiver() {
         // and is then shown again with the note's words (DirectBoot.replayFired).
         if (!DirectBoot.isUnlocked(context)) {
             DirectBoot.fired(context, MissedReminders.noteKey(id), trigger)
-            val ring = intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false)
-            if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, ring))
-                postNoteReminder(context, id, trigger, null, couldNotRing = ring)
+            val ringFor = ringSecondsNow(context, intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false),
+                intent.getIntExtra(ReminderScheduler.EXTRA_RING_SECONDS, 0))
+            if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, ringFor))
+                postNoteReminder(context, id, trigger, null, couldNotRing = ringFor != null)
             return
         }
         val app = context.applicationContext as ItineraryApp
@@ -36,8 +37,9 @@ class NoteReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 app.repository.deliverNoteReminder(id, trigger) { note ->
-                    if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, note.ringUntilDismissed))
-                        postNoteReminder(context, id, trigger, note, couldNotRing = note.ringUntilDismissed)
+                    val ringFor = ringSecondsNow(context, note.ringUntilDismissed, note.ringSeconds)
+                    if (!startOwnedAlarm(context, "note", id, "Note reminder", trigger, ringFor))
+                        postNoteReminder(context, id, trigger, note, couldNotRing = ringFor != null)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("NoteReminderReceiver", "Couldn't deliver note reminder", e)
@@ -71,9 +73,8 @@ class NoteReminderReceiver : BroadcastReceiver() {
  * is locked it leaves the words out of the notification itself too, and is shown again with them after the unlock
  * (NoteWords). [quiet]: shown again with the note's words, without sounding a second time.
  */
-internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false, allowChime: Boolean = true) {
+internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false) {
     if (!notificationsEnabled(context)) return
-    val chime = ReminderChime.use(context, allowChime && !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     // D6-3: posted while locked (or with the screen off), the note's words wait for the unlock (NoteWords).
@@ -87,7 +88,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
     // The first line isn't said twice: left out when it is the name (no title, or an auto title made from it).
     val named = shown == null || shown.title.isBlank() || shown.title.trim() == lines.firstOrNull()?.trim()?.take(Notes.MAX_TITLE)
     val body = (if (named) lines.drop(1) else lines).take(6).joinToString("\n")
-    val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
+    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(label)
         .setContentText(body.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: "Note reminder")
@@ -104,7 +105,7 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setOnlyAlertOnce(quiet).setSilent(silent)
         .addDataAction(context, "Done", NoteActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
-    try { NotificationManagerCompat.from(context).notify(tag, 0, notification); if (chime) ReminderChime.play(context) }
+    try { NotificationManagerCompat.from(context).notify(tag, 0, notification) }
     catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
 }
 

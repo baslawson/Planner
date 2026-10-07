@@ -33,6 +33,16 @@ class EntryHistoryTest {
         assertTrue("not the event being edited", EntryHistory.titles(items, "caf", bills = false, today = today, except = 4).isEmpty())
     }
 
+    // Hunt 21 S5: prepared once, then only filtered; the event being edited doesn't hide its title's older uses.
+    @Test fun preparedOnceAndTheEditedEventsTitleStillSuggested() {
+        val prepared = EntryHistory.prepare(items, today)
+        assertEquals(EntryHistory.titles(items, "ent", bills = false, today = today), prepared.titles("ent", bills = false))
+        // Editing event 2 (the newest "Dentist"): the older one stands in, with its own place.
+        assertEquals("Old Dental", prepared.titles("dent", bills = false, except = 2).single().location)
+        assertEquals(listOf("Smile Dental", "Old Dental", "Future Dental"), prepared.locations("dental"))
+        assertTrue(prepared.titles("", bills = false).isEmpty())
+    }
+
     @Test fun billsSuggestBillsWithTheirPayeeAndAmount() {
         assertTrue(EntryHistory.titles(items, "elec", bills = false, today = today).isEmpty())
         val bill = EntryHistory.titles(items, "elec", bills = true, today = today).single()

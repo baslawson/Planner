@@ -71,6 +71,9 @@ class CleanStart : RunListener() {
             setShowBillsSummary(true); setBillsExpanded(true); setCalendarCollapsed(false)
             setHiddenCategories(emptySet()); setSavedSearches(emptyList())
             lastViewCalendar = false; lastCalendarDate = null; lastCalendarMonth = null
+            // Not the new-install default (10 s): the tests that deliver a reminder were written for its plain notification,
+            // and a 10-second alarm in each would ring through the run. Those for ringing choose it (ReminderSoundAndNotesTest).
+            setReminderSound(com.example.itinerary.data.ReminderSound.NOTIFICATION)
         }
     }
 }

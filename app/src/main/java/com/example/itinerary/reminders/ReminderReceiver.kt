@@ -41,9 +41,13 @@ class ReminderReceiver : BroadcastReceiver() {
         val id = intent.getLongExtra(ReminderScheduler.EXTRA_REMINDER_ID, 0L)
         val content = reminderContent(context, intent.extras) ?: return
         var couldNotRing = false
-        if (intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false) && ringingAlarmsEnabled(context)) {
+        // Its sound (ReminderSound): rings for a few seconds or until stopped, through AlarmService; or the notification only.
+        val ringFor = ringSecondsNow(context, intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false),
+            intent.getIntExtra(ReminderScheduler.EXTRA_RING_SECONDS, 0))
+        if (ringFor != null && ringingAlarmsEnabled(context)) {
             try {
-                ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java).putExtras(intent))
+                ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java).putExtras(intent)
+                    .putExtra(AlarmService.EXTRA_RING_FOR, ringFor))
                 return
             } catch (e: Exception) {
                 // Android 12+ lets a background app start the ringing service from an exact alarm only. Without "Alarms &
@@ -55,6 +59,6 @@ class ReminderReceiver : BroadcastReceiver() {
                 couldNotRing = true
             }
         }
-        postReminderNotification(context, id.toInt(), content.title, content.text, content.subText, id, intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN), couldNotRing, details = content.details)
+        postReminderNotification(context, id.toInt(), content.title, content.text, content.subText, id, intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN), couldNotRing, details = content.details, publicText = content.whenText)
     }
 }

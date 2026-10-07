@@ -228,7 +228,8 @@ class Repository(
     val tasks = taskDao.observe()
     suspend fun saveTask(task: PlannerTask, create: Boolean = true) = changes.withLock {
         // U14-2: ringing is a choice of a reminder: without one it is off, so a later reminder doesn't start ringing unseen.
-        val clean = Tasks.capText(task.copy(title = task.title.trim(), notes = task.notes.trim(), ringUntilDismissed = task.ringUntilDismissed && task.reminderAt != null))
+        val clean = Tasks.capText(task.copy(title = task.title.trim(), notes = task.notes.trim(), ringUntilDismissed = task.ringUntilDismissed && task.reminderAt != null,
+            ringSeconds = ReminderSound.cleanSeconds(task.ringUntilDismissed, task.ringSeconds, task.reminderAt != null)))
         Tasks.validate(clean)
         val allTasks = taskDao.all()
         val oldIds = allTasks.find { it.id == clean.id }?.prerequisiteIds.orEmpty()
@@ -485,7 +486,7 @@ class Repository(
         if (note.activeReminderAt != trigger || trigger > System.currentTimeMillis()) return@withLock false
         if (snoozeUntil != null) require(snoozeUntil > System.currentTimeMillis())
         withContext(NonCancellable) {
-            noteDao.update(if (snoozeUntil == null) note.copy(reminderAt = null, snoozedUntil = null, ringUntilDismissed = false) else note.copy(snoozedUntil = snoozeUntil))
+            noteDao.update(if (snoozeUntil == null) note.copy(reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0) else note.copy(snoozedUntil = snoozeUntil))
             afterCommit(noteIds = listOf(id), resetNoteIds = setOf(id))
         }
         true
@@ -963,7 +964,7 @@ class Repository(
                     // itself: it is updated, keeping its snooze and delivery record, not deleted and added again.
                     val changed = addedReminders.filter { new -> new.id != 0L && removedReminders.any { it.id == new.id } &&
                         reminderDao.byId(new.id)?.itemId == saved.id }
-                    changed.forEach { reminderDao.setRing(it.id, it.ringUntilDismissed) }
+                    changed.forEach { reminderDao.setRing(it.id, it.ringUntilDismissed, it.ringSeconds) }
                     addedReminders.filterNot { it in changed }.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                     removedReminders.filter { old -> old.itemId == saved.id && changed.none { it.id == old.id } }
                         .forEach { reminderDao.delete(it); cancelled.add(it) }
@@ -1594,7 +1595,7 @@ internal fun seriesSiblingAttachments(own: List<Attachment>, added: List<Attachm
     seriesSiblingChanges(own, added, removed, { a, b -> a.seriesKey() == b.seriesKey() }, { a, b -> a.seriesKey() == b.seriesKey() })
 
 internal fun seriesSiblingReminders(own: List<Reminder>, added: List<Reminder>, removed: List<Reminder>) =
-    seriesSiblingChanges(own, added, removed, { a, b -> a.scheduleKey == b.scheduleKey && a.ringUntilDismissed == b.ringUntilDismissed },
+    seriesSiblingChanges(own, added, removed, { a, b -> a.scheduleKey == b.scheduleKey && a.sound == b.sound },
         { a, b -> a.scheduleKey == b.scheduleKey })
 
 /**
