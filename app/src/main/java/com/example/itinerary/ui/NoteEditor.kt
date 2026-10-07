@@ -14,6 +14,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -331,124 +337,176 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // While the note box is typed in, the Markdown buttons sit on top of the keyboard instead of scrolling away.
     var noteFocused by remember { mutableStateOf(false) }
     val toolsPinned = !preview && noteFocused && WindowInsets.isImeVisible
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val highlight = remember(colors) { markdownHighlighting(colors.onSurfaceVariant.copy(alpha = 0.55f), colors.primary, colors.surfaceVariant) }
+    // Switching between Edit and Preview goes back to the top, where the note starts.
+    fun setPreview(on: Boolean) { preview = on; app.settings.setNoteLeftInPreview(initial.id, on); scope.launch { scroll.scrollTo(0) } }
+    // A copy of what is here now as a new note (not saved yet); the original stays as last saved. The copy's editor
+    // takes over this one's files, so they aren't released here.
+    fun duplicate() {
+        val copy = Notes.copyOf(current)
+        if (ownsDraft) runCatching { draftStore.clear(initial.id) } // NT-1, as in releaseFiles
+        dismiss(); onDuplicate?.invoke(copy)
+    }
+    val plain = androidx.compose.material3.TextFieldDefaults.colors(
+        focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+        disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent, focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent, disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent)
+    // Bug notes 7: laid out like Quillpad's editor. A bar of icons (Close, Undo, Redo, pin, reminder, Save, and ⋮ for
+    // Duplicate and Delete); the title and the note without boxes, the Markdown styled as it's typed; an eye button for
+    // Preview; when it was created and changed. The note's details (notebook, tags, reminder, importance, colour,
+    // attachments) follow below. Save stays a tap of its own: unsaved typing is kept as a draft, as before.
+    Surface(Modifier.fillMaxSize(), color = colors.background) {
+      Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().undoKeys(undo, enabled = !busy)) {
-            ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp).lockedWhile(busy), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    HeadingText(if (base == null) "New note" else "Edit note", style = MaterialTheme.typography.headlineMedium)
-                    // A copy of what is here now as a new note (not saved yet); the original stays as last saved. The copy's
-                    // editor takes over this one's files, so they aren't released here.
-                    if (base != null && onDuplicate != null) MatrixTextButton(enabled = !busy && Notes.hasContent(current), onClick = {
-                        val copy = Notes.copyOf(current)
-                        if (ownsDraft) runCatching { draftStore.clear(initial.id) } // NT-1, as in releaseFiles
-                        dismiss(); onDuplicate(copy)
-                    }) { Text("Duplicate note") }
-                    OutlinedTextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
-                        label = { Text("Title") }, singleLine = true, enabled = !busy,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
-                    // Edit / Preview, and in Edit the Markdown shortcuts.
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        listOf(false to "Edit", true to "Preview").forEachIndexed { index, (isPreview, label) ->
-                            SegmentedButton(selected = preview == isPreview, enabled = !busy, onClick = { preview = isPreview; app.settings.setNoteLeftInPreview(initial.id, isPreview) },
-                                shape = SegmentedButtonDefaults.itemShape(index, 2),
-                                colors = SegmentedButtonDefaults.colors(activeContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                                    activeContentColor = MaterialTheme.colorScheme.primary)) { Text(label) }
-                        }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+                .semantics { contentDescription = if (base == null) "New note" else "Edit note"; heading() },
+                verticalAlignment = Alignment.CenterVertically) {
+                IconButton(enabled = !busy, onClick = ::close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close") }
+                Spacer(Modifier.weight(1f))
+                IconButton(enabled = !busy && undo.canUndo, onClick = undo::undo) { Icon(UndoIcons.undo, contentDescription = "Undo") }
+                IconButton(enabled = !busy && undo.canRedo, onClick = undo::redo) { Icon(UndoIcons.redo, contentDescription = "Redo") }
+                IconButton(enabled = !busy, onClick = { pinned = !pinned }) {
+                    Icon(androidx.compose.ui.res.painterResource(if (pinned) com.example.itinerary.R.drawable.ic_pin else com.example.itinerary.R.drawable.ic_pin_outline),
+                        contentDescription = if (pinned) "Pinned to the top" else "Pin to the top",
+                        tint = if (pinned) colors.primary else androidx.compose.material3.LocalContentColor.current)
+                }
+                IconButton(enabled = !busy, onClick = { choosingReminderDate = true }) {
+                    Icon(Icons.Filled.Notifications, contentDescription = reminderAt?.let { "Reminder: ${momentLabel(it)}" } ?: "Set a reminder",
+                        tint = if (reminderAt != null) colors.primary else androidx.compose.material3.LocalContentColor.current)
+                }
+                val saved = justSaved && !unsaved
+                IconButton(enabled = canSave && (unsaved || deletedElsewhere), onClick = { save() },
+                    modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }) {
+                    Icon(Icons.Filled.Check, contentDescription = if (busy) "Saving…" else if (saved) "Saved" else "Save",
+                        tint = if (saved) colors.tertiary else androidx.compose.material3.LocalContentColor.current)
+                }
+                Box {
+                    IconButton(enabled = !busy, onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Note options") }
+                    androidx.compose.material3.DropdownMenu(menuOpen, { menuOpen = false }) {
+                        if (base != null && onDuplicate != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Duplicate note") },
+                            enabled = Notes.hasContent(current), onClick = { menuOpen = false; duplicate() })
+                        if (base != null && !deletedElsewhere) androidx.compose.material3.DropdownMenuItem(text = { Text("Delete", color = colors.error) },
+                            onClick = { menuOpen = false; if (unsaved) askingToDelete = true else delete() })
+                        if (base == null || deletedElsewhere) androidx.compose.material3.DropdownMenuItem(text = { Text("Discard") },
+                            onClick = { menuOpen = false; close() })
                     }
+                }
+            }
+            ScrollHints(scroll, Modifier.weight(1f).fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 96.dp).lockedWhile(busy), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.TextField(title, { title = it.replace('\n', ' ').take(Notes.MAX_TITLE) }, Modifier.fillMaxWidth(),
+                        placeholder = { Text("Title", style = MaterialTheme.typography.headlineSmall) }, singleLine = true, enabled = !busy,
+                        textStyle = MaterialTheme.typography.headlineSmall, colors = plain,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
                     if (preview) {
-                        if (content.text.isBlank()) Text("Nothing written yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else MarkdownView(content.text, Modifier.fillMaxWidth(), onToggle = if (busy) null else { line ->
-                            content = TextFieldValue(Markdown.toggle(content.text, line), content.selection)
-                        })
+                        Column(Modifier.padding(horizontal = 16.dp)) {
+                            if (content.text.isBlank()) Text("Nothing written yet.", color = colors.onSurfaceVariant)
+                            else MarkdownView(content.text, Modifier.fillMaxWidth(), onToggle = if (busy) null else { line ->
+                                content = TextFieldValue(Markdown.toggle(content.text, line), content.selection)
+                            })
+                        }
                     } else {
-                        if (!toolsPinned) MarkdownToolbar(enabled = !busy) { edit -> content = edit(content) }
-                        OutlinedTextField(content, { typed ->
+                        androidx.compose.material3.TextField(content, { typed ->
                                 // Enter in a checklist or list item starts the next item (or ends the list on an empty one).
                                 val next = Markdown.continueList(content.text, typed.text, typed.selection.start)
                                     ?.takeIf { typed.selection.collapsed && continueLists }?.let { TextFieldValue(it.text, TextRange(it.start)) } ?: typed
                                 content = if (next.text.length <= Notes.MAX_CONTENT) next else content
                             },
-                            Modifier.fillMaxWidth().onFocusChanged { noteFocused = it.isFocused }, label = { Text("Note") }, minLines = 8, enabled = !busy,
-                            textStyle = MaterialTheme.typography.bodyLarge,
+                            Modifier.fillMaxWidth().onFocusChanged { noteFocused = it.isFocused }, placeholder = { Text("Note") }, minLines = 8, enabled = !busy,
+                            textStyle = MaterialTheme.typography.bodyLarge, colors = plain, visualTransformation = highlight,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
-                        Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SwitchRow("Continue lists on Enter", continueLists, app.settings::setContinueLists, Modifier, enabled = !busy,
-                            style = MaterialTheme.typography.bodyMedium)
                     }
-                    HorizontalDivider()
-                    // Existing notebooks open under the box and narrow as you type; a new name is typed as before.
-                    SuggestField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, "Notebook (optional)",
-                        suggestions = Notes.suggest(notebooks, notebook).filter { it != notebook.trim() }, onPick = { notebook = it }, enabled = !busy)
-                    Text("Tags", style = MaterialTheme.typography.titleSmall)
-                    if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        tags.forEach { tag ->
-                            FilterChip(selected = true, enabled = !busy, onClick = { tags = tags - tag }, label = { Text("#$tag") },
-                                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove tag $tag", Modifier.size(16.dp)) })
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        base?.let { saved ->
+                            Text("Created ${momentLabel(saved.created)}\nLast modified ${momentLabel(saved.modified)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = colors.onSurfaceVariant)
                         }
-                    }
-                    SuggestField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, "Add a tag",
-                        suggestions = Notes.suggest(allTags, Notes.cleanTag(newTag), taken = tags),
-                        onPick = { tag -> if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, shown = { "#$it" },
-                        enabled = !busy && tags.size < Notes.MAX_TAGS,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
-                        trailingIcon = { if (newTag.isNotBlank()) IconButton(enabled = !busy, onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
-                    NoteReminderSection(reminderAt, ringUntilDismissed, onRing = { ringUntilDismissed = it }, snoozedUntil = base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
-                        enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
-                    Text("Importance", style = MaterialTheme.typography.titleSmall)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.example.itinerary.data.TaskPriority.entries.forEach { option ->
-                            FilterChip(selected = priority == option, enabled = !busy, onClick = { priority = option }, label = { Text(option.label) })
+                        if (!preview) {
+                            if (!toolsPinned) MarkdownToolbar(enabled = !busy) { edit -> content = edit(content) }
+                            Text("Markdown: **bold**, *italic*, # heading, - list, - [ ] checklist, > quote.",
+                                style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                            SwitchRow("Continue lists on Enter", continueLists, app.settings::setContinueLists, Modifier, enabled = !busy,
+                                style = MaterialTheme.typography.bodyMedium)
                         }
-                    }
-                    Text("Colour", style = MaterialTheme.typography.titleSmall)
-                    ColorChoices(color, enabled = !busy, onCustom = { pickingColor = true }) { color = it }
-                    FilterChip(selected = pinned, enabled = !busy, onClick = { pinned = !pinned }, label = { Text(if (pinned) "Pinned to the top" else "Pin to the top") },
-                        leadingIcon = if (pinned) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(18.dp)) }) else null)
-                    HorizontalDivider()
-                    HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
-                    attachments.forEach { attachment ->
-                        AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) },
-                            onRemove = {
-                                val remaining = attachments.filterNot { it.fileName == attachment.fileName }
-                                // Persist the removal before cleanup: neither this draft nor a recovered editor may still name it.
-                                try {
-                                    draftStore.write(NoteDraftStore.Draft(current.copy(attachments = remaining), base == null, base,
-                                        pendingPhoto, windowEditors?.id))
-                                    ownsDraft = true
-                                    setAttachments(remaining)
-                                    app.appScope.launch { runCatching { repo.releaseTaskFiles(listOf(attachment.fileName)) } }
-                                } catch (_: Exception) { error = draftError }
-                            })
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
-                        OutlinedButton(enabled = !busy && attachments.size < 100, onClick = {
-                            // A second tap while the camera opens would leave the first photo file behind.
-                            if (pendingPhoto != null) return@OutlinedButton
-                            val file = attachmentStore.newPhotoFile()
-                            pendingPhoto = file.name
-                            try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
-                            catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
-                        }) { Text("Take photo") }
+                        HorizontalDivider()
+                        // Existing notebooks open under the box and narrow as you type; a new name is typed as before.
+                        SuggestField(notebook, { notebook = it.replace('\n', ' ').take(Notes.MAX_NOTEBOOK) }, "Notebook (optional)",
+                            suggestions = Notes.suggest(notebooks, notebook).filter { it != notebook.trim() }, onPick = { notebook = it }, enabled = !busy)
+                        Text("Tags", style = MaterialTheme.typography.titleSmall)
+                        if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            tags.forEach { tag ->
+                                FilterChip(selected = true, enabled = !busy, onClick = { tags = tags - tag }, label = { Text("#$tag") },
+                                    trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove tag $tag", Modifier.size(16.dp)) })
+                            }
+                        }
+                        SuggestField(newTag, { newTag = it.replace('\n', ' ').take(Notes.MAX_TAG + 1) }, "Add a tag",
+                            suggestions = Notes.suggest(allTags, Notes.cleanTag(newTag), taken = tags),
+                            onPick = { tag -> if (tags.size < Notes.MAX_TAGS) tags = tags + tag; newTag = "" }, shown = { "#$it" },
+                            enabled = !busy && tags.size < Notes.MAX_TAGS,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTag() }),
+                            trailingIcon = { if (newTag.isNotBlank()) IconButton(enabled = !busy, onClick = ::addTag) { Icon(Icons.Filled.Add, contentDescription = "Add tag") } })
+                        NoteReminderSection(reminderAt, ringUntilDismissed, onRing = { ringUntilDismissed = it }, snoozedUntil = base?.takeIf { it.reminderAt == reminderAt }?.snoozedAt(System.currentTimeMillis()),
+                            enabled = !busy, onSet = { reminderAt = it; error = null }, onCustom = { choosingReminderDate = true })
+                        Text("Importance", style = MaterialTheme.typography.titleSmall)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.example.itinerary.data.TaskPriority.entries.forEach { option ->
+                                FilterChip(selected = priority == option, enabled = !busy, onClick = { priority = option }, label = { Text(option.label) })
+                            }
+                        }
+                        Text("Colour", style = MaterialTheme.typography.titleSmall)
+                        ColorChoices(color, enabled = !busy, onCustom = { pickingColor = true }) { color = it }
+                        HorizontalDivider()
+                        HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
+                        attachments.forEach { attachment ->
+                            AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) },
+                                onRemove = {
+                                    val remaining = attachments.filterNot { it.fileName == attachment.fileName }
+                                    // Persist the removal before cleanup: neither this draft nor a recovered editor may still name it.
+                                    try {
+                                        draftStore.write(NoteDraftStore.Draft(current.copy(attachments = remaining), base == null, base,
+                                            pendingPhoto, windowEditors?.id))
+                                        ownsDraft = true
+                                        setAttachments(remaining)
+                                        app.appScope.launch { runCatching { repo.releaseTaskFiles(listOf(attachment.fileName)) } }
+                                    } catch (_: Exception) { error = draftError }
+                                })
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(enabled = !busy && attachments.size < 100, onClick = { pickFile.launch(arrayOf("*/*")) }) { Text("Attach file") }
+                            OutlinedButton(enabled = !busy && attachments.size < 100, onClick = {
+                                // A second tap while the camera opens would leave the first photo file behind.
+                                if (pendingPhoto != null) return@OutlinedButton
+                                val file = attachmentStore.newPhotoFile()
+                                pendingPhoto = file.name
+                                try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
+                                catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
+                            }) { Text("Take photo") }
+                        }
                     }
                 }
             }
-            HorizontalDivider()
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Beside Save, where it can't be missed.
-                if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = MaterialTheme.colorScheme.error)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                EditorActions(onDelete = if (base != null && !deletedElsewhere) ({ if (unsaved) askingToDelete = true else delete() }) else null,
-                    onClose = ::close, onSave = { save() }, deleteEnabled = !busy, closeEnabled = !busy,
-                    saveEnabled = canSave && (unsaved || deletedElsewhere), undo = undo, undoEnabled = !busy) { SaveLabel(busy, saved = justSaved && !unsaved) }
+            // Under the note, where they can't be missed.
+            if (deletedElsewhere || error != null) Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (deletedElsewhere) Text("This note was deleted elsewhere. Save keeps your version as a new note.", color = colors.error)
+                error?.let { Text(it, color = colors.error) }
             }
             if (toolsPinned) {
                 HorizontalDivider()
-                MarkdownToolbar(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), enabled = !busy) { edit -> content = edit(content) }
+                MarkdownToolbar(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), enabled = !busy) { edit -> content = edit(content) }
             }
         }
+        // The eye: Preview (rendered, checklists tickable) and back to Edit. The space under the details lets their last
+        // controls scroll clear of it.
+        androidx.compose.material3.FloatingActionButton(onClick = { if (!busy) setPreview(!preview) },
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().imePadding().padding(end = 20.dp, bottom = if (toolsPinned) 76.dp else 20.dp),
+            containerColor = colors.primaryContainer, contentColor = colors.primary, shape = CircleShape) {
+            if (preview) Icon(Icons.Filled.Edit, contentDescription = "Edit")
+            else Icon(androidx.compose.ui.res.painterResource(com.example.itinerary.R.drawable.ic_visibility), contentDescription = "Preview")
+        }
+      }
     }
     if (pickingColor) CustomColorDialog(
         // Starts from the note's colour, or the card's blue.
@@ -530,12 +588,13 @@ private fun MarkdownToolbar(modifier: Modifier = Modifier, enabled: Boolean = tr
     val tools = listOf(
         Triple("B", "Bold", wrap("**")), Triple("I", "Italic", wrap("*")), Triple("S", "Strikethrough", wrap("~~")),
         Triple("H", "Heading", prefix("# ")), Triple("•", "Bulleted list", prefix("- ")),
-        Triple("\u2611\uFE0E", "Checklist", prefix("- [ ] ")), Triple("</>", "Code", wrap("`")),
+        Triple("\u2611\uFE0E", "Checklist", prefix("- [ ] ")), Triple("\u201C", "Quote", prefix("> ")), Triple("</>", "Code", wrap("`")),
     )
     Row(modifier.horizontalScroll(rememberScrollState()).semantics { contentDescription = "Formatting" },
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         tools.forEach { (label, name, edit) ->
-            OutlinedButton(enabled = enabled, onClick = { apply(edit) }, modifier = Modifier.semantics { contentDescription = name }.defaultMinSize(minWidth = 44.dp),
+            // Plain buttons, as on Quillpad's bar.
+            androidx.compose.material3.TextButton(enabled = enabled, onClick = { apply(edit) }, modifier = Modifier.semantics { contentDescription = name }.defaultMinSize(minWidth = 44.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp)) {
                 Text(label, fontFamily = if (label == "</>") FontFamily.Monospace else null,
                     style = MaterialTheme.typography.labelLarge)

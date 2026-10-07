@@ -71,7 +71,7 @@ class WishListSmallUiTest {
         openNotes()
         assertNotNull(find("NOTES"))
         // Never left either way: it opens in Preview, as before.
-        click("QA view memory"); await { find("Preview") != null }
+        click("QA view memory"); await { find("Edit") != null } // in Preview the eye offers Edit
         assertFalse(inEdit())
         click("Edit"); await { inEdit() }
         click("Close"); await { find("Search notes") != null }
@@ -80,7 +80,7 @@ class WishListSmallUiTest {
         screenshot("reopened-in-edit")
         click("Preview"); await { !inEdit() }
         click("Close"); await { find("Search notes") != null }
-        click("QA view memory"); await { find("Preview") != null }; Thread.sleep(500)
+        click("QA view memory"); await { find("Edit") != null }; Thread.sleep(500)
         assertFalse(inEdit())
         click("Close"); await { find("Search notes") != null }
         // Settings → Notes open in Edit: every saved note opens in Edit.

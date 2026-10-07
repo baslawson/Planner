@@ -37,8 +37,8 @@ class NoteEditorHuntRegressionTest {
         }
         Thread.sleep(250)
     }
-    private fun field() = nodes().firstOrNull { n -> n.isVisibleToUser && n.isEditable &&
-        (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Title" } }
+    // The title box is the editor's first text box; "Title" is only a placeholder, gone once it has text.
+    private fun field() = nodes().firstOrNull { n -> n.isVisibleToUser && n.isEditable }
     private fun title(value: String) {
         await { field() != null }
         val n = field()!!
@@ -54,7 +54,7 @@ class NoteEditorHuntRegressionTest {
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await { find("AGENDA") != null }
         click("More options"); click("Notes"); await { find("Search notes") != null }
-        click("New note"); await { field() != null }
+        click("New note"); await { find("Note options") != null && field() != null }
     }
     @Test fun saveAndCloseDisablesTypingUntilCommit() {
         openNew(); title("beforeSave")
@@ -63,7 +63,7 @@ class NoteEditorHuntRegressionTest {
         runBlocking { gate.lock() }
         try {
             click("Save"); await { find("Saving…") != null }
-            val titleBox = nodes().first { n -> (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Title" } }
+            val titleBox = nodes().first { it.isEditable && it.text?.toString() == "beforeSave" }
             assertFalse("Title disabled while saving", titleBox.isEnabled)
             assertFalse("Accessibility cannot change saved input", titleBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "typedDuringSave")

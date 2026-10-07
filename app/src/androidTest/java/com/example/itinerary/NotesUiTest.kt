@@ -379,7 +379,9 @@ class NotesUiTest {
         type(0, "QA remind me")
         click("Add reminder") // the ways to add one are a dropdown list
         click("Tomorrow 09:00")
-        await { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ") == true } }
+        // The row's ✕ can start under the Preview button, so scroll it clear, as a person would.
+        await { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ") == true } ||
+            run { page()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); Thread.sleep(250); false } }
         screenshot("editor-reminder")
         click("Save")
         val tomorrowNine = java.time.LocalDate.now().plusDays(1).atTime(9, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -698,10 +700,10 @@ class NotesUiTest {
         Thread.sleep(300)
         click("Bold"); awaitNote("**hello** world")
         await(5000) { imeTop() != null && find("Bold") != null && bounds("Bold").bottom <= imeTop()!! + 2 }
-        // The title box: the buttons go back above the note box.
+        // The title box: the buttons go back to their place under the note box (bug notes 7, Quillpad's layout).
         realTap(nodes().filter { it.isVisibleToUser && it.isEditable }[0])
         await(8000) { find("Bold") != null && nodes().filter { it.isVisibleToUser && it.isEditable }.size > 1 &&
-            bounds("Bold").bottom <= android.graphics.Rect().also(nodes().filter { it.isVisibleToUser && it.isEditable }[1]::getBoundsInScreen).top }
+            bounds("Bold").top >= android.graphics.Rect().also(nodes().filter { it.isVisibleToUser && it.isEditable }[1]::getBoundsInScreen).bottom }
         screenshot("tools-in-place")
         click("Save")
         await { notes().singleOrNull()?.content == "**hello** world" }
@@ -926,7 +928,7 @@ class NotesUiTest {
         type(1, "ABC"); Thread.sleep(800)
         com.example.itinerary.data.NoteDraftStore(context).clearAll()
         recreateAsAfterProcessDeath()
-        await { find("Edit note") != null && find("Delete") != null }
+        await { find("Edit note") != null } // a saved note (a new one says "New note")
         type(1, "ABCD"); click("Save")
         await { notes().singleOrNull()?.content == "ABCD" && find("Saved") != null }
         assertNull(find("Couldn't save this note. Please try again."))
@@ -1029,7 +1031,7 @@ class NotesUiTest {
         click("QA second"); await { find("Edit note") != null }
         click("Edit") // a note with words opens in Preview
         type(1, "two, edited")
-        click("Duplicate note"); await { find("New note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA second (copy)" } }
+        click("Note options"); click("Duplicate note"); await { find("New note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA second (copy)" } }
         click("Save"); await { notes().count { it.title == "QA second (copy)" } == 2 }
         assertTrue(notes().any { it.title == "QA second (copy)" && it.content == "two, edited" })
         assertEquals("two", notes().single { it.title == "QA second" }.content)

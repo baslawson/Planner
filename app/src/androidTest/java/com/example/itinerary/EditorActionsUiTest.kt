@@ -114,8 +114,32 @@ class EditorActionsUiTest {
             await { find("AGENDA") != null }
             click("More options"); click("Notes"); click(note.title)
             await { find("Edit note") != null }
-            checkBar("note-dark", wrapped = false)
+            checkNoteBar("note-dark")
         }
+        // The icons don't grow with the text size, so the bar stays one line at the largest size too.
+        themed(ThemeMode.LIGHT, TextSize.MAX_PERCENT) {
+            ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+            await { find("AGENDA") != null }
+            click("More options"); click("Notes"); click(note.title)
+            await { find("Edit note") != null }
+            checkNoteBar("note-light-large")
+        }
+    }
+
+    // Bug notes 7: the note editor's actions are a row of icons at the top, as on Quillpad (Delete is in the ⋮ menu):
+    // Close on the left, the rest to the right ending with ⋮ at the edge, all on one line and none overlapping.
+    private fun checkNoteBar(name: String) {
+        val names = listOf("Close", "Undo", "Redo", "Pin to the top", "Set a reminder", "Save", "Note options")
+        await { names.all { button(it) != null } }
+        Thread.sleep(600)
+        val rects = names.map { button(it)!! }
+        screenshot(name)
+        rects.zipWithNext().forEachIndexed { i, (a, b) ->
+            assertTrue("$name: ${names[i]} before ${names[i + 1]}", a.right <= b.left)
+            assertEquals("$name: one line", a.centerY().toFloat(), b.centerY().toFloat(), 2f)
+        }
+        assertTrue("$name: Close on the left", rects.first().left < 16 * dp)
+        assertTrue("$name: ⋮ at the right edge", context.resources.displayMetrics.widthPixels - rects.last().right < 16 * dp)
     }
 
     @Test fun eventEditorBar() {
