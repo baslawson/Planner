@@ -154,6 +154,7 @@ fun AgendaActionsButton(
     onAddEvent: () -> Unit,
     onQuickEntry: () -> Unit,
     onAddTask: () -> Unit = {},
+    onAddNote: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
@@ -187,6 +188,8 @@ fun AgendaActionsButton(
                 AgendaActionRow("Add task", R.drawable.action_task) { onOpenChange(false); onAddTask() }
                 AgendaActionRow("Add event", R.drawable.shortcut_event) { onOpenChange(false); onAddEvent() }
                 AgendaActionRow("Quick entry", R.drawable.action_quick_entry) { onOpenChange(false); onQuickEntry() }
+                // Bug notes 3: a new note, on the Notes screen (which has its own + for notes).
+                if (onAddNote != null) AgendaActionRow("Add note", R.drawable.action_note) { onOpenChange(false); onAddNote() }
                 AddButtonSample(seeThroughPercent = seeThroughPercent, open = true,
                     onClick = { onOpenChange(false) }, modifier = Modifier.size(AddButtonSize))
             }
@@ -244,6 +247,7 @@ fun BoxScope.AddMenuHost(
     onEventSaved: (ItineraryItem) -> Unit = {},
     // Quick entry's "Add" closed it: the screen shows what was added.
     onQuickAdded: (QuickAdded) -> Unit = {},
+    onAddNote: (() -> Unit)? = null,
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var quickEntry by rememberSaveable { mutableStateOf(false) }
@@ -283,6 +287,7 @@ fun BoxScope.AddMenuHost(
             onAddEvent = { addEvent() },
             onQuickEntry = { quickEntry = true },
             onAddTask = { choosingTaskType = true },
+            onAddNote = onAddNote,
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
         )
     }

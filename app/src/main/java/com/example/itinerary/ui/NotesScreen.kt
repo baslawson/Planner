@@ -72,7 +72,8 @@ private fun filterOf(key: String): NoteFilter = when {
 @Composable
 // [newNote]: a note not saved yet (made from a share) to open in the editor, once; [onNewNoteOpened] says it was taken.
 fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: () -> Unit = {},
-                newNote: PlannerNote? = null, onNewNoteOpened: () -> Unit = {}, onOpenSettings: () -> Unit = {},
+                newNote: PlannerNote? = null, onNewNoteOpened: () -> Unit = {}, startNewNote: Boolean = false, onNewNoteStarted: () -> Unit = {},
+                onOpenSettings: () -> Unit = {},
                 onEditorOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as ItineraryApp
@@ -298,6 +299,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
             else -> { editingNew = false; editingId = id }
         }
         onNoteOpened()
+    }
+    // The + menu's "Add note" on Agenda or Calendar: a new note, as this page's "New note" starts one, once the notes and
+    // any recovered draft are read. A note already open (a draft recovered) stays, with a message.
+    LaunchedEffect(startNewNote, notes != null, draftChecked) {
+        if (!startNewNote || notes == null || !draftChecked) return@LaunchedEffect
+        if (editingId != null) android.widget.Toast.makeText(context, "Close this note first, then add a new one.", android.widget.Toast.LENGTH_LONG).show()
+        else { editingNew = true; editingId = UUID.randomUUID().toString() }
+        onNewNoteStarted()
     }
     // A share made into a note: it opens like a duplicate, as a new note that is only saved by Save. The share checked
     // that no note was open; one opened meanwhile (a draft recovered) stays, and the share is dropped with a message.

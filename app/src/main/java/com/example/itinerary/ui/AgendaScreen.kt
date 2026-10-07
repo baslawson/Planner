@@ -79,6 +79,7 @@ fun AgendaScreen(
     onOpenEvent: (LocalDate) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenNotes: () -> Unit,
+    onAddNote: () -> Unit = {},
     onOpenCalendar: () -> Unit,
 ) {
     // Wait for the database before showing an empty state.
@@ -359,6 +360,7 @@ fun AgendaScreen(
             planningTools = planningTools,
             saveEvent = vm::saveEvent,
             onQuickAdded = { following = it },
+            onAddNote = onAddNote,
         )
         editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
         editingEventId?.let { id -> StoredEventEditor(id, { editingEventId = null }) }

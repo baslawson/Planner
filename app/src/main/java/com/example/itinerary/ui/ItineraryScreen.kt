@@ -52,7 +52,7 @@ import java.time.YearMonth
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: () -> Unit, onOpenSettings: () -> Unit, onOpenCalendars: () -> Unit,
-                    onOpenNotes: () -> Unit) {
+                    onOpenNotes: () -> Unit, onAddNote: () -> Unit = {}) {
     val today = rememberCurrentDate()
     val loadedItems by vm.items.collectAsStateWithLifecycle()
     val allItems = loadedItems.orEmpty()
@@ -234,6 +234,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             onEventSaved = ::follow,
             // An event is shown by following it to its day (above); the calendar has no tasks, so a task is said below.
             onQuickAdded = { if (it.task) addedBar(it) },
+            onAddNote = onAddNote,
         )
     }
 

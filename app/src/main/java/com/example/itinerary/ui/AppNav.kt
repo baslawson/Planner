@@ -89,6 +89,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     val app = LocalContext.current.applicationContext as ItineraryApp
     // A share made into a note, handed to the Notes page, which opens it in a new note's editor. Kept with its words
     // until then, as the share itself is already cleared (SH-12).
+    // The + menu's "Add note" (Agenda, Calendar): Notes opens a new note, as its own "New note" does.
+    var startNewNote by rememberSaveable { mutableStateOf(false) }
     var sharedNote by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<com.example.itinerary.data.PlannerNote?, String>(
         save = { it?.let { note -> com.example.itinerary.data.NoteCodec.encode(listOf(note)).toString() } ?: "" },
         restore = { text -> text.takeIf { it.isNotEmpty() }?.let { runCatching { com.example.itinerary.data.NoteCodec.decodeLenient(org.json.JSONArray(it)).firstOrNull() }.getOrNull() } },
@@ -326,6 +328,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                     onOpenEvent = { date -> nav.openCalendar(entry, date) },
                     onOpenSearch = { nav.navigateFrom(entry, "search") },
                     onOpenNotes = { nav.navigateFrom(entry, "notes") },
+                    onAddNote = { startNewNote = true; nav.navigateFrom(entry, "notes") },
                     onOpenCalendar = { nav.openCalendar(entry) },
                 )
             }
@@ -337,6 +340,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                 Box(Modifier.fillMaxSize()) {
                     NotesScreen(onBack = { nav.popFrom(entry) }, openNoteId = noteToOpen, onNoteOpened = { noteToOpen = null },
                         newNote = sharedNote, onNewNoteOpened = { sharedNote = null },
+                        startNewNote = startNewNote, onNewNoteStarted = { startNewNote = false },
                         onOpenSettings = { settingsOpened = true; showSettings = true },
                         // H17-A1: a note opening (a reminder tapped, a share, a draft) closes Settings, which would hide it
                         // while Back went to the editor underneath.
@@ -389,6 +393,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
                         onOpenCalendars = { settingsOpened = true; showCalendars = true },
                         onOpenSearch = { nav.navigateFrom(entry, "search") },
                         onOpenNotes = { nav.navigateFrom(entry, "notes") },
+                        onAddNote = { startNewNote = true; nav.navigateFrom(entry, "notes") },
                         onAgenda = {
                             if (entry.lifecycle.currentState == Lifecycle.State.RESUMED) {
                                 // Save just Calendar, not a Search screen that may sit underneath it.
