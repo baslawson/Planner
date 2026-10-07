@@ -472,9 +472,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 var presetsStale by remember { mutableIntStateOf(0) }
                 val presets = remember(date, reminderAt, presetsStale) { taskReminderPresets(date?.let(LocalDate::parse)) }
                 val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
-                ReminderSectionFrame(notifications.enabled, notifications.enable,
-                    hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, rings(ringUntilDismissed, ringSeconds, defaultSound))),
-                    chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
+                // The ways to set it: "Add reminder" while there is none, its "Change ▾" once there is.
+                val reminderChoices = presets.map { (preset, _) ->
                         when (preset) {
                             TaskReminderPreset.ON_THE_DAY -> "On the day $nine"
                             TaskReminderPreset.DAY_BEFORE -> "1 day before"
@@ -488,7 +487,10 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     } + ("Pick date and time…" to {
                         reminderSuggestion = taskReminderDefault(date?.let(LocalDate::parse)).toString()
                         choosingReminderDate = true
-                    }),
+                    })
+                ReminderSectionFrame(notifications.enabled, notifications.enable,
+                    hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, rings(ringUntilDismissed, ringSeconds, defaultSound))),
+                    chips = if (reminderAt != null) emptyList() else reminderChoices,
                     enabled = !busy) {
                     reminderAt?.let { at ->
                         // Saving keeps the snooze only while the reminder time is unchanged (Repository.saveTask).
@@ -497,7 +499,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                             initial.done -> "Reminders are off while this task is completed."
                             snoozed != null && at == initial.reminderAt -> "Snoozed until ${momentLabel(snoozed)}. Changing the reminder ends the snooze."
                             else -> null
-                        }, onRemove = { reminderAt = null; ringUntilDismissed = false; ringSeconds = 0 }, enabled = !busy) {
+                        }, onRemove = { reminderAt = null; ringUntilDismissed = false; ringSeconds = 0 }, enabled = !busy, changes = reminderChoices) {
                             ReminderSoundChoice(com.example.itinerary.data.ReminderSound.of(ringUntilDismissed, ringSeconds), defaultSound, enabled = !busy) {
                                 ringUntilDismissed = it.ring; ringSeconds = it.seconds }
                         }

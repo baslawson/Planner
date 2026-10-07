@@ -119,6 +119,41 @@ class ReminderSoundAndNotesTest {
         }
     }
 
+    // Bugnotes 7 Oct: on the user's phone a timed ring stayed quiet where "Until I stop it" rang: timed rings had kept the
+    // old chime's extra checks, and that phone's silent mode is a Do Not Disturb mode. A timed ring is now the same ring:
+    // with Do Not Disturb on as well as silent mode, a 10 s reminder still rings.
+    @Test fun aTimedReminderRingsInSilentModeWithDoNotDisturbOnAsUntilStoppedDoes() = runBlocking {
+        val audio = context.getSystemService(AudioManager::class.java)
+        val ringerBefore = audio.ringerMode
+        val soundBefore = app.settings.reminderSound.value
+        app.settings.setReminderSound(ReminderSound.SECONDS_10)
+        manager.cancelAll()
+        val start = LocalDateTime.now().withSecond(0).withNano(0).plusMinutes(2)
+        val title = "QA ring through do not disturb"
+        app.repository.saveItem(ItineraryItem(tripId = 0, date = start.toLocalDate(), startTime = start.toLocalTime(), title = title),
+            addedReminders = listOf(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.MINUTES)))
+        val reminder = app.repository.snapshot().reminders.single()
+        shell("cmd audio set-ringer-mode SILENT")
+        shell("cmd notification set_dnd priority")
+        shell("input keyevent KEYCODE_HOME")
+        try {
+            val end = SystemClock.uptimeMillis() + 150_000
+            var ringing: StatusBarNotification? = null
+            while (SystemClock.uptimeMillis() < end && ringing == null) {
+                ringing = manager.activeNotifications.firstOrNull { titled(title, it) && it.notification.channelId == ALARM_CHANNEL_ID }
+                Thread.sleep(100)
+            }
+            assertNotNull("a 10 s reminder didn't ring in silent mode with Do Not Disturb on", ringing)
+            assertTrue("AlarmService rings it", ringing!!.notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0)
+        } finally {
+            AlarmService.stopIfRinging(context, reminder.id)
+            shell("cmd notification set_dnd off")
+            shell("cmd audio set-ringer-mode ${ringerName(ringerBefore)}")
+            app.settings.setReminderSound(soundBefore)
+            manager.cancelAll()
+        }
+    }
+
     // "Notification sound only": a plain notification on the Reminders category (muted by silent mode, as Android does),
     // with the task's notes, kept off the lock screen; nothing rings.
     @Test fun notificationSoundOnlyIsAPlainNotification() = runBlocking {

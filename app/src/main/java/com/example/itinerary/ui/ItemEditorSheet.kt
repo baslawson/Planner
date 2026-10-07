@@ -1081,6 +1081,17 @@ private fun ItemEditorForm(
                         addedReminders += changed
                     }
                 },
+                onChange = { reminder, amount, unit ->
+                    // Another time for the reminder, keeping its sound: saved as a new reminder in place of it (Save cancels
+                    // the old alarm and sets the new one; a snooze ends). Nothing changes if another one is already at that time.
+                    val moved = Reminder(itemId = 0, amount = amount, unit = unit,
+                        ringUntilDismissed = reminder.ringUntilDismissed, ringSeconds = reminder.ringSeconds)
+                    if (shownReminders.none { it != reminder && it.scheduleKey == moved.scheduleKey } && moved.scheduleKey != reminder.scheduleKey) {
+                        addedReminders.remove(reminder)
+                        if (reminder.id != 0L && removedReminders.none { it.id == reminder.id }) removedReminders += reminder
+                        addedReminders += moved
+                    }
+                },
             )
             } } // Close the inner scrollable Column
 

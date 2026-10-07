@@ -235,8 +235,8 @@ fun SettingsScreen(
                     Text(when (reminderSound) {
                         com.example.itinerary.data.ReminderSound.NOTIFICATION -> "Reminders use the notification sound, which silent and vibrate mode mute."
                         com.example.itinerary.data.ReminderSound.UNTIL_STOPPED -> "Reminders ring like an alarm until you stop them, even on silent or vibrate and on the lock screen."
-                        else -> "Reminders ring like an alarm for ${reminderSound.label.lowercase()}, even on silent or vibrate and on the lock screen. " +
-                            "Not during Do Not Disturb or a call: then they use the notification sound."
+                        else -> "Reminders ring like an alarm for ${reminderSound.label.lowercase()}, even on silent or vibrate and on the lock screen, " +
+                            "then stop by themselves (Stop ends one sooner)."
                     } + " Each reminder can choose its own sound.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     StackedButton("Send test notification") {

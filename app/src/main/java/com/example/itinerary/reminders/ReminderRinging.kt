@@ -1,9 +1,7 @@
 package com.example.itinerary.reminders
 
-import android.app.NotificationManager
 import android.content.Context
 import android.content.SharedPreferences
-import android.media.AudioManager
 import com.example.itinerary.data.ReminderSound
 
 /**
@@ -52,30 +50,10 @@ object ReminderSoundSetting {
 
 /**
  * How long a reminder due now rings through AlarmService, from its own choice ([ring], "Until I stop it", and [seconds],
- * ReminderSound): seconds, 0 until stopped, or null for the notification sound only (no ring). A timed ring is for a
- * normal reminder, so it gives way where the plain notification would be quiet anyway ([timedRingAllowed]); "Until I stop
- * it" rings as it always has.
+ * ReminderSound): seconds, 0 until stopped, or null for the notification sound only (no ring). A timed ring is the very
+ * same ring as "Until I stop it" (through silent and vibrate mode, Do Not Disturb and the lock screen as it does), only it
+ * stops by itself: bugnotes 7 Oct, timed rings had kept the old chime's extra checks (Do Not Disturb, a call, the
+ * Reminders category's sound), which on phones whose silent mode is a Do Not Disturb mode kept every one quiet.
  */
-internal fun ringSecondsNow(context: Context, ring: Boolean, seconds: Int): Int? {
-    val sound = ReminderSound.resolve(ring, seconds, ReminderSoundSetting.current(context))
-    val ringFor = sound.alarmSeconds ?: return null
-    if (ringFor == 0) return 0
-    val manager = context.getSystemService(NotificationManager::class.java)
-    val reminders = runCatching { manager.getNotificationChannel(REMINDER_CHANNEL_ID) }.getOrNull()
-    val audioMode = runCatching { context.getSystemService(AudioManager::class.java).mode }.getOrDefault(AudioManager.MODE_NORMAL)
-    val filter = runCatching { manager.currentInterruptionFilter }.getOrDefault(NotificationManager.INTERRUPTION_FILTER_UNKNOWN)
-    return ringFor.takeIf { timedRingAllowed(reminders?.importance, reminders == null || reminders.sound != null, filter, audioMode) }
-}
-
-/**
- * Whether a timed ring (10 s to 1 min) may ring, or the reminder is a plain notification instead. Not when the user made
- * Planner's Reminders category silent in Android's settings (their choice for reminders wins, hunt 19 P3); not in any Do
- * Not Disturb mode (the default one lets alarms through, so a normal reminder would ring through it, hunt 20 R1); not
- * during a call or while one rings (hunt 20 R2). The kept checks of the 4-second chime this replaces.
- */
-internal fun timedRingAllowed(remindersImportance: Int?, remindersHaveSound: Boolean,
-                              interruptionFilter: Int = NotificationManager.INTERRUPTION_FILTER_ALL,
-                              audioMode: Int = AudioManager.MODE_NORMAL): Boolean =
-    (remindersImportance == null || remindersImportance >= NotificationManager.IMPORTANCE_DEFAULT) && remindersHaveSound &&
-        interruptionFilter in setOf(NotificationManager.INTERRUPTION_FILTER_ALL, NotificationManager.INTERRUPTION_FILTER_UNKNOWN) &&
-        audioMode == AudioManager.MODE_NORMAL
+internal fun ringSecondsNow(context: Context, ring: Boolean, seconds: Int): Int? =
+    ReminderSound.resolve(ring, seconds, ReminderSoundSetting.current(context)).alarmSeconds

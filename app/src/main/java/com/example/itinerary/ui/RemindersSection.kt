@@ -13,8 +13,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +64,7 @@ fun RemindersSection(
     onAdd: (Int, ReminderUnit) -> Unit,
     onRemove: (Reminder) -> Unit,
     onSound: (Reminder, com.example.itinerary.data.ReminderSound) -> Unit,
+    onChange: (Reminder, Int, ReminderUnit) -> Unit,
     billTask: Boolean = false,
 ) {
     // Bug hunt 19: kept through a rotation, so a date picked survives while the clock is open.
@@ -65,6 +73,18 @@ fun RemindersSection(
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
     val pickedDate = pickedDay?.let(java.time.LocalDate::parse)
+    // The reminder being changed (its "Change ▾"), or null while adding one.
+    var changingKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val changing = changingKey?.let { key -> reminders.firstOrNull { it.changeKey == key } }
+    fun choose(amount: Int, unit: ReminderUnit) { changing?.let { onChange(it, amount, unit) } ?: onAdd(amount, unit) }
+    // The ways to add a reminder, or to change [reminder] to another time.
+    fun choices(reminder: Reminder?): List<Pair<String, () -> Unit>> {
+        val key = reminder?.changeKey
+        return PRESETS.map { preset -> preset.text to {
+                if (reminder != null) onChange(reminder, preset.amount, preset.unit) else onAdd(preset.amount, preset.unit) } } +
+            ("Custom…" to { changingKey = key; customOpen = true }) +
+            ("Pick date and time…" to { changingKey = key; pickedDay = null; pickingDate = true })
+    }
     val zone = rememberCurrentZoneId()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -74,12 +94,11 @@ fun RemindersSection(
 
     val hint = if (eventTime == null) "${if (billTask) "Without a due time, reminders count back from" else "All-day reminders count back from"} ${java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)}." else null
     ReminderSectionFrame(notificationsOn, onEnableNotifications, listOfNotNull(hint, exactAlarmHint(exactAllowed, reminders, defaultSound)),
-        chips = PRESETS.map { preset -> preset.text to { onAdd(preset.amount, preset.unit) } } + ("Custom…" to { customOpen = true }) +
-            ("Pick date and time…" to { pickedDay = null; pickingDate = true })) {
+        chips = choices(null)) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
-            ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)} · ${zone.id}",
-                onRemove = { onRemove(reminder) }) {
+            ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)}",
+                onRemove = { onRemove(reminder) }, changes = choices(reminder)) {
                 ReminderSoundChoice(reminder.sound, defaultSound) { onSound(reminder, it) }
             }
         }
@@ -87,20 +106,23 @@ fun RemindersSection(
 
     if (customOpen) {
         CustomReminderDialog(
+            initialAmount = changing?.amount?.takeIf { it >= 1 } ?: 1, initialUnit = changing?.unit ?: ReminderUnit.HOURS,
+            confirm = if (changing != null) "Change reminder" else "Add reminder",
             onDismiss = { customOpen = false },
-            onConfirm = { amount, unit -> onAdd(amount, unit); customOpen = false },
+            onConfirm = { amount, unit -> choose(amount, unit); customOpen = false },
         )
     }
     // Bug notes 1: a reminder at a date and time, from the calendar then the clock (as tasks and notes set theirs). It's kept
-    // as the time before the event (reminderAt), so it moves with the event.
-    val eventStartTime = eventTime ?: java.time.LocalTime.of(9, 0)
-    if (pickingDate) SingleDateDialog(pickedDate ?: eventDate, onDismiss = { pickingDate = false },
+    // as the time before the event (reminderAt), so it moves with the event. Changing one starts from when it fires now.
+    val changingAt = changing?.let { com.example.itinerary.data.reminderTrigger(eventDate, eventTime, it, zone).toLocalDateTime() }
+    val eventStartTime = changingAt?.toLocalTime() ?: eventTime ?: java.time.LocalTime.of(9, 0)
+    if (pickingDate) SingleDateDialog(pickedDate ?: changingAt?.toLocalDate() ?: eventDate, onDismiss = { pickingDate = false },
         onConfirm = { pickedDay = it.toString(); pickingDate = false; pickingTime = true })
     if (pickingTime) TimePickerDialog(eventStartTime, onDismiss = { pickingTime = false }, onConfirm = { time ->
         pickingTime = false
         val offset = com.example.itinerary.data.reminderAt(eventDate, eventTime, pickedDate!!.atTime(time), zone)
         if (offset == null) android.widget.Toast.makeText(context, "Choose a time before the event starts.", android.widget.Toast.LENGTH_LONG).show()
-        else onAdd(offset.first, offset.second)
+        else choose(offset.first, offset.second)
     })
 }
 
@@ -143,13 +165,14 @@ internal fun rememberDefaultReminderSound(): ReminderSound {
 }
 
 /**
- * A reminder's sound (bugnotes 7 Oct, in place of the "Ring until I stop it" switch): "Sound: Default (10 s) ▾", whose
- * list is Default, the notification sound only, 10 s, 30 s, 1 min or until stopped ([ReminderSound]).
+ * A reminder's sound (bugnotes 7 Oct, in place of the "Ring until I stop it" switch): "🔔 Default (10 s) ▾" (read out as
+ * "Sound: …"), whose list is Default, the notification sound only, 10 s, 30 s, 1 min or until stopped ([ReminderSound]).
  */
 @Composable
 fun ReminderSoundChoice(sound: ReminderSound, default: ReminderSound, enabled: Boolean = true, onChange: (ReminderSound) -> Unit) {
-    DropdownChoice("Sound: ${sound.choiceLabel(default)}", ReminderSound.entries.map { choice ->
-        choice.choiceLabel(default) to { onChange(choice) } }, enabled)
+    DropdownChoice(sound.choiceLabel(default), ReminderSound.entries.map { choice ->
+        choice.choiceLabel(default) to { onChange(choice) } }, enabled, quiet = true, icon = Icons.Filled.Notifications,
+        description = "Sound: ${sound.choiceLabel(default)}")
 }
 
 /**
@@ -187,19 +210,27 @@ fun ReminderSectionFrame(
         hints.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         rows()
         // Bug notes 2: the ways to add one are a dropdown list, not a row of chips that scrolls sideways.
-        if (chips.isNotEmpty()) DropdownChoice("Add reminder", chips, enabled)
+        if (chips.isNotEmpty()) DropdownChoice("Add reminder", chips, enabled, quiet = true, icon = Icons.Filled.Add, arrow = false)
     }
 }
 
-/** An outlined "[label] ▾" button whose list runs one of [choices] (its own text and action). */
+/**
+ * An outlined "[label] ▾" button whose list runs one of [choices] (its own text and action). [quiet]: a plain text button
+ * instead (inside a reminder's card), with [icon] before the label, no ▾ without [arrow], and [description] for TalkBack.
+ */
 @Composable
-internal fun DropdownChoice(label: String, choices: List<Pair<String, () -> Unit>>, enabled: Boolean = true) {
+internal fun DropdownChoice(label: String, choices: List<Pair<String, () -> Unit>>, enabled: Boolean = true, quiet: Boolean = false,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null, arrow: Boolean = true, description: String? = null) {
     var open by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Box {
-        OutlinedButton(onClick = { open = true }, enabled = enabled) {
+        val described = if (description != null) Modifier.semantics { contentDescription = description } else Modifier
+        val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+            if (icon != null) { Icon(icon, contentDescription = null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
             Text(label)
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            if (arrow) Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
         }
+        if (quiet) MatrixQuietButton(onClick = { open = true }, modifier = described, enabled = enabled, content = content)
+        else OutlinedButton(onClick = { open = true }, modifier = described, enabled = enabled, content = content)
         androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             choices.forEach { (text, onClick) ->
                 androidx.compose.material3.DropdownMenuItem(text = { Text(text) }, onClick = { open = false; onClick() })
@@ -208,30 +239,46 @@ internal fun DropdownChoice(label: String, choices: List<Pair<String, () -> Unit
     }
 }
 
-/** One reminder in a [ReminderSectionFrame]: its label with a remove button, when it fires, and anything [extra]. */
+// Which reminder "Change ▾" was opened for, kept through a rotation (one not yet saved has no id).
+private val Reminder.changeKey get() = "$amount ${unit.name}"
+
+/**
+ * One reminder in a [ReminderSectionFrame], as a card (user, 7 Oct: the buttons looked messy): its label, which opens
+ * [changes] ("Change reminder: …", the same choices as "Add reminder", so its time changes without removing it and
+ * losing its sound), a remove button, when it fires, and anything [extra] (its sound).
+ */
 @Composable
-fun ReminderRow(label: String, detail: String?, onRemove: () -> Unit, enabled: Boolean = true, extra: @Composable () -> Unit = {}) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            IconButton(onClick = onRemove, enabled = enabled) {
-                Icon(Icons.Filled.Close, contentDescription = "Remove reminder: $label")
+fun ReminderRow(label: String, detail: String?, onRemove: () -> Unit, enabled: Boolean = true,
+    changes: List<Pair<String, () -> Unit>> = emptyList(), extra: @Composable () -> Unit = {}) {
+    androidx.compose.material3.Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        // The text lines up with the text buttons' (12 dp in).
+        Column(Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
+                    if (changes.isNotEmpty()) DropdownChoice(label, changes, enabled, quiet = true, description = "Change reminder: $label")
+                    else Text(label, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium)
+                }
+                IconButton(onClick = onRemove, enabled = enabled) {
+                    Icon(Icons.Filled.Close, contentDescription = "Remove reminder: $label")
+                }
             }
+            if (detail != null) Text(detail, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            extra()
         }
-        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        extra()
     }
 }
 
 @Composable
-private fun CustomReminderDialog(onDismiss: () -> Unit, onConfirm: (Int, ReminderUnit) -> Unit) {
-    var amountText by remember { mutableStateOf("1") }
-    var unit by remember { mutableStateOf(ReminderUnit.HOURS) }
+private fun CustomReminderDialog(initialAmount: Int, initialUnit: ReminderUnit, confirm: String, onDismiss: () -> Unit, onConfirm: (Int, ReminderUnit) -> Unit) {
+    var amountText by remember { mutableStateOf(initialAmount.toString()) }
+    var unit by remember { mutableStateOf(initialUnit) }
     val amount = amountText.toIntOrNull()
 
     PlannerDialog("Custom reminder",
         onDismissRequest = onDismiss,
-        primary = DialogAction("Add reminder", enabled = amount != null && amount >= 1) { onConfirm(amount!!, unit) },
+        primary = DialogAction(confirm, enabled = amount != null && amount >= 1) { onConfirm(amount!!, unit) },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
     ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

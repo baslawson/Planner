@@ -773,7 +773,7 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     }
 }
 
-// A note's one reminder: In 1 hour, Tomorrow 09:00 or Custom; once set, its time with Remove (and a snooze, if any).
+// A note's one reminder: In 1 hour, Tomorrow 09:00 or Custom; once set, its time with Change and Remove (and a snooze, if any).
 @Composable
 private fun NoteReminderSection(reminderAt: Long?, sound: com.example.itinerary.data.ReminderSound, onSound: (com.example.itinerary.data.ReminderSound) -> Unit, snoozedUntil: Long?, enabled: Boolean, onSet: (Long?) -> Unit, onCustom: () -> Unit) {
     val context = LocalContext.current
@@ -784,19 +784,21 @@ private fun NoteReminderSection(reminderAt: Long?, sound: com.example.itinerary.
     var stale by remember { mutableIntStateOf(0) }
     val presets = remember(reminderAt, stale) { com.example.itinerary.data.taskReminderPresets(null) }
     val nine = java.time.LocalTime.of(9, 0).label(LocalTimeFormat.current, context)
+    // "Add reminder" while there is none, its "Change ▾" once there is.
+    val choices = presets.map { (preset, _) ->
+        (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
+            // Timed from the tap; a choice that has passed since goes.
+            val at = com.example.itinerary.data.taskReminderPresetAt(preset, null)
+            if (at != null) onSet(at) else stale += 1
+        }
+    } + ("Pick date and time…" to onCustom)
     ReminderSectionFrame(notifications.enabled, notifications.enable,
         hints = listOfNotNull(reminderAlarmHint(exactAllowed, reminderAt != null, rings(sound.ring, sound.seconds, defaultSound))),
-        chips = if (reminderAt != null) emptyList() else presets.map { (preset, _) ->
-            (if (preset == com.example.itinerary.data.TaskReminderPreset.LATER_TODAY) "In 1 hour" else "Tomorrow $nine") to {
-                // Timed from the tap; a choice that has passed since goes.
-                val at = com.example.itinerary.data.taskReminderPresetAt(preset, null)
-                if (at != null) onSet(at) else stale += 1
-            }
-        } + ("Pick date and time…" to onCustom),
+        chips = if (reminderAt != null) emptyList() else choices,
         enabled = enabled) {
         reminderAt?.let { at ->
             ReminderRow(momentLabel(at), snoozedUntil?.let { "Snoozed until ${momentLabel(it)}. Changing the reminder ends the snooze." },
-                onRemove = { onSet(null); onSound(com.example.itinerary.data.ReminderSound.DEFAULT) }, enabled = enabled) {
+                onRemove = { onSet(null); onSound(com.example.itinerary.data.ReminderSound.DEFAULT) }, enabled = enabled, changes = choices) {
                 ReminderSoundChoice(sound, defaultSound, enabled, onSound) }
         }
     }

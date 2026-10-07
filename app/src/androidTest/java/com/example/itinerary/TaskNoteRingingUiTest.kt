@@ -51,9 +51,9 @@ class TaskNoteRingingUiTest {
         Thread.sleep(300)
     }
     private fun click(text: String) { reveal(text); clickNode(find(text), text) }
-    // The reminder's "Sound: …" button (a dropdown), or null with no reminder.
-    private fun soundButton() = nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Sound: ") == true }
-    private fun soundShown() = soundButton()?.text?.toString()?.removePrefix("Sound: ")
+    // The reminder's sound button ("🔔 … ▾", read out as "Sound: …"), or null with no reminder.
+    private fun soundButton() = nodes().firstOrNull { it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("Sound: ") == true }
+    private fun soundShown() = soundButton()?.contentDescription?.toString()?.removePrefix("Sound: ")
     private fun chooseSound(label: String) {
         revealWhere("No Sound choice") { soundButton() != null }
         clickNode(soundButton(), "Sound")
@@ -136,6 +136,46 @@ class TaskNoteRingingUiTest {
         removeReminder()
         click("Close"); Thread.sleep(800)
         assertNull("Close asked to save an unchanged legacy task", find("Keep editing"))
+    }
+
+    // A reminder's "Change ▾" (user, 7 Oct: changing the time meant removing the reminder first). A saved event's 15-minute
+    // reminder with its own sound becomes 1 hour before, keeping that sound, without a remove.
+    @Test fun eventReminderChangesTimeAndKeepsItsSound() {
+        val day = java.time.LocalDate.now().plusDays(3)
+        runBlocking { app.repository.saveItem(ItineraryItem(tripId = 0, date = day, startTime = java.time.LocalTime.of(14, 0), title = "QA change reminder"),
+            addedReminders = listOf(Reminder(itemId = 0, amount = 15, unit = ReminderUnit.MINUTES, ringSeconds = 30))) }
+        app.settings.lastViewCalendar = false
+        ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        click("QA change reminder"); Thread.sleep(800); if (find("Edit event") == null) click("QA change reminder")
+        await("The event editor didn't open") { find("Edit event") != null }
+        reveal("15 minutes before")
+        click("Change reminder: 15 minutes before")
+        await("The Change list didn't open") { find("1 hour") != null && find("Pick date and time…") != null }
+        clickNode(find("1 hour"), "1 hour")
+        await("The reminder didn't change") { find("1 hour before") != null && find("15 minutes before") == null }
+        assertEquals("the sound changed with the time", "30 seconds", soundShown())
+        screenshot("event-reminder-changed")
+        click("Save"); click("Close")
+        val saved = runBlocking { app.repository.snapshot().reminders.single() }
+        assertEquals(1, saved.amount); assertEquals(ReminderUnit.HOURS, saved.unit); assertEquals(30, saved.ringSeconds); assertFalse(saved.ringUntilDismissed)
+    }
+
+    // A task's one reminder changes from its "Change ▾" too, keeping its sound.
+    @Test fun taskReminderChangesTimeAndKeepsItsSound() {
+        val task = PlannerTask(id = "qa-ui-change", title = "QA task change reminder", reminderAt = System.currentTimeMillis() + 3_600_000, ringSeconds = 60)
+        runBlocking { app.repository.saveTask(task) }
+        ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        click(task.title)
+        clickNode(nodes().first { it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("Change reminder: ") == true }, "Change reminder")
+        var chip: AccessibilityNodeInfo? = null
+        await("No Tomorrow choice") { chip = nodes().firstOrNull { it.isVisibleToUser && it.text?.toString()?.startsWith("Tomorrow") == true }; chip != null }
+        clickNode(chip, "Tomorrow")
+        assertEquals("1 minute", soundShown())
+        click("Save"); click("Close")
+        val saved = runBlocking { app.repository.snapshot().tasks.single() }
+        val at = java.time.Instant.ofEpochMilli(saved.reminderAt!!).atZone(java.time.ZoneId.systemDefault())
+        assertEquals(java.time.LocalDate.now().plusDays(1), at.toLocalDate()); assertEquals(9, at.hour)
+        assertEquals(60, saved.ringSeconds)
     }
 
     @Test fun noteSoundChoiceSavesAndReopens() {
