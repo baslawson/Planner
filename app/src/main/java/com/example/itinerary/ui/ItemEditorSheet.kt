@@ -1089,7 +1089,18 @@ private fun ItemEditorForm(
                     if (shownReminders.none { it != reminder && it.scheduleKey == moved.scheduleKey } && moved.scheduleKey != reminder.scheduleKey) {
                         addedReminders.remove(reminder)
                         if (reminder.id != 0L && removedReminders.none { it.id == reminder.id }) removedReminders += reminder
-                        addedReminders += moved
+                        // Hunt 22 P3: back to a saved reminder's own time (changed away and back): that reminder again, with
+                        // its record, snooze and shown notification, not a copy (Save would delete the original).
+                        val original = existingReminders.firstOrNull { saved -> saved.scheduleKey == moved.scheduleKey && removedReminders.any { it.id == saved.id } }
+                        if (original == null) addedReminders += moved
+                        else {
+                            removedReminders.removeAll { it.id == original.id }
+                            if (original.ringUntilDismissed != moved.ringUntilDismissed || original.ringSeconds != moved.ringSeconds) {
+                                // Its sound as chosen: changed in place, as the Sound choice does.
+                                removedReminders += original
+                                addedReminders += original.copy(ringUntilDismissed = moved.ringUntilDismissed, ringSeconds = moved.ringSeconds)
+                            }
+                        }
                     }
                 },
             )

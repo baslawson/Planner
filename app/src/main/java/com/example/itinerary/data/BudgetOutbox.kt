@@ -11,8 +11,20 @@ import android.content.Context
 class BudgetOutbox(context: Context) {
     private val prefs = context.getSharedPreferences("budget_outbox", Context.MODE_PRIVATE)
 
+    // The message MyBudget has open now (BudgetLinkSender), which an Undone can't take back here: MyBudget must hear it.
+    @Volatile var inFlight: BudgetLink.Message? = null
+
     @Synchronized fun add(messages: List<BudgetLink.Message>) {
-        if (messages.isNotEmpty()) save((pending() + messages).takeLast(MAX))
+        if (messages.isEmpty()) return
+        // Hunt 22 L3: paid then undone before MyBudget heard of it (Pay then Undo from a notification, Planner closed):
+        // the two cancel out, rather than walking the user through adding the expense and then removing it.
+        val all = pending().toMutableList()
+        messages.forEach { message ->
+            val unsent = (message as? BudgetLink.Message.Undone)?.let { undone ->
+                all.lastOrNull { it is BudgetLink.Message.Add && it.paymentId == undone.paymentId && it != inFlight } }
+            if (unsent != null) all.remove(unsent) else all += message
+        }
+        save(all.takeLast(MAX))
     }
     @Synchronized fun pending(): List<BudgetLink.Message> =
         prefs.getString(KEY, "").orEmpty().split('\n').filter { it.isNotEmpty() }.mapNotNull { BudgetLink.decode(it) }

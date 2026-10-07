@@ -57,7 +57,7 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
 
     fun answered(resultCode: Int, data: Intent?) {
         val sent = waiting ?: return
-        waiting = null
+        waiting = null; outbox.inFlight = null
         outbox.remove(sent)
         val summary = data?.getStringExtra(BudgetLink.EXTRA_SUMMARY)?.take(160)?.takeIf { it.isNotBlank() }
         when {
@@ -71,6 +71,8 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         if (waiting != null) return
         if (queue.isEmpty()) queue += outbox.pending() // what's left: answered ones have gone from the outbox
         val message = queue.removeFirstOrNull() ?: return
+        // L3: taken back meanwhile (paid and undone before it went): it has left the outbox.
+        if (message !in outbox.pending()) return next()
         val intent = budgetIntent(message)
         if (intent == null) { outbox.remove(message); toast("Not sent to MyBudget: it keeps AUD bills only."); return next() }
         // Not reachable: nothing waits for a MyBudget that isn't there (it would pile up and arrive long after).
@@ -79,8 +81,8 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
             if (message is BudgetLink.Message.Add) toast("MyBudget isn't installed, so the bill wasn't sent.")
             return
         }
-        try { waiting = message; launcher.launch(intent) }
-        catch (_: android.content.ActivityNotFoundException) { waiting = null; queue.clear(); outbox.clear(); toast("Couldn't open MyBudget.") }
+        try { waiting = message; outbox.inFlight = message; launcher.launch(intent) }
+        catch (_: android.content.ActivityNotFoundException) { waiting = null; outbox.inFlight = null; queue.clear(); outbox.clear(); toast("Couldn't open MyBudget.") }
     }
 
     private fun toast(text: String) = Toast.makeText(activity, text, Toast.LENGTH_LONG).show()

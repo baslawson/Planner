@@ -106,6 +106,15 @@ class AlarmService : Service() {
     }
 
     private fun startRinging(extras: Bundle?, startId: Int, redelivered: Boolean = false) {
+        // Hunt 22 P1: a timed ring never takes over one ringing until stopped (a wake-up alarm, which would go quiet while the
+        // newcomer stopped by itself seconds later): it gives way, as its normal notification with its sound, and the alarm
+        // rings on. Its start is set aside, done with when the alarm ends.
+        if (extras != null && timed(extras) && ringing?.let { !timed(it) } == true) {
+            showAsNotification(extras)
+            OwnedAlarmStarts.finish(this, extras)
+            ignoredStart = maxOf(ignoredStart, startId)
+            return
+        }
         // A second alarm can arrive while one is ringing; keep the first one as a normal notification.
         val previous = ringing
         val previousStart = ringingStart
@@ -237,7 +246,10 @@ class AlarmService : Service() {
     // as its normal notification, quietly, with its buttons. Like a give-up, it ends its own start only (R6-2).
     private fun onRangOut() {
         val start = ringingStart
-        ringing?.let { extras -> showAsNotification(extras, silent = true) }
+        // P6: an event's alarm stopped from elsewhere (stopIfRinging) just now is no longer this one's: nothing to post.
+        synchronized(OwnedAlarmStarts) {
+            ringing?.takeIf { it.containsKey(EXTRA_OWNER_KIND) || currentReminderId != null }?.let { extras -> showAsNotification(extras, silent = true) }
+        }
         stopRinging(start)
     }
 
@@ -446,7 +458,15 @@ class AlarmService : Service() {
         @Volatile private var stopToken: String? = null
         fun stopIfRinging(context: Context, id: Long) {
             synchronized(OwnedAlarmStarts) {
-                if (currentReminderId == id) requestStop(context, stopToken)
+                // Hunt 22 P6: no longer this alarm's, at once, so its time running out meanwhile (onRangOut) doesn't post the
+                // notification that was just taken away (snoozed, deleted, paid).
+                if (currentReminderId == id) { currentReminderId = null; requestStop(context, stopToken) }
+            }
+        }
+        /** Hunt 22 P2: an event reminder's sound changed to one that doesn't ring: it stops ringing, its notification stays. */
+        fun quietIfRinging(context: Context, id: Long) {
+            synchronized(OwnedAlarmStarts) {
+                if (currentReminderId == id) requestStop(context, stopToken, keepReminder = true)
             }
         }
 

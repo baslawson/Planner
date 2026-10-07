@@ -97,6 +97,18 @@ class BudgetLinkTest {
         assertEquals(listOf(BudgetLink.Message.Undone("planner-paid-7")), BudgetLink.changes(paid, Payments.setPaid(paid, false)))
     }
 
+    // Hunt 22 L1: paid without an amount, given one later, then unpaid: MyBudget still hears it was undone.
+    @Test fun aBillPaidWithoutAnAmountIsUndoneAfterGettingOne() {
+        val paid = Payments.setPaid(bill(amount = null), true)
+        val priced = paid.copy(billAmountMinor = 5000)
+        assertTrue("giving it an amount alone sends nothing", BudgetLink.changes(paid, priced).isEmpty())
+        val unpaid = Payments.setPaid(priced, false)
+        assertEquals(listOf(BudgetLink.Message.Undone("planner-paid-7")), BudgetLink.changes(priced, unpaid))
+        // Paid again, now with its amount: a new payment, after the old one was taken back.
+        val again = Payments.setPaid(unpaid, true)
+        assertEquals(listOf(again.payments.single().id), BudgetLink.changes(unpaid, again).map { (it as BudgetLink.Message.Add).paymentId })
+    }
+
     @Test fun otherCurrenciesAreNotSent() {
         val before = bill(currency = "USD")
         val paid = Payments.setPaid(before, true)

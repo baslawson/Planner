@@ -134,8 +134,12 @@ class Repository(
     }
 
     // D14-1: a changed reminder time is a new reminder (the old alarm and notification go); a changed ring choice alone
-    // keeps the reminder as it is: it is set again with the choice, and turned off it only stops the ringing.
-    private fun ringTurnedOff(before: Boolean?, after: Boolean?) = before == true && after == false
+    // keeps the reminder as it is: it is set again with the choice, and turned off it only stops the ringing. Hunt 22 P2:
+    // "turned off" is a sound that rang changed to one that doesn't (10 s, 30 s, 1 min and Default count, not only "Until
+    // I stop it"); a change from one ring to another lets the ringing go on.
+    private class Ringing(val ringUntilDismissed: Boolean, val ringSeconds: Int)
+    private fun ringTurnedOff(before: Ringing?, after: Ringing?) = before != null && after != null &&
+        scheduler.rings(before.ringUntilDismissed, before.ringSeconds) && !scheduler.rings(after.ringUntilDismissed, after.ringSeconds)
 
     private suspend fun afterCommit(files: Collection<String> = emptyList(), reminderIds: Collection<Long> = emptyList(),
                                     cancelFirst: Set<Long> = emptySet(), notify: Boolean = true, taskIds: Collection<String> = emptyList(),
@@ -251,7 +255,7 @@ class Repository(
             val saved = taskDao.byId(task.id)
             afterCommit(files = existing?.attachments.orEmpty().map { it.fileName }, taskIds = listOf(task.id),
                 resetTaskIds = if (existing?.activeReminderAt != saved?.activeReminderAt) setOf(task.id) else emptySet(),
-                quietTaskIds = if (ringTurnedOff(existing?.ringUntilDismissed, saved?.ringUntilDismissed)) setOf(task.id) else emptySet())
+                quietTaskIds = if (ringTurnedOff(existing?.let { Ringing(it.ringUntilDismissed, it.ringSeconds) }, saved?.let { Ringing(it.ringUntilDismissed, it.ringSeconds) })) setOf(task.id) else emptySet())
         }
     }
     // A task's ⋮ "Due tomorrow", with the same Undo bar as an event's move (see undoMove).
@@ -336,7 +340,7 @@ class Repository(
             else { check(old != null) { "This note was deleted" }; noteDao.update(clean) }
             afterCommit(noteIds = listOf(clean.id),
                 resetNoteIds = if (old != null && old.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet(),
-                quietNoteIds = if (ringTurnedOff(old?.ringUntilDismissed, clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
+                quietNoteIds = if (ringTurnedOff(old?.let { Ringing(it.ringUntilDismissed, it.ringSeconds) }, Ringing(clean.ringUntilDismissed, clean.ringSeconds))) setOf(clean.id) else emptySet())
         }
         clean
     }
@@ -359,7 +363,7 @@ class Repository(
             val stamped = if (changed.content != note.content || changed.title != note.title) changed.copy(modified = System.currentTimeMillis()) else changed
             noteDao.update(stamped)
             afterCommit(noteIds = listOf(id), resetNoteIds = if (note.activeReminderAt != stamped.activeReminderAt) setOf(id) else emptySet(),
-                quietNoteIds = if (ringTurnedOff(note.ringUntilDismissed, stamped.ringUntilDismissed)) setOf(id) else emptySet())
+                quietNoteIds = if (ringTurnedOff(Ringing(note.ringUntilDismissed, note.ringSeconds), Ringing(stamped.ringUntilDismissed, stamped.ringSeconds))) setOf(id) else emptySet())
             stamped
         }
     }
@@ -433,7 +437,7 @@ class Repository(
             Notes.validate(clean)
             if (current == null) noteDao.insert(clean) else noteDao.update(clean)
             afterCommit(noteIds = listOf(clean.id), resetNoteIds = if (current != null && current.activeReminderAt != clean.activeReminderAt) setOf(clean.id) else emptySet(),
-                quietNoteIds = if (ringTurnedOff(current?.ringUntilDismissed, clean.ringUntilDismissed)) setOf(clean.id) else emptySet())
+                quietNoteIds = if (ringTurnedOff(current?.let { Ringing(it.ringUntilDismissed, it.ringSeconds) }, Ringing(clean.ringUntilDismissed, clean.ringSeconds))) setOf(clean.id) else emptySet())
             true
         }
     }
@@ -865,6 +869,7 @@ class Repository(
         EventText.validate(item, if (item.id == 0L) null else itemDao.byId(item.id))
         val cancelled = mutableListOf<Reminder>()
         val resetReminders = mutableSetOf<Long>()
+        val quieted = mutableListOf<Long>()
         val removedFiles = mutableListOf<String>()
         val scheduled = mutableListOf<Pair<ItineraryItem, List<Reminder>>>()
         val payments = mutableListOf<PendingPayment>()
@@ -964,7 +969,12 @@ class Repository(
                     // itself: it is updated, keeping its snooze and delivery record, not deleted and added again.
                     val changed = addedReminders.filter { new -> new.id != 0L && removedReminders.any { it.id == new.id } &&
                         reminderDao.byId(new.id)?.itemId == saved.id }
-                    changed.forEach { reminderDao.setRing(it.id, it.ringUntilDismissed, it.ringSeconds) }
+                    changed.forEach { new ->
+                        // Hunt 22 P2: changed to a sound that doesn't ring while it rings: it goes quiet (after the commit).
+                        reminderDao.byId(new.id)?.let { old -> if (ringTurnedOff(Ringing(old.ringUntilDismissed, old.ringSeconds),
+                            Ringing(new.ringUntilDismissed, new.ringSeconds))) quieted.add(new.id) }
+                        reminderDao.setRing(new.id, new.ringUntilDismissed, new.ringSeconds)
+                    }
                     addedReminders.filterNot { it in changed }.forEach { reminderDao.insert(it.copy(id = 0, itemId = saved.id, snoozedUntil = null)) }
                     removedReminders.filter { old -> old.itemId == saved.id && changed.none { it.id == old.id } }
                         .forEach { reminderDao.delete(it); cancelled.add(it) }
@@ -981,6 +991,7 @@ class Repository(
         }
         payments.forEach(::recordPayment)
         budgetChanges.forEach { (before, after) -> tellBudget(before, after) }
+        quieted.forEach(scheduler::ringOff)
         afterCommit(removedFiles, cancelled.map { it.id } + scheduled.flatMap { it.second }.map { it.id }, cancelFirst = resetReminders)
         editedId
     }

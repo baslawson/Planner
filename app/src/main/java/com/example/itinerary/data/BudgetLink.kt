@@ -104,7 +104,9 @@ object BudgetLink {
         val undone = liveBefore.filter { old -> liveAfter.none { it.id == old.id } }.map { it.id }.toMutableList()
         val unpriced = after.billAmountMinor == null && liveAfter.isEmpty() && liveBefore.isEmpty()
         val paidNow = unpriced && after.paid && !before.paid
-        if (unpriced && before.paid && !after.paid) undone += unpricedPaymentId(after)
+        // Hunt 22 L1: paid without an amount (MyBudget has it by the bill) and no longer paid that way, whatever its amount
+        // now: given one later and then unpaid, MyBudget was never told, and paying again made a second expense there.
+        if (before.paid && liveBefore.isEmpty() && !(after.paid && liveAfter.isEmpty())) undone += unpricedPaymentId(after)
         // MyBudget never had a payment in another currency, so it isn't told about one being undone either.
         if (after.billCurrency != CURRENCY) return if (added.isNotEmpty() || paidNow) listOf(Message.NotAud(after.billCurrency)) else emptyList()
         return undone.map { Message.Undone(it) } +

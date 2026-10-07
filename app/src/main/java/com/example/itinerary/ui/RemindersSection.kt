@@ -73,10 +73,17 @@ fun RemindersSection(
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
     val pickedDate = pickedDay?.let(java.time.LocalDate::parse)
+    val context = androidx.compose.ui.platform.LocalContext.current
     // The reminder being changed (its "Change ▾"), or null while adding one.
     var changingKey by rememberSaveable { mutableStateOf<String?>(null) }
     val changing = changingKey?.let { key -> reminders.firstOrNull { it.changeKey == key } }
-    fun choose(amount: Int, unit: ReminderUnit) { changing?.let { onChange(it, amount, unit) } ?: onAdd(amount, unit) }
+    // Hunt 22 P4: a reminder gone meanwhile (deleted or changed elsewhere while its dialog was open) isn't added instead.
+    fun choose(amount: Int, unit: ReminderUnit) {
+        if (changingKey == null) onAdd(amount, unit)
+        else changing?.let { onChange(it, amount, unit) }
+            ?: android.widget.Toast.makeText(context, "That reminder was changed meanwhile.", android.widget.Toast.LENGTH_SHORT).show()
+        changingKey = null
+    }
     // The ways to add a reminder, or to change [reminder] to another time.
     fun choices(reminder: Reminder?): List<Pair<String, () -> Unit>> {
         val key = reminder?.changeKey
@@ -86,7 +93,6 @@ fun RemindersSection(
             ("Pick date and time…" to { changingKey = key; pickedDay = null; pickingDate = true })
     }
     val zone = rememberCurrentZoneId()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     val scheduler = (context.applicationContext as com.example.itinerary.ItineraryApp).reminderScheduler
     val exactAllowed by rememberExactAlarmsAllowed(scheduler)
@@ -107,8 +113,8 @@ fun RemindersSection(
     if (customOpen) {
         CustomReminderDialog(
             initialAmount = changing?.amount?.takeIf { it >= 1 } ?: 1, initialUnit = changing?.unit ?: ReminderUnit.HOURS,
-            confirm = if (changing != null) "Change reminder" else "Add reminder",
-            onDismiss = { customOpen = false },
+            confirm = if (changingKey != null) "Change reminder" else "Add reminder",
+            onDismiss = { customOpen = false; changingKey = null },
             onConfirm = { amount, unit -> choose(amount, unit); customOpen = false },
         )
     }
@@ -116,12 +122,12 @@ fun RemindersSection(
     // as the time before the event (reminderAt), so it moves with the event. Changing one starts from when it fires now.
     val changingAt = changing?.let { com.example.itinerary.data.reminderTrigger(eventDate, eventTime, it, zone).toLocalDateTime() }
     val eventStartTime = changingAt?.toLocalTime() ?: eventTime ?: java.time.LocalTime.of(9, 0)
-    if (pickingDate) SingleDateDialog(pickedDate ?: changingAt?.toLocalDate() ?: eventDate, onDismiss = { pickingDate = false },
+    if (pickingDate) SingleDateDialog(pickedDate ?: changingAt?.toLocalDate() ?: eventDate, onDismiss = { pickingDate = false; changingKey = null },
         onConfirm = { pickedDay = it.toString(); pickingDate = false; pickingTime = true })
-    if (pickingTime) TimePickerDialog(eventStartTime, onDismiss = { pickingTime = false }, onConfirm = { time ->
+    if (pickingTime) TimePickerDialog(eventStartTime, onDismiss = { pickingTime = false; changingKey = null }, onConfirm = { time ->
         pickingTime = false
         val offset = com.example.itinerary.data.reminderAt(eventDate, eventTime, pickedDate!!.atTime(time), zone)
-        if (offset == null) android.widget.Toast.makeText(context, "Choose a time before the event starts.", android.widget.Toast.LENGTH_LONG).show()
+        if (offset == null) { android.widget.Toast.makeText(context, "Choose a time before the event starts.", android.widget.Toast.LENGTH_LONG).show(); changingKey = null }
         else choose(offset.first, offset.second)
     })
 }
@@ -272,8 +278,9 @@ fun ReminderRow(label: String, detail: String?, onRemove: () -> Unit, enabled: B
 
 @Composable
 private fun CustomReminderDialog(initialAmount: Int, initialUnit: ReminderUnit, confirm: String, onDismiss: () -> Unit, onConfirm: (Int, ReminderUnit) -> Unit) {
-    var amountText by remember { mutableStateOf(initialAmount.toString()) }
-    var unit by remember { mutableStateOf(initialUnit) }
+    // Hunt 22 P5: kept through a rotation, as the dialog is (customOpen).
+    var amountText by rememberSaveable { mutableStateOf(initialAmount.toString()) }
+    var unit by rememberSaveable { mutableStateOf(initialUnit) }
     val amount = amountText.toIntOrNull()
 
     PlannerDialog("Custom reminder",
