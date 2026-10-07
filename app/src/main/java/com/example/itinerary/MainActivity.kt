@@ -285,7 +285,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // With "Send paid bills to MyBudget" on, MyBudget also gets the upcoming bills: when Planner opens, and when it's left
+    // (so changes made meanwhile arrive). Not on a rotation.
+    private fun shareUpcomingBills() {
+        val app = application as ItineraryApp
+        if (isChangingConfigurations || !app.settings.sendBillsToBudget.value) return
+        app.appScope.launch(Dispatchers.IO) { runCatching { com.example.itinerary.ui.sendUpcomingBills(app, app.repository.upcomingBills()) } }
+    }
+
     override fun onStop() {
+        shareUpcomingBills()
         appLock.onStopped(isChangingConfigurations)
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
@@ -299,6 +308,7 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
         AlarmService.stopIfUnseen(this)
+        shareUpcomingBills()
         // Once per process, and again when the exact-alarm permission (just granted in system settings, say) or the
         // time zone changed: see RescheduleOnOpen.
         lifecycleScope.launch(Dispatchers.IO) {

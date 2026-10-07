@@ -133,8 +133,11 @@ fun SettingsScreen(
                     SettingsHeading("Agenda")
                     SwitchRow("Show unpaid bills summary", showBillsSummary, settings::setShowBillsSummary)
                     Text("Hide the summary card without hiding bill events.", style = MaterialTheme.typography.bodySmall)
-                    SwitchRow("Send paid bills to MyBudget", sendBillsToBudget, settings::setSendBillsToBudget)
-                    Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. AUD bills only."
+                    SwitchRow("Send paid bills to MyBudget", sendBillsToBudget, onChange = { on ->
+                        settings.setSendBillsToBudget(on)
+                        if (!on) sendUpcomingBills(context, emptyList()) // MyBudget drops the upcoming bills it had
+                    })
+                    Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. MyBudget also sees your upcoming bills, to plan for them. AUD bills only."
                         else "MyBudget isn't installed on this phone, so nothing is sent.", style = MaterialTheme.typography.bodySmall)
                     // RS-4: not Agenda settings: a heading of their own.
                     SettingsHeading("Start and notes")

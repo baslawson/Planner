@@ -23,6 +23,23 @@ fun budgetIntent(message: BudgetLink.Message): Intent? = when (message) {
 }
 
 /**
+ * Upcoming bills for MyBudget (BudgetLink.upcoming), as a broadcast to MyBudget's package only. On Android 14 and later
+ * Planner shares its identity with it, so MyBudget can check the list came from Planner.
+ */
+fun sendUpcomingBills(context: Context, bills: List<BudgetLink.Upcoming>) {
+    if (!budgetLinkInstalled(context)) return
+    val json = org.json.JSONArray()
+    bills.forEach { b ->
+        json.put(org.json.JSONObject().put("id", b.id).put("billKey", b.billKey).put("payee", b.payee).put("due", b.due.toString())
+            .apply { b.amount?.let { put("amountCents", it) } })
+    }
+    val intent = Intent(BudgetLink.ACTION_UPCOMING).setPackage(BudgetLink.PACKAGE).putExtra(BudgetLink.EXTRA_BILLS, json.toString())
+    if (android.os.Build.VERSION.SDK_INT >= 34)
+        context.sendBroadcast(intent, null, android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle())
+    else context.sendBroadcast(intent)
+}
+
+/**
  * MainActivity's messages for MyBudget, one screen at a time: the next opens when MyBudget answers the last. Lost if
  * Android ends Planner while MyBudget is open; MyBudget adds a payment once, so nothing is doubled either way.
  */

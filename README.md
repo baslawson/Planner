@@ -17,7 +17,7 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 - Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
 - Notes in Markdown with checklists, notebooks, tags, colours, attachments and reminders; optional two-way sync with the Nextcloud Notes app (and so with Quillpad).
 - Document and bill scanning with cropping and on-device text recognition.
-- Optionally send paid bills to [MyBudget](https://github.com/baslawson/mybudget), an envelope budgeting app, which asks for the category and records the expense.
+- Optionally send paid bills to [MyBudget](https://github.com/baslawson/mybudget), an envelope budgeting app, which asks for the category and records the expense. MyBudget also sees your upcoming unpaid bills, to plan for them.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
 - Checks GitHub for new versions once a day (optional) and asks before downloading or installing.
 - Report a bug from the ⋮ menu: it opens a prefilled GitHub issue and shows exactly what will be sent.

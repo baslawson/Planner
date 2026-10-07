@@ -24,6 +24,33 @@ object BudgetLink {
     const val NOTE = "From Planner"
     private const val CURRENCY = "AUD"
 
+    // Upcoming bills (sent quietly, as a broadcast to MyBudget only, when Planner opens and closes with the setting on):
+    // MyBudget shows them, plans for them, and replaces its list with each one sent. They're never money there: the
+    // expense still comes from marking the bill paid here.
+    const val ACTION_UPCOMING = "com.mybudget.app.action.UPCOMING_BILLS"
+    const val EXTRA_BILLS = "bills" // JSON array of {id, billKey, payee, due (YYYY-MM-DD), amountCents (optional)}
+    private const val DAYS_BACK = 31L
+    private const val DAYS_AHEAD = 62L
+    const val MAX_UPCOMING = 200
+
+    data class Upcoming(val id: String, val billKey: String, val payee: String, val due: LocalDate, val amount: Long?)
+
+    /** Unpaid AUD bills from a month back (overdue) to two months ahead, by date: what's left to pay, or no amount. */
+    fun upcoming(items: List<ItineraryItem>, today: LocalDate): List<Upcoming> = items.asSequence()
+        .filter { it.category == "Bills" && !it.skipped && it.billCurrency == CURRENCY && it.date in today.minusDays(DAYS_BACK)..today.plusDays(DAYS_AHEAD) }
+        .mapNotNull { item ->
+            val left = Payments.remaining(item.billAmountMinor, item.paid, item.payments)
+            when {
+                item.billAmountMinor == null -> if (item.paid) null else item to null
+                left == null || left <= 0L -> null
+                else -> item to left
+            }
+        }
+        .sortedWith(compareBy({ it.first.date }, { it.first.id }))
+        .take(MAX_UPCOMING)
+        .map { (item, left) -> Upcoming("planner-bill-${item.id}", billKey(item), item.title.take(80), item.date, left) }
+        .toList()
+
     sealed interface Message {
         data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate) : Message
         data class Undone(val paymentId: String) : Message

@@ -9,6 +9,31 @@ class BudgetLinkTest {
         date = LocalDate.of(2026, 10, 9), startTime = null, title = "Electricity", category = "Bills",
         billAmountMinor = amount, billCurrency = currency)
 
+    @Test fun upcomingBillsAreUnpaidAudBillsNearToday() {
+        val today = LocalDate.of(2026, 10, 7)
+        fun at(id: Long, date: LocalDate, amount: Long? = 5000) = bill(amount).copy(id = id, date = date, title = "Bill $id")
+        val items = listOf(
+            at(1, today.plusDays(3)),
+            at(2, today.minusDays(10)),                                                // overdue: still to pay
+            Payments.setPaid(at(3, today.plusDays(5)), true),                          // paid
+            at(4, today.plusDays(4)).copy(payments = listOf(BillPayment(id = "p", amount = 2000))), // part paid: what's left
+            at(5, today.plusDays(6), amount = null),                                   // no amount
+            at(6, today.plusDays(7), amount = null).copy(paid = true),                 // no amount, paid
+            at(7, today.plusDays(8)).copy(billCurrency = "USD"),                       // not AUD
+            at(8, today.plusDays(9)).copy(skipped = true),                             // skipped
+            at(9, today.plusDays(63)),                                                 // too far ahead
+            at(10, today.minusDays(32)),                                               // too long ago
+            at(11, today.plusDays(2)).copy(category = "Food"),                         // not a bill
+            at(12, today.plusDays(1)).copy(seriesId = "s1"))
+        val upcoming = BudgetLink.upcoming(items, today)
+        assertEquals(listOf(2L, 12L, 1L, 4L, 5L), upcoming.map { it.id.removePrefix("planner-bill-").toLong() })
+        assertEquals(3000L, upcoming.first { it.id == "planner-bill-4" }.amount)
+        assertNull(upcoming.first { it.id == "planner-bill-5" }.amount)
+        assertEquals("planner-series-s1", upcoming.first { it.id == "planner-bill-12" }.billKey)
+        assertEquals("planner-bill-1", upcoming.first { it.id == "planner-bill-1" }.billKey)
+        assertEquals(BudgetLink.MAX_UPCOMING, BudgetLink.upcoming((1L..300L).map { at(it, today) }, today).size)
+    }
+
     @Test fun markingPaidSendsTheMarkedPaidEntry() {
         val before = bill()
         val after = Payments.setPaid(before, true)

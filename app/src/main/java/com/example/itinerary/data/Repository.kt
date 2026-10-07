@@ -105,6 +105,9 @@ class Repository(
     private fun tellBudget(before: ItineraryItem, after: ItineraryItem) {
         BudgetLink.changes(before, after).takeIf { it.isNotEmpty() }?.let { _budgetMessages.tryEmit(it) }
     }
+    // Upcoming bills for MyBudget (BudgetLink.upcoming); MainActivity sends them when Planner opens and closes.
+    suspend fun upcomingBills(today: java.time.LocalDate = java.time.LocalDate.now()): List<BudgetLink.Upcoming> =
+        BudgetLink.upcoming(itemDao.all(), today)
 
     private val _pendingMoves = MutableStateFlow<List<PendingMove>>(emptyList())
     val pendingMoves = _pendingMoves.asStateFlow()
