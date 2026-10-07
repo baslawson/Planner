@@ -17,6 +17,7 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 - Calendars beside your own: Nextcloud, the calendars on your phone and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
 - Notes in Markdown with checklists, notebooks, tags, colours, attachments and reminders; optional two-way sync with the Nextcloud Notes app (and so with Quillpad).
 - Document and bill scanning with cropping and on-device text recognition.
+- Optionally send paid bills to [MyBudget](https://github.com/baslawson/mybudget), an envelope budgeting app, which asks for the category and records the expense.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
 - Checks GitHub for new versions once a day (optional) and asks before downloading or installing.
 - Report a bug from the ⋮ menu: it opens a prefilled GitHub issue and shows exactly what will be sent.
@@ -39,7 +40,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Release tags match the app's version (tag `v0.0.20` is version 0.0.20), so Obtainium can tell when an update is available.
+Release tags match the app's version (tag `v0.0.21` is version 0.0.21), so Obtainium can tell when an update is available.
 
 From 0.0.2 the app ID is `io.github.baslawson.planner` and releases are signed with a dedicated release key. Earlier builds (`com.example.itinerary`) are a separate app: export a backup from the old app, restore it in the new one, then uninstall the old one.
 
