@@ -108,7 +108,9 @@ class ColourBlindThemeUiTest {
             app.settings.lastViewCalendar=false
             app.settings.setAppTheme(AppTheme.MATRIX);app.settings.setThemeMode(ThemeMode.DARK)
             open();click("More options");click("Themes")
-            await { scrollableIn(nodes())?.canScroll(true)==true };screenshot("theme-list-top")
+            // R18 T1: the dialog scrolls only when its content doesn't fit (it fits on a Pixel 7 Pro): wait for a theme
+            // instead; click() scrolls to one off screen.
+            await { find("Colour-blind friendly")!=null };screenshot("theme-list-top")
             click("Colour-blind friendly")
             await { app.settings.appTheme.value==AppTheme.COLOUR_BLIND && find("✓ Colour-blind friendly")!=null }
             screenshot("selected-dark-preview")

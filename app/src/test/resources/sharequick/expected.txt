@@ -305,7 +305,7 @@
    -> title=Pay rent on 1. date=2026-10-04 time=null error=Finish the date, time or duration, or put literal title text in quotes. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
 
 [qe] Pay rent on 1.10.
-   -> title=Pay rent on date=2026-10-04 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[01:10, 13:10] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Pay rent date=2027-10-01 time=null error=Which date did you mean? choices=[] dateChoices=[2027-10-01, 2027-01-10] specified=true repeat=NONE minutes=null
 
 [qe] Pay rent on 1.10
    -> title=Pay rent on 1.10 date=2026-10-04 time=null error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
@@ -656,7 +656,7 @@
    -> title=Run date=2026-10-06 time=null error=null choices=[] dateChoices=[] specified=true repeat=NONE minutes=270
 
 [qe] Pay rent on 1.10.
-   -> title=Pay rent on date=2026-10-05 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[01:10, 13:10] dateChoices=[] specified=false repeat=NONE minutes=null
+   -> title=Pay rent date=2027-10-01 time=null error=Which date did you mean? choices=[] dateChoices=[2027-10-01, 2027-01-10] specified=true repeat=NONE minutes=null
 
 [bill] Amount due: 85\nYour credit limit is AUD 5,000.
    -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=8500, currency=null, warnings={})
@@ -1526,7 +1526,7 @@
    -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=AUD, warnings={})
 
 [S:Bill|bill] Amount due: A$84.20\nDue date: 20 October 2026
-   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=null, warnings={})
+   -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=AUD, warnings={})
 
 [S:Bill|bill] Amount due: €84.20\nDue date: 20 October 2026\nLate fee after due date: €10.00
    -> SharedWhen(date=2026-10-20, time=null, dates=[2026-10-20], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-20, amount=8420, currency=EUR, warnings={})
@@ -1773,3 +1773,63 @@
 
 [draft] Sent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
    -> title=Appointment | body=Your appointment is on 20 October at 10:30am. | notes=Sent from my Galaxy\n\n-------- Original message --------\nFrom: Clinic <clinic@example.com>\nDate: 02/10/2026 10:00 (GMT+01:00)\nTo: Me <me@example.org>\nSubject: Appointment\n\nYour appointment is on 20 October at 10:30am.
+
+[qe] Gym daily except 25 Dec
+   -> title=Gym daily except 25 Dec date=2026-10-07 time=null error=Planner can't skip one date. Add the repeat, then delete that occurrence. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Class Tuesdays until 1 Dec except 10 Nov
+   -> title=Class Tuesdays until 1 Dec except 10 Nov date=2026-10-07 time=null error=Planner can't skip one date. Add the repeat, then delete that occurrence. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Gym daily except tomorrow
+   -> title=Gym daily except tomorrow date=2026-10-07 time=null error=Planner can't skip one date. Add the repeat, then delete that occurrence. choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Gym every day except Fridays 6am
+   -> title=Gym date=2026-10-07 time=06:00 error=null choices=[] dateChoices=[] specified=true repeat=DAYS_OF_WEEK minutes=null
+
+[find] Your bill of $80 was due on 3 October. Please pay now.
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[find] Payment received on 2 October, thank you.
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[])
+
+[find] Statement date: 1 Oct\nTotal: $80\nDue: 25 Oct
+   -> SharedWhen(date=2026-10-25, time=null, dates=[2026-10-25], timeChoices=[])
+
+[qe] Lunch noon-1:30
+   -> title=Lunch date=2026-10-07 time=12:00 error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=90
+
+[qe] Lunch midday-1:15
+   -> title=Lunch date=2026-10-07 time=12:00 error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=75
+
+[qe] Yoga every Sat until December
+   -> title=Yoga date=2026-10-10 time=null error=null choices=[] dateChoices=[] specified=true repeat=WEEKLY minutes=null
+
+[qe] Pay rent every month until March
+   -> title=Pay rent date=2026-10-07 time=null error=null choices=[] dateChoices=[] specified=true repeat=MONTHLY minutes=null
+
+[bill] Refund of -$45 processed
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=null, currency=null, warnings={})
+
+[bill] Closing balance: $45.00 CR
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=null, currency=null, warnings={})
+
+[bill] Credit of $45 applied
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=null, currency=null, warnings={})
+
+[bill] Amount due AUD$120 by 15 Oct
+   -> SharedWhen(date=2026-10-15, time=null, dates=[2026-10-15], timeChoices=[]) || BillSuggestion(title=null, date=2026-10-15, amount=12000, currency=AUD, warnings={})
+
+[bill] NZ$ 89.50 due Friday
+   -> SharedWhen(date=null, time=null, dates=[], timeChoices=[]) || BillSuggestion(title=null, date=null, amount=8950, currency=NZD, warnings={})
+
+[qe] Meeting 12.10. 3pm
+   -> title=Meeting date=2026-10-12 time=15:00 error=Which date did you mean? choices=[] dateChoices=[2026-10-12, 2026-12-10] specified=true repeat=NONE minutes=null
+
+[qe] Meet at ٣pm
+   -> title=Meet date=2026-10-07 time=15:00 error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Lunch １２:３０
+   -> title=Lunch date=2026-10-07 time=null error=Morning or afternoon? Choose a time below, or type am or pm. choices=[00:30, 12:30] dateChoices=[] specified=false repeat=NONE minutes=null
+
+[qe] Call ‏
+   -> title=Call date=2026-10-07 time=null error=null choices=[] dateChoices=[] specified=false repeat=NONE minutes=null

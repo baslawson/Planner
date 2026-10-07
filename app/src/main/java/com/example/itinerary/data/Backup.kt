@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -83,43 +84,20 @@ class BackupManager(
         if (trackStatus) status.track("File") { writeExport(uri) } else writeExport(uri)
     }
     private suspend fun writeExport(uri: Uri) = withContext(Dispatchers.IO) {
-        val files = File.createTempFile("backup-files-", "", context.cacheDir).apply { delete(); mkdirs() }
         try {
-            val snapshot = repo.withSnapshotFiles { all ->
+            // R18-D1: only the snapshot is read under the repository lock; the files are read from the store after it,
+            // pinned so cleanup leaves them until the zip is written (no copy into the cache either, which needed as much
+            // free space again as the attachments take).
+            repo.withPinnedFiles({ all ->
                 // H17-D3: a Recently deleted bundle that can't be read is left out of the backup, not the whole backup.
                 val readable = readEachDeleted(all.deleted, { DeletedCodec.decode(it.payload) }) { entry, e ->
                     Log.w("BackupManager", "Left unreadable Recently deleted entry ${entry.id} out of the backup", e)
                 }
                 val data = all.copy(deleted = all.deleted.filterIndexed { i, _ -> readable[i] != null })
-                data.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
-                    val source = store.fileFor(name)
-                    if (source.exists()) source.copyTo(File(files, name))
-                }
-                data
-            }
-            // A record whose file has gone missing would only be a broken row in the backup. A link has no file.
-            val attachments = snapshot.attachments.filter { it.url != null || File(files, it.fileName).exists() }
-            val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || File(files, it.fileName).exists() }
-            val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { File(files, it.fileName).exists() },
-                notes = filterNoteAttachments(snapshot.notes) { File(files, it.fileName).exists() })
-            val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
-                .toByteArray(Charsets.UTF_8)
-            // H17-D1: stage() refuses a data.json over this, so a backup that couldn't be restored is never written.
-            if (json.size > MAX_DATA_BYTES) throw tooLargeToRestore()
-            val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
-            ZipOutputStream(out.buffered()).use { zip ->
-                zip.putNextEntry(ZipEntry(DATA_ENTRY))
-                zip.write(json)
-                zip.closeEntry()
-                saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
-                    zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
-                    File(files, name).inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
-                }
-            }
+                data to data.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct()
+            }) { snapshot -> writeZip(uri, snapshot) }
         } catch (e: Throwable) {
-            // H17-D2: any failure, the copy into the cache included, leaves no half-written (or empty) file behind that
-            // looks like a good backup. The cache copies go in finally.
+            // H17-D2: any failure leaves no half-written (or empty) file behind that looks like a good backup.
             runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
             if (e is kotlinx.coroutines.CancellationException) throw e
             throw when {
@@ -130,7 +108,42 @@ class BackupManager(
                     BackupException("There isn't enough free space on this phone to make the backup. Free some space and try again.")
                 else -> BackupException("Couldn't write the backup file.")
             }
-        } finally { files.deleteRecursively() }
+        }
+    }
+
+    private suspend fun writeZip(uri: Uri, snapshot: DataSnapshot) {
+        val files = snapshot.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct()
+            .filterTo(HashSet()) { store.fileFor(it).exists() }
+        // A record whose file has gone missing would only be a broken row in the backup. A link has no file.
+        val attachments = snapshot.attachments.filter { it.url != null || it.fileName in files }
+        val deleted = filterDeletedAttachments(snapshot.deleted) { it.url != null || it.fileName in files }
+        val saved = snapshot.copy(attachments = attachments, deleted = deleted, tasks = filterTaskAttachments(snapshot.tasks) { it.fileName in files },
+            notes = filterNoteAttachments(snapshot.notes) { it.fileName in files })
+        val json = toJson(saved, settings.snapshot(), calendars?.choices().orEmpty(), calendars?.sendSnapshot(), tasks?.snapshot())
+            .toByteArray(Charsets.UTF_8)
+        // H17-D1: stage() refuses a data.json over this, so a backup that couldn't be restored is never written.
+        if (json.size > MAX_DATA_BYTES) throw tooLargeToRestore()
+        val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
+        ZipOutputStream(out.buffered()).use { zip ->
+            zip.putNextEntry(ZipEntry(DATA_ENTRY))
+            zip.write(json)
+            zip.closeEntry()
+            saved.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct().forEach { name ->
+                zip.putNextEntry(ZipEntry("$ATTACHMENTS_DIR/$name"))
+                store.fileFor(name).inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    // R18-D4: copies a backup, restore or Nextcloud transfer left in the cache when Planner was ended part way (Android
+    // only clears the cache when storage runs low). A day old at least: one in use (a restore waiting to be confirmed)
+    // is never touched. backup-files-* are from versions before R18-D1.
+    fun sweepCache(now: Long = System.currentTimeMillis()) {
+        val prefixes = listOf("backup-files-", "import-staging-", "nextcloud-export-", "nextcloud-download-")
+        context.cacheDir.listFiles().orEmpty()
+            .filter { f -> prefixes.any { f.name.startsWith(it) } && now - f.lastModified() > 24 * 60 * 60_000L }
+            .forEach { if (it.isDirectory) it.deleteRecursively() else it.delete() }
     }
 
     // H17-D1: one limit for both directions (see MAX_DATA_BYTES).
@@ -181,7 +194,13 @@ class BackupManager(
     }
 
     // Replaces everything in the app with the staged backup, settings included.
-    suspend fun restore(staged: StagedBackup) = withContext(Dispatchers.IO) {
+    // R18-D3: the staged copy goes whether or not the restore works (the screen has already let go of it, so a failed
+    // one used to leave a copy of the whole backup in the cache, often on a phone already short of space).
+    suspend fun restore(staged: StagedBackup) {
+        try { restoreStaged(staged) } finally { withContext(NonCancellable + Dispatchers.IO) { staged.file.delete() } }
+    }
+
+    private suspend fun restoreStaged(staged: StagedBackup) = withContext(Dispatchers.IO) {
         // Files go in first, so the database never points at a file that isn't there. File names are
         // random, so a name that already exists is the same file and is left alone.
         val created = mutableListOf<File>()
@@ -247,8 +266,8 @@ class BackupManager(
                 throw e as? BackupException ?: BackupException("Couldn't restore the backup. Nothing was changed.")
             }
         }
-        failure?.let { throw it }
-        staged.file.delete()
+        // R18-D5: the plans are restored by now; only a setting or a sync record didn't take.
+        failure?.let { throw it as? BackupException ?: BackupException("The backup was restored, but some settings couldn't be applied. Check Settings.") }
     }
 
     fun discard(staged: StagedBackup) {

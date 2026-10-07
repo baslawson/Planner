@@ -132,7 +132,9 @@ class ShareFilesUiTest {
         assertEquals(listOf("QA receipt.txt"), note.attachments.map { it.name })
         assertTrue(File(context.filesDir, "attachments/${note.attachments.single().fileName}").exists())
         // H17-A6: handed to a note, the staging file waits for the week-old sweep, which leaves a saved note's files alone.
-        assertEquals(1, staging.size)
+        // R18-D2: and its marker that a window took it, so it isn't offered again after a restart.
+        assertEquals(staging.toString(), 1, staging.count { it.endsWith(".json") })
+        assertEquals(staging.toString(), setOf(".json", ".taken"), staging.map { "." + it.substringAfterLast(".") }.toSet())
     }
 
     // A second share of files while one is open waits its turn instead of replacing it (whose files would be left behind).

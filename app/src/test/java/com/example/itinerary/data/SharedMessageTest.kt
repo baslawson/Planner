@@ -198,4 +198,38 @@ class SharedMessageTest {
         assertNull(BillSuggestions.parseMessage("Due date: 2026-09-01\nEUR 84.20", null, today).date)
         assertEquals(LocalDate.of(2026, 10, 20), BillSuggestions.parseMessage("Due date: 2026-10-20\nEUR 84.20", null, today).date)
     }
+
+    // R18-Q2: a day without a year that has just gone is past, not next year's. Today is Wednesday 7 October 2026.
+    @Test fun aDayJustGoneIsNotNextYears() {
+        val oct7 = LocalDate.of(2026, 10, 7)
+        assertEquals(emptyList<LocalDate>(), SharedDates.find("Your bill of \$80 was due on 3 October. Please pay now.", oct7).dates)
+        assertEquals(emptyList<LocalDate>(), SharedDates.find("Payment received on 2 October, thank you.", oct7).dates)
+        assertEquals(LocalDate.of(2026, 10, 25), SharedDates.find("Statement date: 1 Oct\nTotal: \$80\nDue: 25 Oct", oct7).date)
+        // Longer ago than six months, or with its year written, it is still next year's or that year's.
+        assertEquals(LocalDate.of(2027, 3, 1), SharedDates.find("Your lease renews on 1 March.", oct7).date)
+        assertEquals(LocalDate.of(2027, 10, 3), SharedDates.find("The conference is on 3 October 2027.", oct7).date)
+    }
+
+    // R18-Q5: money coming back is no bill, and a dollar with its country keeps its currency.
+    @Test fun refundsCreditsAndCountryDollars() {
+        fun bill(text: String) = BillSuggestions.parseMessage(text, null).let { it.amount to it.currency }
+        for (text in listOf("Refund of -\$45 processed", "Total: -\$45.00", "Closing balance: \$45.00 CR", "Credit of \$45 applied",
+            "Your refund of \$45 is on its way.", "We have credited \$45 to your account.", "Cashback \$45 paid", "Reversal of \$45 done",
+            "Balance (\$45.00)", "Balance −\$45.00")) {
+            assertEquals(text, null to null, bill(text))
+        }
+        assertEquals(12000L to "AUD", bill("Amount due AUD\$120 by 15 Oct"))
+        assertEquals(8950L to "NZD", bill("NZ\$ 89.50 due Friday"))
+        for ((written, code) in listOf("A\$" to "AUD", "AU\$" to "AUD", "AUD\$" to "AUD", "NZ\$" to "NZD", "NZD\$" to "NZD", "US\$" to "USD",
+            "C\$" to "CAD", "CA\$" to "CAD", "S\$" to "SGD", "SG\$" to "SGD")) {
+            assertEquals(written, 4500L to code, bill("Please pay ${written}45.00 by Friday."))
+            assertEquals(written, 4500L to code, BillSuggestions.parse("Amount due: ${written}45.00").let { it.amount to it.currency })
+        }
+        // A refund in another sentence leaves this one's bill; a credit card is no credit.
+        assertEquals(8000L to "AUD", bill("Last month's refund went through. Please pay AUD 80 by Friday."))
+        assertEquals(8000L to "AUD", bill("Your credit card bill of AUD 80 is due."))
+        assertEquals(123456L to "AUD", bill("Pay AUD 1,234.56 now"))
+        assertEquals(123456L to "EUR", bill("Betrag 1.234,56 €"))
+        assertEquals(2050L to "AUD", bill("Pay Sam AUD 20.50"))
+    }
 }

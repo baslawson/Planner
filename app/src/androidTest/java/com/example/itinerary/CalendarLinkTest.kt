@@ -180,6 +180,24 @@ class CalendarLinkTest {
         assertEquals("Holidays", source().name)
     }
 
+    // Bug hunt 18, R18-S1: repeating events whose rule Planner can't follow are noted on the calendar's row instead of
+    // vanishing without a word; the note goes once the calendar has none.
+    @Test fun repeatsPlannerCantFollowAreNotedOnTheRow() = runBlocking {
+        feed.body = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:Club\r\n" +
+            "BEGIN:VEVENT\r\nUID:m\r\nDTSTART:20250106T090000Z\r\nRRULE:FREQ=MONTHLY;BYDAY=1MO,3MO\r\nSUMMARY:Committee\r\nEND:VEVENT\r\n" +
+            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20250101T090000Z\r\nRRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1\r\nSUMMARY:Social\r\nEND:VEVENT\r\n" +
+            "BEGIN:VEVENT\r\nUID:q\r\nDTSTART:20240103T190000Z\r\nDURATION:PT2H\r\nRRULE:FREQ=WEEKLY\r\nSUMMARY:Weekly quiz\r\nEND:VEVENT\r\n" +
+            "END:VCALENDAR\r\n"
+        sync.addLink(link(), null)
+        assertEquals("2 repeating events repeat in a way Planner can't show.", source().note)
+        assertEquals(setOf("Weekly quiz"), shown())
+        feed.body = null; feed.version = 2
+        sync.refreshLinks()
+        assertEquals(setOf("Christmas Day", "Boxing Day", "Weekly quiz"), shown())
+        assertNull(source().note)
+        assertNull(source().lastError)
+    }
+
     // A holiday feed with an ETag; [version] changes it, [code]/[body] force an answer.
     private inner class Feed : Dispatcher() {
         val requests = CopyOnWriteArrayList<Pair<String, String?>>()

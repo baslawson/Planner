@@ -56,6 +56,9 @@ data class CalendarSource(
     @ColumnInfo(defaultValue = "0") val tasksHere: Boolean = false,
     val taskCtag: String? = null,
     val taskError: String? = null,
+    // R18-S1: what the last download couldn't show, in words for the user (repeating events whose rule Planner can't
+    // follow); null: nothing. Shown on its row, not as an error.
+    val note: String? = null,
 )
 
 // Task sync: one Planner task kept in sync with a task file in the chosen Nextcloud list, as SentEvent is for events

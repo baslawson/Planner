@@ -142,7 +142,8 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
                     CalendarRow(source, enabled = !state.running) { ticked ->
                         app.appScope.launch {
                             sync.setEnabled(source.id, ticked)
-                            if (ticked) sync.sync()
+                            // R18-S2: waits for a quiet check holding the lock, so the ticked calendar is read now.
+                            if (ticked) sync.sync(wait = true)
                         }
                     }
                 }
@@ -228,6 +229,8 @@ private fun CalendarRow(source: CalendarSource, enabled: Boolean, onRemove: (() 
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = if (source.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // R18-S1: what its last download couldn't show (repeating events whose rule Planner can't follow).
+            if (source.enabled) source.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (onRemove != null) MatrixTextButton(onClick = onRemove, enabled = enabled) { Text("Remove") }
     }
@@ -296,6 +299,8 @@ private fun SendChoice(sources: List<CalendarSource>, rows: List<com.example.iti
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         // Its last download failed: shown until one works (the send state below may say all went well).
         target.lastError?.let { Text("${target.name}: $it", color = MaterialTheme.colorScheme.error) }
+        // R18-S1: its read-only repeating events the server didn't expand and Planner can't follow.
+        target.note?.let { Text("${target.name}: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
     Text("Title, time, place and notes are synced; anything else in its events (attendees, alarms…) is kept. Bills, payments, " +
         "checklists, reminders and attachments stay in Planner. Turning this off leaves the events in both places.",

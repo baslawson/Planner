@@ -503,6 +503,9 @@ class NoteSync(
                 free.remove(twin)
                 val linkedNote = twin.copy(notebook = incoming.notebook, pinned = incoming.pinned)
                 if (linkedNote == twin || put(linkedNote, twin)) rows.put(NoteMapping.row(linkedNote, key, theirs))
+                // R18-S3: edited here meanwhile: linked all the same, as it was, so the next pass sends the edit as an
+                // update (not the note up again, and Nextcloud's in again, as two new notes).
+                else rows.put(NoteMapping.row(twin, key, theirs))
             } else if (put(incoming, null)) rows.put(NoteMapping.row(incoming, key, theirs))
         }
 

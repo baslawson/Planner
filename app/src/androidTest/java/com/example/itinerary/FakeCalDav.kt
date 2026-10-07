@@ -30,6 +30,8 @@ class FakeCalDav(private val home: String, private val user: String, private val
     @Volatile var refuse: ((String) -> Int?)? = null
     // Files a REPORT lists without their calendar-data (a server leaving one out of a query reply).
     @Volatile var withoutData: Set<String> = emptySet()
+    // A file's repeats as the server expands them (single dates), sent for a multiget asking for that.
+    val expanded = ConcurrentHashMap<String, String>()
     // Task queries (VTODO calendar-queries) fail with a 500.
     @Volatile var failTaskQueries = false
     @Volatile private var version = 0
@@ -70,7 +72,10 @@ class FakeCalDav(private val home: String, private val user: String, private val
                     // A calendar-query returns only the kind it asks for.
                     else if (todo != v.second.contains("BEGIN:VTODO")) false
                     else todo || v.second.contains("RRULE") || start == null || (Regex("DTSTART[^:]*:(\\d{8})").find(v.second.substringAfter("BEGIN:VEVENT"))?.groupValues?.get(1) ?: "0") >= start
-                }.entries.joinToString("") { entry(it.key, it.value, it.key !in withoutData) })
+                }.entries.joinToString("") { (p, v) ->
+                    // R18-S1: a multiget asking for repeats expanded gets the file's form in [expanded] (as is without one).
+                    val sent = if (body.contains("calendar-multiget") && body.contains("<c:expand")) expanded[p]?.let { v.first to it } ?: v else v
+                    entry(p, sent, p !in withoutData) })
             }
             "GET" -> current?.let { MockResponse().setResponseCode(200).setHeader("ETag", it.first).setBody(it.second) } ?: MockResponse().setResponseCode(404)
             "PUT" -> {

@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -443,6 +444,22 @@ class NotesUiTest {
             // A long press still opens the sync settings.
             hold("Notes sync: up to date"); await { find("Sync notes with Nextcloud") != null }
             click("Close"); await { find("Sync notes with Nextcloud") == null }
+            // A4: a tap while a pass runs says so (it used to do nothing), and doesn't open the sync settings. The pass is
+            // held at sending a new note (well inside the client's read timeout).
+            val gate = java.util.concurrent.CountDownLatch(1)
+            fake.beforePost = { gate.await(8, java.util.concurrent.TimeUnit.SECONDS) }
+            try {
+                runBlocking { app.repository.saveNote(PlannerNote(title = "Sent slowly", content = "Held"), create = true) }
+                app.appScope.launch { app.noteSync.sync() }
+                await { find("Notes sync: syncing") != null }
+                ins.uiAutomation.executeAndWaitForEvent({ click("Notes sync: syncing") }, { e ->
+                    e.eventType == android.view.accessibility.AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
+                        e.text.any { it.toString() == com.example.itinerary.ui.NOTES_SYNCING_MESSAGE }
+                }, 5000)
+                assertNull("tap while syncing doesn't open the sync settings", find("Sync notes with Nextcloud"))
+            } finally { gate.countDown(); fake.beforePost = null }
+            await { find("Notes sync: up to date") != null }
+            assertTrue(fake.notes.values.any { it.title == "Sent slowly" })
         } finally {
             runBlocking { app.noteSync.setEnabled(false) }
             app.noteSync.api = original

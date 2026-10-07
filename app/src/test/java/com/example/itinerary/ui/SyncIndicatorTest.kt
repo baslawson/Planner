@@ -58,10 +58,12 @@ class SyncIndicatorTest {
     }
     @Test fun aTapSyncsWhenAllIsWellAndOpensCalendarsWhenSomethingNeedsALook() {
         assertEquals(SyncIndicatorState.Tap.SYNC, SyncIndicatorState.Synced.tap)
-        assertEquals(SyncIndicatorState.Tap.NOTHING, SyncIndicatorState.Syncing.tap)
+        // A4: while a sync runs a tap says so, instead of doing nothing.
+        assertEquals(SyncIndicatorState.Tap.STATUS, SyncIndicatorState.Syncing.tap)
         assertEquals(SyncIndicatorState.Tap.OPEN, SyncIndicatorState.Failed.tap)
         assertEquals(SyncIndicatorState.Tap.OPEN, SyncIndicatorState.Conflicts(2).tap)
         assertEquals("Sync now", SyncIndicatorState.Synced.tapLabel)
+        assertEquals("Show sync status", SyncIndicatorState.Syncing.tapLabel)
         assertEquals("Open Calendars", SyncIndicatorState.Failed.tapLabel)
     }
 }

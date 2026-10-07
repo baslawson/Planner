@@ -87,7 +87,9 @@ fun MonthCalendar(
     // Shorter rows let the whole month fit beside the day's events in landscape.
     rowHeight: Dp = 48.dp,
 ) = CompositionLocalProvider(LocalCalendarRowHeight provides rowHeight) {
-    val firstDow = remember { WeekFields.of(Locale.getDefault()).firstDayOfWeek }
+    // R18-U2: read again when the language or region changes (the activity handles that itself, so it isn't recreated).
+    val locales = androidx.compose.ui.platform.LocalConfiguration.current.locales
+    val firstDow = remember(locales) { WeekFields.of(Locale.getDefault()).firstDayOfWeek }
     val today = rememberCurrentDate()
     // The arrows stop at the ends of the Calendar's range (January 1 and December 9999).
     val previous = if (collapsed) YearMonth.from(selected.minusWeeks(1)) else month.minusMonths(1)

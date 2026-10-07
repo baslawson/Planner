@@ -327,6 +327,7 @@ object SharedDates {
     private val monthWord = Regex("\\b(?:$months)\\b", RegexOption.IGNORE_CASE)
     private val weekdayWord = Regex("\\b(?:$weekdays)\\b", RegexOption.IGNORE_CASE)
     private val numericWithYear = Regex("\\b\\d{1,2}[/.-]\\d{1,2}[/.-](?:\\d{4}|\\d{2})\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b")
+    private val yearWritten = Regex("\\d{4}|\\b\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2}\\b")
     private val until = Regex("\\b(?:until|till|til|through|thru|ends?|valid|expires?)\\b", RegexOption.IGNORE_CASE)
     // A full stop after these is no sentence end: "Oct. 12", "Mon. 12 Oct", "10 a.m. on Friday", "Dr. Smith" (Q6-7).
     private const val shortNames = "jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun"
@@ -384,6 +385,10 @@ object SharedDates {
             val plainDay = monthWord.containsMatchIn(dateWords) || numericWithYear.containsMatchIn(dateWords) ||
                 weekdayWord.containsMatchIn(dateWords) && (time != null || choices.isNotEmpty())
             if (!plainDay || until.containsMatchIn(sentence)) return@mapNotNull null
+            // R18-Q2: a day without its year that Quick entry put in a later year ("was due on 3 October" on 7 October) is
+            // the one just gone when that day this year is within the last six months: past, so left out.
+            if (s.date.year > today.year && !yearWritten.containsMatchIn(dateWords) &&
+                runCatching { s.date.withYear(today.year) }.getOrNull()?.let { it < today && it >= today.minusMonths(6) } == true) return@mapNotNull null
             // Earlier today is gone: a reply's "today at 8:00" isn't ahead.
             if (s.date == today && now != null && time != null && time < now) return@mapNotNull null
             Found(s.date, time, choices)

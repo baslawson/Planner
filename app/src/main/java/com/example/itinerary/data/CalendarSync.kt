@@ -280,13 +280,14 @@ class CalendarSync(
             lastRefused = null
             db.withTransaction {
                 val sources = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
-                sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null)) }
+                sources.filter { it.sendHere && it.id != id }.forEach { dao.deleteEvents(it.id); dao.updateSource(it.copy(sendHere = false, enabled = false, ctag = null, fetchedFor = null, note = null)) }
                 takeUp(sources.firstOrNull { it.id == id && it.writable && it.events } ?: return@withTransaction)
             }
             _sendState.value = State()
         }
         onChanged()
-        if (id != null) { sync(); send() }
+        // R18-S2: waits for a quiet check holding the lock, so the chosen calendar is read now, not by a later sync.
+        if (id != null) { sync(wait = true); send() }
     }
 
     // Runs [block] with no send, pull or conflict choice under way, and none starting until it's done. Those work from
@@ -538,7 +539,14 @@ class CalendarSync(
         val items = db.itemDao().all().associateBy { it.id }
         val waiting = pendingDeleted()
         val readOnly = mutableListOf<OutsideEvent>()
-        fun shown(file: ServerFile) = CalendarFileImport.window(file.data, zone(), from, until).events
+        // R18-S1: files whose repeats Planner can't follow (BYSETPOS, BYDAY=1MO,3MO…), with what Planner can show of them;
+        // read below as the server expands them, as the other Nextcloud calendars are.
+        val unread = mutableMapOf<String, List<OutsideEvent>>()
+        fun shown(file: ServerFile): List<OutsideEvent> {
+            val window = CalendarFileImport.window(file.data, zone(), from, until)
+            if (window.unreadRepeats == 0) return window.events
+            unread[file.href] = window.events; return emptyList()
+        }
         // Files Planner has no row for that are its own events already (after reconnecting, or choosing this calendar
         // again): linked to them, not brought in as copies. Planner events with a row only noting them (past) count too.
         val linkedIds = rows.filter { it.uid != null || it.problem != null }.mapTo(HashSet()) { it.itemId }
@@ -628,10 +636,26 @@ class CalendarSync(
                 else -> sentDao.put(row.copy(problem = SentEvent.CONFLICT, conflict = ""))
             }
         }
+        // R18-S1: expanded by the server; a file it doesn't send expanded keeps what Planner can show (its first date, in
+        // the window), and the calendar's note says so.
+        var unshown = 0
+        if (unread.isNotEmpty()) {
+            val expanded = try {
+                client.multiget(account, target.href, unread.keys,
+                    expand = from.atStartOfDay(zone()).toInstant() to until.plusDays(1).atStartOfDay(zone()).toInstant()).associateBy { it.href }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyMap() }
+            for ((href, own) in unread) {
+                // Sent back as it is (a server that doesn't expand here): not expanded.
+                val events = expanded[href]?.data?.takeUnless { Regex("(?im)^RRULE[:;]").containsMatchIn(it) }
+                    ?.let { OutsideEventReader.read(listOf(it), zone()).events }
+                if (events != null) readOnly += events else { readOnly += own; unshown++ }
+            }
+        }
         db.withTransaction {
             dao.deleteEvents(target.id)
             dao.insertEvents(readOnly.distinct().map { it.copy(id = 0, sourceId = target.id) })
-            dao.source(target.id)?.let { dao.updateSource(it.copy(ctag = ctag, fetchedFor = key, lastSynced = now(), lastError = null)) }
+            dao.source(target.id)?.let { dao.updateSource(it.copy(ctag = ctag, fetchedFor = key, lastSynced = now(), lastError = null,
+                note = unreadRepeatsNote(unshown))) }
         }
         onChanged()
         return true
@@ -724,7 +748,7 @@ class CalendarSync(
         lastRefused = null // a new record of what was sent: no refusal carried over
         db.withTransaction {
             db.sentDao().deleteAll()
-            dao.sources().filter { it.sendHere }.forEach { dao.updateSource(it.copy(sendHere = false)) }
+            dao.sources().filter { it.sendHere }.forEach { dao.updateSource(it.copy(sendHere = false, note = null)) }
             if (target == null) return@withTransaction
             val existing = dao.sources().firstOrNull { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.account == target.account && it.href == target.href }
             if (existing != null) dao.updateSource(existing.copy(sendHere = true, enabled = true, ctag = null, fetchedFor = null))
@@ -751,7 +775,7 @@ class CalendarSync(
             val id = dao.insertSource(CalendarSource(account = LINK_ACCOUNT, href = href, kind = OutsideCalendars.KIND_LINK,
                 name = name?.trim()?.takeIf { it.isNotEmpty() }?.take(200) ?: read.name ?: url.host, detail = url.host,
                 color = read.color ?: OutsideCalendars.LINK_COLORS.minBy { c -> used.count { it == c } },
-                enabled = true, ctag = validator(fetched), fetchedFor = key, lastSynced = now()))
+                enabled = true, ctag = validator(fetched), fetchedFor = key, lastSynced = now(), note = unreadRepeatsNote(read.unreadRepeats)))
             dao.insertEvents(read.events.map { it.copy(sourceId = id) })
         }
         onChanged()
@@ -795,7 +819,9 @@ class CalendarSync(
                             dao.deleteEvents(source.id)
                             if (!current.enabled) return@withTransaction
                             dao.insertEvents(read.events.map { it.copy(sourceId = source.id) })
-                            dao.updateSource(current.copy(ctag = validator(result), fetchedFor = key, lastSynced = now(), lastError = null))
+                            // R18-S1: repeating events it can't follow are noted on its row.
+                            dao.updateSource(current.copy(ctag = validator(result), fetchedFor = key, lastSynced = now(), lastError = null,
+                                note = unreadRepeatsNote(read.unreadRepeats)))
                         }
                         changed = true
                     }
@@ -919,7 +945,8 @@ class CalendarSync(
                     dao.deleteEvents(source.id)
                     if (!current.enabled) return@withTransaction
                     dao.insertEvents(read.events.map { it.copy(id = 0, sourceId = source.id) })
-                    dao.updateSource(current.copy(ctag = calendar.ctag, fetchedFor = window, lastSynced = now(), lastError = null))
+                    // The server expands every repeat here: nothing for a note (R18-S1) to say.
+                    dao.updateSource(current.copy(ctag = calendar.ctag, fetchedFor = window, lastSynced = now(), lastError = null, note = null))
                 }
                 wrote = true
                 failedAt.remove(source.id)
@@ -1050,6 +1077,13 @@ class CalendarSync(
         const val MONTHS_BACK = 3L
         const val MONTHS_AHEAD = 12L
         const val PERMISSION_NEEDED = "Permission needed: allow Planner to read calendars."
+
+        // R18-S1: the note on a calendar's row for [count] repeating events whose rule Planner can't follow (null: none).
+        internal fun unreadRepeatsNote(count: Int): String? = when (count) {
+            0 -> null
+            1 -> "1 repeating event repeats in a way Planner can't show."
+            else -> "$count repeating events repeat in a way Planner can't show."
+        }
         private const val PHONE_ACCOUNT = "phone"
         const val LINK_ACCOUNT = "link"
         const val LINK_INTERVAL_MS = 60 * 60 * 1000L

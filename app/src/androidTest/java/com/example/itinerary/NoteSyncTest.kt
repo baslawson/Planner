@@ -639,4 +639,33 @@ class NoteSyncTest {
         backup.restore(staged)
         waitFor("the restored note is sent after the restore") { r.fake.notes.values.any { it.content == "restored" } }
     }
+
+    // Bug hunt 18, R18-S3: a note matched by its words to Nextcloud's unlinked twin, edited here just as the pass files it
+    // (Nextcloud's notebook and favourite), is still linked: the next pass sends the edit as an update. Before, no link
+    // was kept, so the next pass brought Nextcloud's in and sent Planner's up as new notes (duplicates on both sides).
+    @Test fun aTwinEditedWhileItIsLinkedIsUpdatedNotDuplicated() = rig("note-sync-twin-edited") { r ->
+        r.repo.saveNote(PlannerNote(title = "Groceries", content = "milk"), create = true)
+        val id = r.fake.add("Groceries", "milk", category = "Home", favorite = true)
+        val store = r.repo.asNoteStore()
+        var edited = false
+        val racing = object : NoteStore by store {
+            override suspend fun put(note: PlannerNote, expected: PlannerNote?): Boolean {
+                if (!edited && expected?.title == "Groceries") {
+                    edited = true
+                    r.repo.saveNote(r.note("Groceries").copy(content = "milk\neggs"), create = false)
+                }
+                return store.put(note, expected)
+            }
+        }
+        val prefs = r.isolated.getSharedPreferences("twin_edited_sync", 0).apply { edit().clear().commit() }
+        val sync = NoteSync(r.db, NextcloudAccountStore(r.isolated, "planner.nextcloud.note-sync-twin-edited"), r.sync.api, racing, prefs)
+        sync.setEnabled(true)
+        assertTrue(sync.sync())
+        assertTrue(edited)
+        assertTrue(sync.sync())
+        assertEquals("One note on Nextcloud", 1, r.fake.notes.size)
+        assertEquals("One note here", 1, r.repo.allNotes().size)
+        assertEquals("milk\neggs", r.fake.notes[id]!!.content)
+        assertEquals("milk\neggs", r.note("Groceries").content)
+    }
 }

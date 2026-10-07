@@ -44,14 +44,7 @@ class AutoSync(private val calendars: CalendarSync, private val notes: NoteSync,
         // Without it (no permission, say) the minute's check still runs.
         val listening = runCatching { connectivity?.registerDefaultNetworkCallback(callback) != null }.getOrDefault(false)
         try {
-            var last = 0L
-            var fresh = false
-            while (true) {
-                // The callback also fires on registering, with a connection already there: not a second check straight away.
-                if (SystemClock.elapsedRealtime() - last >= MIN_GAP_MS) { check(fresh); fresh = false; last = SystemClock.elapsedRealtime() }
-                // A connection back (not the one there on registering, which comes straight after the first check).
-                if (withTimeoutOrNull(intervalMs) { wake.receive() } != null && SystemClock.elapsedRealtime() - last >= MIN_GAP_MS) fresh = true
-            }
+            loop(intervalMs, SystemClock::elapsedRealtime, { ms -> withTimeoutOrNull(ms) { wake.receive() } != null }) { check(it) }
         } finally {
             if (listening) runCatching { connectivity?.unregisterNetworkCallback(callback) }
         }
@@ -60,5 +53,21 @@ class AutoSync(private val calendars: CalendarSync, private val notes: NoteSync,
     companion object {
         const val INTERVAL_MS = 60_000L
         const val MIN_GAP_MS = 5_000L
+
+        // watch's loop. [waitForWake] waits at most that long for a connection back (true: one came).
+        internal suspend fun loop(intervalMs: Long, clock: () -> Long, waitForWake: suspend (Long) -> Boolean, check: suspend (Boolean) -> Unit) {
+            var last = 0L
+            var fresh = false
+            var checks = 0
+            while (true) {
+                // The callback also fires on registering, with a connection already there: not a second check straight away.
+                if (clock() - last >= MIN_GAP_MS) { check(fresh); fresh = false; checks++; last = clock() }
+                // R18-S6: a connection back too soon after a check is remembered, and checked once the gap is over (not a
+                // minute later).
+                val wait = if (fresh) (MIN_GAP_MS - (clock() - last)).coerceIn(0, intervalMs) else intervalMs
+                // A connection back (not the one there on registering, which comes straight after the first check).
+                if (waitForWake(wait) && (clock() - last >= MIN_GAP_MS || checks > 1)) fresh = true
+            }
+        }
     }
 }

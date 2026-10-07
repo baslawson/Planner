@@ -3086,3 +3086,68 @@ To: Me <me@example.org>
 Subject: Appointment
 
 Your appointment is on 20 October at 10:30am.
+====
+@today
+2026-10-07
+====
+qe
+Gym daily except 25 Dec
+====
+qe
+Class Tuesdays until 1 Dec except 10 Nov
+====
+qe
+Gym daily except tomorrow
+====
+qe
+Gym every day except Fridays 6am
+====
+find
+Your bill of $80 was due on 3 October. Please pay now.
+====
+find
+Payment received on 2 October, thank you.
+====
+find
+Statement date: 1 Oct
+Total: $80
+Due: 25 Oct
+====
+qe
+Lunch noon-1:30
+====
+qe
+Lunch midday-1:15
+====
+qe
+Yoga every Sat until December
+====
+qe
+Pay rent every month until March
+====
+bill
+Refund of -$45 processed
+====
+bill
+Closing balance: $45.00 CR
+====
+bill
+Credit of $45 applied
+====
+bill
+Amount due AUD$120 by 15 Oct
+====
+bill
+NZ$ 89.50 due Friday
+====
+qe
+Meeting 12.10. 3pm
+====
+qe
+Meet at ٣pm
+====
+qe
+Lunch １２:３０
+====
+qe
+Call ‏

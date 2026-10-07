@@ -35,6 +35,7 @@ class TaskNoteRingingDataTest {
             android.database.sqlite.SQLiteDatabase.openDatabase(file.absolutePath, null, 0).use { raw ->
                 raw.execSQL("ALTER TABLE tasks DROP COLUMN ringUntilDismissed")
                 raw.execSQL("ALTER TABLE notes DROP COLUMN ringUntilDismissed")
+                raw.execSQL("ALTER TABLE calendar_sources DROP COLUMN note") // added in version 35
                 raw.execSQL("DELETE FROM room_master_table"); raw.version = 33
             }
             db = open()

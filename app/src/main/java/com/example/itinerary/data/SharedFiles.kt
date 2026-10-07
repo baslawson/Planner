@@ -41,18 +41,25 @@ object SharedFiles {
     }
 }
 
-/** The staging files of shares of files (see [SharedFiles]), until the share is closed. */
-class SharedFilesStore(context: Context) {
-    private val dir = File(context.filesDir, "shared-files")
+/**
+ * The staging files of shares of files (see [SharedFiles]), until the share is closed. R18-D2: they're also the queue
+ * of shares no window has taken yet, so one isn't lost when Android ends Planner first: "<id>.taken" once a window took
+ * it, and "copying" while its files are still being copied (see [recover]).
+ */
+class SharedFilesStore(private val dir: File) {
+    constructor(context: Context) : this(File(context.filesDir, "shared-files"))
 
     private fun file(id: String) = File(dir, "$id.json")
+    private fun takenFile(id: String) = File(dir, "$id.taken")
 
-    fun write(id: String, staged: SharedFiles.Staged) {
+    // [copying]: its files are still being copied ([staged] has those copied so far).
+    fun write(id: String, staged: SharedFiles.Staged, copying: Boolean = false) {
         dir.mkdirs()
         val json = org.json.JSONObject()
             .put("caption", staged.caption)
             .put("subject", staged.subject)
             .put("files", DraftCodec.attachments(staged.files))
+            .put("copying", copying)
         val target = file(id)
         val temp = File(dir, "$id.tmp")
         try {
@@ -66,7 +73,8 @@ class SharedFilesStore(context: Context) {
      * [maxAgeMs], with leftover .tmp files. Returns the attachment files they held, for the caller to release (only those
      * nothing uses are then removed). A share still open after so long reads as gone ("Share them again").
      */
-    fun sweep(now: Long = System.currentTimeMillis(), maxAgeMs: Long = 7 * 24 * 60 * 60_000L): List<String> {
+    // R18-D2: "<id>.taken" files go too, once as old.
+    fun sweep(now: Long = System.currentTimeMillis(), maxAgeMs: Long = SWEEP_AGE_MS): List<String> {
         val old = dir.listFiles().orEmpty().filter { now - it.lastModified() > maxAgeMs }
         val files = old.filter { it.name.endsWith(".json") }.flatMap { f -> read(f.name.removeSuffix(".json"))?.files.orEmpty().map { it.fileName } }
         old.forEach { it.delete() }
@@ -80,5 +88,39 @@ class SharedFilesStore(context: Context) {
             DraftCodec.attachments(json.optJSONArray("files")))
     }.getOrNull()
 
-    fun delete(id: String) { file(id).delete() }
+    fun delete(id: String) { file(id).delete(); takenFile(id).delete() }
+
+    // R18-D2: a window took this share, so it isn't offered again after Planner restarts.
+    fun markTaken(id: String) { dir.mkdirs(); takenFile(id).writeText("") }
+
+    /** A staging file as a new process finds it. [files]: the attachment files it holds. */
+    class Waiting(val id: String, val modified: Long, val taken: Boolean, val copying: Boolean, val files: List<String>)
+
+    fun waiting(): List<Waiting> = dir.listFiles().orEmpty().filter { it.name.endsWith(".json") }.mapNotNull { f ->
+        val id = f.name.removeSuffix(".json")
+        val json = runCatching { org.json.JSONObject(f.readText()) }.getOrNull() ?: return@mapNotNull null
+        Waiting(id, f.lastModified(), takenFile(id).exists(), json.optBoolean("copying"),
+            DraftCodec.attachments(json.optJSONArray("files")).map { it.fileName })
+    }
+
+    /** What [recover] does: [offer] these shares again, oldest first; [release] these files; [forget] these staging files. */
+    class Recovery(val offer: List<String>, val release: List<String>, val forget: List<String>)
+
+    /**
+     * R18-D2: once per process, before any new share is copied. A share no window took (Planner switched away, App lock
+     * not unlocked, a second share waiting) is offered again; one whose files were still being copied is released (its
+     * copies, those nothing uses) and forgotten. Taken ones, and those the week-old sweep is for, are left alone.
+     */
+    fun recover(now: Long = System.currentTimeMillis(), maxAgeMs: Long = SWEEP_AGE_MS): Recovery =
+        recovery(waiting(), now, maxAgeMs).also { r -> r.forget.forEach { file(it).delete() } }
+
+    companion object {
+        const val SWEEP_AGE_MS = 7 * 24 * 60 * 60_000L
+
+        fun recovery(waiting: List<Waiting>, now: Long, maxAgeMs: Long = SWEEP_AGE_MS): Recovery {
+            val (copying, done) = waiting.partition { it.copying }
+            val offer = done.filter { !it.taken && now - it.modified <= maxAgeMs }.sortedWith(compareBy({ it.modified }, { it.id })).map { it.id }
+            return Recovery(offer, copying.flatMap { it.files }, copying.map { it.id })
+        }
+    }
 }

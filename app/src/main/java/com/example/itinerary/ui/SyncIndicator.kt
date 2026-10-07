@@ -1,5 +1,6 @@
 package com.example.itinerary.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -23,13 +24,25 @@ import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.CalendarSource
 import com.example.itinerary.data.OutsideCalendars
 
+// What a tap on the cloud says while a sync runs, on Agenda and Calendar, and on Notes.
+internal const val SYNCING_MESSAGE = "Syncing with Nextcloud. Long press the cloud for Calendars."
+internal const val NOTES_SYNCING_MESSAGE = "Notes are syncing. Long press the cloud for sync settings."
+
+// R18-S5: one toast at a time; repeated taps replace it instead of queueing several seconds of them.
+private var syncToast: Toast? = null
+internal fun showSyncToast(context: android.content.Context, text: String) {
+    syncToast?.cancel()
+    syncToast = Toast.makeText(context.applicationContext, text, Toast.LENGTH_SHORT).also { it.show() }
+}
+
 /** What the sync icon on Agenda and Calendar shows; null hides it (two-way Nextcloud sync is off). */
 internal sealed interface SyncIndicatorState {
     val label: String
-    // What a tap does: sync now while all is well, nothing while a sync runs, open Calendars when something needs a look.
-    enum class Tap { SYNC, NOTHING, OPEN }
-    val tap: Tap get() = when (this) { Synced -> Tap.SYNC; Syncing -> Tap.NOTHING; else -> Tap.OPEN }
-    val tapLabel: String? get() = when (tap) { Tap.SYNC -> "Sync now"; Tap.OPEN -> "Open Calendars"; Tap.NOTHING -> null }
+    // What a tap does: sync now while all is well, say a sync is running while one runs (A4: it used to do nothing),
+    // open Calendars when something needs a look.
+    enum class Tap { SYNC, STATUS, OPEN }
+    val tap: Tap get() = when (this) { Synced -> Tap.SYNC; Syncing -> Tap.STATUS; else -> Tap.OPEN }
+    val tapLabel: String get() = when (tap) { Tap.SYNC -> "Sync now"; Tap.OPEN -> "Open Calendars"; Tap.STATUS -> "Show sync status" }
     data object Synced : SyncIndicatorState { override val label = "Sync: up to date" }
     data object Syncing : SyncIndicatorState { override val label = "Sync: syncing" }
     data object Failed : SyncIndicatorState { override val label = "Sync: problem, open Calendars" }
@@ -58,7 +71,7 @@ internal sealed interface SyncIndicatorState {
 /**
  * Two-way Nextcloud sync at a glance, for a top bar: a green cloud when up to date, raining while syncing, struck through
  * (red) on a problem or conflicts. A tap syncs now while all is
- * well (and does nothing while a sync runs); with a problem or conflicts it opens Calendars, where they're shown. A long
+ * well (and says a sync is running while one runs); with a problem or conflicts it opens Calendars, where they're shown. A long
  * press always opens Calendars.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -76,7 +89,8 @@ fun SyncIndicator(onOpenCalendars: () -> Unit) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val onTap: () -> Unit = when (shown.tap) {
         SyncIndicatorState.Tap.SYNC -> { { app.appScope.launch { sync.syncNow() } } }
-        SyncIndicatorState.Tap.NOTHING -> { {} }
+        // Planner's changes made meanwhile are sent after this sync anyway (requestSend), so nothing more is asked for.
+        SyncIndicatorState.Tap.STATUS -> { { showSyncToast(app, SYNCING_MESSAGE) } }
         SyncIndicatorState.Tap.OPEN -> onOpenCalendars
     }
     Box(

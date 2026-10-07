@@ -360,7 +360,14 @@ fun NotesScreen(onBack: () -> Unit, openNoteId: String? = null, onNoteOpened: ()
                             HeadingText("NOTES", modifier = Modifier.weight(1f, fill = false),
                                 style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, shrinkToFit = true)
                             NotesSyncCloud(syncOn, syncState.running, syncState.error != null,
-                                onSyncNow = { app.appScope.launch { sync.sync() } }, onOpenSettings = { showSync = true })
+                                onSyncNow = { app.appScope.launch { sync.sync() } },
+                                // R18-S5: one more pass after this one only if Planner's notes are still out of step by
+                                // then (NoteSync.followUp); a change on Nextcloud meanwhile waits for the next check.
+                                onWhileSyncing = {
+                                    showSyncToast(app, NOTES_SYNCING_MESSAGE)
+                                    sync.request(delayMs = 0)
+                                },
+                                onOpenSettings = { showSync = true })
                         }
                     },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
@@ -526,11 +533,13 @@ private fun <T> NotesToolbarMenu(label: String, icon: androidx.compose.ui.graphi
     }
 }
 
-// Notes sync at a glance, tapped like the cloud on Agenda and Calendar: a tap syncs now while all is well and does nothing
-// while a sync runs; with sync off or a problem it opens the sync settings, as a long press always does.
+// Notes sync at a glance, tapped like the cloud on Agenda and Calendar: a tap syncs now while all is well and says a sync
+// is running while one runs (A4: it used to do nothing); with sync off or a problem it opens the sync settings, as a long
+// press always does.
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NotesSyncCloud(on: Boolean, running: Boolean, problem: Boolean, onSyncNow: () -> Unit, onOpenSettings: () -> Unit) {
+private fun NotesSyncCloud(on: Boolean, running: Boolean, problem: Boolean, onSyncNow: () -> Unit, onWhileSyncing: () -> Unit,
+    onOpenSettings: () -> Unit) {
     val label = when {
         !on -> "Notes sync: off"
         running -> "Notes sync: syncing"
@@ -541,8 +550,9 @@ private fun NotesSyncCloud(on: Boolean, running: Boolean, problem: Boolean, onSy
     Box(
         Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
             .combinedClickable(
-                onClick = { if (synced) onSyncNow() else if (!running) onOpenSettings() },
-                onClickLabel = if (synced) "Sync now" else if (running) null else "Open sync settings",
+                // R18-S4: turned off while a pass still runs, it's "off": a tap opens the settings, not "syncing".
+                onClick = { if (synced) onSyncNow() else if (on && running) onWhileSyncing() else onOpenSettings() },
+                onClickLabel = if (synced) "Sync now" else if (on && running) "Show sync status" else "Open sync settings",
                 onLongClick = onOpenSettings, onLongClickLabel = "Open sync settings",
                 role = androidx.compose.ui.semantics.Role.Button),
         contentAlignment = Alignment.Center,

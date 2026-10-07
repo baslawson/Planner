@@ -335,13 +335,16 @@ class NextcloudClient(client: OkHttpClient = OkHttpClient(), callTimeoutMs: Long
             """<d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/>""" +
             """</c:comp-filter></c:filter></c:calendar-query>""")
 
-    // Step 6: these event files of [calendar], in one request.
-    fun multiget(account: NextcloudAccount, calendar: String, hrefs: Collection<String>): List<ServerFile> {
+    // Step 6: these event files of [calendar], in one request. R18-S1: with [expand] (from, until), their repeats are
+    // expanded by the server into single dates in that range, as calendarEvents does.
+    fun multiget(account: NextcloudAccount, calendar: String, hrefs: Collection<String>, expand: Pair<Instant, Instant>? = null): List<ServerFile> {
         if (hrefs.isEmpty()) return emptyList()
         hrefs.forEach { fileUrl(account, calendar, it) }
         val list = hrefs.joinToString("") { "<d:href>${it.replace("&", "&amp;").replace("<", "&lt;")}</d:href>" }
+        val data = expand?.let { (from, until) -> """<c:calendar-data><c:expand start="${RANGE_STAMP.format(from)}" end="${RANGE_STAMP.format(until)}"/></c:calendar-data>""" }
+            ?: "<c:calendar-data/>"
         return files(account, calendar, """<?xml version="1.0" encoding="utf-8"?><c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">""" +
-            """<d:prop><d:getetag/><c:calendar-data/></d:prop>$list</c:calendar-multiget>""")
+            """<d:prop><d:getetag/>$data</d:prop>$list</c:calendar-multiget>""")
     }
 
     // Step 6: one event file as it is now; null when it's no longer there. Its version as the listings give it (see etag),

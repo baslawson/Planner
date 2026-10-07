@@ -11,7 +11,10 @@ data class BillSuggestion(val title: String?, val date: LocalDate?, val amount: 
 object BillSuggestions {
     private val amountLabel = Regex("(?i)\\b(?:total\\s+amount\\s+due|amount\\s+due|balance\\s+due|total\\s+due|grand\\s+total|total)\\b\\s*[:=-]?\\s*")
     private val dueLabel = Regex("(?i)\\b(?:payment\\s+due(?:\\s+date)?|due\\s+date|pay\\s+by|due\\s+by|due)\\b\\s*[:=-]?\\s*")
-    private val money = Regex("(?i)^(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s*)?([£€$])?\\s*([0-9]{1,9}(?:\\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?)(?:\\s*(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)|([£€$])))?$")
+    // R18-Q5: a dollar with its country in front, "A$", "NZ$", "US$", "C$", "S$" (see dollarCode).
+    private const val dollarPrefixes = "(?-i:A|AU|NZ|US|CA|C|SG|S)(?=\\$)"
+    private fun dollarCode(prefix: String) = when (prefix) { "A", "AU" -> "AUD"; "NZ" -> "NZD"; "US" -> "USD"; "C", "CA" -> "CAD"; else -> "SGD" }
+    private val money = Regex("(?i)^(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)\\s*|($dollarPrefixes))?([£€$])?\\s*([0-9]{1,9}(?:\\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?)(?:\\s*(?:(AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR)|([£€$])))?$")
     private fun lines(text: String) = text.take(200_000).lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     private fun values(lines: List<String>, label: Regex): List<String> = lines.mapIndexedNotNull { i, line ->
         if (label == dueLabel && amountLabel.containsMatchIn(line)) return@mapIndexedNotNull null
@@ -24,9 +27,10 @@ object BillSuggestions {
         val amountValues = values(lines, amountLabel)
         val dateValues = values(lines, dueLabel)
         val amounts = amountValues.mapNotNull { value -> money.matchEntire(value)?.let { match ->
-            val amount = Bills.parse(match.groupValues[3].replace(",", "")) ?: return@let null
-            val code = match.groupValues[1].ifEmpty { match.groupValues[4] }.uppercase(Locale.ROOT).ifEmpty {
-                when (match.groupValues[2].ifEmpty { match.groupValues[5] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+            val g = match.groupValues
+            val amount = Bills.parse(g[4].replace(",", "")) ?: return@let null
+            val code = g[1].ifEmpty { g[5] }.ifEmpty { g[2].takeIf { it.isNotEmpty() }?.let(::dollarCode).orEmpty() }.uppercase(Locale.ROOT).ifEmpty {
+                when (g[3].ifEmpty { g[6] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
             }.ifEmpty { null }
             amount to code
         } }.distinct()
@@ -55,7 +59,13 @@ object BillSuggestions {
     // Thousands may be set apart by a space ("2 450,00 €", SQX-8), at most three times, so that stays short too.
     private val number = "(?<![0-9.,])(?:[0-9]{1,3}(?:[ \\u00A0\\u202F][0-9]{3}){1,3}(?:[.,][0-9]{1,2})?(?![0-9.,])|[0-9](?:[0-9.,]*[0-9])?)"
     private const val codes = "AUD|USD|GBP|EUR|NZD|CAD|SGD|IDR"
-    private val looseMoney = Regex("(?i)(?<![A-Za-z])($codes)\\s?($number)|([£€$])\\s?($number)|($number)\\s?(?:($codes)(?![A-Za-z])|([£€$])(?!\\s?[0-9]))")
+    // R18-Q5: also "AUD$120", "NZ$ 89.50": a code or a country's dollar, then a $ (group 2 is the country).
+    private val looseMoney = Regex("(?i)(?<![A-Za-z])(?:($codes)|($dollarPrefixes))\\s?\\$?\\s?($number)|([£€$])\\s?($number)|($number)\\s?(?:($codes)(?![A-Za-z])|([£€$])(?!\\s?[0-9]))")
+    // R18-Q5: money coming back is no bill: "-$45", "−$45", "($45.00)", "$45.00 CR", "$45 credit", or a sentence about a
+    // refund, a credit, cashback or a reversal ("Credit of $45 applied"). Not a credit card or limit.
+    private val creditAfter = Regex("^\\s?(?:CR|Cr|[Cc]redit)\\b")
+    private val moneyBack = Regex("(?i)\\b(?:refund(?:s|ed)?|credit(?:s|ed)?(?!\\s+(?:card|limit|union|score|rating))|cash\\s?back|reversal|reversed)\\b")
+    private val sentenceStop = Regex("[.!?](?=\\s)|\\n")
     // Things counted under a "total": "Items in total: 3" (SQ8-8).
     private val countWord = Regex("(?i)\\b(?:items?|articles?|pieces?|units?|products?|parcels?|packages?|tickets?|guests?|people|persons?|qty|quantity)\\b")
     private val commaThousands = Regex("[0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?")
@@ -72,11 +82,20 @@ object BillSuggestions {
      * and [due], the one day the email names ([SharedDates]). Several different amounts are left for the person.
      */
     fun parseMessage(text: String, due: LocalDate?, today: LocalDate? = null): BillSuggestion {
-        val loose = looseMoney.findAll(text.take(200_000)).mapNotNull { m ->
+        val read = text.take(200_000)
+        val loose = looseMoney.findAll(read).mapNotNull { m ->
             val g = m.groupValues
-            val amount = looseAmount(g[2].ifEmpty { g[4] }.ifEmpty { g[5] }) ?: return@mapNotNull null
-            val code = g[1].ifEmpty { g[6] }.uppercase(Locale.ROOT).ifEmpty {
-                when (g[3].ifEmpty { g[7] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+            // R18-Q5: not money coming back (see moneyBack), in the sentence this amount is in.
+            val signBefore = read.getOrNull(m.range.first - 1)
+            if (signBefore == '-' || signBefore == '−' || signBefore == '(' && read.getOrNull(m.range.last + 1) == ')' ||
+                creditAfter.containsMatchIn(read.substring(m.range.last + 1, minOf(read.length, m.range.last + 10)))) return@mapNotNull null
+            // Looked at within 300 characters either side, so a long text without full stops stays quick (SQ9-10).
+            val before = read.substring(maxOf(0, m.range.first - 300), m.range.first).let { b -> b.substring(sentenceStop.findAll(b).lastOrNull()?.range?.last?.plus(1) ?: 0) }
+            val after = read.substring(m.range.last + 1, minOf(read.length, m.range.last + 301)).let { a -> a.substring(0, sentenceStop.find(a)?.range?.first ?: a.length) }
+            if (moneyBack.containsMatchIn(before + m.value + after)) return@mapNotNull null
+            val amount = looseAmount(g[3].ifEmpty { g[5] }.ifEmpty { g[6] }) ?: return@mapNotNull null
+            val code = g[1].ifEmpty { g[7] }.ifEmpty { g[2].takeIf { it.isNotEmpty() }?.let(::dollarCode).orEmpty() }.uppercase(Locale.ROOT).ifEmpty {
+                when (g[4].ifEmpty { g[8] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
             }.ifEmpty { null }
             amount to code
         }.toList()

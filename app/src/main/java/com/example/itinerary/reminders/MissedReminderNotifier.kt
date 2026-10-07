@@ -166,7 +166,9 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
         val tag = "note:${m.note.id}"
         val words = !NoteWords.hide(context)
         if (words) NoteWords.shown(tag) else NoteWords.later(context, tag) { missedNote(m, quiet = true) }
-        manager.notify(tag, 0, builder(if (words) com.example.itinerary.data.Notes.label(m.note) else if (waiting) "Note reminder" else "Missed note reminder", dueText(m.due), 0)
+        // R18-A4: also posted again after the unlock (NoteWords.later), outside the try below: checked and caught here too.
+        if (!notificationsEnabled(context)) return
+        try { manager.notify(tag, 0, builder(if (words) com.example.itinerary.data.Notes.label(m.note) else if (waiting) "Note reminder" else "Missed note reminder", dueText(m.due), 0)
             .setSubText("Note reminder").setWhen(m.due).setShowWhen(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
@@ -175,7 +177,8 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
             .setContentIntent(PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, m.note.id),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             .setOnlyAlertOnce(quiet)
-            .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build())
+            .addAction(0, "Done", NoteActionReceiver.done(context, m.note.id, m.due)).build()) }
+        catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
     }
     try {
         shown.forEach { m ->

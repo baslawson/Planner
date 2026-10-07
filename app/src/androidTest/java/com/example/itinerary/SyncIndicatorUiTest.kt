@@ -52,6 +52,12 @@ class SyncIndicatorUiTest {
         }
         Thread.sleep(400)
     }
+    // A toast isn't in the window tree; Android announces it to accessibility as a notification event.
+    private fun awaitToast(text: String, action: () -> Unit) {
+        ins.uiAutomation.executeAndWaitForEvent({ action() }, { e ->
+            e.eventType == android.view.accessibility.AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED && e.text.any { it.toString() == text }
+        }, 10000)
+    }
     private fun open() {
         app.settings.lastViewCalendar = false
         ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -127,6 +133,9 @@ class SyncIndicatorUiTest {
             app.appScope.launch { app.calendarSync.sync() }
             await { syncLabels() == listOf("Sync: syncing") }
             screenshot("agenda-syncing")
+            // A4: a tap while it syncs says so (it used to do nothing), and doesn't open Calendars.
+            awaitToast(com.example.itinerary.ui.SYNCING_MESSAGE) { click("Sync: syncing") }
+            assertNull("tap while syncing doesn't open Calendars", find("Keep in sync with"))
             slow.set(false)
             await { syncLabels() == listOf("Sync: up to date") }
 

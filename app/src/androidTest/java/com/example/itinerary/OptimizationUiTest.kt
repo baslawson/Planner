@@ -139,7 +139,10 @@ class OptimizationUiTest {
                     onSave = { _, _, _, _, _, _ -> 0L }, onDelete = { _, _ -> }) }
             } }
             await { store.read()?.getJSONObject("item")?.getString("title") == "Draft benchmark" }
-            Thread.sleep(300)
+            // R18 T2: read() also returns a draft still waiting in the writer (300 ms): write it now, and let the file
+            // observer catch up, so its own write isn't counted as one of the updates' below.
+            store.flush()
+            Thread.sleep(500)
             val before = writes.get()
             repeat(20) {
                 ins.runOnMainSync { tick.intValue++ }

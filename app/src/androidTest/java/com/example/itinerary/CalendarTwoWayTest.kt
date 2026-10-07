@@ -991,4 +991,31 @@ class CalendarTwoWayTest {
         assertEquals("nothing new: backing off again", after, puts())
         assertTrue(sync.sendState.value.error)
     }
+
+    // Bug hunt 18, R18-S1: a read-only repeating event in the synced calendar whose rule Planner can't follow (begun
+    // before the window) is shown as the server expands it, as the other Nextcloud calendars are. One the server doesn't
+    // expand is noted on the calendar instead of vanishing without a word.
+    @Test fun repeatsPlannerCantFollowAreExpandedByTheServer() = runBlocking {
+        val odd = "${synced}committee.ics"
+        dav.put(odd, ics("odd-1", "Committee", "20250106T090000Z", "RRULE:FREQ=MONTHLY;BYDAY=1MO,3MO"))
+        dav.expanded[odd] = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nextcloud//EN\r\n" + listOf("20261005", "20261019").joinToString("") {
+            "BEGIN:VEVENT\r\nUID:odd-1\r\nRECURRENCE-ID:${it}T090000Z\r\nDTSTART:${it}T090000Z\r\nDURATION:PT1H\r\nSUMMARY:Committee\r\nEND:VEVENT\r\n"
+        } + "END:VCALENDAR\r\n"
+        dav.put("${synced}social.ics", ics("odd-2", "Social", "20250101T090000Z", "RRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1"))
+        start()
+        val shown = sync.shown.first().values.map { it.event }
+        assertEquals(listOf(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 19)), shown.filter { it.title == "Committee" }.map { it.date }.sorted())
+        assertTrue(shown.none { it.title == "Social" })
+        fun target() = runBlocking { database.outsideDao().sources() }.single { it.sendHere }
+        assertEquals("1 repeating event repeats in a way Planner can't show.", target().note)
+        assertTrue(items().isEmpty()) // read-only: not brought in as Planner events
+        // Expanded there too: nothing left to note.
+        dav.expanded["${synced}social.ics"] = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:odd-2\r\nRECURRENCE-ID:20261026T090000Z\r\n" +
+            "DTSTART:20261026T090000Z\r\nDURATION:PT1H\r\nSUMMARY:Social\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        dav.bump(); syncAgain()
+        assertEquals(listOf(LocalDate.of(2026, 10, 26)), sync.shown.first().values.filter { it.event.title == "Social" }.map { it.event.date })
+        assertNull(target().note)
+        assertTrue(writes().isEmpty())
+        assertOtherCalendarUntouched()
+    }
 }

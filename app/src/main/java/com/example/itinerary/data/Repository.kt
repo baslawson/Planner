@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import com.example.itinerary.reminders.ReminderAlarms
 import com.example.itinerary.reminders.MissedReminders
@@ -199,7 +200,11 @@ class Repository(
         if (bundles.any { it == null }) { Log.w("Repository", "Kept unused files: a Recently deleted bundle couldn't be read"); return }
         bundles.forEach { data -> data!!.storedAttachments.forEach { keep.add(it.fileName) } }
         _pendingDeletions.value.flatMap { it.attachments }.forEach { keep.add(it.fileName) }
-        candidates.filter { it.isNotBlank() && it !in keep }.distinct().forEach(store::delete)
+        val unused = candidates.filter { it.isNotBlank() && it !in keep }.distinct()
+        // R18-D1: one a backup is still reading waits for it (see withPinnedFiles).
+        val (held, free) = synchronized(pinned) { unused.partition { it in pinned }.also { (held, _) -> deferredFiles.addAll(held) } }
+        if (held.isNotEmpty()) Log.i("Repository", "Kept ${held.size} unused files until a backup has read them")
+        free.forEach(store::delete)
     }
 
     private val tripDao = db.tripDao()
@@ -451,8 +456,8 @@ class Repository(
     }
 
     // A note reminder's alarm: [deliver] shows it, if the note still has that reminder at that time.
-    suspend fun deliverNoteReminder(id: String, trigger: Long, deliver: (PlannerNote) -> Unit) = changes.withLock {
-        val note = noteDao.byId(id) ?: return@withLock
+    suspend fun deliverNoteReminder(id: String, trigger: Long, deliver: (PlannerNote) -> Unit) = forDelivery {
+        val note = noteDao.byId(id) ?: return@forDelivery
         if (note.activeReminderAt == trigger && trigger <= System.currentTimeMillis() &&
             !scheduler.wasDelivered(MissedReminders.noteKey(id), trigger)) {
             deliver(note)
@@ -1295,21 +1300,30 @@ class Repository(
         true
     }
 
+    // R18-A2: a reminder waits for the lock (an edit, payment or delete going on) only so long: Android lets it start
+    // ringing for about 10 s after the alarm, and kills a receiver that takes a minute. Past that it's checked and shown
+    // without the lock; its delivery record still keeps it from ringing twice.
+    private suspend fun <T> forDelivery(block: suspend () -> T): T {
+        val locked = withTimeoutOrNull(DELIVERY_LOCK_WAIT_MS) { changes.lock(); true } == true
+        if (!locked) Log.w("Repository", "Reminder delivered without waiting any longer for a change in progress")
+        try { return block() } finally { if (locked) changes.unlock() }
+    }
+
     // Serialize delivery with edits/deletion/payment, and reject an alarm already replaced by a snooze.
-    suspend fun deliverReminder(id: Long, trigger: Long, deliver: (ItineraryItem, Reminder) -> Unit) = changes.withLock {
-        val reminder = reminderDao.byId(id) ?: return@withLock
-        val item = itemDao.byId(reminder.itemId) ?: return@withLock
+    suspend fun deliverReminder(id: Long, trigger: Long, deliver: (ItineraryItem, Reminder) -> Unit) = forDelivery {
+        val reminder = reminderDao.byId(id) ?: return@forDelivery
+        val item = itemDao.byId(reminder.itemId) ?: return@forDelivery
         val expected = reminder.snoozedUntil ?: reminderTrigger(item.date, item.startTime, reminder).toInstant().toEpochMilli()
         if (item.paid || item.skipped || deliveredAlready(item, reminder) ||
             scheduler.wasDelivered(MissedReminders.eventKey(id), expected) ||
-            !ReminderDeliveries.accepts(trigger, expected, reminder.snoozedUntil != null, System.currentTimeMillis())) return@withLock
+            !ReminderDeliveries.accepts(trigger, expected, reminder.snoozedUntil != null, System.currentTimeMillis())) return@forDelivery
         deliver(item, reminder)
         ReminderDeliveries.key(item, reminder)?.let { reminderDao.recordDelivery(ReminderDelivery(reminder.id, it)) }
             ?: scheduler.markDelivered(MissedReminders.eventKey(id), expected)
     }
 
-    suspend fun deliverTaskReminder(id: String, trigger: Long, deliver: (PlannerTask) -> Unit) = changes.withLock {
-        val task = taskDao.byId(id) ?: return@withLock
+    suspend fun deliverTaskReminder(id: String, trigger: Long, deliver: (PlannerTask) -> Unit) = forDelivery {
+        val task = taskDao.byId(id) ?: return@forDelivery
         if (!task.done && task.activeReminderAt == trigger && trigger <= System.currentTimeMillis() &&
             !scheduler.wasDelivered(MissedReminders.taskKey(id), trigger)) {
             deliver(task)
@@ -1321,6 +1335,25 @@ class Repository(
     // bundles come with their JSON, wherever it is kept.
     // Materialize backup files while mutations and their file cleanup are excluded.
     suspend fun <T> withSnapshotFiles(block: suspend (DataSnapshot) -> T): T = changes.withLock { block(snapshot()) }
+
+    // R18-D1: a backup reads its snapshot under the lock but its files outside it, so a big export no longer holds up
+    // saves and reminders (past ~10 s a reminder couldn't start ringing; R18-A2). [prepare] runs under the lock and names
+    // the files [use] reads; until [use] is done, cleanup keeps them and deletes the ones it let go of afterwards.
+    suspend fun <T, R> withPinnedFiles(prepare: suspend (DataSnapshot) -> Pair<T, Collection<String>>, use: suspend (T) -> R): R {
+        val (data, names) = changes.withLock { prepare(snapshot()).also { (_, names) -> pin(names) } }
+        try { return use(data) } finally { withContext(NonCancellable) { unpin(names) } }
+    }
+    private val pinned = HashMap<String, Int>()
+    // Unused files cleanup kept only because a backup was reading them.
+    private val deferredFiles = HashSet<String>()
+    private fun pin(names: Collection<String>) = synchronized(pinned) { names.distinct().forEach { pinned[it] = (pinned[it] ?: 0) + 1 } }
+    private suspend fun unpin(names: Collection<String>) {
+        val free = synchronized(pinned) {
+            names.distinct().forEach { n -> val left = (pinned[n] ?: 1) - 1; if (left <= 0) pinned.remove(n) else pinned[n] = left }
+            deferredFiles.filter { it !in pinned }.also { deferredFiles.removeAll(it.toSet()) }
+        }
+        if (free.isNotEmpty()) releaseTaskFiles(free)
+    }
 
     suspend fun snapshot(): DataSnapshot = db.withTransaction {
         DataSnapshot(tripDao.all(), itemDao.all(), reminderDao.all(), attachmentDao.all(), db.templateDao().all(),
@@ -1549,3 +1582,6 @@ internal suspend fun updateReminderAlarm(scheduler: ReminderAlarms, id: Long, ev
     if (event == null || reset) scheduler.cancel(id)
     if (event != null && reminder != null) { if (event.paid || event.skipped) scheduler.cancel(id) else if (!delivered(event, reminder)) scheduler.reconcile(event, reminder) }
 }
+
+// R18-A2: how long a reminder waits for a change in progress before it is shown without the lock.
+internal const val DELIVERY_LOCK_WAIT_MS = 3_000L

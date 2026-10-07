@@ -46,7 +46,7 @@ object CalendarFileImport {
 
     // One event read from a file with every date it falls on, on the phone's clock.
     private class Expanded(val timings: List<Ics.Timing>, val title: String, val location: String, val notes: String,
-                           val repeat: IcsRepeat?, val repeatStart: LocalDate, val note: String?)
+                           val repeat: IcsRepeat?, val repeatStart: LocalDate, val note: String?, val unreadRepeat: Boolean = false)
 
     fun read(text: String, zone: ZoneId = ZoneId.systemDefault(), today: LocalDate = LocalDate.now(zone)): Result {
         val lines = checkedLines(text)
@@ -65,11 +65,15 @@ object CalendarFileImport {
     // name and colour when the file has them. An empty window is fine; a file that isn't a calendar is not. Also the
     // synced calendar's read-only files. E16-2: shown read-only like a Nextcloud calendar's (OutsideEventReader), an
     // unknown time zone (Exchange's "Customized Time Zone") is read as the phone's own rather than the event vanishing.
-    class Window(val events: List<OutsideEvent>, val skipped: Int, val name: String?, val color: Int?)
+    // R18-S1: [unreadRepeats]: repeating events whose RRULE Planner can't follow (BYSETPOS, BYDAY=1MO,3MO…): only their
+    // first date is in [events] (when it's in the window), and they're counted in [skipped] too.
+    class Window(val events: List<OutsideEvent>, val skipped: Int, val name: String?, val color: Int?, val unreadRepeats: Int = 0)
 
     fun window(text: String, zone: ZoneId, from: LocalDate, until: LocalDate): Window {
         val lines = checkedLines(text)
-        val (expanded, skipped) = expandAll(lines, zone, until, from) { runCatching { Ics.zone(it) }.getOrDefault(zone) }
+        val (expanded, unreadable) = expandAll(lines, zone, until, from) { runCatching { Ics.zone(it) }.getOrDefault(zone) }
+        val unreadRepeats = expanded.count { it.unreadRepeat }
+        val skipped = unreadable + unreadRepeats
         val events = expanded.flatMap { e ->
             e.timings.filter { !(it.endDate ?: it.date).isBefore(from) && !it.date.isAfter(until) }.map { t ->
                 OutsideEvent(sourceId = 0, date = t.date, startTime = t.startTime, durationMinutes = t.durationMinutes, endDate = t.endDate,
@@ -81,7 +85,7 @@ object CalendarFileImport {
         val name = header.firstOrNull { it.name == "X-WR-CALNAME" }?.value?.let(Ics::unescape)?.trim()?.takeIf { it.isNotEmpty() }?.take(200)
         val color = header.firstOrNull { it.name == "X-APPLE-CALENDAR-COLOR" || it.name == "COLOR" }?.value?.trim()
             ?.let { Regex("#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?").matchEntire(it) }?.let { (0xFF000000L or it.groupValues[1].toLong(16)).toInt() }
-        return Window(events, skipped, name, color)
+        return Window(events, skipped, name, color, unreadRepeats)
     }
 
     private fun checkedLines(text: String): List<String> {
@@ -195,7 +199,7 @@ object CalendarFileImport {
             title = one("SUMMARY")?.value?.let(Ics::unescape)?.trim()?.takeIf { it.isNotEmpty() }?.take(500) ?: "Imported event",
             location = one("LOCATION")?.value?.let(Ics::unescape)?.trim().orEmpty().take(2000),
             notes = one("DESCRIPTION")?.value?.let(Ics::unescape)?.trim().orEmpty().take(20_000),
-            repeat = repeat, repeatStart = firstLocal.toLocalDate(), note = note)
+            repeat = repeat, repeatStart = firstLocal.toLocalDate(), note = note, unreadRepeat = rule != null && repeat == null)
     }
 
     // One event (with its repeats) as import rows: usually one, but more when daylight-saving differences between its own

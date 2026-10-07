@@ -75,7 +75,19 @@ internal fun sharedStreams(intent: Intent?): List<android.net.Uri> {
  */
 internal object SharedFileArrivals {
     val queue = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<String, String?>>>(emptyList())
-    fun add(share: Pair<String, String?>) = queue.update { it + share }
+    // R18-D2: the staging ids queued in this process, so a share of files is never offered twice.
+    private val queued: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** Queues [share]; false if it's a share of files queued before. */
+    fun add(share: Pair<String, String?>): Boolean {
+        com.example.itinerary.data.SharedFiles.idOf(share.first)?.let { if (!queued.add(it)) return false }
+        queue.update { it + share }
+        return true
+    }
+    // R18-D2: shares of files an earlier process left (SharedFilesStore.recover), looked for once per process; a new share
+    // is copied only after that.
+    private var recovery: kotlinx.coroutines.Job? = null
+    @Synchronized fun recoverOnce(start: () -> kotlinx.coroutines.Job): kotlinx.coroutines.Job = recovery ?: start().also { recovery = it }
+    suspend fun recovered() { synchronized(this) { recovery }?.join() }
     /** Takes [share] off the queue; false if another window took it first. */
     fun take(share: Pair<String, String?>): Boolean {
         while (true) {
@@ -206,14 +218,21 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(app, if (uris.size == 1) "Adding the file to Planner…" else "Adding ${uris.size} files to Planner…",
             android.widget.Toast.LENGTH_SHORT).show()
         app.appScope.launch {
-            val files = uris.take(com.example.itinerary.data.SharedFiles.MAX_FILES).mapNotNull { app.attachmentStore.import(it) }
+            SharedFileArrivals.recovered()
+            val store = com.example.itinerary.data.SharedFilesStore(app)
+            val id = java.util.UUID.randomUUID().toString()
+            // R18-D2: noted as being copied from the start, and again after each file, so the copies of a share Android ends
+            // half way are released at the next start (all but the one being copied then: AttachmentStore names it).
+            fun note(files: List<com.example.itinerary.data.Attachment>) =
+                runCatching { store.write(id, com.example.itinerary.data.SharedFiles.Staged(caption, subject, files), copying = true) }
+            val files = mutableListOf<com.example.itinerary.data.Attachment>()
+            note(files)
+            for (uri in uris.take(com.example.itinerary.data.SharedFiles.MAX_FILES)) app.attachmentStore.import(uri)?.let { files += it; note(files) }
             val missed = uris.size - files.size
             val staged = if (files.isEmpty()) null else runCatching {
-                java.util.UUID.randomUUID().toString().also { id ->
-                    com.example.itinerary.data.SharedFilesStore(app).write(id, com.example.itinerary.data.SharedFiles.Staged(caption, subject, files))
-                }
+                id.also { store.write(it, com.example.itinerary.data.SharedFiles.Staged(caption, subject, files)) }
             }.getOrNull()
-            if (staged == null) runCatching { app.repository.releaseTaskFiles(files.map { it.fileName }) }
+            if (staged == null) { runCatching { app.repository.releaseTaskFiles(files.map { it.fileName }) }; runCatching { store.delete(id) } }
             kotlinx.coroutines.withContext(Dispatchers.Main) {
                 when {
                     staged == null -> android.widget.Toast.makeText(app, "Couldn't read the shared ${if (uris.size == 1) "file" else "files"}" +
@@ -299,11 +318,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // R18-D2: once per process, before any share is copied: shares of files an earlier process left are offered again
+        // (or, caught half way through copying, released). Then those left a week ago or more: their files go, unless used.
+        (application as ItineraryApp).let { app -> SharedFileArrivals.recoverOnce { app.appScope.launch(Dispatchers.IO) {
+            val store = com.example.itinerary.data.SharedFilesStore(app)
+            runCatching {
+                val found = store.recover()
+                found.offer.forEach { SharedFileArrivals.add(com.example.itinerary.data.SharedFiles.key(it) to null) }
+                if (found.release.isNotEmpty()) app.repository.releaseTaskFiles(found.release)
+            }
+            runCatching { store.sweep().takeIf { it.isNotEmpty() }?.let { app.repository.releaseTaskFiles(it) } }
+        } } }
         if (actsOnLaunchIntent(intent?.flags ?: 0, savedInstanceState == null)) { stopAlarmIfRequested(intent); readWidgetIntent(intent); importSharedFiles(intent) }
-        // Shares of files left behind a week ago or more (Android ended Planner mid-share): their files go, unless used.
-        if (savedInstanceState == null) (application as ItineraryApp).let { app -> app.appScope.launch(Dispatchers.IO) {
-            runCatching { com.example.itinerary.data.SharedFilesStore(app).sweep().takeIf { it.isNotEmpty() }?.let { app.repository.releaseTaskFiles(it) } }
-        } }
         // Shared files, once copied, open like a shared text, in the window on screen: only a started one takes them, so a
         // window closing as a new share opens Planner (CLEAR_TASK) can't take them away with it. One at a time, once this
         // window has no share open or waiting.
@@ -313,8 +339,13 @@ class MainActivity : ComponentActivity() {
                     queue.firstOrNull().takeIf { open == null }
                 }.collect { share ->
                     // Not a window that is closing (a new share opened Planner with CLEAR_TASK): it is still started a moment.
-                    if (share != null && !isFinishing && SharedFileArrivals.take(share))
+                    if (share != null && !isFinishing && SharedFileArrivals.take(share)) {
                         setLaunchFields(launchFields().mergedWith(LaunchFields(sharedText = share.first, sharedSubject = share.second)))
+                        // R18-D2: taken, so it isn't offered again after Planner restarts.
+                        com.example.itinerary.data.SharedFiles.idOf(share.first)?.let { id -> (application as ItineraryApp).appScope.launch(Dispatchers.IO) {
+                            runCatching { com.example.itinerary.data.SharedFilesStore(application).markTaken(id) }
+                        } }
+                    }
                 }
             }
         }

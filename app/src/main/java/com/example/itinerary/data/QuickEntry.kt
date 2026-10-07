@@ -200,7 +200,9 @@ object QuickEntry {
     private val bareDurations = rx("(?<![\\w.])$span(?![\\w])")
     private val relativeTimes = rx("\\bin\\s+$wordSpan\\b")
     private val durationParts = rx("($amount)\\s*($hours|$minutes)(?![a-z])")
-    private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)")
+    // R18-Q6: also "12.10.", a day and month each with a dot after it (see dottedDayMonth).
+    private val numericDate = rx("(?<![\\d:/.])\\b\\d{1,2}(?:(?:[/-]\\d{1,2}(?:[/-]\\d{2,4})?|\\.\\d{1,2}\\.(?:\\d{4}|\\d{2}))\\b(?![:\\d]|[/.]\\d)|\\.\\d{1,2}\\.(?![\\w.]))")
+    private val dottedDayMonth = re("(\\d{1,2})\\.(\\d{1,2})\\.")
     // Not after a hyphen: "check-in", "sign-on" are words, not unfinished phrases.
     // A full stop alone is no number: "for Tuesday 13 October at 2pm." ends a sentence (Q6-1). Nor is one after a number:
     // "Book a table for 4." is a party size at a sentence end, read as "for 4" (SQ-7).
@@ -285,11 +287,16 @@ object QuickEntry {
     // "until Christmas", "until 30 November", "till next Friday": when a repeat stops. A number with one dot is a time,
     // as elsewhere: "9 until 5.30" is an hour range; "until 5.10.26" is a date.
     private const val holidayNames = "anzac\\s+day|australia\\s+day|father['’]?s\\s+day|nye|easter(?:\\s+(?:sunday|monday))?|good\\s+friday|mother['’]?s\\s+day|christmas\\s+eve|(?:christmas|xmas)(?:\\s+day)?|boxing\\s+day|new\\s+year['’]?s(?:\\s+(?:eve|day))?|hallowe['’]?en|valentine['’]?s(?:\\s+day)?"
-    private val repeatUntil = rx("\\b(?:until|till|til|through|thru|up\\s+(?:to|until))\\s+(?:and\\s+including\\s+)?($holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{1,2}[/-]\\d{1,2})\\b")
+    // R18-Q4: on a repeat also a month alone, "until December", "until end of March 2027": that month's last day.
+    private const val untilMonth = "(?:(?:the\\s+)?end\\s+of\\s+)?(?:$months)(?:\\s+\\d{4})?"
+    private val untilMonthOnly = rx("^$untilMonth$")
+    private val repeatUntil = rx("\\b(?:until|till|til|through|thru|up\\s+(?:to|until))\\s+(?:and\\s+including\\s+)?($holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{1,2}[/-]\\d{1,2}|$untilMonth)\\b")
     // A repeat's first date: "starting next week", "from 6 Oct", "beginning Monday".
     private val repeatStart = rx("\\b(?:starting|beginning|from)\\s+(?:on\\s+)?(next\\s+week|$datePhrases)\\b")
     // H17-Q2: "every day except Sunday", "weekdays but not Fri or Mon": days left out of a repeat, never a start date.
     private val exceptDays = rx("\\b(?:except|excluding|but\\s+not|apart\\s+from|other\\s+than)\\s+(?:on\\s+)?(?:$pluralWeekdays|$weekdays)\\b(?:\\s*(?:,|/|&|\\band\\b|\\bor\\b)?\\s*(?:(?:and|or)\\s+)?(?:on\\s+)?(?:$pluralWeekdays|$weekdays)\\b)*")
+    // R18-Q1: "daily except 25 Dec", "skip 10 Nov": one date left out of a repeat, which Planner can't hold (see parse).
+    private val exceptDate = rx("\\b(?:except|excluding|but\\s+not|apart\\s+from|other\\s+than|skip(?:ping)?)\\s+(?:on\\s+)?(?:$holidayNames|$datePhrases|\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?)\\b")
     // "weekly on Tuesdays", "fortnightly on Friday": the rule with its weekday.
     private val ruleOnWeekday = rx("\\b(weekly|fortnightly|bi-?weekly|every\\s+(?:week|fortnight|other\\s+week))\\s+on\\s+(?:the\\s+)?($pluralWeekdays|$weekdays)\\b")
     // "every month on the last day", "the last day of every month": monthly on the 31st, so shorter months get their last day.
@@ -363,7 +370,10 @@ object QuickEntry {
         // Q5-6: some patterns cost more the longer the text, so a large paste is refused before it is read at all.
         if (input.length > MAX_LENGTH) return QuickEntrySuggestion(input.trim(), today, null, TOO_LONG)
         // Keep offsets identical to the text field, including repeated spaces/newlines.
-        val text = input.replace('“', '"').replace('”', '"').map { if (it.isWhitespace()) ' ' else it }.joinToString("")
+        // R18-Q7: digits of other scripts ("٣pm", "３pm") are read as 0–9, one char for one.
+        val text = input.replace('“', '"').replace('”', '"').map {
+            if (it.isWhitespace()) ' ' else if (it.isDigit() && it !in '0'..'9') '0' + Character.digit(it, 10) else it
+        }.joinToString("")
         val phrases = mutableListOf<QuickEntryPhrase>()
         fun error(message: String) = QuickEntrySuggestion(text.trim(), today, null, message, phrases = phrases.toList())
         if (text.count { it == '"' } % 2 != 0) return error("Close the quotation marks around your title or place name.")
@@ -582,7 +592,7 @@ object QuickEntry {
             if (rx("^(?:\\d|~|noon\\b|midd?ay\\b|mid-day\\b|midnight\\b|(?:$spokenTime)|(?:$spokenWords)|$approx\\d|(?:the\\s+)?(?:end|last\\s+day)\\s+of\\s+(?:the\\s+)?month\\b)").containsMatchIn(tail)) continue
             val end = sequenceOf(dates, ranges, times, durations, relativeTimes, numericDate, unfinished, repeats, monthDayRepeat, reminders, reminderClocks, nightBefore, noReminder, endOfDay, nights, repeatCounts, allDay, schedulingWords).flatMap { it.findAll(remaining, start) }
                 .filter { it.range.first > start }.map { it.range.first }.plus(phrases.filter { it.kind == QuickPhraseKind.TIME && it.start > start }.map { it.start }).minOrNull() ?: text.length
-            val value = text.substring(start, end).trim().trimEnd(',').replace("\"", "")
+            val value = withoutFormatChars(text.substring(start, end)).trim().trimEnd(',').replace("\"", "")
             if (value.isBlank()) return error("Add a place after at, or remove at.")
             location = value
             consume(marker.range.first until end, QuickPhraseKind.LOCATION)
@@ -850,6 +860,11 @@ object QuickEntry {
                 else -> RepeatRule.onDays(left)
             }
         }
+        // R18-Q1: a date after "except" is one occurrence to leave out, never the start.
+        if (repeat != RepeatRule.NONE) exceptDate.find(remaining)?.let { match ->
+            phrases += QuickEntryPhrase(match.range.first, match.range.last + 1, QuickPhraseKind.UNSUPPORTED)
+            return error("Planner can't skip one date. Add the repeat, then delete that occurrence.")
+        }
         val countMatches = repeatCounts.findAll(remaining).toList()
         if (countMatches.size > 1) return error("Use one occurrence count.")
         var repeatCount = 12
@@ -887,7 +902,8 @@ object QuickEntry {
                 // "Away until Friday 9", "until Friday 1500": the hour or 24-hour time right after the date.
                 rx("^\\s*,?\\s*(?:\\d{1,2}(?![\\w:./-])|\\d{4}\\b)").containsMatchIn(remaining.substring(match.range.last + 1))
             // "Remind me to pay rent until Friday", "todo …": a task, due that day as before.
-            if (timed || taskHint) return@let
+            // R18-Q4: a month alone ends only a repeat: "Away until March" is no stay of five months.
+            if (timed || taskHint || untilMonthOnly.matches(match.groupValues[1].trim())) return@let
             stayUntilText = match.groupValues[1]
             consume(match.range, QuickPhraseKind.DATE)
         }
@@ -995,8 +1011,16 @@ object QuickEntry {
                 runCatching { LocalDate.of(today.year, dm.second, dm.first).let { if (it < today) it.plusYears(1) else it } }.getOrNull() }
             return readings.none { d -> d == named && (repeatDay == null || d.dayOfWeek == repeatDay) && repeat.fits(d) && onMonthDay(d) }
         }
+        // R18-Q6: "12.10." is a date only where it is one in the order the setting gives (day first unless set otherwise),
+        // and not after a word for a time or a length: "Meeting 3.30.", "Call at 10.10." and "Study for 1.5." stay as they were.
+        fun dottedTime(n: MatchResult): Boolean {
+            val (a, b) = dottedDayMonth.matchEntire(n.value)?.destructured?.let { (x, y) -> x.toInt() to y.toInt() } ?: return false
+            val (day, month) = if (dayFirst == false) b to a else a to b
+            return month !in 1..12 || day !in 1..31 ||
+                rx("(?:\\b(?:at|around|about|approx|for|in)\\s+|[@~]\\s*)$").containsMatchIn(remaining.substring(0, n.range.first))
+        }
         val numeric = numericDate.findAll(remaining).filter { n -> (ds + meridiemRanges).none { d -> n.range.first <= d.range.last && d.range.first <= n.range.last } }
-            .filterNot(::hoursNotDate).toList()
+            .filterNot(::hoursNotDate).filterNot(::dottedTime).toList()
         // Not beside a range that could be 24-hour hours: "Workshop 5th 10-14" has two dates, so it asks for one.
         dropBareOrdinals(numeric.any { n -> !(re("\\d{1,2}-\\d{1,2}").matches(n.value) && n.value.split('-').all { it.toInt() <= 23 }) })
         // A weekday beside a calendar date is a cross-check, not a second date: Friday 2 October, Fri 3/10.
@@ -1068,7 +1092,7 @@ object QuickEntry {
             consume((from?.range?.first ?: ds.single().range.first)..ds.single().range.last, QuickPhraseKind.DATE)
         }
         numeric.firstOrNull()?.let { match ->
-            val parts = match.value.split('/', '-', '.')
+            val parts = match.value.removeSuffix(".").split('/', '-', '.')
             if (parts.size == 3 && parts[2].length !in setOf(2, 4)) return error("Use a four-digit year, for example 03/04/2027.")
             // A two-digit year is this century: 3/10/26 is 2026.
             val year = parts.getOrNull(2)?.toIntOrNull()?.let { if (parts[2].length == 2) 2000 + it else it } ?: today.year
@@ -1128,6 +1152,12 @@ object QuickEntry {
             val value = raw.lowercase(Locale.ROOT).replace(re("\\s+"), " ")
             val end = when {
                 rx("^(?:$holidayNames)$").matches(value) -> nextHoliday(value, date)
+                // R18-Q4: "until December": its last day, next year's once that month has gone by.
+                untilMonthOnly.matches(value) -> {
+                    val year = re("\\d{4}").find(value)?.value?.toInt()
+                    val end = YearMonth.of(year ?: date.year, monthOf(rx("\\b(?:$months)\\b").find(value)!!.value)).atEndOfMonth()
+                    if (year == null && end < date) end.plusYears(1) else end
+                }
                 re("\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?").matches(value) -> {
                     val parts = value.split('/', '.', '-').map { it.toInt() }
                     val year = parts.getOrNull(2)?.let { if (it < 100) 2000 + it else it }
@@ -1270,7 +1300,10 @@ object QuickEntry {
             // A trailing suffix can cover an increasing range within the same half-day: 3–4pm.
             // Never infer across noon/midnight or reinterpret an explicit 24-hour start.
             var start = readTime(endpoints[0])
-            val end = readTime(endpoints[1])
+            // R18-Q3: "noon-1:30", "midday to 2": from noon, a 12-hour end without am/pm is in the afternoon.
+            val fromNoon = re("(?:12)?(?:noon|midday|mid-day)").matches(endpoints[0]) && !hasMeridiem[1]
+            val end = twelveHour.matchEntire(endpoints[1])?.takeIf { fromNoon }?.destructured
+                ?.let { (h, m) -> LocalTime.of(h.toInt() % 12 + 12, m.ifEmpty { "0" }.toInt()) } ?: readTime(endpoints[1])
             if (!hasMeridiem[0] && hasMeridiem[1] && endpoints[0].matches(rx("[1-9]\\d?(?::\\d{2})?|[1-9][0-5]\\d"))) {
                 val candidate = readTime(endpoints[0] + endpoints[1].takeLast(2))
                 if (candidate == null || end == null || !candidate.isBefore(end))
@@ -1484,7 +1517,7 @@ object QuickEntry {
             val word = re("^\\p{L}+(?![\\p{L}'’])").find(text.substring(next))?.value?.lowercase(Locale.ROOT)
             next < text.length && !gone[next] && word in periodNameWords
         }?.let { periodSaid }
-        title = title.replace("\"", "").replace(re("\\(\\s*\\)|\\[\\s*]"), " ")
+        title = withoutFormatChars(title).replace("\"", "").replace(re("\\(\\s*\\)|\\[\\s*]"), " ")
             // Commas left alone by removed phrases: "Dentist 3 October, 2pm".
             .replace(re("(?<=^|\\s)[,;:]+(?=\\s|$)"), " ").replace(re("[\\s,;:]+$"), "")
             .trim().replace(re("\\s+"), " ")
@@ -1510,7 +1543,15 @@ object QuickEntry {
             reminderAt, if (reminderAt == null) 0 else if (reminderDaysBack > 0) reminderDaysBack else -1, repeatAnchorDay)
     }
 
-    /** Whether [words] say only when: "tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */
+    /** R18-Q7: invisible format characters (U+200F, U+200B, …) out of a title or place. Not the joiners or tags that make
+     *  up an emoji or a script's letters (U+200C, U+200D, U+E0020–U+E007F). */
+    private fun withoutFormatChars(value: String): String = buildString {
+        value.codePoints().forEach { c ->
+            if (Character.getType(c) != Character.FORMAT.toInt() || c == 0x200C || c == 0x200D || c in 0xE0020..0xE007F) appendCodePoint(c)
+        }
+    }
+
+    /** Whether [words] say only when:"tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */
     private fun readsAsWhen(words: String): Boolean =
         sequenceOf(dates, numericDate, ranges, times, relativeTimes, unsupported, wordDateMatches, holidays, endOfDay, nowWords, allDay,
             everyPeriod, monthlyWeekdays, monthDayRepeat, weekdayLists, repeats)
