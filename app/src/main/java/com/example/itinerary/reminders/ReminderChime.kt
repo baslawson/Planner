@@ -68,8 +68,20 @@ object ReminderChime {
             interruptionFilter in setOf(NotificationManager.INTERRUPTION_FILTER_ALL, NotificationManager.INTERRUPTION_FILTER_UNKNOWN) &&
             audioMode == android.media.AudioManager.MODE_NORMAL && !notificationSoundNone
 
-    /** Plays the chime (the channel vibrates, as the phone's mode allows). Returns at once; it stops by itself. */
+    /**
+     * Plays the chime (the channel vibrates, as the phone's mode allows). Returns at once; it stops by itself. From a short
+     * foreground service (ChimeService): newer Android mutes sound an app starts in the background, alarm sound too
+     * ("background playback would be muted", seen on Android 16, bugnotes 7 Oct); a ringing alarm plays the same way.
+     * Where the service can't start, it plays here as before.
+     */
     fun play(context: Context) {
+        val app = context.applicationContext
+        val started = runCatching { androidx.core.content.ContextCompat.startForegroundService(app, android.content.Intent(app, ChimeService::class.java)) }
+        if (started.isFailure) playNow(app) {}
+    }
+
+    /** The chime itself; [onDone] once it has stopped (or couldn't play). */
+    internal fun playNow(context: Context, onDone: () -> Unit) {
         val app = context.applicationContext
         val notifications = app.getSystemService(NotificationManager::class.java)
         val wake = app.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Planner:reminderChime")
@@ -87,7 +99,7 @@ object ReminderChime {
         val player = choices.firstNotNullOfOrNull { uri ->
             runCatching { MediaPlayer().apply { setAudioAttributes(attributes); setDataSource(app, uri); prepare() } }.getOrNull()
         }
-        if (player == null) { wake.release(); return }
+        if (player == null) { wake.release(); onDone(); return }
         // R2: music and other sound dip under the chime, and come back after (audio focus, given back when it stops).
         val audio = app.getSystemService(android.media.AudioManager::class.java)
         val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attributes).build()
@@ -95,7 +107,7 @@ object ReminderChime {
         val handler = Handler(Looper.getMainLooper())
         var finished = false
         val stop = Runnable {
-            if (!finished) { finished = true; runCatching { player.stop() }; player.release(); runCatching { audio.abandonAudioFocusRequest(focus) }; if (wake.isHeld) wake.release() }
+            if (!finished) { finished = true; runCatching { player.stop() }; player.release(); runCatching { audio.abandonAudioFocusRequest(focus) }; if (wake.isHeld) wake.release(); onDone() }
         }
         player.setOnCompletionListener { handler.removeCallbacks(stop); stop.run() }
         player.setOnErrorListener { _, _, _ -> handler.removeCallbacks(stop); stop.run(); true }

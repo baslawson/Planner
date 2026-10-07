@@ -95,7 +95,7 @@ suspend fun showMissedReminders(context: Context, afterBoot: Boolean) {
     // RB-3: the alarms that rang before the first unlock aren't missed.
     try {
         DirectBoot.replayFired(app, app.repository, app.reminderScheduler.ledger,
-            showTask = { task, trigger -> postTaskReminder(app, task.id, task.title, trigger, quiet = true) },
+            showTask = { task, trigger -> postTaskReminder(app, task.id, task.title, trigger, quiet = true, notes = task.notes) },
             showEvent = { item, reminder -> showEventAgain(app, item, reminder) }) { note, trigger -> postNoteReminder(app, note.id, trigger, note, quiet = true) }
     }
     catch (e: Exception) { android.util.Log.w("MissedReminders", "Couldn't record the reminders rung while locked", e) }
@@ -129,7 +129,7 @@ internal fun showEventAgain(context: Context, item: com.example.itinerary.data.I
     val couldNotRing = shown != null && shown.flags and android.app.Notification.FLAG_INSISTENT != 0
     postReminderNotification(context, id, title, content.text, content.subText, reminder.id,
         intent.getStringExtra(ReminderScheduler.EXTRA_BILL_TOKEN), intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-        couldNotRing = couldNotRing, quiet = true)
+        couldNotRing = couldNotRing, quiet = true, details = content.details)
 }
 
 private const val MISSED_GROUP = "planner.missed"

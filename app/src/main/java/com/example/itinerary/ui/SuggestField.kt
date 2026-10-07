@@ -34,6 +34,8 @@ fun SuggestField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     trailingIcon: (@Composable () -> Unit)? = null,
+    // False for a title that may wrap onto more lines as it grows (Done still closes the keyboard).
+    singleLine: Boolean = true,
 ) {
     var open by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
@@ -45,7 +47,7 @@ fun SuggestField(
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, enabled)
                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) open = true },
             label = { Text(label) },
-            singleLine = true,
+            singleLine = singleLine,
             enabled = enabled,
             keyboardOptions = keyboardOptions,
             keyboardActions = keyboardActions,

@@ -325,6 +325,8 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
         const val EXTRA_DATE = "date"
         const val EXTRA_TIME = "time"
         const val EXTRA_OFFSET_LABEL = "offset_label"
+        // The event's notes: what it is for (bugnotes 7 Oct). Not in the locked-reboot snapshot, which shows title and time.
+        const val EXTRA_NOTES = "notes"
         const val EXTRA_RING = "ring"
     }
 }
@@ -332,6 +334,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
 // [trigger]: the time its alarm was set for (0: not known), handed on to a ringing alarm (AlarmRestart).
 fun reminderIntent(context: Context, item: ItineraryItem, reminder: Reminder, trigger: Long = 0L): Intent =
     eventIntent(context, LockedAlarm.Event.of(item, reminder, trigger))
+        .putExtra(ReminderScheduler.EXTRA_NOTES, item.notes.trim().take(2_000))
 
 // What an event reminder's notification shows, in its alarm's intent: from the database, or from the locked snapshot.
 // R6-1: with its time, which goes on to AlarmService, so a ringing alarm Android restarts rings only for what is left.

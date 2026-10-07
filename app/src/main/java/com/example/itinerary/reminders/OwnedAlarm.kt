@@ -78,7 +78,7 @@ private fun refreshOwnedAlarm(context: Context, kind: String, id: String, trigge
             val shown = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.tag == tag }
             if (!shown) return@runCatching
             when (item) {
-                is PlannerTask -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") + item.title, trigger, quiet = true, silent = silent)
+                is PlannerTask -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") + item.title, trigger, quiet = true, silent = silent, notes = item.notes)
                 is PlannerNote -> postNoteReminder(context, id, trigger, item, quiet = true, missed = missed, silent = silent)
             }
             if (current() == null) manager.cancel(tag, 0)

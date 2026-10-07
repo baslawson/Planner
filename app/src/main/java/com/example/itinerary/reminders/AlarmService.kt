@@ -112,7 +112,7 @@ class AlarmService : Service() {
                     this,
                     previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
                     it.title, it.text, it.subText, previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID), previous.getString(ReminderScheduler.EXTRA_BILL_TOKEN), previous.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-                    allowChime = false, // it has rung already: no chime over the new one
+                    allowChime = false, details = it.details, // it has rung already: no chime over the new one
                 )
             }
         }
@@ -324,7 +324,7 @@ class AlarmService : Service() {
                     this,
                     extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
                     "Missed alarm: ${it.title}", it.text, it.subText, extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID), extras.getString(ReminderScheduler.EXTRA_BILL_TOKEN), extras.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
-                    allowChime = false, // it rang unanswered: no chime on top
+                    allowChime = false, details = it.details, // it rang unanswered: no chime on top
                 )
             }
         }

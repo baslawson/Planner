@@ -421,8 +421,12 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         if (changedElsewhere) TextButton(enabled = !busy, onClick = { if (unsaved) askingReload = true else reload() }) { Text("Reload") }
                     }
                 }
-                OutlinedTextField(title, onValueChange = { if (it.length <= 500) title = it.replace('\n', ' ') },
-                    label = { Text("Task title") }, enabled = !busy, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done), modifier = Modifier.fillMaxWidth())
+                // Task titles used before, as you type (chores that come back).
+                val allTasks by repo.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
+                val pastTasks = remember(title, allTasks) { com.example.itinerary.data.EntryHistory.taskTitles(allTasks, title, except = initial.id) }
+                SuggestField(title, onValueChange = { if (it.length <= 500) title = it.replace('\n', ' ') }, label = "Task title",
+                    suggestions = pastTasks, onPick = { title = it }, enabled = !busy, singleLine = false,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
                 if (!creating) {
                     TextButton(enabled = !busy && title.isNotBlank(), onClick = {
                         duplicate = initial.copy(title = title, notes = notes, priority = TaskPriority.valueOf(priority),

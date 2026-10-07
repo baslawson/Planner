@@ -31,7 +31,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
             try {
                 (context.applicationContext as ItineraryApp).repository.deliverTaskReminder(id, trigger) { task ->
                     if (!startOwnedAlarm(context, "task", id, task.title, trigger, task.ringUntilDismissed))
-                        postTaskReminder(context, id, task.title, trigger, couldNotRing = task.ringUntilDismissed)
+                        postTaskReminder(context, id, task.title, trigger, couldNotRing = task.ringUntilDismissed, notes = task.notes)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("TaskReminderReceiver", "Couldn't deliver task reminder", e)
@@ -54,7 +54,8 @@ class TaskReminderReceiver : BroadcastReceiver() {
 }
 
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
-internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false, allowChime: Boolean = true) {
+// [notes]: the task's notes, what it is for: their first line instead of "Task reminder", all of them when opened.
+internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false, allowChime: Boolean = true, notes: String = "") {
     if (!notificationsEnabled(context)) return
     val chime = ReminderChime.use(context, allowChime && !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0,
@@ -63,7 +64,8 @@ internal fun postTaskReminder(context: Context, id: String, title: String, trigg
     val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText(if (couldNotRing) CouldNotRing.now(context).short /* H17-R2 */ else "Task reminder")
+        .setContentText(if (couldNotRing) CouldNotRing.now(context).short /* H17-R2 */ else notes.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: "Task reminder")
+        .apply { if (notes.isNotBlank() && !couldNotRing) setStyle(NotificationCompat.BigTextStyle().bigText(notes.trim())) }
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)

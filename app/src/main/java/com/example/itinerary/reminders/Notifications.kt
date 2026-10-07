@@ -58,7 +58,8 @@ fun createReminderChannel(context: Context) {
     ReminderChime.createChannel(manager)
 }
 
-class ReminderContent(val title: String, val text: String, val subText: String)
+// [details]: the event's notes, what the reminder is for (empty when it has none, or before the first unlock).
+class ReminderContent(val title: String, val text: String, val subText: String, val details: String = "")
 
 // Builds what a reminder says from the extras that ReminderScheduler put in its intent.
 fun reminderContent(context: Context, extras: Bundle?): ReminderContent? {
@@ -76,7 +77,8 @@ fun reminderContent(context: Context, extras: Bundle?): ReminderContent? {
         "Due $dayText${time?.let { ", ${it.label(timeFormat, context)}" }.orEmpty()}"
     else "$dayText, ${time?.label(timeFormat, context) ?: "all day"}"
     val text = if (location.isBlank()) whenText else "$whenText · $location"
-    return ReminderContent(title, text, extras.getString(ReminderScheduler.EXTRA_OFFSET_LABEL).orEmpty())
+    return ReminderContent(title, text, extras.getString(ReminderScheduler.EXTRA_OFFSET_LABEL).orEmpty(),
+        extras.getString(ReminderScheduler.EXTRA_NOTES).orEmpty().trim())
 }
 
 // False when the permission was refused, notifications are off for the app, or the user muted our channel.
@@ -135,6 +137,8 @@ fun postReminderNotification(
     quiet: Boolean = false,
     // False: no chime (a ringing alarm put aside by a newer one, or one that rang unanswered: it has sounded already).
     allowChime: Boolean = true,
+    // What the reminder is for (an event's notes): its first line after the time, all of it when the notification is opened.
+    details: String = "",
 ): Boolean {
     if (!notificationsEnabled(context)) return false
     // Its sound is Planner's chime instead (ReminderChime, posted on its soundless channel), which silent and vibrate mode
@@ -150,7 +154,8 @@ fun postReminderNotification(
     val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText(text)
+        .setContentText(details.lineSequence().firstOrNull { it.isNotBlank() }?.let { "$text · ${it.trim()}" } ?: text)
+        .apply { if (details.isNotBlank()) setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$details")) }
         .setSubText(subText)
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -164,7 +169,7 @@ fun postReminderNotification(
             }
             if (couldNotRing) {
                 val why = CouldNotRing.now(context)
-                setStyle(NotificationCompat.BigTextStyle().bigText("$text\n${why.full}"))
+                setStyle(NotificationCompat.BigTextStyle().bigText(listOf(text, details, why.full).filter { it.isNotBlank() }.joinToString("\n")))
                 // H17-R2: "Allow alarms" only when that is what's missing; otherwise app settings (notifications, battery).
                 val (label, settings) = if (why == CouldNotRing.ALLOW_ALARMS) "Allow alarms" to Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM
                     else "App settings" to Settings.ACTION_APPLICATION_DETAILS_SETTINGS

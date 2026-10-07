@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
@@ -43,7 +44,16 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
             SuggestionCheck("Use amount and currency", useAmount) { useAmount = it }
             OutlinedTextField(amount, { amount = it.take(16) }, label = { Text("Suggested amount") }, isError = useAmount && Bills.parse(amount) == null, modifier = Modifier.fillMaxWidth())
             ScanUncertainty(suggestion.warnings["amount"])
-            OutlinedTextField(currency, { currency = it.uppercase().take(3) }, label = { Text("Currency code") }, isError = useAmount && currency !in Bills.currencies, modifier = Modifier.fillMaxWidth())
+            // The currencies Planner takes, those used on bills before first.
+            val used by (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).repository.allItems
+                .collectAsStateWithLifecycle(initialValue = emptyList())
+            val currencyChoices = androidx.compose.runtime.remember(currency, used) {
+                com.example.itinerary.data.EntryHistory.currencies(used.filter { it.category == "Bills" }.map { it.billCurrency }, currency, Bills.currencies)
+            }
+            SuggestField(currency, { currency = it.uppercase().take(3) }, label = "Currency code", suggestions = currencyChoices,
+                onPick = { currency = it })
+            if (useAmount && currency !in Bills.currencies) Text("Choose one of: ${Bills.currencies.joinToString()}.", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
             ScanUncertainty(suggestion.warnings["currency"])
             Text("Blank fields could not be identified reliably. A $ symbol alone keeps your current currency ($currentCurrency). Applying details selects Bills.", style = MaterialTheme.typography.bodySmall)
     }

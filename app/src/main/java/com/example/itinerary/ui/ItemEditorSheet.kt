@@ -754,14 +754,33 @@ private fun ItemEditorForm(
                         if (spanEnd != null) pickingRange = true else pickingDate = true }
                     .padding(horizontal = 16.dp, vertical = 6.dp),
             )
-            OutlinedTextField(
+            // Titles used before, as you type: picking one fills in what went with it last time where nothing is entered
+            // yet (an event's place and category; a bill's payee, amount and currency).
+            val pastTitles = remember(title, allEvents, category) {
+                com.example.itinerary.data.EntryHistory.titles(allEvents, title, bills = category == "Bills", except = initial.id.takeIf { it != 0L })
+            }
+            SuggestField(
                 value = title,
                 onValueChange = { title = EventText.typed(title, it.replace('\n', ' '), EventText.MAX_TITLE) },
-                readOnly = busy,
-                label = { Text(if (billTask) "Bill title" else "What are you doing?") },
+                label = if (billTask) "Bill title" else "What are you doing?",
+                suggestions = pastTitles.map { it.title },
+                shown = { t -> pastTitles.firstOrNull { it.title == t }?.location?.takeIf { it.isNotBlank() }?.let { "$t · $it" } ?: t },
+                onPick = { t ->
+                    val past = pastTitles.firstOrNull { it.title == t }
+                    title = t
+                    if (past != null) {
+                        if (location.isBlank()) location = past.location
+                        if (category == initial.category && past.category != category && past.category != "Bills" && category != "Bills") category = past.category
+                        if (category == "Bills") {
+                            if (billAmountText.isBlank() && past.amountMinor != null) billAmountText = Bills.input(past.amountMinor)
+                            if (payments.isEmpty()) billCurrency = past.currency
+                        }
+                    }
+                },
+                enabled = !busy,
                 // Grows as the text wraps; Done closes the keyboard instead of adding a line break.
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
             )
             if (category == "Bills") {
                 OutlinedTextField(value = billAmountText, readOnly = busy, onValueChange = {
@@ -952,13 +971,17 @@ private fun ItemEditorForm(
                     color = MaterialTheme.colorScheme.tertiary,
                 )
             }
-            OutlinedTextField(
+            // Places (and payees) used before, as you type.
+            val pastPlaces = remember(location, allEvents) { com.example.itinerary.data.EntryHistory.locations(allEvents, location) }
+            SuggestField(
                 value = location,
-                readOnly = busy,
                 onValueChange = { location = EventText.typed(location, it.replace('\n', ' '), EventText.MAX_LOCATION) },
-                label = { Text(if (billTask) "Payee / location (optional)" else "Location") },
+                label = if (billTask) "Payee / location (optional)" else "Location",
+                suggestions = pastPlaces,
+                onPick = { location = it },
+                enabled = !busy,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
             )
             OutlinedTextField(
                 value = notes,
