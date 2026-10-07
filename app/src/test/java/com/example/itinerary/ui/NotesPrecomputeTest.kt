@@ -68,7 +68,9 @@ class NotesPrecomputeTest {
             val card = noteCardText(note)
             val body = Markdown.plain(note.content).lines().filter { it.isNotBlank() }
             assertEquals(Notes.label(note), card.label)
-            assertEquals((if (note.title.isBlank()) body.drop(1) else body).joinToString("\n"), card.preview)
+            // The first line is left out when it is the name: no title, or a title that is that line (auto title).
+            val named = note.title.isBlank() || note.title.trim() == body.firstOrNull()?.trim()?.take(com.example.itinerary.data.Notes.MAX_TITLE)
+            assertEquals((if (named) body.drop(1) else body).joinToString("\n"), card.preview)
             assertEquals(Markdown.checklist(note.content), card.done to card.total)
         }
     }

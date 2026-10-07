@@ -56,13 +56,15 @@ class NoteEditorHuntRegressionTest {
         click("More options"); click("Notes"); await { find("Search notes") != null }
         click("New note"); await { find("Note options") != null && field() != null }
     }
+    // Auto save: Close saves (no "Save changes?"), and typing is locked until it has.
     @Test fun saveAndCloseDisablesTypingUntilCommit() {
-        openNew(); title("beforeSave")
-        click("Close"); await { find("Save changes?") != null }
+        openNew()
         val gate = app.repository.javaClass.getDeclaredField("changes").apply { isAccessible = true }.get(app.repository) as Mutex
         runBlocking { gate.lock() }
         try {
-            click("Save"); await { find("Saving…") != null }
+            title("beforeSave")
+            click("Close"); await { find("Saving…") != null }
+            assertNull(find("Save changes?"))
             val titleBox = nodes().first { it.isEditable && it.text?.toString() == "beforeSave" }
             assertFalse("Title disabled while saving", titleBox.isEnabled)
             assertFalse("Accessibility cannot change saved input", titleBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
@@ -91,6 +93,7 @@ class NoteEditorHuntRegressionTest {
                 body.attachments = body.attachments + imported!!
             }
             val remove = "Remove ${imported!!.name}"
+            click("Note details"); await { find("Close note details") != null } // attachments are in the details panel
             await {
                 if (find(remove) != null) true else {
                     nodes().filter { it.isScrollable && it.isVisibleToUser && !it.isEditable }
@@ -99,12 +102,13 @@ class NoteEditorHuntRegressionTest {
                     Thread.sleep(150); false
                 }
             }
-            click(remove); click("Close"); click("Discard")
+            // Auto save: the note is kept (Close saves it), without the file taken off it.
+            click(remove); click("Close note details"); click("Close")
             await { find("Search notes") != null && NoteDraftStore(context).readAll().isEmpty() }
             // Ensure the app-scope releaseFiles coroutine had time to run and serialized cleanup completes.
             runBlocking { app.repository.releaseTaskFiles(emptyList()) }
             await { !app.attachmentStore.fileFor(imported!!.fileName).exists() }
-            assertTrue(runBlocking { app.repository.snapshot().notes }.isEmpty())
+            assertTrue(runBlocking { app.repository.snapshot().notes }.single().let { it.title == "importRemove" && it.attachments.isEmpty() })
         } finally {
             source.delete()
             imported?.let { app.attachmentStore.delete(it.fileName) }

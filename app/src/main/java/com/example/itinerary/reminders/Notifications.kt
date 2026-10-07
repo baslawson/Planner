@@ -133,12 +133,14 @@ fun postReminderNotification(
     couldNotRing: Boolean = false,
     // Shown again (D6-10: with its Mark paid, after the unlock), without sounding a second time.
     quiet: Boolean = false,
+    // False: no chime (a ringing alarm put aside by a newer one, or one that rang unanswered: it has sounded already).
+    allowChime: Boolean = true,
 ): Boolean {
     if (!notificationsEnabled(context)) return false
     // Its sound is Planner's chime instead (ReminderChime, posted on its soundless channel), which silent and vibrate mode
     // don't mute; not when shown again, or for a "Ring until I stop it" that couldn't ring (its insistent sound stays), or
     // when the Reminders category is silent in Android's settings.
-    val chime = ReminderChime.use(context, !quiet && !couldNotRing)
+    val chime = ReminderChime.use(context, allowChime && !quiet && !couldNotRing)
     val open = PendingIntent.getActivity(
         context,
         notificationId,

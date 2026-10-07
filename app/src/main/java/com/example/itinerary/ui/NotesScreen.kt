@@ -604,14 +604,17 @@ private fun <T> NotesShowBox(currentLabel: String, choices: List<T>, current: T,
 
 // What a note card shows from its text, from one Markdown parse per change to it (UI-4). The preview is kept whole:
 // the card shows 8 lines, but TalkBack reads all of it.
-internal class NoteCardText(val label: String, val preview: String, val done: Int, val total: Int)
+// [all]: every line, for a note whose title was deleted (no heading, its text from the first line).
+internal class NoteCardText(val label: String, val preview: String, val done: Int, val total: Int, val all: String = preview)
 internal fun noteCardText(note: PlannerNote): NoteCardText {
     val blocks = Markdown.parse(note.content)
     val plain = Markdown.plain(blocks)
     val body = plain.lines().filter { it.isNotBlank() }
     val (done, total) = Markdown.checklist(blocks)
-    // The first line is the name when there is no title; the preview goes on from the next.
-    return NoteCardText(Notes.label(note) { plain }, (if (note.title.isBlank()) body.drop(1) else body).joinToString("\n"), done, total)
+    // The first line is the name when there is no title; the preview goes on from the next. So too when the title is
+    // the first line (made from it as the note was typed): it isn't shown twice.
+    val named = note.title.isBlank() || note.title.trim() == body.firstOrNull()?.trim()?.take(Notes.MAX_TITLE)
+    return NoteCardText(Notes.label(note) { plain }, (if (named) body.drop(1) else body).joinToString("\n"), done, total, body.joinToString("\n"))
 }
 
 // How many notes each Show choice lists (Notes.visible with no search): archived notes count only under Archive.
@@ -639,6 +642,9 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
     val soft = if (tint != null) text.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
     val card = remember(note.title, note.content) { noteCardText(note) }
     val label = card.label
+    // Its title deleted on purpose: no heading; the card shows the note's text from its first line.
+    val noAutoTitle by (LocalContext.current.applicationContext as ItineraryApp).settings.noAutoTitle.collectAsStateWithLifecycle()
+    val untitled = note.title.isBlank() && note.id in noAutoTitle
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = tint ?: MaterialTheme.colorScheme.surfaceContainer,
@@ -652,7 +658,9 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
     ) {
         Column(Modifier.padding(start = 14.dp, top = 8.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                Text(label, Modifier.weight(1f).padding(top = 6.dp), style = MaterialTheme.typography.titleMedium,
+                if (untitled) Text(card.all.ifBlank { "Untitled note" }, Modifier.weight(1f).padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium,
+                    color = if (card.all.isBlank()) soft else text, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                else Text(label, Modifier.weight(1f).padding(top = 6.dp), style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold, color = text, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 if (note.pinned) Icon(Icons.Filled.Star, contentDescription = "Pinned", tint = if (tint != null) text else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 8.dp).size(18.dp))
@@ -661,7 +669,7 @@ private fun NoteCard(note: PlannerNote, selecting: Boolean, selected: Boolean, m
             }
             Column(Modifier.padding(end = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val preview = card.preview
-                if (preview.isNotBlank()) Text(preview, style = MaterialTheme.typography.bodyMedium, color = soft, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                if (!untitled && preview.isNotBlank()) Text(preview, style = MaterialTheme.typography.bodyMedium, color = soft, maxLines = 8, overflow = TextOverflow.Ellipsis)
                 if (note.priority != com.example.itinerary.data.TaskPriority.NORMAL) Surface(
                     color = if (note.priority == com.example.itinerary.data.TaskPriority.HIGH) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
                     shape = RoundedCornerShape(6.dp)) {

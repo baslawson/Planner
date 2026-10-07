@@ -45,15 +45,15 @@ internal fun startOwnedAlarm(context: Context, kind: String, id: String, title: 
  * An alarm displaced by another, or timed out, keeps its own normal notification and actions. [silent]: ringing was just
  * turned off, so it doesn't sound again (A15-3).
  */
-internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false, silent: Boolean = false): Boolean {
+internal fun postOwnedAlarm(context: Context, extras: Bundle, missed: Boolean = false, silent: Boolean = false, allowChime: Boolean = true): Boolean {
     val id = extras.getString(EXTRA_OWNER_ID) ?: return false
     val trigger = extras.getLong(ReminderScheduler.EXTRA_TRIGGER)
     val kind = extras.getString(EXTRA_OWNER_KIND)
     when (kind) {
         "task" -> postTaskReminder(context, id, (if (missed) "Missed alarm: " else "") +
-            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger, silent = silent)
+            extras.getString(ReminderScheduler.EXTRA_TITLE).orEmpty(), trigger, silent = silent, allowChime = allowChime)
         // The alarm carries no word of the note: "Note reminder" at once, its words once read (below).
-        "note" -> postNoteReminder(context, id, trigger, null, missed = missed, silent = silent)
+        "note" -> postNoteReminder(context, id, trigger, null, missed = missed, silent = silent, allowChime = allowChime)
         else -> return false
     }
     refreshOwnedAlarm(context, kind, id, trigger, missed, silent)

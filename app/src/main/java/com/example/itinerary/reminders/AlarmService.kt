@@ -106,12 +106,13 @@ class AlarmService : Service() {
         val previous = ringing
         val previousStart = ringingStart
         // A14-5: not one completed, deleted or removed meanwhile (its start no longer stands).
-        if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous) && !postOwnedAlarm(this, previous)) {
+        if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous) && !postOwnedAlarm(this, previous, allowChime = false)) {
             reminderContent(this, previous)?.let {
                 postReminderNotification(
                     this,
                     previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
                     it.title, it.text, it.subText, previous.getLong(ReminderScheduler.EXTRA_REMINDER_ID), previous.getString(ReminderScheduler.EXTRA_BILL_TOKEN), previous.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
+                    allowChime = false, // it has rung already: no chime over the new one
                 )
             }
         }
@@ -317,12 +318,13 @@ class AlarmService : Service() {
     private fun onGiveUp() {
         val start = ringingStart
         ringing?.let { extras ->
-            if (postOwnedAlarm(this, extras, missed = true)) return@let
+            if (postOwnedAlarm(this, extras, missed = true, allowChime = false)) return@let
             reminderContent(this, extras)?.let {
                 postReminderNotification(
                     this,
                     extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID).toInt(),
                     "Missed alarm: ${it.title}", it.text, it.subText, extras.getLong(ReminderScheduler.EXTRA_REMINDER_ID), extras.getString(ReminderScheduler.EXTRA_BILL_TOKEN), extras.getString(ReminderScheduler.EXTRA_SNOOZE_TOKEN),
+                    allowChime = false, // it rang unanswered: no chime on top
                 )
             }
         }

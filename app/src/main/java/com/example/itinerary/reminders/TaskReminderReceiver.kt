@@ -54,9 +54,9 @@ class TaskReminderReceiver : BroadcastReceiver() {
 }
 
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
-internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false) {
+internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false, allowChime: Boolean = true) {
     if (!notificationsEnabled(context)) return
-    val chime = ReminderChime.use(context, !quiet && !silent && !couldNotRing) // see postReminderNotification
+    val chime = ReminderChime.use(context, allowChime && !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0,
         openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)

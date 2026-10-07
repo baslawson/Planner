@@ -192,11 +192,22 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val noteViews = context.getSharedPreferences("note_views", Context.MODE_PRIVATE)
     fun noteLeftInPreview(id: String): Boolean? = if (noteViews.contains(id)) noteViews.getBoolean(id, false) else null
     fun setNoteLeftInPreview(id: String, preview: Boolean) { noteViews.edit { putBoolean(id, preview) } }
-    /** NW-7: forgets the view of every note not in [ids]. */
+    /** NW-7: forgets the view of every note not in [ids] (and that a gone note had its auto title turned off). */
     fun pruneNoteViews(ids: Set<String>) {
         val gone = noteViews.all.keys.filter { it !in ids }
         if (gone.isNotEmpty()) noteViews.edit { gone.forEach(::remove) }
+        if (_noAutoTitle.value.any { it !in ids }) saveNoAutoTitle(_noAutoTitle.value.filter { it in ids }.toSet())
     }
+    // Notes whose title was deleted: they keep no title (no auto title from the first line, no heading on the card).
+    // By note id; it stays on this phone and isn't synced, like the views above.
+    private val noAutoTitlePrefs = context.getSharedPreferences("note_no_auto_title", Context.MODE_PRIVATE)
+    private val _noAutoTitle = MutableStateFlow(runCatching { noAutoTitlePrefs.getStringSet("ids", null).orEmpty().toSet() }.getOrDefault(emptySet()))
+    val noAutoTitle: StateFlow<Set<String>> = _noAutoTitle.asStateFlow()
+    fun setNoAutoTitle(id: String, off: Boolean) {
+        val now = _noAutoTitle.value
+        if (off != (id in now)) saveNoAutoTitle(if (off) now + id else now - id)
+    }
+    private fun saveNoAutoTitle(ids: Set<String>) { noAutoTitlePrefs.edit { putStringSet("ids", ids) }; _noAutoTitle.value = ids }
 
     // Device-local: how the Notes page sorts and lays out its cards (grid or list); not in backups.
     private val _noteSort = MutableStateFlow(runCatching { NoteSort.valueOf(prefs.getString("note_sort", null) ?: "") }.getOrDefault(NoteSort.MY_ORDER))

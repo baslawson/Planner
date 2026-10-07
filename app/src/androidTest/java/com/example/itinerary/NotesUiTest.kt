@@ -51,6 +51,23 @@ class NotesUiTest {
         }
     }
     private var toolbarAnchorWindowId: Int? = null
+    // Notes save by themselves about a second after a change: Save (✓) only when that hasn't happened yet.
+    private fun saveNow() {
+        await { find("Save") != null || find("Saved") != null }
+        // The button found, not looked for again: the auto save may finish meanwhile (it then says Saved).
+        var n = find("Save"); while (n != null && !n.isClickable) n = n.parent
+        n?.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(300)
+    }
+    // Saves wait while [block] runs (the repository's lock held), so typing stays a draft, as when Android closes
+    // Planner (or a window goes) before the auto save.
+    private fun <T> withSavesHeld(block: () -> T): T {
+        val gate = app.repository.javaClass.getDeclaredField("changes").apply { isAccessible = true }.get(app.repository) as kotlinx.coroutines.sync.Mutex
+        runBlocking { gate.lock() }
+        try { return block() } finally { gate.unlock() }
+    }
+    // The note's details (notebook, tags, reminder, importance, colour, attachments) are in a panel from a button.
+    private fun openDetails() { click("Note details"); await { find("Close note details") != null } }
+    private fun closeDetails() { click("Close note details"); await { find("Note details") != null } }
     private fun click(text: String) {
         reveal(text)
         if (text == "Sort" || text == "Choose what to show") toolbarAnchorWindowId = ins.uiAutomation.freshRoot?.windowId
@@ -123,7 +140,7 @@ class NotesUiTest {
         return box
     }
 
-    // The [index]th text field on screen (editor: 0 Title, 1 Note in Edit, then Notebook).
+    // The [index]th text field on screen (editor: 0 Title, 1 Note in Edit; in the details panel, 0 Notebook).
     private fun type(index: Int, value: String) {
         await { nodes().filter { it.isVisibleToUser && it.isEditable }.size > index }
         val field = nodes().filter { it.isVisibleToUser && it.isEditable }[index]
@@ -139,7 +156,7 @@ class NotesUiTest {
         await { find("AGENDA") != null }
         click("More options"); click("Notes")
         // The page, or a recovered draft's editor opened straight over it.
-        await { find("Search notes") != null || find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
+        await { find("Search notes") != null || find("Recovered changes that weren't saved last time.") != null }
     }
 
     @Test fun searchOpensFromToolbarAndClosingRestoresNotes() {
@@ -288,10 +305,12 @@ class NotesUiTest {
         // The cursor is after "milk": the checklist button makes that line a box.
         click("Checklist")
         type(1, "- [ ] milk\n- [ ] **bread**")
-        type(2, "Home")
+        openDetails()
+        type(0, "Home") // the panel's first box: the note behind it is left out while it's open
         click("Teal")
         screenshot("editor-edit")
-        click("Save")
+        closeDetails()
+        saveNow()
         await { find("Saved") != null && notes().singleOrNull()?.title == "QA groceries" }
         val note = notes().single()
         assertEquals("Home", note.notebook); assertEquals(Notes.colors[1], note.color)
@@ -301,8 +320,7 @@ class NotesUiTest {
         click("Preview"); await { find("bread") != null }
         screenshot("editor-preview")
         click("milk")
-        await { find("Save") != null }
-        click("Save"); await { notes().single().content == "- [x] milk\n- [ ] **bread**" }
+        saveNow(); await { notes().single().content == "- [x] milk\n- [ ] **bread**" }
         click("Close")
 
         // The card: title, checklist progress, notebook; the notebook gets its own chip.
@@ -319,13 +337,16 @@ class NotesUiTest {
         await { !notes().single().archived && find("No archived notes.") != null }
         show("All notes"); await { find("QA groceries") != null }
 
-        // Close with a change asks; Discard leaves the note as it was.
+        // Auto save: a change is saved without Save, and Close doesn't ask.
         click("QA groceries"); await { find("Edit note") != null }
         type(0, "QA changed title")
-        click("Close"); await { find("Save changes?") != null }
-        click("Discard")
-        await { find("QA groceries") != null }
-        assertEquals("QA groceries", notes().single().title)
+        await { notes().single().title == "QA changed title" && find("Saved") != null }
+        click("Close"); await { find("QA changed title") != null }
+        assertNull(find("Save changes?"))
+        // Back as it was (Close right after typing saves too, without waiting for the auto save).
+        click("QA changed title"); await { find("Edit note") != null }
+        type(0, "QA groceries"); click("Close")
+        await { find("QA groceries") != null && notes().single().title == "QA groceries" }
 
         // Delete from the card, with Undo.
         click("Actions for QA groceries"); click("Delete note")
@@ -347,15 +368,16 @@ class NotesUiTest {
         // A tag typed in the editor; the tag box is below the note box, so scroll to it and find it by its own text.
         click("New note"); await { find("New note") != null && find("Title") != null }
         type(0, "QA errands")
-        reveal("Add a tag")
+        openDetails(); reveal("Add a tag")
         val tagBox = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Add a tag" } }
         assertTrue(tagBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "#errands") }))
         Thread.sleep(300)
         click("Add tag")
         await { find("#errands") != null && find("Remove tag errands") != null }
-        click("Save"); await { notes().any { it.title == "QA errands" && it.tags == listOf("errands") } }
         screenshot("editor-tags")
+        closeDetails()
+        saveNow(); await { notes().any { it.title == "QA errands" && it.tags == listOf("errands") } }
         click("Close")
         // The Show list filters the page to it.
         await { find("#errands") != null }
@@ -364,10 +386,12 @@ class NotesUiTest {
         screenshot("tag-filter")
         show("All notes")
         // The attachment is listed in the note and can be taken off.
-        click("QA with file"); reveal("Receipt.txt")
+        click("QA with file"); await { find("Edit note") != null }
+        openDetails(); reveal("Receipt.txt")
         screenshot("editor-attachment")
         click("Remove Receipt.txt"); await { find("Receipt.txt") == null }
-        click("Save"); await { notes().single { it.title == "QA with file" }.attachments.isEmpty() }
+        closeDetails()
+        saveNow(); await { notes().single { it.title == "QA with file" }.attachments.isEmpty() }
         click("Close"); await { find("QA with file") != null && find("1 attachment") == null }
         // Nothing uses the file now, so it has gone.
         await { !store.fileFor("qa-note-receipt.txt").exists() }
@@ -377,13 +401,14 @@ class NotesUiTest {
         openNotes()
         click("New note"); await { find("Title") != null }
         type(0, "QA remind me")
+        openDetails()
         click("Add reminder") // the ways to add one are a dropdown list
         click("Tomorrow 09:00")
-        // The row's ✕ can start under the Preview button, so scroll it clear, as a person would.
         await { nodes().any { it.contentDescription?.toString()?.startsWith("Remove reminder: ") == true } ||
             run { page()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); Thread.sleep(250); false } }
         screenshot("editor-reminder")
-        click("Save")
+        closeDetails()
+        saveNow()
         val tomorrowNine = java.time.LocalDate.now().plusDays(1).atTime(9, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         await { notes().singleOrNull()?.reminderAt == tomorrowNine }
         click("Close")
@@ -480,13 +505,13 @@ class NotesUiTest {
         click("Edit"); type(1, "mine")
         // Elsewhere, something else changes: Save keeps both.
         runBlocking { app.repository.updateNote(note.id) { it.copy(notebook = "Synced") } }
-        click("Save")
+        saveNow()
         await { find("Merged with a change made elsewhere.") != null }
         await { notes().single().let { it.content == "mine" && it.notebook == "Synced" } }
         // Elsewhere, the same text changes: Save asks.
         type(1, "mine again")
         runBlocking { app.repository.updateNote(note.id) { it.copy(content = "theirs") } }
-        click("Save")
+        saveNow()
         await { find("Changed elsewhere") != null }
         screenshot("changed-elsewhere")
         click("Keep my version")
@@ -503,7 +528,7 @@ class NotesUiTest {
         runBlocking { app.repository.deleteNote(note.id) }
         await { find("This note was deleted elsewhere. Save keeps your version as a new note.") != null }
         screenshot("deleted-elsewhere")
-        click("Save")
+        saveNow()
         await { notes().singleOrNull()?.content == "keep me, edited" }
     }
 
@@ -512,9 +537,9 @@ class NotesUiTest {
         com.example.itinerary.data.NoteDraftStore(context).write(com.example.itinerary.data.NoteDraftStore.Draft(draftNote, creating = true, base = null, pendingPhoto = null))
         try {
             openNotes()
-            await { find("New note") != null && find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
+            await { find("New note") != null && find("Recovered changes that weren't saved last time.") != null }
             screenshot("draft-recovered")
-            click("Save")
+            saveNow()
             await { notes().singleOrNull()?.content == "typed before Android closed Planner" }
             await { com.example.itinerary.data.NoteDraftStore(context).read("qa-draft-note") == null }
         } finally { com.example.itinerary.data.NoteDraftStore(context).clearAll() }
@@ -526,31 +551,31 @@ class NotesUiTest {
     @Test fun aSecondWindowLeavesTheFirstWindowsNoteAlone() {
         openNotes()
         click("New note"); await { find("New note") != null && find("Title") != null }
-        type(0, "QA first window"); type(1, "typed in the first window")
-        await { NoteDraftStore(context).readAll().singleOrNull()?.note?.content == "typed in the first window" }
-        val firstId = NoteDraftStore(context).readAll().single().note.id
-        val second = ins.startActivitySync(Intent(context, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
-        try {
-            await { find("AGENDA") != null }
-            click("More options"); click("Notes")
-            await { find("Search notes") != null && find("New note") != null }
-            Thread.sleep(1000) // a recovered draft would open by now
-            assertNull(find("Recovered unsaved changes. Save them, or Close and Discard."))
-            assertNull(find("QA first window"))
-            screenshot("second-window-notes")
-            click("New note"); await { find("Title") != null }
-            type(0, "QA second window"); type(1, "second")
-            await { NoteDraftStore(context).readAll().size == 2 }
-            click("Close"); click("Discard")
-            await { find("Search notes") != null && NoteDraftStore(context).readAll().size == 1 }
-            assertEquals("typed in the first window", NoteDraftStore(context).read(firstId)?.note?.content)
-            assertTrue("the first window's editor is still open", NoteDraftStore.isOpen(firstId))
-        } finally { ins.runOnMainSync { second.finish() } }
-        // Its draft goes the usual way, so no later test finds it (NT-2: a window that has gone leaves its drafts to the next).
+        // Saves held: the first window's typing stays a draft (not yet auto saved) while the second window opens.
+        val firstId = withSavesHeld {
+            type(0, "QA first window"); type(1, "typed in the first window")
+            await { NoteDraftStore(context).readAll().singleOrNull()?.note?.content == "typed in the first window" }
+            val firstId = NoteDraftStore(context).readAll().single().note.id
+            val second = ins.startActivitySync(Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
+            try {
+                await { find("AGENDA") != null }
+                click("More options"); click("Notes")
+                await { find("Search notes") != null && find("New note") != null }
+                Thread.sleep(1000) // a recovered draft would open by now
+                assertNull(find("Recovered changes that weren't saved last time."))
+                assertNull(find("QA first window"))
+                screenshot("second-window-notes")
+                assertEquals("typed in the first window", NoteDraftStore(context).read(firstId)?.note?.content)
+                assertTrue("the first window's editor is still open", NoteDraftStore.isOpen(firstId))
+            } finally { ins.runOnMainSync { second.finish() } }
+            firstId
+        }
+        // Saves go on again: the first window's note saves by itself, and its draft goes.
         await { find("QA first window") != null }
-        click("Close"); click("Discard")
-        await { NoteDraftStore(context).readAll().isEmpty() }
+        await { notes().singleOrNull()?.title == "QA first window" && NoteDraftStore(context).read(firstId) == null }
+        click("Close")
+        await { find("Search notes") != null && NoteDraftStore(context).readAll().isEmpty() }
     }
 
     // Bug hunt #8 NT-1 / NT-2: a second window (a share in the mail app's task) edits a saved note and goes (its task swiped
@@ -564,26 +589,29 @@ class NotesUiTest {
             await { find("QA shared note") != null }
             val second = ins.startActivitySync(Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
-            try {
-                await { find("AGENDA") != null }
-                click("More options"); click("Notes")
-                click("QA shared note"); await { find("Edit note") != null }
-                click("Edit"); type(1, "typed in the second window")
-                await { NoteDraftStore(context).read(id)?.note?.content == "typed in the second window" }
-            } finally { ins.runOnMainSync { second.finish() } }
-            // Not "the note is free": this window may already have it open again with its draft.
-            await { second.isDestroyed }
+            // Saves held: the window goes before its typing is auto saved, leaving a draft.
+            withSavesHeld {
+                try {
+                    await { find("AGENDA") != null }
+                    click("More options"); click("Notes")
+                    click("QA shared note"); await { find("Edit note") != null }
+                    click("Edit"); type(1, "typed in the second window")
+                    await { NoteDraftStore(context).read(id)?.note?.content == "typed in the second window" }
+                } finally { ins.runOnMainSync { second.finish() } }
+                // Not "the note is free": this window may already have it open again with its draft.
+                await { second.isDestroyed }
+            }
             // NT-2: back in the first window the draft reopens by itself, with no tap (CC-2: the card's path is the next test).
             // The notice sits further down the editor, maybe below the screen's edge: looked for in the whole editor.
-            await { nodes().any { it.text?.toString() == "Recovered unsaved changes. Save them, or Close and Discard." } &&
+            await { nodes().any { it.text?.toString() == "Recovered changes that weren't saved last time." } &&
                 noteText() == "typed in the second window" }
             screenshot("draft-of-a-window-that-went")
             assertNull(find("A note in another Planner window has unsaved changes"))
             assertNull(find("A note has unsaved changes"))
-            click("Close"); await { find("Save changes?") != null }
-            click("Discard")
+            // Recovered, it saves by itself.
+            await { notes().single().content == "typed in the second window" }
+            click("Close")
             await { find("Search notes") != null && NoteDraftStore(context).read(id) == null }
-            assertEquals("as stored", notes().single().content)
         } finally { NoteDraftStore(context).clearAll() }
     }
 
@@ -599,15 +627,15 @@ class NotesUiTest {
                 base = note, pendingPhoto = null, owner = other))
             openNotes()
             await { find("A note in another Planner window has unsaved changes") != null }
-            assertNull(find("Recovered unsaved changes. Save them, or Close and Discard."))
+            assertNull(find("Recovered changes that weren't saved last time."))
             click("QA other window's note")
-            await { find("Recovered unsaved changes. Save them, or Close and Discard.") != null }
+            await { find("Recovered changes that weren't saved last time.") != null }
             if (noteText() == null) click("Edit")
             awaitNote("typed in the other window")
-            click("Close"); await { find("Save changes?") != null }
-            click("Discard")
+            // Opened, the draft saves by itself.
+            await { notes().single().content == "typed in the other window" }
+            click("Close")
             await { find("Search notes") != null && NoteDraftStore(context).read(note.id) == null }
-            assertEquals("as stored", notes().single().content)
         } finally { NoteDraftStore.windowClosed(other, gone = true); NoteDraftStore(context).clearAll() }
     }
 
@@ -656,7 +684,7 @@ class NotesUiTest {
         shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] test\n- [ ] eggs\n- [ ] ")
         shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] test\n- [ ] eggs\n") // the empty box ends the list
         shell("input text done")
-        click("Save")
+        saveNow()
         await { notes().singleOrNull()?.content == "- [ ] test\n- [ ] eggs\ndone" }
     }
 
@@ -678,7 +706,7 @@ class NotesUiTest {
     }
 
     // Typing in the note box: B, I, ☑… sit right on top of the keyboard (below Save), and still act on the selection.
-    // In the title box, or with the keyboard down, they go back above the note box.
+    // In the title box, or with the keyboard down, they stay along the bottom, under the note box, which fills the screen.
     @Test fun formattingButtonsSitOnTopOfTheKeyboard() {
         openNotes()
         click("New note"); await { find("New note") != null && find("Title") != null }
@@ -700,13 +728,101 @@ class NotesUiTest {
         Thread.sleep(300)
         click("Bold"); awaitNote("**hello** world")
         await(5000) { imeTop() != null && find("Bold") != null && bounds("Bold").bottom <= imeTop()!! + 2 }
-        // The title box: the buttons go back to their place under the note box (bug notes 7, Quillpad's layout).
+        // The title box: the buttons stay under the note box, which reaches down to them.
         realTap(nodes().filter { it.isVisibleToUser && it.isEditable }[0])
         await(8000) { find("Bold") != null && nodes().filter { it.isVisibleToUser && it.isEditable }.size > 1 &&
             bounds("Bold").top >= android.graphics.Rect().also(nodes().filter { it.isVisibleToUser && it.isEditable }[1]::getBoundsInScreen).bottom }
         screenshot("tools-in-place")
-        click("Save")
+        saveNow()
         await { notes().singleOrNull()?.content == "**hello** world" }
+    }
+
+    // The note uses the whole screen: an empty note's box reaches down near the Markdown buttons along the bottom, and
+    // the details panel has the moved lines (when it was made, the Markdown hint) and the app's scroll bar.
+    @Test fun theNoteBoxFillsTheScreen() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null && find("Bold") != null }
+        if (imeTop() != null) { ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); Thread.sleep(800) }
+        await { find("New note") != null }
+        val box = android.graphics.Rect().also(nodes().filter { it.isVisibleToUser && it.isEditable }[1]::getBoundsInScreen)
+        val bold = bounds("Bold")
+        val density = context.resources.displayMetrics.density
+        screenshot("full-height")
+        assertTrue("note box ${box.height()} px should fill most of the screen", box.height() > context.resources.displayMetrics.heightPixels / 2)
+        assertTrue("note box ends ${bold.top - box.bottom} px above the buttons", box.bottom <= bold.top && bold.top - box.bottom <= 140 * density)
+        assertNull("the hint is in the details panel", nodes().firstOrNull { it.text?.toString()?.startsWith("Markdown: ") == true })
+        openDetails()
+        await { nodes().any { it.text?.toString()?.startsWith("Markdown: ") == true } }
+        screenshot("details-panel")
+        closeDetails()
+        click("Close")
+    }
+
+    // Auto title: Title left empty shows and saves the note's first line, and follows it; a title typed in stays. The card
+    // shows the first line once (as its name), not again under it.
+    @Test fun anEmptyTitleIsTheFirstLine() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(1, "Buy milk\nPick up parcel")
+        await { nodes().any { it.isEditable && it.text?.toString() == "Buy milk" } }
+        await { notes().singleOrNull()?.title == "Buy milk" }
+        type(1, "Buy bread\nPick up parcel")
+        await { nodes().any { it.isEditable && it.text?.toString() == "Buy bread" } && notes().single().title == "Buy bread" }
+        // A title of its own: the first line changing no longer changes it.
+        type(0, "Errands")
+        type(1, "Buy eggs\nPick up parcel")
+        await { notes().single().let { it.title == "Errands" && it.content == "Buy eggs\nPick up parcel" } }
+        // The title deleted: it stays empty (no auto title for this note, also when it's opened again).
+        type(0, "")
+        await { notes().single().title == "" }
+        type(1, "Buy rice\nPick up parcel")
+        await { notes().single().content == "Buy rice\nPick up parcel" }
+        assertEquals("", notes().single().title)
+        click("Close"); await { find("Search notes") != null }
+        // Its card has no heading: the text from its first line.
+        await { find("Buy rice\nPick up parcel") != null }
+        screenshot("no-title-card")
+        click("Buy rice\nPick up parcel"); await { find("Edit note") != null }
+        assertNull("the title stays empty when reopened", nodes().firstOrNull { it.isEditable && it.text?.toString() == "Buy rice" })
+        click("Close"); await { find("Search notes") != null }
+        // A note that keeps its auto title: the card shows the first line once, as its name.
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        type(1, "Buy eggs\nPost a letter")
+        await { notes().any { it.title == "Buy eggs" } }
+        click("Close"); await { find("Search notes") != null && find("Buy eggs") != null && find("Post a letter") != null }
+        assertEquals("the first line is shown once", 1, nodes().count { it.isVisibleToUser && it.text?.toString()?.lines()?.contains("Buy eggs") == true })
+        screenshot("auto-title-card")
+    }
+
+    // Hunt 20 E3: ⋮ Discard on a new note throws it away, even when its first auto save is under way.
+    @Test fun discardThrowsAwayANewNote() {
+        openNotes()
+        click("New note"); await { find("New note") != null && find("Title") != null }
+        withSavesHeld {
+            type(1, "QA discard me")
+            Thread.sleep(1500) // the auto save has started (and waits)
+            click("Note options"); click("Discard")
+        }
+        await { find("Search notes") != null }
+        Thread.sleep(1000)
+        assertTrue(notes().none { it.content == "QA discard me" })
+        assertNull(find("QA discard me"))
+    }
+
+    // Hunt 20 E1: a draft that still says "new note" for a note already saved (Android closed Planner just after its
+    // first auto save) goes on as that note: it saves, with no error and no second note.
+    @Test fun aRecoveredDraftOfASavedNoteSavesAsThatNote() {
+        val saved = runBlocking { app.repository.saveNote(PlannerNote(title = "QA saved once", content = "A"), create = true) }
+        NoteDraftStore(context).write(NoteDraftStore.Draft(saved.copy(content = "AB"), creating = true, base = null, pendingPhoto = null))
+        try {
+            openNotes()
+            await { find("Recovered changes that weren't saved last time.") != null }
+            await { notes().singleOrNull()?.content == "AB" }
+            Thread.sleep(1500)
+            assertNull(find("Couldn't save this note. Please try again."))
+            assertEquals(1, notes().size)
+            click("Close"); await { find("Search notes") != null && NoteDraftStore(context).readAll().isEmpty() }
+        } finally { NoteDraftStore(context).clearAll() }
     }
 
     // "Continue lists on Enter" off: Enter is a plain new line again; the choice is remembered.
@@ -718,15 +834,15 @@ class NotesUiTest {
             type(0, "QA plain")
             type(1, "- [ ] a")
             assertTrue(app.settings.continueLists.value)
-            click("Continue lists on Enter"); await { !app.settings.continueLists.value }
-            screenshot("switch-off")
+            openDetails(); click("Continue lists on Enter"); await { !app.settings.continueLists.value }
+            screenshot("switch-off"); closeDetails()
             val field = nodes().filter { it.isVisibleToUser && it.isEditable }[1]
             field.performAction(AccessibilityNodeInfo.ACTION_CLICK); Thread.sleep(400)
             field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
                 putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 7); putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, 7) })
             Thread.sleep(300)
             shell("input keyevent KEYCODE_ENTER"); awaitNote("- [ ] a\n")
-            click("Continue lists on Enter"); await { app.settings.continueLists.value }
+            openDetails(); click("Continue lists on Enter"); await { app.settings.continueLists.value }
         } finally { app.settings.setContinueLists(true) }
     }
 
@@ -752,6 +868,7 @@ class NotesUiTest {
         click("New note"); await { find("New note") != null && find("Title") != null }
         type(0, "QA three")
         // Typing part of a notebook offers it; tapping fills the box.
+        openDetails()
         typeInto("Notebook (optional)", "wo")
         await { listShows("Work") }; Thread.sleep(800); screenshot("notebook-suggestions")
         pick("Work"); await { nodes().any { it.isEditable && it.text?.toString() == "Work" } }
@@ -765,7 +882,8 @@ class NotesUiTest {
         typeInto("Add a tag", "Ideas"); click("Add tag"); await { find("Remove tag ideas") != null }
         // A notebook typed in other capitals saves into the existing one.
         typeInto("Notebook (optional)", "home")
-        click("Save")
+        closeDetails()
+        saveNow()
         await { notes().any { it.title == "QA three" && it.notebook == "Home" && it.tags == listOf("errands", "ideas") } }
         assertEquals(listOf("Home", "Work"), Notes.notebooks(notes()))
     }
@@ -871,14 +989,17 @@ class NotesUiTest {
             await { app.settings.noteSort.value == NoteSort.TITLE && top("QA a") < top("QA b") && top("QA b") < top("QA c") }
             // Importance and a custom colour, from the editor.
             click("QA c"); await { find("Edit note") != null }
-            reveal("High"); click("High")
+            openDetails(); reveal("High"); click("High")
             reveal("Custom colour"); click("Custom colour"); await { find("Use this colour") != null }
             val hex = nodes().first { n -> n.isEditable && (0 until n.childCount).any { n.getChild(it)?.text?.toString() == "Hex colour" } }
             hex.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "123456") })
             Thread.sleep(400)
             click("Use this colour"); await { find("Custom colour (chosen)") != null }
             screenshot("editor-importance-colour")
-            click("Save"); await { notes().single { it.title == "QA c" }.let { it.priority == TaskPriority.HIGH && it.color == 0xFF123456.toInt() } }
+            closeDetails()
+            assertNotNull("the button shows details are set", nodes().firstOrNull { it.contentDescription?.toString() == "Note details" && it.stateDescription?.toString() == "Some set" }
+                ?: nodes().firstOrNull { n -> n.contentDescription?.toString() == "Note details" && generateSequence(n) { it.parent }.any { it.stateDescription?.toString() == "Some set" } })
+            saveNow(); await { notes().single { it.title == "QA c" }.let { it.priority == TaskPriority.HIGH && it.color == 0xFF123456.toInt() } }
             click("Close")
             await { find("High importance") != null }
             // Sort by importance: the High note first.
@@ -913,23 +1034,26 @@ class NotesUiTest {
         openNotes()
         click("New note"); await { find("New note") != null && find("Title") != null }
         type(0, "QA restored"); type(1, "A")
-        click("Save"); await { find("Saved") != null && notes().singleOrNull()?.content == "A" }
-        type(1, "AB"); Thread.sleep(800) // the draft is written 400 ms after a change
-        // Rotation: the body comes back from memory.
-        recreate()
-        await { find("Edit note") != null && noteText() == "AB" }
-        // Android closed Planner: the draft has the body.
-        recreateAsAfterProcessDeath()
-        await { find("Edit note") != null && find("Recovered unsaved changes. Save them, or Close and Discard.") != null && noteText() == "AB" }
-        screenshot("restored-after-process-death")
-        click("Save"); await { notes().singleOrNull()?.content == "AB" && find("Saved") != null }
+        saveNow(); await { find("Saved") != null && notes().singleOrNull()?.content == "A" }
+        // Saves held, so "AB" is still only a draft when Planner is rebuilt (as if Android closed it within the second).
+        withSavesHeld {
+            type(1, "AB"); Thread.sleep(800) // the draft is written 400 ms after a change
+            // Rotation: the body comes back from memory.
+            recreate()
+            await { find("Edit note") != null && noteText() == "AB" }
+            // Android closed Planner: the draft has the body.
+            recreateAsAfterProcessDeath()
+            await { find("Edit note") != null && find("Recovered changes that weren't saved last time.") != null && noteText() == "AB" }
+            screenshot("restored-after-process-death")
+        }
+        saveNow(); await { notes().singleOrNull()?.content == "AB" && find("Saved") != null }
         assertNull(find("Couldn't save this note. Please try again."))
         // No draft either: the editor still opens the saved note (not a new one), and Save updates it.
         type(1, "ABC"); Thread.sleep(800)
         com.example.itinerary.data.NoteDraftStore(context).clearAll()
         recreateAsAfterProcessDeath()
         await { find("Edit note") != null } // a saved note (a new one says "New note")
-        type(1, "ABCD"); click("Save")
+        type(1, "ABCD"); saveNow()
         await { notes().singleOrNull()?.content == "ABCD" && find("Saved") != null }
         assertNull(find("Couldn't save this note. Please try again."))
         click("Close"); await { find("Search notes") != null }
@@ -1030,9 +1154,12 @@ class NotesUiTest {
         // The editor: what is typed goes to the copy; the original keeps what was saved.
         click("QA second"); await { find("Edit note") != null }
         click("Edit") // a note with words opens in Preview
-        type(1, "two, edited")
-        click("Note options"); click("Duplicate note"); await { find("New note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA second (copy)" } }
-        click("Save"); await { notes().count { it.title == "QA second (copy)" } == 2 }
+        // Saves held: Duplicate comes before the original's auto save (which would save the typing to it too).
+        withSavesHeld {
+            type(1, "two, edited")
+            click("Note options"); click("Duplicate note"); await { find("New note") != null && nodes().any { it.isEditable && it.text?.toString() == "QA second (copy)" } }
+        }
+        saveNow(); await { notes().count { it.title == "QA second (copy)" } == 2 }
         assertTrue(notes().any { it.title == "QA second (copy)" && it.content == "two, edited" })
         assertEquals("two", notes().single { it.title == "QA second" }.content)
         // ...and it went next to its original, not to the top (D6-7).

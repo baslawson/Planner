@@ -1,4 +1,6 @@
 package com.example.itinerary.ui
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
@@ -161,6 +163,8 @@ fun AgendaActionsButton(
 ) {
     val configuration = LocalConfiguration.current
     val menuWidth = (configuration.screenWidthDp - 32).coerceIn(0, 320).dp
+    // Hunt 20: from Android 15 the screen height includes the status and navigation bars; the menu stays clear of them.
+    val systemBars = androidx.compose.foundation.layout.WindowInsets.systemBars.asPaddingValues()
     val gap = with(LocalDensity.current) { 12.dp.roundToPx() }
     val position = remember(gap) {
         object : PopupPositionProvider {
@@ -184,7 +188,7 @@ fun AgendaActionsButton(
             properties = PopupProperties(focusable = true)) {
             // Bug hunt 19: scrolls when taller than the window (landscape, large text), starting at the bottom, by the button.
             Column(
-                Modifier.width(menuWidth).heightIn(max = (configuration.screenHeightDp - 24).coerceAtLeast(0).dp)
+                Modifier.width(menuWidth).heightIn(max = (configuration.screenHeightDp.dp - systemBars.calculateTopPadding() - systemBars.calculateBottomPadding() - 24.dp).coerceAtLeast(0.dp))
                     .verticalScroll(rememberScrollState(), reverseScrolling = true),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),

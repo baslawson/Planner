@@ -229,6 +229,10 @@ object Notes {
     fun tags(notes: List<PlannerNote>): List<String> =
         notes.flatMap { it.tags }.distinct().sortedBy { Search.normalize(it) }
 
+    /** The note's first line of text, without its Markdown, as a title: what the editor fills Title with while it's empty. */
+    fun firstLine(content: String): String =
+        Markdown.plain(content.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()).trim().take(MAX_TITLE)
+
     /** The name a note goes by: its title, else its first line of text, else "Untitled note". */
     fun label(note: PlannerNote): String = label(note) { Markdown.plain(note.content) }
     // [plain]: the note's Markdown.plain text, asked for only when it has no title (a card has it already, UI-4).

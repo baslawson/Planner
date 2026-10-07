@@ -56,7 +56,7 @@ class WishListSmallUiTest {
         await { find("Search notes") != null }
     }
     // In Edit the editor shows its Markdown hint; Preview doesn't.
-    private fun inEdit() = has("Markdown:")
+    private fun inEdit() = find("Preview") != null // in Edit the eye offers Preview
     private val note = PlannerNote(title = "QA view memory", content = "Some **words**")
 
     @Before fun fresh() { NoteDraftStore(context).clearAll(); app.settings.setNoteOpenView(NoteOpenView.LAST) }

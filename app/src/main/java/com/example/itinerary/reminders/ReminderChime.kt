@@ -43,34 +43,35 @@ object ReminderChime {
     }
 
     /**
-     * Whether a reminder [wanted] to sound gets the chime (and goes to [CHANNEL_ID]): the setting is on, the user hasn't
-     * made the Reminders category silent in Android's settings (P3: then it stays silent), and hasn't turned this one off.
+     * Whether a reminder [wanted] to sound gets the chime (and goes to [CHANNEL_ID]); otherwise it goes to the Reminders
+     * category as any notification does. Not when: the setting is off; the user made the Reminders category silent, or
+     * this one (P3, hunt 20 R4); Do Not Disturb is on (R1: it would hide the notification, yet alarms are let through by
+     * default, so a sound would play with nothing on screen); a call is on (R2); or the phone's notification sound is
+     * None (R3: there is nothing to play, not the alarm tone instead).
      */
     fun use(context: Context, wanted: Boolean): Boolean {
         if (!wanted || !enabled(context)) return false
         val manager = context.getSystemService(NotificationManager::class.java)
         val reminders = manager.getNotificationChannel(REMINDER_CHANNEL_ID)
-        return chimes(reminders?.importance, reminders == null || reminders.sound != null, manager.getNotificationChannel(CHANNEL_ID)?.importance)
+        val audioMode = runCatching { context.getSystemService(android.media.AudioManager::class.java).mode }.getOrDefault(android.media.AudioManager.MODE_NORMAL)
+        val soundNone = reminders?.sound == android.provider.Settings.System.DEFAULT_NOTIFICATION_URI && DirectBoot.isUnlocked(context) &&
+            runCatching { RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_NOTIFICATION) == null }.getOrDefault(false)
+        return chimes(reminders?.importance, reminders == null || reminders.sound != null, manager.getNotificationChannel(CHANNEL_ID)?.importance,
+            manager.currentInterruptionFilter, audioMode, soundNone)
     }
 
-    internal fun chimes(reminderImportance: Int?, reminderHasSound: Boolean, chimeImportance: Int?): Boolean =
+    internal fun chimes(reminderImportance: Int?, reminderHasSound: Boolean, chimeImportance: Int?,
+                        interruptionFilter: Int = NotificationManager.INTERRUPTION_FILTER_ALL,
+                        audioMode: Int = android.media.AudioManager.MODE_NORMAL, notificationSoundNone: Boolean = false): Boolean =
         (reminderImportance == null || reminderImportance >= NotificationManager.IMPORTANCE_DEFAULT) && reminderHasSound &&
-            chimeImportance != NotificationManager.IMPORTANCE_NONE
-
-    /** Whether Do Not Disturb lets an alarm through: all off, alarms only, or priority with alarms allowed. */
-    internal fun alarmsAllowed(filter: Int, priorityCategories: Int?): Boolean = when (filter) {
-        NotificationManager.INTERRUPTION_FILTER_NONE -> false
-        NotificationManager.INTERRUPTION_FILTER_PRIORITY ->
-            priorityCategories?.let { it and NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS != 0 } ?: true
-        else -> true
-    }
+            (chimeImportance == null || chimeImportance >= NotificationManager.IMPORTANCE_DEFAULT) &&
+            interruptionFilter in setOf(NotificationManager.INTERRUPTION_FILTER_ALL, NotificationManager.INTERRUPTION_FILTER_UNKNOWN) &&
+            audioMode == android.media.AudioManager.MODE_NORMAL && !notificationSoundNone
 
     /** Plays the chime (the channel vibrates, as the phone's mode allows). Returns at once; it stops by itself. */
     fun play(context: Context) {
         val app = context.applicationContext
         val notifications = app.getSystemService(NotificationManager::class.java)
-        val categories = if (Build.VERSION.SDK_INT >= 28) runCatching { notifications.notificationPolicy.priorityCategories }.getOrNull() else null
-        if (!alarmsAllowed(notifications.currentInterruptionFilter, categories)) return
         val wake = app.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Planner:reminderChime")
             .apply { setReferenceCounted(false); acquire(MAX_MS + 1_000) }
         // The sound chosen for the Reminders category (P3: a custom one too), else the phone's notification sound, else its
@@ -87,10 +88,14 @@ object ReminderChime {
             runCatching { MediaPlayer().apply { setAudioAttributes(attributes); setDataSource(app, uri); prepare() } }.getOrNull()
         }
         if (player == null) { wake.release(); return }
+        // R2: music and other sound dip under the chime, and come back after (audio focus, given back when it stops).
+        val audio = app.getSystemService(android.media.AudioManager::class.java)
+        val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attributes).build()
+        runCatching { audio.requestAudioFocus(focus) }
         val handler = Handler(Looper.getMainLooper())
         var finished = false
         val stop = Runnable {
-            if (!finished) { finished = true; runCatching { player.stop() }; player.release(); if (wake.isHeld) wake.release() }
+            if (!finished) { finished = true; runCatching { player.stop() }; player.release(); runCatching { audio.abandonAudioFocusRequest(focus) }; if (wake.isHeld) wake.release() }
         }
         player.setOnCompletionListener { handler.removeCallbacks(stop); stop.run() }
         player.setOnErrorListener { _, _, _ -> handler.removeCallbacks(stop); stop.run(); true }

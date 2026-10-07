@@ -150,7 +150,9 @@ fun ConversionHost(conversions: Conversions) {
                 val occurrence = if (!whole) event else TaskEventConversion.dueOccurrence(series, reminders, today, System.currentTimeMillis())
                 val firstComing = if (!whole) null else series.filter { !(it.endDate ?: it.date).isBefore(today) }.minByOrNull { it.date }
                 Prepared.ToTask(TaskEventConversion.toTask(event, reminders, attachments, whole, seriesCount = series.size, occurrence = occurrence, firstComing = firstComing,
-                    seriesStart = series.minOfOrNull { it.date },
+                    // The day of the month the series keeps to: its largest (the 31st shows as 28 Feb, 30 Apr…), so one deleted
+                    // first event doesn't lose it (hunt 20).
+                    seriesStart = series.maxByOrNull { it.date.dayOfMonth }?.date,
                     idSeed = taskSeed), series.mapTo(hashSetOf()) { it.id })
             }
             val eventDraft = runCatching { EditorDraftStore(app).read() }.getOrNull()

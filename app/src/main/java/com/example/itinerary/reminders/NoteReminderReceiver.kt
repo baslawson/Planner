@@ -71,9 +71,9 @@ class NoteReminderReceiver : BroadcastReceiver() {
  * is locked it leaves the words out of the notification itself too, and is shown again with them after the unlock
  * (NoteWords). [quiet]: shown again with the note's words, without sounding a second time.
  */
-internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false) {
+internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false, allowChime: Boolean = true) {
     if (!notificationsEnabled(context)) return
-    val chime = ReminderChime.use(context, !quiet && !silent && !couldNotRing) // see postReminderNotification
+    val chime = ReminderChime.use(context, allowChime && !quiet && !silent && !couldNotRing) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     // D6-3: posted while locked (or with the screen off), the note's words wait for the unlock (NoteWords).
@@ -84,7 +84,9 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
     val label = shown?.let(Notes::label) ?: "Note reminder"
     // The text after the name, as the note's card shows it.
     val lines = shown?.let { n -> Markdown.plain(n.content).lines().filter { it.isNotBlank() } }.orEmpty()
-    val body = (if (shown == null || shown.title.isBlank()) lines.drop(1) else lines).take(6).joinToString("\n")
+    // The first line isn't said twice: left out when it is the name (no title, or an auto title made from it).
+    val named = shown == null || shown.title.isBlank() || shown.title.trim() == lines.firstOrNull()?.trim()?.take(Notes.MAX_TITLE)
+    val body = (if (named) lines.drop(1) else lines).take(6).joinToString("\n")
     val notification = NotificationCompat.Builder(context, if (chime) ReminderChime.CHANNEL_ID else REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(label)
