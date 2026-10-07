@@ -226,6 +226,11 @@ fun SettingsScreen(
                             )
                         }
                     }
+                    val reminderChime by settings.reminderChime.collectAsStateWithLifecycle()
+                    SwitchRow("Play reminder sounds in silent and vibrate mode", reminderChime, settings::setReminderChime)
+                    Text(if (reminderChime) "Reminders play a short sound at alarm volume, even when the phone is on silent or vibrate. Do Not Disturb still silences them unless it allows alarms."
+                        else "Reminders use the notification sound, which silent and vibrate mode mute. \"Ring until I stop it\" always rings.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     StackedButton("Send test notification") {
                         if (!sendTestNotification(context)) {
                             Toast.makeText(context, "Notifications are off", Toast.LENGTH_SHORT).show()

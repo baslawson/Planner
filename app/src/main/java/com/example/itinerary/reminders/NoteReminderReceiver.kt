@@ -73,6 +73,7 @@ class NoteReminderReceiver : BroadcastReceiver() {
  */
 internal fun postNoteReminder(context: Context, id: String, trigger: Long, note: PlannerNote?, quiet: Boolean = false, couldNotRing: Boolean = false, missed: Boolean = false, silent: Boolean = false) {
     if (!notificationsEnabled(context)) return
+    val chime = !quiet && !silent && !couldNotRing && ReminderChime.enabled(context) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0, NoteReminderReceiver.openIntent(context, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     // D6-3: posted while locked (or with the screen off), the note's words wait for the unlock (NoteWords).
@@ -98,10 +99,10 @@ internal fun postNoteReminder(context: Context, id: String, trigger: Long, note:
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         .setPublicVersion(NotificationCompat.Builder(context, REMINDER_CHANNEL_ID).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Note reminder").setCategory(NotificationCompat.CATEGORY_REMINDER).build())
-        .setOnlyAlertOnce(quiet).setSilent(silent)
+        .setOnlyAlertOnce(quiet).setSilent(silent || chime)
         .addDataAction(context, "Done", NoteActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.noteAction(context, id, trigger)).build()
-    try { NotificationManagerCompat.from(context).notify(tag, 0, notification) }
+    try { NotificationManagerCompat.from(context).notify(tag, 0, notification); if (chime) ReminderChime.play(context) }
     catch (_: SecurityException) { /* Permission can be revoked after notificationsEnabled was checked. */ }
 }
 

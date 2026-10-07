@@ -56,6 +56,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
 /** A task reminder's notification. [quiet]: shown again (with its Done, after the unlock), without sounding again. */
 internal fun postTaskReminder(context: Context, id: String, title: String, trigger: Long, quiet: Boolean = false, couldNotRing: Boolean = false, silent: Boolean = false) {
     if (!notificationsEnabled(context)) return
+    val chime = !quiet && !silent && !couldNotRing && ReminderChime.enabled(context) // see postReminderNotification
     val open = PendingIntent.getActivity(context, 0,
         openPlannerIntent(context),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -66,11 +67,12 @@ internal fun postTaskReminder(context: Context, id: String, title: String, trigg
         .setCategory(NotificationCompat.CATEGORY_REMINDER)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setContentIntent(open).setAutoCancel(true)
-        .setOnlyAlertOnce(quiet).setSilent(silent)
+        .setOnlyAlertOnce(quiet).setSilent(silent || chime)
         .addDataAction(context, "Done", TaskActionReceiver.done(context, id, trigger))
         .addAction(0, "Snooze", SnoozeActivity.taskAction(context, id, trigger)).build()
     try {
         NotificationManagerCompat.from(context).notify("task:$id", 0, notification)
+        if (chime) ReminderChime.play(context)
     } catch (_: SecurityException) {
         // Permission can be revoked after notificationsEnabled was checked.
     }

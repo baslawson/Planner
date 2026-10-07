@@ -134,6 +134,9 @@ fun postReminderNotification(
     quiet: Boolean = false,
 ): Boolean {
     if (!notificationsEnabled(context)) return false
+    // Its sound is Planner's chime instead (ReminderChime), which silent and vibrate mode don't mute; not when shown again,
+    // or for a "Ring until I stop it" that couldn't ring (its insistent sound stays).
+    val chime = !quiet && !couldNotRing && ReminderChime.enabled(context)
     val open = PendingIntent.getActivity(
         context,
         notificationId,
@@ -150,6 +153,7 @@ fun postReminderNotification(
         .setAutoCancel(true)
         .setContentIntent(open)
         .setOnlyAlertOnce(quiet)
+        .setSilent(chime)
         .apply {
             if (reminderId != null && reminderId > 0) {
                 if (billToken != null) addDataAction(context, "Mark paid", BillPaymentReceiver.action(context, reminderId, billToken))
@@ -171,6 +175,7 @@ fun postReminderNotification(
         .apply { if (couldNotRing) flags = flags or android.app.Notification.FLAG_INSISTENT }
     return try {
         NotificationManagerCompat.from(context).notify(notificationId, notification)
+        if (chime) ReminderChime.play(context)
         true
     } catch (e: SecurityException) {
         false

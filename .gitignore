@@ -23,6 +23,7 @@
 # Local working history and obsolete deployment template
 /NOTES.md
 /CLAUDE.md
+/bugnotes.md
 /GEMINI.md
 /AGENTS.md
 /compose.yaml

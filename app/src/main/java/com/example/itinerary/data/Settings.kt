@@ -263,6 +263,15 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _sendBillsToBudget.value = on
     }
 
+    // Normal reminders sound through silent and vibrate mode (ReminderChime reads the same key, also from receivers).
+    private val _reminderChime = MutableStateFlow(prefs.getBoolean(com.example.itinerary.reminders.ReminderChime.PREF, true))
+    val reminderChime: StateFlow<Boolean> = _reminderChime.asStateFlow()
+
+    fun setReminderChime(on: Boolean) {
+        prefs.edit { putBoolean(com.example.itinerary.reminders.ReminderChime.PREF, on) }
+        _reminderChime.value = on
+    }
+
     private val _billsExpanded = MutableStateFlow(prefs.getBoolean("bills_expanded", true))
     val billsExpanded: StateFlow<Boolean> = _billsExpanded.asStateFlow()
 
