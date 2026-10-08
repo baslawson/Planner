@@ -147,7 +147,7 @@ class FourAdditionsUiTest {
                 com.example.itinerary.ui.BillSuggestionDialog(
                     Attachment(itemId=0,name="Unclear scan",fileName="qa-unclear.txt",mimeType="text/plain",
                         recognizedText="Power company\nAmount due: $100.00\nTotal: $200.00\nDue date: 03/04/2026",textStatus="PARTIAL"),
-                    "","","AUD",{}, {_,_,_,_->})
+                    "","","AUD","",{}, {_,_,_,_,_->})
             }
         } }
         try {
@@ -158,6 +158,30 @@ class FourAdditionsUiTest {
             reveal { nodes().any { it.text?.contains("Several different totals")==true } }
             reveal { nodes().any { it.text?.contains("Currency is uncertain")==true } }
             screenshot("scan-amount-currency-warning")
+        } finally { ins.runOnMainSync { activity.finish() } }
+    }
+    // A scanned bill with a BPAY box: AUD for its plain $, and its biller code and reference offered and applied.
+    @Test fun scanReviewOffersBpayDetailsForAnAustralianBill() {
+        val activity=ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
+        var applied:Pair<String,String>?=null;var appliedCurrency=""
+        ins.runOnMainSync { activity.setContent {
+            com.example.itinerary.ui.theme.ItineraryTheme {
+                com.example.itinerary.ui.BillSuggestionDialog(
+                    Attachment(itemId=0,name="Power bill",fileName="qa-bpay.txt",mimeType="text/plain",
+                        recognizedText="Acme Energy\nAmount due: $142.80\nDue date: 30 September 2026\nBPAY\nBiller Code: 23796\nRef: 1234 5678 9012"),
+                    "","","USD","",{}, { _,_,_,currency,bpay -> appliedCurrency=currency;applied=bpay })
+            }
+        } }
+        try {
+            reveal { nodes().any { it.text?.contains("BPAY found: an Australian bill")==true } }
+            reveal { find("Use BPAY biller code and reference")!=null }
+            reveal { nodes().any { it.text?.toString()=="23796" } }
+            reveal { nodes().any { it.text?.toString()=="123456789012" } }
+            screenshot("scan-bpay")
+            click("Apply selected")
+            await { applied!=null }
+            assertEquals("AUD",appliedCurrency)
+            assertEquals("23796" to "123456789012",applied)
         } finally { ins.runOnMainSync { activity.finish() } }
     }
 

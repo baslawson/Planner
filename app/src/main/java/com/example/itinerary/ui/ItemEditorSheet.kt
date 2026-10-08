@@ -509,7 +509,7 @@ private fun ItemEditorForm(
         overlappingEvents(allEvents, plannedDates, time, duration?.takeIf { it in 1..1440 }, excluded, before.coerceIn(0, 1440), after.coerceIn(0, 1440))
     }
 
-    fun currentItem(copy: Boolean = false): ItineraryItem = initial.copy(
+    fun currentItem(copy: Boolean = false): ItineraryItem = Bills.bpayForCurrency(initial.copy(
             id = if (copy) 0 else initial.id,
             linkedTaskId = if (copy) null else initial.linkedTaskId,
             paid = paid, skipped = !copy && initial.skipped,
@@ -526,7 +526,7 @@ private fun ItemEditorForm(
             checklist = checklist.map { it.copy(text = it.text.trim()) },
             location = location.trim(), notes = notes.trim(), category = category,
             colorIndex = colorIndex, customColor = customColor,
-        )
+        ))
     // Unsaved changes: anything Save would store that differs from what this form opened with (the event as last saved,
     // or a new one as offered). Save greys out without them (a new event can still be saved as it is), and Close only
     // asks "Save changes?" with them.
@@ -818,7 +818,7 @@ private fun ItemEditorForm(
                 }
                 if (paid) Text("Reminders stopped on Save", style = MaterialTheme.typography.bodySmall)
                 Text("Paid status applies only to this occurrence.", style = MaterialTheme.typography.bodySmall)
-                BillPaymentDetails(paymentLink, paymentReference, bpayBillerCode, bpayReference,
+                BillPaymentDetails(paymentLink, paymentReference, bpayBillerCode, bpayReference, Bills.hasBpay(billCurrency),
                     onLink = { paymentLink = it }, onReference = { paymentReference = it },
                     onBiller = { bpayBillerCode = it }, onBpayReference = { bpayReference = it })
                 PaymentsSection(Bills.parse(billAmountText), billCurrency, paid, payments) { changed ->
@@ -1181,8 +1181,8 @@ private fun ItemEditorForm(
         }
     }
     (billSuggestion ?: scannedBillSuggestion?.takeIf { billReviewRequested })?.let { attachment ->
-        BillSuggestionDialog(attachment, title, billAmountText, billCurrency,
-            onDismiss = { billSuggestion = null; billReviewFiles = emptyList(); billReviewRequested = false }, onApply = { suggestedTitle, suggestedDate, suggestedAmount, suggestedCurrency ->
+        BillSuggestionDialog(attachment, title, billAmountText, billCurrency, bpayBillerCode,
+            onDismiss = { billSuggestion = null; billReviewFiles = emptyList(); billReviewRequested = false }, onApply = { suggestedTitle, suggestedDate, suggestedAmount, suggestedCurrency, suggestedBpay ->
                 undo.together()
                 suggestedTitle?.let { title = it }
                 suggestedDate?.let { date = it }
@@ -1193,6 +1193,8 @@ private fun ItemEditorForm(
                     }
                     else error = "The scanned currency differs from the bill's payment history. Check the amount manually."
                 }
+                // Offered only for an AUD bill (the dialog checks), so Save keeps them (Bills.bpayForCurrency).
+                suggestedBpay?.let { (biller, reference) -> bpayBillerCode = biller; bpayReference = reference }
                 selectCategory("Bills")
                 billSuggestion = null
                 billReviewFiles = emptyList()

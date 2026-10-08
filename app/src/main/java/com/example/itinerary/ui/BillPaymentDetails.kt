@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.itinerary.data.Links
 
 @Composable
-fun BillPaymentDetails(link: String, reference: String, biller: String, bpayReference: String,
+fun BillPaymentDetails(link: String, reference: String, biller: String, bpayReference: String, bpay: Boolean,
                        onLink: (String) -> Unit, onReference: (String) -> Unit,
                        onBiller: (String) -> Unit, onBpayReference: (String) -> Unit) {
     val context = LocalContext.current
@@ -40,6 +40,9 @@ fun BillPaymentDetails(link: String, reference: String, biller: String, bpayRefe
         }) { Text("Open payment link") }
     }
     field("Reference", reference, 500, onReference)
-    field("BPAY biller code", biller, 100, onBiller)
-    field("BPAY reference", bpayReference, 500, onBpayReference)
+    // BPAY is Australian: AUD bills only (Bills.hasBpay).
+    if (bpay) {
+        field("BPAY biller code", biller, 100, onBiller)
+        field("BPAY reference", bpayReference, 500, onBpayReference)
+    }
 }

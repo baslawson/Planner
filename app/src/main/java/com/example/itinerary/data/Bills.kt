@@ -22,6 +22,11 @@ object Bills {
     }
 
     val currencies = listOf("AUD", "USD", "GBP", "EUR", "NZD", "CAD", "SGD", "IDR")
+    // BPAY is Australian: the editor offers its biller code and reference for AUD bills only, and a bill saved in
+    // another currency keeps none (the editor keeps what was typed until Save, so switching back brings it back).
+    fun hasBpay(currency: String) = currency == "AUD"
+    fun bpayForCurrency(item: ItineraryItem): ItineraryItem =
+        if (hasBpay(item.billCurrency)) item else item.copy(bpayBillerCode = "", bpayReference = "")
     const val MAX_MINOR = 99_999_999_999L
     fun parse(text: String): Long? = runCatching {
         require(Regex("[0-9]{1,9}([.,][0-9]{1,2})?").matches(text.trim()))

@@ -14,8 +14,8 @@ import com.example.itinerary.data.*
 import java.time.LocalDate
 
 @Composable
-fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAmount: String, currentCurrency: String,
-    onDismiss: () -> Unit, onApply: (String?, LocalDate?, Long?, String) -> Unit) {
+fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAmount: String, currentCurrency: String, currentBiller: String,
+    onDismiss: () -> Unit, onApply: (String?, LocalDate?, Long?, String, Pair<String, String>?) -> Unit) {
     val suggestion = remember(attachment) { BillSuggestions.parse(attachment.recognizedText) }
     var title by rememberSaveable(attachment.fileName) { mutableStateOf(suggestion.title.orEmpty()) }
     var date by rememberSaveable(attachment.fileName) { mutableStateOf(suggestion.date?.toString().orEmpty()) }
@@ -24,12 +24,18 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
     var useTitle by rememberSaveable(attachment.fileName) { mutableStateOf(currentTitle.isBlank() && suggestion.title != null) }
     var useDate by rememberSaveable(attachment.fileName) { mutableStateOf(false) }
     var useAmount by rememberSaveable(attachment.fileName) { mutableStateOf(currentAmount.isBlank() && suggestion.amount != null) }
+    // BPAY: offered when the scan has a BPAY box and the bill will be AUD (Bills.hasBpay); ticked when the bill has no biller code yet.
+    var biller by rememberSaveable(attachment.fileName) { mutableStateOf(suggestion.bpayBiller.orEmpty()) }
+    var bpayRef by rememberSaveable(attachment.fileName) { mutableStateOf(suggestion.bpayReference.orEmpty()) }
+    var useBpay by rememberSaveable(attachment.fileName) { mutableStateOf(suggestion.bpayBiller != null && currentBiller.isBlank()) }
+    val bpayOffered = Bills.hasBpay(if (useAmount) currency.uppercase() else currentCurrency) && suggestion.warnings["bpay"] != null
     val parsedDate = runCatching { LocalDate.parse(date.trim()) }.getOrNull()
-    val valid = (useTitle || useDate || useAmount) && (!useTitle || title.isNotBlank()) && (!useDate || parsedDate != null) &&
-        (!useAmount || Bills.parse(amount) != null && currency.uppercase() in Bills.currencies)
+    val valid = (useTitle || useDate || useAmount || useBpay && bpayOffered) && (!useTitle || title.isNotBlank()) && (!useDate || parsedDate != null) &&
+        (!useAmount || Bills.parse(amount) != null && currency.uppercase() in Bills.currencies) && (!useBpay || !bpayOffered || biller.isNotBlank())
     PlannerDialog("Review bill details", onDismissRequest = onDismiss,
         primary = DialogAction("Apply selected", enabled = valid) {
-            onApply(title.trim().takeIf { useTitle }, parsedDate.takeIf { useDate }, Bills.parse(amount).takeIf { useAmount }, currency)
+            onApply(title.trim().takeIf { useTitle }, parsedDate.takeIf { useDate }, Bills.parse(amount).takeIf { useAmount }, currency,
+                (biller.trim() to bpayRef.trim()).takeIf { useBpay && bpayOffered })
         },
         dismiss = DialogAction("Cancel", onClick = onDismiss)) {
             Text("From ${attachment.name}. Check against the document, then tick the fields to apply. Nothing is saved until you save the bill.")
@@ -55,7 +61,15 @@ fun BillSuggestionDialog(attachment: Attachment, currentTitle: String, currentAm
             if (useAmount && currency !in Bills.currencies) Text("Choose one of: ${Bills.currencies.joinToString()}.", color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall)
             ScanUncertainty(suggestion.warnings["currency"])
-            Text("Blank fields could not be identified reliably. A $ symbol alone keeps your current currency ($currentCurrency). Applying details selects Bills.", style = MaterialTheme.typography.bodySmall)
+            if (bpayOffered) {
+                SuggestionCheck("Use BPAY biller code and reference", useBpay) { useBpay = it }
+                OutlinedTextField(biller, { biller = it.filter(Char::isDigit).take(10) }, label = { Text("BPAY biller code") },
+                    isError = useBpay && biller.isBlank(), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(bpayRef, { bpayRef = it.filter(Char::isDigit).take(20) }, label = { Text("BPAY reference") }, modifier = Modifier.fillMaxWidth())
+                ScanUncertainty(suggestion.warnings["bpay"])
+            }
+            Text("Blank fields could not be identified reliably. A $ symbol alone keeps your current currency ($currentCurrency), " +
+                "unless the document has a BPAY box (then AUD). Applying details selects Bills.", style = MaterialTheme.typography.bodySmall)
     }
 }
 

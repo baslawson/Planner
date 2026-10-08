@@ -5,7 +5,11 @@ import java.time.format.ResolverStyle
 import java.util.Locale
 
 data class BillSuggestion(val title: String?, val date: LocalDate?, val amount: Long?, val currency: String?,
-    val warnings: Map<String, String> = emptyMap())
+    val warnings: Map<String, String> = emptyMap(), val bpayBiller: String? = null, val bpayReference: String? = null) {
+    // Written as before when there's no BPAY (ShareQuickCasesTest compares these lines with what earlier versions gave).
+    override fun toString() = "BillSuggestion(title=$title, date=$date, amount=$amount, currency=$currency, warnings=$warnings" +
+        (if (bpayBiller != null || bpayReference != null) ", bpayBiller=$bpayBiller, bpayReference=$bpayReference" else "") + ")"
+}
 
 /** Conservative extraction from labelled lines. Ambiguous numeric dates and amounts are left for the user. */
 object BillSuggestions {
@@ -22,18 +26,43 @@ object BillSuggestions {
             line.substring(it.range.last + 1).trim().ifEmpty { lines.getOrNull(i + 1).orEmpty() }
         }
     }
+    // BPAY (Australia's bill payment system): its box names a biller code and a customer reference number (CRN). A
+    // bill with one is an Australian bill, so a plain "$" on it is AUD.
+    private val bpayMark = Regex("(?i)\\bBPAY\\b|\\bbiller\\s*code\\b")
+    private val billerLabel = Regex("(?i)\\bbiller\\s*(?:code|no\\.?|number)?\\b\\s*[:#=-]?\\s*")
+    private val referenceLabel = Regex("(?i)\\b(?:customer\\s+reference(?:\\s+(?:no\\.?|number))?|CRN|ref(?:erence)?(?:\\s*(?:no\\.?|number))?)\\b\\.?\\s*[:#=-]?\\s*")
+    // After the label: "(CRN):" or ":" may come before the number; the number stops at the first other character.
+    private fun digits(value: String, sizes: IntRange): String? =
+        Regex("^[0-9][0-9 ]*[0-9]|^[0-9]").find(value.trim().replace(Regex("^\\([^)]{1,12}\\)\\s*[:#=-]?\\s*"), ""))
+            ?.value?.trim()?.replace(" ", "")?.takeIf { it.length in sizes }
+    /** The biller code (2–10 digits) and reference (2–20 digits, spaces dropped) from a BPAY box; null when unclear. */
+    private fun bpay(lines: List<String>): Pair<String?, String?> {
+        if (lines.none { bpayMark.containsMatchIn(it) }) return null to null
+        val billers = lines.indices.mapNotNull { i ->
+            billerLabel.find(lines[i])?.let { m -> digits(lines[i].substring(m.range.last + 1).ifBlank { lines.getOrNull(i + 1).orEmpty() }, 2..10)?.let { i to it } }
+        }
+        val biller = billers.map { it.second }.distinct().singleOrNull()
+        // The reference: only near the biller code (an invoice's own "Ref" elsewhere isn't the BPAY one).
+        val near = billers.map { it.first }.flatMap { (it - 3)..(it + 3) }.toSet()
+        val reference = lines.indices.filter { it in near }.mapNotNull { i ->
+            referenceLabel.find(lines[i])?.let { m -> digits(lines[i].substring(m.range.last + 1).ifBlank { lines.getOrNull(i + 1).orEmpty() }, 2..20) }
+        }.distinct().singleOrNull()
+        return biller to reference
+    }
     fun parse(text: String): BillSuggestion {
         val lines = lines(text)
         val amountValues = values(lines, amountLabel)
         val dateValues = values(lines, dueLabel)
+        val australian = lines.any { bpayMark.containsMatchIn(it) }
         val amounts = amountValues.mapNotNull { value -> money.matchEntire(value)?.let { match ->
             val g = match.groupValues
             val amount = Bills.parse(g[4].replace(",", "")) ?: return@let null
             val code = g[1].ifEmpty { g[5] }.ifEmpty { g[2].takeIf { it.isNotEmpty() }?.let(::dollarCode).orEmpty() }.uppercase(Locale.ROOT).ifEmpty {
-                when (g[3].ifEmpty { g[6] }) { "£" -> "GBP"; "€" -> "EUR"; else -> "" }
+                when (g[3].ifEmpty { g[6] }) { "£" -> "GBP"; "€" -> "EUR"; "$" -> if (australian) "AUD" else ""; else -> "" }
             }.ifEmpty { null }
             amount to code
         } }.distinct()
+        val (biller, reference) = bpay(lines)
         val dates = dateValues.mapNotNull(::parseDate).distinct()
         val title = lines.take(5).firstOrNull { line ->
             line.length in 3..80 && line.any(Char::isLetter) &&
@@ -50,8 +79,13 @@ object BillSuggestions {
                 else "The due date is unclear or ambiguous. Check the day and month.")
             else if (dateValues.any { parseDate(it) == null }) put("date", "Some date lines are ambiguous. Verify this due date.")
             if (amounts.singleOrNull()?.second == null) put("currency", "Currency is uncertain; confirm the currency code. A $ symbol alone does not identify it.")
+            else if (australian && amountValues.none { Regex("(?i)AUD|A\\$|AU\\$").containsMatchIn(it) } && amounts.singleOrNull()?.second == "AUD")
+                put("currency", "BPAY found: an Australian bill, so the $ is taken as AUD.")
+            if (australian && (biller == null || reference == null))
+                put("bpay", "BPAY found, but its biller code or reference couldn't be read clearly. Enter them from the document.")
+            else if (biller != null) put("bpay", "Read from the BPAY box; check both numbers against the document.")
         }
-        return BillSuggestion(title, dates.singleOrNull(), amounts.singleOrNull()?.first, amounts.singleOrNull()?.second, warnings)
+        return BillSuggestion(title, dates.singleOrNull(), amounts.singleOrNull()?.first, amounts.singleOrNull()?.second, warnings, biller, reference)
     }
     // An amount with its currency anywhere in a sentence ("your bill of EUR 84.20", "€84,20", "1,234.50 GBP", "84,20 €",
     // SQX-8; not "for 2 $40": a sign before a number is that number's). Tried only from the start of a run of digits, dots
