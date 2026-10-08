@@ -305,6 +305,12 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        // Hunt 25 E5: no longer waiting for MyBudget here (a recreated window claims it again from its saved state).
+        budgetLink.release(gone = isFinishing && !isChangingConfigurations)
+        super.onDestroy()
+    }
+
     override fun onStart() {
         super.onStart()
         if (appLock.checkOnStart())

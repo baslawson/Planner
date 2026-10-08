@@ -1077,6 +1077,15 @@ object QuickEntry {
         var date = relativeAt?.toLocalDate() ?: if (impliedToday) today.minusDays(if (impliedYesterday) 1 else 0) else
             (startFrom ?: today).let { first -> generateSequence(first) { it.plusDays(1) }.take(400).firstOrNull(::fitsAnchor) ?: first }
         rangeStart?.let { date = it }
+        // Hunt 25 E3: a range a weekday repeat runs over ("Swim every Monday 1-31 Oct", 1 Oct a Thursday) starts on its first
+        // matching day, when two or more fall in it (Hunt 23 P2's meaning, counted below); fewer is left to Hunt 24 E6 and
+        // the check that the start matches. One with no matching day at all says so.
+        val rangeFirst = rangeStart; val rangeLast = rangeEnd
+        if (rangeFirst != null && rangeLast != null && anchorName != null && repeat != RepeatRule.NONE && !fitsAnchor(rangeFirst)) {
+            val first = generateSequence(rangeFirst) { it.plusDays(1) }.takeWhile { it <= rangeLast }.firstOrNull(::fitsAnchor)
+                ?: return error("No day in that date range matches the $anchorName. Choose other dates.")
+            if (occurrencesWhile(repeat, first, repeatAnchorDay) { it <= rangeLast } >= 2) date = first
+        }
         var dateChoices = emptyList<LocalDate>()
         orDates?.let { choices ->
             if (relative || rangeStart != null || startFrom != null) return error("Use one date.")

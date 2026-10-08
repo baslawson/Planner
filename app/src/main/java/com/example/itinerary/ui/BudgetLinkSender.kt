@@ -47,23 +47,50 @@ fun sendUpcomingBills(context: Context, bills: List<BudgetLink.Upcoming>) {
 }
 
 /**
+ * Hunt 25 E5: which BudgetLinkSender, in this process, has a message open in MyBudget. A second MainActivity (a share
+ * opened into another app's task) mustn't take what's in flight for nothing open, nor open it again, while the first still
+ * waits for MyBudget's answer. A process started anew has none: whatever was in flight then is open nowhere.
+ */
+internal object BudgetLinkOwner {
+    private var owner: Any? = null // the sender waiting, or none
+
+    @Synchronized fun claim(sender: Any) { owner = sender }
+    @Synchronized fun release(sender: Any) { if (owner === sender) owner = null }
+    /** Another sender waits for MyBudget's answer. */
+    @Synchronized fun othersWaiting(sender: Any): Boolean = owner != null && owner !== sender
+}
+
+/**
  * MainActivity's messages for MyBudget, from [outbox], one screen at a time: the next opens when MyBudget answers the
  * last, and only then does a message leave the outbox. If Android ends Planner while MyBudget is open, the message is
  * sent again next time; MyBudget adds a payment once, so nothing is doubled.
  */
 class BudgetLinkSender(private val activity: Activity, private val outbox: com.example.itinerary.data.BudgetOutbox) {
     private val queue = ArrayDeque<BudgetLink.Message>()
+    // Hunt 25 E5: claimed process-wide while set (BudgetLinkOwner).
     private var waiting: BudgetLink.Message? = null
+        set(value) { field = value; if (value != null) BudgetLinkOwner.claim(this) else BudgetLinkOwner.release(this) }
     lateinit var launcher: ActivityResultLauncher<Intent>
 
     /**
      * Hunt 23 P5: called from MainActivity.onCreate with what [saved] kept. Recreated (or after Android ended Planner), the
      * message MyBudget has open is still waited for, so its answer is matched to it and it isn't opened a second time.
-     * Started afresh, nothing is open any more: what was in flight goes again (MyBudget adds a payment once).
+     * Started afresh, nothing is open any more: what was in flight goes again (MyBudget adds a payment once). Hunt 25 E5:
+     * unless another window in this process still waits for MyBudget: that one is open, and stays in flight.
      */
     fun restore(saved: String?) {
         val message = saved?.let { BudgetLink.decode(it) }?.takeIf { it in outbox.pending() }
+        if (message == null && BudgetLinkOwner.othersWaiting(this)) return
         waiting = message; outbox.inFlight = message
+    }
+
+    /**
+     * Hunt 25 E5: from MainActivity.onDestroy: this window waits no longer (recreated, it claims it again in [restore]).
+     * Closed for good ([gone]), MyBudget's answer has nowhere to come: what it had open isn't in flight any more.
+     */
+    fun release(gone: Boolean) {
+        if (gone && waiting != null && !BudgetLinkOwner.othersWaiting(this) && outbox.inFlight == waiting) outbox.inFlight = null
+        BudgetLinkOwner.release(this)
     }
 
     /** What [restore] needs after a recreation. */
@@ -88,7 +115,8 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
     }
 
     private fun next() {
-        if (waiting != null) return
+        // Hunt 25 E5: one at a time across windows too: the other window has the first in the outbox open.
+        if (waiting != null || BudgetLinkOwner.othersWaiting(this)) return
         if (queue.isEmpty()) queue += outbox.pending() // what's left: answered ones have gone from the outbox
         val message = queue.removeFirstOrNull() ?: return
         // L3: taken back meanwhile (paid and undone before it went): it has left the outbox.

@@ -16,5 +16,8 @@ object RescheduleOnOpen {
     // Tests start each case afresh.
     @Synchronized internal fun forget() { last = null }
 
+    // Hunt 25 D5: a reschedule handed to WorkManager (RescheduleRemindersWorker) is waiting: the next open does it too.
+    @Synchronized fun again() { last = null }
+
     fun state(exactAllowed: Boolean, zone: java.time.ZoneId) = "$exactAllowed|${zone.id}"
 }

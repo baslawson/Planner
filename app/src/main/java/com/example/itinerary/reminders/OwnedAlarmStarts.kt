@@ -56,11 +56,12 @@ internal object OwnedAlarmStarts {
         if (!token.startsWith(QUIET)) write(context, value.put(key, QUIET + token))
     }
 
-    /** True once, for a start refused because its ringing was turned off ([quiet]): it is then done with. */
+    /**
+     * True once, for a start refused because its ringing was turned off ([quiet]): it is then done with. Hunt 25 D1: an
+     * event's reserved start too.
+     */
     @Synchronized fun takeQuiet(context: Context, extras: Bundle?): Boolean {
-        val kind = extras?.getString(EXTRA_OWNER_KIND) ?: return false
-        val id = extras.getString(EXTRA_OWNER_ID) ?: return false
-        val token = extras.getString(EXTRA_OWNER_START) ?: return false
+        val (kind, id, token) = owner(extras) ?: return false
         val value = runCatching { read(context) }.getOrNull() ?: return false
         if (value.owner("$kind:$id") != QUIET + token) return false
         runCatching { write(context, value.apply { remove("$kind:$id") }) }

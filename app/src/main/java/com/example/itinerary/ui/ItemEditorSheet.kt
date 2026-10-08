@@ -613,7 +613,9 @@ private fun ItemEditorForm(
         val remindersToRemove = if (copy) emptyList() else removedReminders.toList()
         val options = EventSaveOptions(if (creatingSeries || changeRepeat) repeat else RepeatRule.NONE,
             if (creatingSeries && repeat != RepeatRule.NONE) count!! else 1, seriesEdit, changeRepeat, draftToken,
-            paymentBaseline = paymentBaseline.takeUnless { copy || isNew }, anchorDay = anchorDay)
+            paymentBaseline = paymentBaseline.takeUnless { copy || isNew }, anchorDay = anchorDay,
+            // Hunt 25 E4: a Duplicate starts unpaid; a copy of one deleted elsewhere keeps its paid state, sent already.
+            copiesPaid = deletedElsewhere && !duplicating)
         scope.launch {
             withContext(NonCancellable) {
                 try {

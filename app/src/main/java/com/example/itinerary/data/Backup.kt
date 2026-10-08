@@ -56,6 +56,8 @@ class StagedBackup internal constructor(
     internal val taskSend: Pair<CalendarChoice?, List<SentTask>>? = null,
     // Hunt 24 E5: the install id its bills went to MyBudget with (BudgetLink.backupInstallId), adopted on restore.
     internal val budgetInstallId: String = "",
+    // Hunt 25 E1: the ranges of ids with a suffix of their own (BudgetLink.laterIds); none in an older backup.
+    internal val budgetLaterIds: List<Pair<Long, String>> = emptyList(),
 ) {
     val plans: Int get() = data.trips.size
     val tasks: Int get() = data.tasks.size
@@ -184,6 +186,7 @@ class BackupManager(
                     send = parsed.send,
                     taskSend = parsed.taskSend,
                     budgetInstallId = parsed.budgetInstallId,
+                    budgetLaterIds = parsed.budgetLaterIds,
                 )
             }
         } catch (e: Exception) {
@@ -263,7 +266,8 @@ class BackupManager(
                     // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
                     step { notes?.forgetLocked() }
                     // Hunt 24 E5: the restored bills keep the ids MyBudget knows them by.
-                    step { BudgetLink.adoptInstallId(context, staged.budgetInstallId) }
+                    // Hunt 25 E1: ids from here on go on from its highest, which the phone it came from may have used too.
+                    step { BudgetLink.adoptInstallId(context, staged.budgetInstallId, BudgetLink.restoredLaterIds(staged.budgetLaterIds, highestItemId(staged.data))) }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -281,7 +285,7 @@ class BackupManager(
 
     private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?, val calendars: List<CalendarChoice>?,
                          val send: Pair<CalendarChoice?, List<SentEvent>>?, val taskSend: Pair<CalendarChoice?, List<SentTask>>?,
-                         val budgetInstallId: String = "")
+                         val budgetInstallId: String = "", val budgetLaterIds: List<Pair<Long, String>> = emptyList())
 
     private fun notABackup() = BackupException("That file isn't a Planner backup.")
 
@@ -329,6 +333,8 @@ class BackupManager(
         put("notes", NoteCodec.encode(data.notes))
         // Optional (older app versions ignore it): Hunt 24 E5, see BudgetLink.backupInstallId.
         put("budgetInstallId", BudgetLink.installId)
+        // Optional too (older app versions ignore it, an older backup has none): Hunt 25 E1, see BudgetLink.laterIds.
+        put("budgetLaterIds", BudgetLink.encodeLaterIds(BudgetLink.laterIds))
         put("format", FORMAT)
         put("formatVersion", FORMAT_VERSION)
         put("recentlyDeleted", data.deleted.toJson { JSONObject().put("id", it.id).put("deletedAt", it.deletedAt)
@@ -612,7 +618,8 @@ class BackupManager(
         }
         val notes = NoteCodec.decode(root.optJSONArray("notes") ?: JSONArray())
         return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, tasks, notes), settings, exportedOn, calendars, send, taskSend,
-            BudgetLink.backupInstallId(if (root.has("budgetInstallId") && !root.isNull("budgetInstallId")) root.optString("budgetInstallId") else null))
+            BudgetLink.backupInstallId(if (root.has("budgetInstallId") && !root.isNull("budgetInstallId")) root.optString("budgetInstallId") else null),
+            BudgetLink.decodeLaterIds(if (root.isNull("budgetLaterIds")) null else root.optString("budgetLaterIds")))
     }
 
     // "#RRGGBB" to an opaque ARGB int, or null if it isn't that.
@@ -620,6 +627,11 @@ class BackupManager(
         if (HEX_COLOR.matches(text)) (0xFF000000L or text.removePrefix("#").toLong(16)).toInt() else null
 
     companion object {
+        // Hunt 25 E1: where new ids go on from on a fresh install (SQLite carries on from the highest row). Not Recently
+        // deleted's: those rows aren't put back, so new events take ids up to them, ids the old phone may have used too. (One
+        // of them brought back later with its own id above this gets the new suffix: only its undo before the restore misses.)
+        internal fun highestItemId(data: DataSnapshot): Long = data.items.maxOfOrNull { it.id } ?: 0L
+
         private val HEX_COLOR = Regex("#[0-9A-Fa-f]{6}")
         private const val FORMAT = "planner-backup"
         // 2: categories are plain text. 3: attachments can be links. Older files are still read; an older app refuses newer ones.

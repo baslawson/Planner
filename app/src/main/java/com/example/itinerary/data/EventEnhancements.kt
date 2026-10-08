@@ -162,6 +162,12 @@ data class EventSaveOptions(
     val paymentBaseline: PaymentState? = null,
     /** A new monthly series' day of the month (RepeatRule.dates); 0 = its first date's own. */
     val anchorDay: Int = 0,
+    /**
+     * Hunt 25 E4: a new event saved as a copy of one deleted elsewhere, keeping its paid state: MyBudget already has a bill
+     * paid without an amount by the old event's id, so the copy doesn't send it again as a new expense (its payments,
+     * same ids, still go: MyBudget knows those).
+     */
+    val copiesPaid: Boolean = false,
 )
 
 fun millisUntilNextDay(now: java.time.ZonedDateTime): Long =

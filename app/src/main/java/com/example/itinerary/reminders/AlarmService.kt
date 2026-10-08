@@ -85,8 +85,10 @@ class AlarmService : Service() {
                 val accepted = OwnedAlarmStarts.start(this, extras) {
                     startRinging(extras, startId, redelivered = flags and START_FLAG_REDELIVERY != 0)
                 }
-                // Turned quiet on its way (D14-1): its reminder is shown as a normal notification instead.
-                if (!accepted) synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.takeQuiet(this, extras)) extras?.let { postOwnedAlarm(this, it) } }
+                // Turned quiet on its way (D14-1): its reminder is shown as a normal notification instead. Hunt 25 D1: an
+                // event's or bill's too (with its buttons); delivered again after a restart, it has had its sound.
+                if (!accepted) synchronized(OwnedAlarmStarts) { if (OwnedAlarmStarts.takeQuiet(this, extras))
+                    extras?.let { showAsNotification(it, silent = flags and START_FLAG_REDELIVERY != 0) } }
                 if (!accepted && ringing != null) ignoredStart = maxOf(ignoredStart, startId)
                 if (!accepted && ringing == null) {
                     // Fulfil the foreground-start deadline, then end this cancelled start without playing anything.
@@ -381,7 +383,12 @@ class AlarmService : Service() {
     // Given up on, it ends its own start only: an alarm started after it still rings (R6-2).
     private fun onGiveUp() {
         val start = ringingStart
-        ringing?.let { extras -> showAsNotification(extras, missed = true) }
+        // Hunt 25 D4: as onRangOut: an alarm stopped from elsewhere just now (paid, deleted, snoozed, done) is no longer this
+        // one's, so no "Missed alarm" goes into the slot its notification was just taken from.
+        synchronized(OwnedAlarmStarts) {
+            ringing?.takeIf { (it.containsKey(EXTRA_OWNER_KIND) || currentReminderId != null) && OwnedAlarmStarts.isCurrent(this, it) }
+                ?.let { extras -> showAsNotification(extras, missed = true) }
+        }
         stopRinging(start)
     }
 
@@ -480,9 +487,15 @@ class AlarmService : Service() {
                 if (currentReminderId == id) { currentReminderId = null; requestStop(context, stopToken) }
             }
         }
-        /** Hunt 22 P2: an event reminder's sound changed to one that doesn't ring: it stops ringing, its notification stays. */
+        /**
+         * Hunt 22 P2: an event reminder's sound changed to one that doesn't ring: it stops ringing, its notification stays.
+         * Hunt 25 D1: its reserved start turns quiet too, as a task's does (D14-1), so one on its way, or delivered again after
+         * Android ended the process, shows the notification instead of ringing.
+         */
         fun quietIfRinging(context: Context, id: Long) {
             synchronized(OwnedAlarmStarts) {
+                runCatching { OwnedAlarmStarts.quiet(context, OwnedAlarmStarts.EVENT, id.toString()) }
+                    .onFailure { android.util.Log.w("AlarmService", "Couldn't quiet ringing ownership", it) }
                 if (currentReminderId == id) requestStop(context, stopToken, keepReminder = true)
             }
         }

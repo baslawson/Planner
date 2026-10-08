@@ -89,4 +89,20 @@ class OwnedAlarmStartsTest {
             assertTrue(OwnedAlarmStarts.start(context, event(null)) {})
         } finally { OwnedAlarmStarts.cancel(context, OwnedAlarmStarts.EVENT, reminderId.toString()) }
     }
+
+    // Hunt 25 D1: an event reminder turned to notification only while its start is on its way (or delivered again after
+    // process death) is refused, but reported once as quiet, so it shows as its notification; it still stands meanwhile.
+    @Test fun quietEventStartIsRefusedButKeepsItsReminder() {
+        val reminderId = 9_100_000_000L + System.nanoTime() % 1_000_000
+        fun event(token: String) = android.os.Bundle().apply { putLong(ReminderScheduler.EXTRA_REMINDER_ID, reminderId); putString(EXTRA_EVENT_START, token) }
+        try {
+            val token = OwnedAlarmStarts.reserve(context, OwnedAlarmStarts.EVENT, reminderId.toString())
+            AlarmService.quietIfRinging(context, reminderId)
+            assertTrue(OwnedAlarmStarts.isCurrent(context, event(token)))
+            assertFalse(OwnedAlarmStarts.start(context, event(token)) { fail("Quieted event start rang") })
+            assertTrue(OwnedAlarmStarts.takeQuiet(context, event(token)))
+            assertFalse(OwnedAlarmStarts.takeQuiet(context, event(token)))
+            assertFalse(OwnedAlarmStarts.isCurrent(context, event(token)))
+        } finally { OwnedAlarmStarts.cancel(context, OwnedAlarmStarts.EVENT, reminderId.toString()) }
+    }
 }

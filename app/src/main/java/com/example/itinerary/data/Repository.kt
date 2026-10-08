@@ -945,8 +945,8 @@ class Repository(
                 }
                 val rowId = itemDao.upsert(normalized)
                 val saved = normalized.copy(id = if (rowId > 0) rowId else target.id)
-                // A new bill saved as paid counts as paid from unpaid.
-                budgetChanges += (previous ?: saved.copy(paid = false, payments = emptyList())) to saved
+                // A new bill saved as paid counts as paid from unpaid (Hunt 25 E4: unless a copy, see EventSaveOptions.copiesPaid).
+                budgetChanges += (previous ?: BudgetLink.newBillBefore(saved, options.copiesPaid)) to saved
                 if (newSeries && saved.id != item.id) {
                     selectedAttachments.forEach { attachmentDao.insert(it.copy(id = 0, itemId = saved.id)) }
                 } else if (seriesSave && saved.id != item.id) {
@@ -1504,13 +1504,24 @@ class Repository(
      * lock and so did nothing: the caller hands it to work that can wait (RescheduleRemindersWorker).
      */
     suspend fun tryRescheduleAllReminders(waitMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
-        val deadline = System.nanoTime() + waitMs * 1_000_000
-        var locked = changes.tryLock()
-        while (!locked && System.nanoTime() - deadline < 0) { kotlinx.coroutines.delay(20); locked = changes.tryLock() }
-        if (!locked) return false
+        if (!tryLockWithin(waitMs)) return false
         try { rescheduleAllLocked(zone) } finally { changes.unlock() }
         return true
     }
+
+    private suspend fun tryLockWithin(waitMs: Long): Boolean {
+        val deadline = System.nanoTime() + waitMs * 1_000_000
+        var locked = changes.tryLock()
+        while (!locked && System.nanoTime() - deadline < 0) { kotlinx.coroutines.delay(20); locked = changes.tryLock() }
+        return locked
+    }
+
+    /**
+     * Hunt 25 D3: no change in progress (a restore, a sync) within [waitMs], for a receiver Android gives only seconds before
+     * it runs work that takes the lock several times (missed reminders after a boot, DirectBoot.afterRing). False: hand it
+     * on to RescheduleRemindersWorker. (One starting right after this returns can still make that work wait.)
+     */
+    suspend fun freeWithin(waitMs: Long): Boolean = tryLockWithin(waitMs).also { if (it) changes.unlock() }
 
     // A reminder has rung and others wait for a free alarm (AlarmWindow): the window moves on.
     suspend fun refillReminders() = changes.withLock {
@@ -1530,15 +1541,23 @@ class Repository(
             tasks.mapNotNull { t -> t.activeReminderAt?.takeIf { !t.done }?.let { MissedReminders.taskKey(t.id) to it } } +
             notes.mapNotNull { n -> n.activeReminderAt?.let { MissedReminders.noteKey(n.id) to it } }
         scheduler.setArmWindow(triggers.toMap(), System.currentTimeMillis())
+        val now = System.currentTimeMillis()
         // The latest first, so the alarms of the ones that now wait are freed before nearer ones are set.
-        val jobs: List<Pair<Long, () -> Unit>> = reminders.mapNotNull { reminder -> items[reminder.itemId]?.let { item -> eventReminderAt(item, reminder) to {
-            if (item.paid || item.skipped) scheduler.cancel(reminder.id)
-            else if (!ReminderDeliveries.delivered(delivered[reminder.id], item, reminder)) scheduler.reconcile(item, reminder)
-        } } } +
+        val jobs: List<Pair<Long, () -> Unit>> = reminders.mapNotNull { reminder ->
+            val item = items[reminder.itemId] ?: return@mapNotNull null
+            val at = eventReminderAt(item, reminder)
+            // Hunt 25 D2: as done tasks below: a paid or skipped one's alarm went when it was paid or skipped, so only the
+            // ones within two days are cancelled again (each a file read and calls into Android, for every one ever kept).
+            if ((item.paid || item.skipped) && !stillCancelled(at, now)) return@mapNotNull null
+            at to {
+                if (item.paid || item.skipped) scheduler.cancel(reminder.id)
+                else if (!ReminderDeliveries.delivered(delivered[reminder.id], item, reminder)) scheduler.reconcile(item, reminder)
+            }
+        } +
             // Hunt 23: a task done with no reminder, or one two days gone, has had its alarm taken away (completing it
             // cancels it): going through each again (a file read and calls into Android) held the lock for seconds once
             // done tasks piled up (a daily task leaves one a day).
-            tasks.filter { t -> !t.done || t.activeReminderAt?.let { it > System.currentTimeMillis() - 2 * 86_400_000L } == true }
+            tasks.filter { t -> !t.done || t.activeReminderAt?.let { stillCancelled(it, now) } == true }
                 .map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } } +
             notes.filter { it.reminderAt != null }.map { note -> note.activeReminderAt!! to { scheduler.scheduleNote(note) } }
         var failure: Exception? = null
@@ -1642,3 +1661,9 @@ internal suspend fun updateReminderAlarm(scheduler: ReminderAlarms, id: Long, ev
 
 // R18-A2: how long a reminder waits for a change in progress before it is shown without the lock.
 internal const val DELIVERY_LOCK_WAIT_MS = 3_000L
+
+/**
+ * Hunt 23 / Hunt 25 D2: a done task's or paid or skipped event's reminder due at [at] is cancelled again on a full
+ * reschedule only within two days of it: an older one's alarm went long ago, when it was completed, paid or skipped.
+ */
+internal fun stillCancelled(at: Long, now: Long): Boolean = at > now - 2 * 86_400_000L

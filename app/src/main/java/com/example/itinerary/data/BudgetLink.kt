@@ -70,7 +70,7 @@ object BudgetLink {
             item.payments.filterNot { it.reversed }.map { it.id }.takeLast(MAX_PAID_IDS)) }
         .toList()
 
-    fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}$installId"
+    fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}${suffixFor(item.id)}"
 
     /**
      * Hunt 23: added to the ids made from a bill's database id, which start again from 1 when Planner is installed afresh
@@ -85,6 +85,7 @@ object BudgetLink {
         val prefs = context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE)
         installId = prefs.getString("installId", null) ?: (if (freshData) "-" + java.util.UUID.randomUUID().toString().take(8) else "")
             .also { prefs.edit().putString("installId", it).commit() }
+        laterIds = decodeLaterIds(prefs.getString("laterIds", null))
     }
 
     /**
@@ -94,10 +95,51 @@ object BudgetLink {
      */
     fun backupInstallId(raw: String?): String = raw?.takeIf { it.isEmpty() || Regex("-[A-Za-z0-9]{1,36}").matches(it) } ?: ""
 
-    /** Hunt 24 E5: on restore, both here and on disk (read again when Planner next starts). */
-    fun adoptInstallId(context: android.content.Context, id: String) {
-        context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE).edit().putString("installId", id).commit()
+    /**
+     * Hunt 25 E1: after a restore, database ids go on from the backup's highest, while the phone it came from may have gone
+     * on to higher ids MyBudget holds already ("planner-paid-120-…"). So ids above the backup's highest get a suffix of their
+     * own: each (after, suffix) covers the ids above `after` (the last that does wins), [installId] the ids up to the first.
+     * Payments made before the restore still match MyBudget's ids, and new ones never take an old one's. Ascending.
+     */
+    @Volatile var laterIds: List<Pair<Long, String>> = emptyList()
+        private set
+
+    /** The suffix the ids made from database id [id] go with (see [laterIds]). */
+    fun suffixFor(id: Long): String = laterIds.lastOrNull { id > it.first }?.second ?: installId
+
+    // Kept as "after:suffix,after:suffix" (prefs "laterIds", backups "budgetLaterIds").
+    fun encodeLaterIds(later: List<Pair<Long, String>>): String = later.joinToString(",") { "${it.first}:${it.second}" }
+
+    /** Hunt 25 E1: what [raw] says; anything that doesn't read drops it all (absent, as in older backups = none). */
+    fun decodeLaterIds(raw: String?): List<Pair<Long, String>> {
+        if (raw.isNullOrEmpty()) return emptyList()
+        val later = raw.split(',').map { part ->
+            val after = part.substringBefore(':', "").toLongOrNull()?.takeIf { it >= 0 } ?: return emptyList()
+            val suffix = part.substringAfter(':', "").takeIf { Regex("-[A-Za-z0-9]{1,36}").matches(it) } ?: return emptyList()
+            after to suffix
+        }
+        return later.takeIf { it.zipWithNext().all { (a, b) -> a.first < b.first } } ?: emptyList()
+    }
+
+    /**
+     * Hunt 25 E1: the ranges a restore leaves: the backup's own ([later]) below [highestId] (the backup's highest event id;
+     * a range from there up holds none of its ids), then a fresh suffix for ids above it.
+     */
+    fun restoredLaterIds(later: List<Pair<Long, String>>, highestId: Long,
+                         fresh: String = "-" + java.util.UUID.randomUUID().toString().take(8)): List<Pair<Long, String>> =
+        later.filter { it.first < highestId } + (highestId to fresh)
+
+    /** Hunt 24 E5: on restore, both here and on disk (read again when Planner next starts). Hunt 25 E1: [later] too. */
+    fun adoptInstallId(context: android.content.Context, id: String, later: List<Pair<Long, String>> = emptyList()) {
+        context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE).edit().putString("installId", id)
+            .putString("laterIds", encodeLaterIds(later)).commit()
+        useIds(id, later)
+    }
+
+    // Set together (also by tests).
+    internal fun useIds(id: String, later: List<Pair<Long, String>>) {
         installId = id
+        laterIds = later
     }
 
     // Messages waiting for MyBudget are kept on disk (BudgetOutbox), one line each: fields separated by tabs, with
@@ -133,28 +175,42 @@ object BudgetLink {
     }
 
     // The same for every occurrence of a repeating bill, so MyBudget can suggest the category it had last time.
-    fun billKey(item: ItineraryItem): String = item.seriesId?.let { "planner-series-$it" } ?: "planner-bill-${item.id}$installId"
+    fun billKey(item: ItineraryItem): String = item.seriesId?.let { "planner-series-$it" } ?: "planner-bill-${item.id}${suffixFor(item.id)}"
 
     // A bill without an amount gets no payment entry when it is marked paid (Payments.setPaid): it goes by the bill.
-    fun unpricedPaymentId(item: ItineraryItem): String = "planner-paid-${item.id}$installId"
+    fun unpricedPaymentId(item: ItineraryItem): String = "planner-paid-${item.id}${suffixFor(item.id)}"
 
     // Hunt 23 P4 / Hunt 24 E3: an Add in a currency other than MyBudget's budget ([budgetCurrency]), which it would only refuse.
     // Never an Undone: MyBudget finds an expense by its id whatever the currency, and answers at once for one it never added.
     fun refusedLocally(message: Message, budgetCurrency: String?): Boolean =
         message is Message.Add && budgetCurrency != null && !message.currency.equals(budgetCurrency, ignoreCase = true)
 
+    /**
+     * What a new bill [saved] is taken to change from: unpaid with no payments, so whatever it has goes to MyBudget. Hunt 25
+     * E4: a copy of a bill deleted elsewhere ([copiesPaid]) paid without an amount was paid already: MyBudget has that
+     * expense by the old bill's id, and a new id would add it again. (Unpaid later, the copy's undo can't find that
+     * expense: removing it is left to MyBudget, rather than risking a second one.) Its payments go again, by the same ids.
+     */
+    fun newBillBefore(saved: ItineraryItem, copiesPaid: Boolean): ItineraryItem =
+        saved.copy(paid = copiesPaid && saved.paid && !Payments.anyLive(saved.payments), payments = emptyList())
+
     /** What MyBudget should hear about a bill going from [before] to [after]: payments that now count and ones undone. */
     fun changes(before: ItineraryItem, after: ItineraryItem): List<Message> {
-        if (after.category != "Bills") return emptyList()
-        val liveBefore = before.payments.filterNot { it.reversed }
+        // Hunt 25 E2: a bill moved out of Bills isn't paid here any more (Repository saves it unpaid; its payments stay on it
+        // but don't count): what counted before is undone in MyBudget, as unpaying it would. Moved back, nothing counted
+        // before, so what counts again goes as new (MyBudget removed it), never twice.
+        if (after.category != "Bills") return if (before.category != "Bills") emptyList()
+            else changes(before, before.copy(paid = false, payments = before.payments.map { it.copy(reversed = true) })).filterIsInstance<Message.Undone>()
+        val liveBefore = if (before.category == "Bills") before.payments.filterNot { it.reversed } else emptyList()
+        val paidBefore = before.paid && before.category == "Bills"
         val liveAfter = after.payments.filterNot { it.reversed }
         val added = liveAfter.filter { new -> liveBefore.none { it.id == new.id } }
         val undone = liveBefore.filter { old -> liveAfter.none { it.id == old.id } }.map { it.id }.toMutableList()
         val unpriced = after.billAmountMinor == null && liveAfter.isEmpty() && liveBefore.isEmpty()
-        val paidNow = unpriced && after.paid && !before.paid
+        val paidNow = unpriced && after.paid && !paidBefore
         // Hunt 22 L1: paid without an amount (MyBudget has it by the bill) and no longer paid that way, whatever its amount
         // now: given one later and then unpaid, MyBudget was never told, and paying again made a second expense there.
-        if (before.paid && liveBefore.isEmpty() && !(after.paid && liveAfter.isEmpty())) undone += unpricedPaymentId(after)
+        if (paidBefore && liveBefore.isEmpty() && !(after.paid && liveAfter.isEmpty())) undone += unpricedPaymentId(after)
         // Every currency goes: MyBudget adds only bills in its budget's currency and says so for others. An undone payment
         // it never added finds nothing there and asks nothing.
         val currency = after.billCurrency
