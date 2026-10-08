@@ -1183,9 +1183,15 @@ object QuickEntry {
         // Hunt 23 P2: with a repeat, a date range is when it runs, each occurrence one day: "Physio daily 12-16 Oct" is five
         // days of physio, not five-day entries every day.
         var rangeEndsRepeat = false
-        rangeEnd?.takeIf { repeat != RepeatRule.NONE }?.let { end ->
+        // Hunt 24 E6: only when that gives two or more: "Kids at dad's weekly Fri-Sun" and "Festival every year 12-16 Oct"
+        // hold one occurrence, so they keep the older meaning, an entry over the days that repeats.
+        rangeEnd?.takeIf { repeat != RepeatRule.NONE && occurrencesWhile(repeat, date, repeatAnchorDay) { d -> d <= it } >= 2 }?.let { end ->
             if (countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null)
                 return error("End the repeat one way: a date, a number of times or a length.")
+            // Hunt 24 E6: a window under way ("Physio daily 1-31 Oct" on the 8th, SQX-4) starts at its next occurrence from
+            // today, not with ones already gone; one wholly past is a repeat that starts in the past.
+            if (date < today) date = repeat.dates(date, 365, repeatAnchorDay).firstOrNull { it >= today && it <= end }
+                ?: return error("A repeat can't start in the past. Start it today or later, or remove the repeat.")
             repeatCount = occurrencesWhile(repeat, date, repeatAnchorDay) { it <= end }
             if (repeatCount !in 2..365) return error("Choose dates that give between 2 and 365 occurrences.")
             rangeEnd = null

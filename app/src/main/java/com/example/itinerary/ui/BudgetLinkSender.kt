@@ -31,7 +31,9 @@ fun sendUpcomingBills(context: Context, bills: List<BudgetLink.Upcoming>) {
     fun json(list: List<BudgetLink.Upcoming>, withCurrency: Boolean) = org.json.JSONArray().apply {
         list.forEach { b ->
             put(org.json.JSONObject().put("id", b.id).put("billKey", b.billKey).put("payee", b.payee).put("due", b.due.toString())
-                .apply { b.amount?.let { put("amountCents", it) }; if (withCurrency) put("currency", b.currency) })
+                .apply { b.amount?.let { put("amountCents", it) }; if (withCurrency) put("currency", b.currency) }
+                // Hunt 24 E4: the payments already taken off amountCents, which MyBudget mustn't take off again.
+                .apply { if (b.paid.isNotEmpty()) put("paid", org.json.JSONArray(b.paid)) })
         }
     }.toString()
     // Also to a MyBudget that was force-stopped or never opened yet: Android skips such apps unless asked not to.
@@ -79,6 +81,8 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         when {
             resultCode == Activity.RESULT_OK && summary != null -> toast(summary)
             sent is BudgetLink.Message.Add && resultCode != Activity.RESULT_OK -> toast("Not added to MyBudget. The bill stays paid.")
+            // Hunt 24 E7: dismissed (or MyBudget couldn't save): the expense is still there, which the user should know.
+            sent is BudgetLink.Message.Undone && resultCode != Activity.RESULT_OK -> toast("Not removed from MyBudget.")
         }
         next()
     }
@@ -90,11 +94,12 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         // L3: taken back meanwhile (paid and undone before it went): it has left the outbox.
         if (message !in outbox.pending()) return next()
         // Hunt 23 P4: MyBudget said its budget is in another currency: it would only refuse this one, so it isn't opened.
-        val currency = when (message) { is BudgetLink.Message.Add -> message.currency; is BudgetLink.Message.Undone -> message.currency }
+        // Hunt 24 E3: an Add only. An undo goes whatever its currency: MyBudget finds the expense by its id (one added before
+        // its budget's currency changed, say), and one it never added it answers at once without asking.
         val budgetCurrency = outbox.budgetCurrency
-        if (budgetCurrency != null && !currency.equals(budgetCurrency, ignoreCase = true)) {
+        if (message is BudgetLink.Message.Add && BudgetLink.refusedLocally(message, budgetCurrency)) {
             outbox.remove(message)
-            if (message is BudgetLink.Message.Add) toast("Not sent to MyBudget: this bill is in $currency, but your budget is in $budgetCurrency.")
+            toast("Not sent to MyBudget: this bill is in ${message.currency}, but your budget is in $budgetCurrency.")
             return next()
         }
         val intent = budgetIntent(message)

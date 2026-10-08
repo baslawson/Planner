@@ -22,8 +22,8 @@ class BugHunt23Test {
         assertTrue(s.repeatCountSpecified)
         // Ended two ways: asked.
         assertNotNull(parse("Physio daily 12-16 Oct for 3 times").error)
-        // One occurrence is no repeat.
-        assertNotNull(parse("Physio weekly 12-14 Oct").error)
+        // Hunt 24 E6: one occurrence in the range keeps the older meaning, an entry over the days that repeats.
+        parse("Physio weekly 12-14 Oct").let { assertNull(it.error); assertEquals(LocalDate.of(2026, 10, 14), it.endDate); assertEquals(RepeatRule.WEEKLY, it.repeat) }
         // Without a repeat it is still one entry over the days.
         parse("Trip 12-16 Oct").let { assertNull(it.error); assertEquals(LocalDate.of(2026, 10, 16), it.endDate) }
     }

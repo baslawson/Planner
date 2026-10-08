@@ -1491,10 +1491,25 @@ class Repository(
     }
 
     // After a reboot, update or time change, and whenever the app opens (the exact-alarm permission may have changed).
-    suspend fun rescheduleAllReminders(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()) = changes.withLock {
-        // Cleanup is independent maintenance: its failure must not prevent scheduling alarms.
+    suspend fun rescheduleAllReminders(zone: java.time.ZoneId = java.time.ZoneId.systemDefault()) = changes.withLock { rescheduleAllLocked(zone) }
+
+    // Cleanup is independent maintenance: its failure must not prevent scheduling alarms.
+    private suspend fun rescheduleAllLocked(zone: java.time.ZoneId) =
         performFollowUp(linkedMapOf("cleanup:expired" to { purgeExpiredDeleted() }, "reminders:zone" to { followTimeZone(zone) },
             "reminders:reload" to { armReminders() }))
+
+    /**
+     * Hunt 24 D5: [rescheduleAllReminders] for a receiver Android gives only seconds (a time or time zone change): it waits
+     * for a change in progress (a restore, a sync) at most [waitMs], tried as forDelivery does. False when it didn't get the
+     * lock and so did nothing: the caller hands it to work that can wait (RescheduleRemindersWorker).
+     */
+    suspend fun tryRescheduleAllReminders(waitMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
+        val deadline = System.nanoTime() + waitMs * 1_000_000
+        var locked = changes.tryLock()
+        while (!locked && System.nanoTime() - deadline < 0) { kotlinx.coroutines.delay(20); locked = changes.tryLock() }
+        if (!locked) return false
+        try { rescheduleAllLocked(zone) } finally { changes.unlock() }
+        return true
     }
 
     // A reminder has rung and others wait for a free alarm (AlarmWindow): the window moves on.

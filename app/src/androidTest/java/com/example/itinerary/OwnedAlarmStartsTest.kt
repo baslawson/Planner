@@ -66,4 +66,27 @@ class OwnedAlarmStartsTest {
         OwnedAlarmStarts.cancel(context, "task", id)
         assertTrue(OwnedAlarmStarts.start(context, extras(token)) {})
     }
+    // Hunt 24 D1: an event's ringing start is reserved too; cancelling the reminder (ReminderScheduler.cancel, through
+    // stopIfRinging) refuses one delivered again, while an event alarm without a reservation (the Settings test) still rings.
+    @Test fun eventStartIsRefusedOnceItsReminderIsCancelled() {
+        val reminderId = 9_000_000_000L + System.nanoTime() % 1_000_000
+        fun event(token: String?) = android.os.Bundle().apply {
+            putLong(ReminderScheduler.EXTRA_REMINDER_ID, reminderId); token?.let { putString(EXTRA_EVENT_START, it) } }
+        try {
+            val token = OwnedAlarmStarts.reserve(context, OwnedAlarmStarts.EVENT, reminderId.toString())
+            assertTrue(OwnedAlarmStarts.isCurrent(context, event(token)))
+            assertTrue(OwnedAlarmStarts.start(context, event(token)) {})
+            AlarmService.stopIfRinging(context, reminderId)
+            assertFalse(OwnedAlarmStarts.isCurrent(context, event(token)))
+            assertFalse(OwnedAlarmStarts.start(context, event(token)) { fail("Cancelled event start rang") })
+            // A snooze's ring reserves afresh: it rings; the earlier one stays refused.
+            val snoozed = OwnedAlarmStarts.reserve(context, OwnedAlarmStarts.EVENT, reminderId.toString())
+            assertTrue(OwnedAlarmStarts.start(context, event(snoozed)) {})
+            assertFalse(OwnedAlarmStarts.start(context, event(token)) { fail("Old event start rang") })
+            OwnedAlarmStarts.finish(context, event(snoozed))
+            assertFalse(OwnedAlarmStarts.start(context, event(snoozed)) { fail("Finished event start rang") })
+            assertTrue(OwnedAlarmStarts.isCurrent(context, event(null)))
+            assertTrue(OwnedAlarmStarts.start(context, event(null)) {})
+        } finally { OwnedAlarmStarts.cancel(context, OwnedAlarmStarts.EVENT, reminderId.toString()) }
+    }
 }

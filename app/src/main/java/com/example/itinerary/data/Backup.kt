@@ -54,6 +54,8 @@ class StagedBackup internal constructor(
     internal val send: Pair<CalendarChoice?, List<SentEvent>>? = null,
     // The same for tasks (see TaskSync.snapshot); null for a backup without it.
     internal val taskSend: Pair<CalendarChoice?, List<SentTask>>? = null,
+    // Hunt 24 E5: the install id its bills went to MyBudget with (BudgetLink.backupInstallId), adopted on restore.
+    internal val budgetInstallId: String = "",
 ) {
     val plans: Int get() = data.trips.size
     val tasks: Int get() = data.tasks.size
@@ -181,6 +183,7 @@ class BackupManager(
                     calendars = parsed.calendars,
                     send = parsed.send,
                     taskSend = parsed.taskSend,
+                    budgetInstallId = parsed.budgetInstallId,
                 )
             }
         } catch (e: Exception) {
@@ -259,6 +262,8 @@ class BackupManager(
                     step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
                     // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
                     step { notes?.forgetLocked() }
+                    // Hunt 24 E5: the restored bills keep the ids MyBudget knows them by.
+                    step { BudgetLink.adoptInstallId(context, staged.budgetInstallId) }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -275,7 +280,8 @@ class BackupManager(
     }
 
     private class Parsed(val data: DataSnapshot, val settings: SettingsSnapshot, val exportedOn: LocalDate?, val calendars: List<CalendarChoice>?,
-                         val send: Pair<CalendarChoice?, List<SentEvent>>?, val taskSend: Pair<CalendarChoice?, List<SentTask>>?)
+                         val send: Pair<CalendarChoice?, List<SentEvent>>?, val taskSend: Pair<CalendarChoice?, List<SentTask>>?,
+                         val budgetInstallId: String = "")
 
     private fun notABackup() = BackupException("That file isn't a Planner backup.")
 
@@ -321,6 +327,8 @@ class BackupManager(
         put("tasks", TaskCodec.encode(data.tasks))
         // Since format 17; an older backup has none.
         put("notes", NoteCodec.encode(data.notes))
+        // Optional (older app versions ignore it): Hunt 24 E5, see BudgetLink.backupInstallId.
+        put("budgetInstallId", BudgetLink.installId)
         put("format", FORMAT)
         put("formatVersion", FORMAT_VERSION)
         put("recentlyDeleted", data.deleted.toJson { JSONObject().put("id", it.id).put("deletedAt", it.deletedAt)
@@ -603,7 +611,8 @@ class BackupManager(
             CalendarChoice(account, href, json.optString("name").ifBlank { "Nextcloud tasks" }.take(200), null, false) to rows
         }
         val notes = NoteCodec.decode(root.optJSONArray("notes") ?: JSONArray())
-        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, tasks, notes), settings, exportedOn, calendars, send, taskSend)
+        return Parsed(DataSnapshot(trips, items, reminders, attachments, templates, deleted, tasks, notes), settings, exportedOn, calendars, send, taskSend,
+            BudgetLink.backupInstallId(if (root.has("budgetInstallId") && !root.isNull("budgetInstallId")) root.optString("budgetInstallId") else null))
     }
 
     // "#RRGGBB" to an opaque ARGB int, or null if it isn't that.

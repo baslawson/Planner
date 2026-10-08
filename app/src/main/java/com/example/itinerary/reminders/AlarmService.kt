@@ -122,7 +122,8 @@ class AlarmService : Service() {
         // A14-5: not one completed, deleted or removed meanwhile (its start no longer stands).
         // It has rung already: quietly, under the new one's sound.
         if (previous != null && extras != null && OwnedAlarmStarts.isCurrent(this, previous)) showAsNotification(previous, silent = true)
-        if (previous?.getString(EXTRA_OWNER_START) != extras?.getString(EXTRA_OWNER_START))
+        // Hunt 24 D1: an event's reserved start is compared too (not the same start delivered again).
+        if (OwnedAlarmStarts.owner(previous) != OwnedAlarmStarts.owner(extras))
             OwnedAlarmStarts.finish(this, previous)
         ringing = extras
         ringingStart = startId
@@ -138,7 +139,8 @@ class AlarmService : Service() {
         // Hunt 23 P1: Android may refuse it after it restarted the service in the background (Android 12+, a start delivered
         // again): rather than crash (and be restarted to crash again), the reminder is left as its normal notification.
         if (!goForeground(notification(extras))) {
-            extras?.let { showAsNotification(it, missed = redelivered && !timed(it)) }
+            // Hunt 24 D3: a timed one delivered again has had its sound already, as one that gives way (above).
+            extras?.let { showAsNotification(it, missed = redelivered && !timed(it), silent = redelivered && timed(it)) }
             stopRinging(startId)
             return
         }
@@ -469,6 +471,10 @@ class AlarmService : Service() {
         @Volatile private var stopToken: String? = null
         fun stopIfRinging(context: Context, id: Long) {
             synchronized(OwnedAlarmStarts) {
+                // Hunt 24 D1: its reserved start goes too, so one Android delivers again after ending the process (where
+                // currentReminderId, below, is gone) is refused rather than ringing for a reminder dealt with meanwhile.
+                runCatching { OwnedAlarmStarts.cancel(context, OwnedAlarmStarts.EVENT, id.toString()) }
+                    .onFailure { android.util.Log.w("AlarmService", "Couldn't cancel ringing ownership", it) }
                 // Hunt 22 P6: no longer this alarm's, at once, so its time running out meanwhile (onRangOut) doesn't post the
                 // notification that was just taken away (snoozed, deleted, paid).
                 if (currentReminderId == id) { currentReminderId = null; requestStop(context, stopToken) }

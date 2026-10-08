@@ -35,7 +35,7 @@ object BudgetLink {
     // MyBudget shows them, plans for them, and replaces its list with each one sent. They're never money there: the
     // expense still comes from marking the bill paid here.
     const val ACTION_UPCOMING = "com.mybudget.app.action.UPCOMING_BILLS"
-    const val EXTRA_BILLS = "bills" // JSON array of {id, billKey, payee, due (YYYY-MM-DD), amountCents (optional)}: AUD only
+    const val EXTRA_BILLS = "bills" // JSON array of {id, billKey, payee, due (YYYY-MM-DD), amountCents (optional), paid (optional, Hunt 24 E4: ids of the payments taken off amountCents)}: AUD only
     // The same with every currency, each with its `currency`: MyBudget 0.0.8 and later read this one and keep the bills
     // in their budget's currency. `bills` stays for older MyBudget, which would take any bill in it as AUD.
     const val EXTRA_BILLS_ALL = "billsAll"
@@ -43,7 +43,12 @@ object BudgetLink {
     private const val DAYS_AHEAD = 62L
     const val MAX_UPCOMING = 200
 
-    data class Upcoming(val id: String, val billKey: String, val payee: String, val due: LocalDate, val amount: Long?, val currency: String = OLD_CURRENCY)
+    // Hunt 24 E4: [paid], the ids of the bill's payments that count (the paymentId each went to MyBudget with, newest last, at
+    // most [MAX_PAID_IDS]), so MyBudget doesn't take a part payment off again that it has planned for already ([amount] is
+    // what is left) while that payment's ADD_EXPENSE still waits in the outbox.
+    data class Upcoming(val id: String, val billKey: String, val payee: String, val due: LocalDate, val amount: Long?, val currency: String = OLD_CURRENCY,
+                        val paid: List<String> = emptyList())
+    const val MAX_PAID_IDS = 20
 
     /** The bills older MyBudget can read (the `bills` list). */
     fun forOldBudget(bills: List<Upcoming>): List<Upcoming> = bills.filter { it.currency == OLD_CURRENCY }
@@ -61,7 +66,8 @@ object BudgetLink {
         }
         .sortedWith(compareBy({ it.first.date }, { it.first.id }))
         .take(MAX_UPCOMING)
-        .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left, item.billCurrency) }
+        .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left, item.billCurrency,
+            item.payments.filterNot { it.reversed }.map { it.id }.takeLast(MAX_PAID_IDS)) }
         .toList()
 
     fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}$installId"
@@ -79,6 +85,19 @@ object BudgetLink {
         val prefs = context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE)
         installId = prefs.getString("installId", null) ?: (if (freshData) "-" + java.util.UUID.randomUUID().toString().take(8) else "")
             .also { prefs.edit().putString("installId", it).commit() }
+    }
+
+    /**
+     * Hunt 24 E5: a restored backup brings back its bills' database ids, so it brings back the install id they went to
+     * MyBudget with too ("planner-paid-5-…"): otherwise MyBudget can't find them to undo, and paying again adds a second
+     * expense. A backup without one ([raw] null) is from before Hunt 23, when every install had "".
+     */
+    fun backupInstallId(raw: String?): String = raw?.takeIf { it.isEmpty() || Regex("-[A-Za-z0-9]{1,36}").matches(it) } ?: ""
+
+    /** Hunt 24 E5: on restore, both here and on disk (read again when Planner next starts). */
+    fun adoptInstallId(context: android.content.Context, id: String) {
+        context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE).edit().putString("installId", id).commit()
+        installId = id
     }
 
     // Messages waiting for MyBudget are kept on disk (BudgetOutbox), one line each: fields separated by tabs, with
@@ -118,6 +137,11 @@ object BudgetLink {
 
     // A bill without an amount gets no payment entry when it is marked paid (Payments.setPaid): it goes by the bill.
     fun unpricedPaymentId(item: ItineraryItem): String = "planner-paid-${item.id}$installId"
+
+    // Hunt 23 P4 / Hunt 24 E3: an Add in a currency other than MyBudget's budget ([budgetCurrency]), which it would only refuse.
+    // Never an Undone: MyBudget finds an expense by its id whatever the currency, and answers at once for one it never added.
+    fun refusedLocally(message: Message, budgetCurrency: String?): Boolean =
+        message is Message.Add && budgetCurrency != null && !message.currency.equals(budgetCurrency, ignoreCase = true)
 
     /** What MyBudget should hear about a bill going from [before] to [after]: payments that now count and ones undone. */
     fun changes(before: ItineraryItem, after: ItineraryItem): List<Message> {

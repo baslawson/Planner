@@ -45,11 +45,19 @@ class ReminderReceiver : BroadcastReceiver() {
         val ringFor = ringSecondsNow(context, intent.getBooleanExtra(ReminderScheduler.EXTRA_RING, false),
             intent.getIntExtra(ReminderScheduler.EXTRA_RING_SECONDS, 0))
         if (ringFor != null && ringingAlarmsEnabled(context)) {
+            // Hunt 24 D1: reserved, as a task's ringing start is, so a start Android delivers again after ending the process is
+            // refused once the reminder was deleted, paid, skipped, snoozed or moved (ReminderScheduler.cancel). Kept on
+            // device-protected storage, so this works before the first unlock too. One that can't be reserved rings as before.
+            val token = if (id == 0L) null else runCatching { OwnedAlarmStarts.reserve(context, OwnedAlarmStarts.EVENT, id.toString()) }
+                .onFailure { android.util.Log.w("ReminderReceiver", "Couldn't reserve the ringing start", it) }.getOrNull()
             try {
                 ContextCompat.startForegroundService(context, Intent(context, AlarmService::class.java).putExtras(intent)
-                    .putExtra(AlarmService.EXTRA_RING_FOR, ringFor))
+                    .putExtra(AlarmService.EXTRA_RING_FOR, ringFor)
+                    // Not an earlier ring's (a snooze set from the ringing alarm carries its extras).
+                    .apply { if (token != null) putExtra(EXTRA_EVENT_START, token) else removeExtra(EXTRA_EVENT_START) })
                 return
             } catch (e: Exception) {
+                token?.let { runCatching { OwnedAlarmStarts.cancel(context, OwnedAlarmStarts.EVENT, id.toString(), it) } }
                 // Android 12+ lets a background app start the ringing service from an exact alarm only. Without "Alarms &
                 // reminders" (off by default from Android 14) this alarm came inexact, and nothing else allowed then can
                 // ring: setAlarmClock needs the same permission, and full-screen intents are for calling and clock apps.

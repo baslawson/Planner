@@ -311,6 +311,9 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         com.example.itinerary.widget.TodayWidget.requestUpdate(this)
         AlarmService.stopIfUnseen(this)
+        // Hunt 24 E8: MyBudget's currency may have changed while Planner was away: learnt again from its next answer (back
+        // from MyBudget, its answer comes after this), rather than refusing bills in the new one for as long as Planner runs.
+        (application as ItineraryApp).budgetOutbox.budgetCurrency = null
         shareUpcomingBills()
         // Once per process, and again when the exact-alarm permission (just granted in system settings, say) or the
         // time zone changed: see RescheduleOnOpen.
