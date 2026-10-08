@@ -75,7 +75,7 @@ $env:JAVA_HOME = "<path-to-jdk-21>"
 ```
 
 ### Build, copy, install
-The original workflow used an unpacked `gradle.bat`; use the checked-in wrapper now, then copy to `Downloads\Planner.apk` and
+The original workflow used an unpacked `gradle.bat`; use the checked-in wrapper now, then copy to `Planner.apk` in the project folder and
 **verify the copy by hash**, not by size:
 
 ```
@@ -223,7 +223,7 @@ waiting for focus) and tests time out at random. Before a full run:
 - [ ] `logcat -b crash` clean for the package.
 - [ ] The app left on the screen you found it on.
 - [ ] `NOTES.md` updated: what changed, what was tested, and what was **not**.
-- [ ] `Downloads\Planner.apk` refreshed and hash-verified if the build changed.
+- [ ] `Planner.apk` in the project folder refreshed and hash-verified if the build changed.
 
 ## Reporting
 
