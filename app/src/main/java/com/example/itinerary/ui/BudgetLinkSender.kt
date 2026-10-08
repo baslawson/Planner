@@ -11,16 +11,15 @@ import com.example.itinerary.data.BudgetLink
 fun budgetLinkInstalled(context: Context): Boolean =
     Intent(BudgetLink.ACTION_ADD).setPackage(BudgetLink.PACKAGE).resolveActivity(context.packageManager) != null
 
-fun budgetIntent(message: BudgetLink.Message): Intent? = when (message) {
+fun budgetIntent(message: BudgetLink.Message): Intent = when (message) {
     is BudgetLink.Message.Add -> Intent(BudgetLink.ACTION_ADD).setPackage(BudgetLink.PACKAGE)
         .putExtra(BudgetLink.EXTRA_PAYMENT_ID, message.paymentId).putExtra(BudgetLink.EXTRA_BILL_KEY, message.billKey)
-        .putExtra(BudgetLink.EXTRA_PAYEE, message.payee).putExtra(BudgetLink.EXTRA_CURRENCY, "AUD")
+        .putExtra(BudgetLink.EXTRA_PAYEE, message.payee).putExtra(BudgetLink.EXTRA_CURRENCY, message.currency)
         .putExtra(BudgetLink.EXTRA_DATE, message.date.toString()).putExtra(BudgetLink.EXTRA_NOTE, BudgetLink.NOTE)
         .putExtra(BudgetLink.EXTRA_UPCOMING_ID, message.upcomingId)
         .apply { message.amount?.let { putExtra(BudgetLink.EXTRA_AMOUNT, it) } }
     is BudgetLink.Message.Undone -> Intent(BudgetLink.ACTION_UNDONE).setPackage(BudgetLink.PACKAGE)
         .putExtra(BudgetLink.EXTRA_PAYMENT_ID, message.paymentId)
-    is BudgetLink.Message.NotAud -> null
 }
 
 /**
@@ -29,13 +28,16 @@ fun budgetIntent(message: BudgetLink.Message): Intent? = when (message) {
  */
 fun sendUpcomingBills(context: Context, bills: List<BudgetLink.Upcoming>) {
     if (!budgetLinkInstalled(context)) return
-    val json = org.json.JSONArray()
-    bills.forEach { b ->
-        json.put(org.json.JSONObject().put("id", b.id).put("billKey", b.billKey).put("payee", b.payee).put("due", b.due.toString())
-            .apply { b.amount?.let { put("amountCents", it) } })
-    }
+    fun json(list: List<BudgetLink.Upcoming>, withCurrency: Boolean) = org.json.JSONArray().apply {
+        list.forEach { b ->
+            put(org.json.JSONObject().put("id", b.id).put("billKey", b.billKey).put("payee", b.payee).put("due", b.due.toString())
+                .apply { b.amount?.let { put("amountCents", it) }; if (withCurrency) put("currency", b.currency) })
+        }
+    }.toString()
     // Also to a MyBudget that was force-stopped or never opened yet: Android skips such apps unless asked not to.
-    val intent = Intent(BudgetLink.ACTION_UPCOMING).setPackage(BudgetLink.PACKAGE).putExtra(BudgetLink.EXTRA_BILLS, json.toString())
+    val intent = Intent(BudgetLink.ACTION_UPCOMING).setPackage(BudgetLink.PACKAGE)
+        .putExtra(BudgetLink.EXTRA_BILLS, json(BudgetLink.forOldBudget(bills), withCurrency = false))
+        .putExtra(BudgetLink.EXTRA_BILLS_ALL, json(bills, withCurrency = true))
         .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
     if (android.os.Build.VERSION.SDK_INT >= 34)
         context.sendBroadcast(intent, null, android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle())
@@ -74,7 +76,6 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         // L3: taken back meanwhile (paid and undone before it went): it has left the outbox.
         if (message !in outbox.pending()) return next()
         val intent = budgetIntent(message)
-        if (intent == null) { outbox.remove(message); toast("Not sent to MyBudget: it keeps AUD bills only."); return next() }
         // Not reachable: nothing waits for a MyBudget that isn't there (it would pile up and arrive long after).
         if (!budgetLinkInstalled(activity)) {
             queue.clear(); outbox.clear()

@@ -5,7 +5,8 @@ import java.time.LocalDate
 /**
  * Paid bills handed to MyBudget (Settings → "Send paid bills to MyBudget"): MyBudget opens a screen that asks for the
  * category and account, and keeps the expense. Each payment goes by its id, so MyBudget adds it once and finds it again
- * when the payment is undone here. MyBudget keeps AUD only. MainActivity sends these; the Repository reports them.
+ * when the payment is undone here. Each goes with its bill's currency: MyBudget keeps the ones in its budget's currency
+ * (MyBudget 0.0.7 and earlier keep AUD only). MainActivity sends these; the Repository reports them.
  */
 object BudgetLink {
     const val PACKAGE = "com.mybudget.app"
@@ -24,22 +25,29 @@ object BudgetLink {
     // MyBudget's reply: one line Planner shows as a toast ("Added to MyBudget: Utilities −$142.80").
     const val EXTRA_SUMMARY = "summary"
     const val NOTE = "From Planner"
-    private const val CURRENCY = "AUD"
+    // The only currency of MyBudget 0.0.7 and earlier, which read the `bills` list and plan every bill in it.
+    private const val OLD_CURRENCY = "AUD"
 
     // Upcoming bills (sent quietly, as a broadcast to MyBudget only, when Planner opens and closes with the setting on):
     // MyBudget shows them, plans for them, and replaces its list with each one sent. They're never money there: the
     // expense still comes from marking the bill paid here.
     const val ACTION_UPCOMING = "com.mybudget.app.action.UPCOMING_BILLS"
-    const val EXTRA_BILLS = "bills" // JSON array of {id, billKey, payee, due (YYYY-MM-DD), amountCents (optional)}
+    const val EXTRA_BILLS = "bills" // JSON array of {id, billKey, payee, due (YYYY-MM-DD), amountCents (optional)}: AUD only
+    // The same with every currency, each with its `currency`: MyBudget 0.0.8 and later read this one and keep the bills
+    // in their budget's currency. `bills` stays for older MyBudget, which would take any bill in it as AUD.
+    const val EXTRA_BILLS_ALL = "billsAll"
     private const val DAYS_BACK = 31L
     private const val DAYS_AHEAD = 62L
     const val MAX_UPCOMING = 200
 
-    data class Upcoming(val id: String, val billKey: String, val payee: String, val due: LocalDate, val amount: Long?)
+    data class Upcoming(val id: String, val billKey: String, val payee: String, val due: LocalDate, val amount: Long?, val currency: String = OLD_CURRENCY)
 
-    /** Unpaid AUD bills from a month back (overdue) to two months ahead, by date: what's left to pay, or no amount. */
+    /** The bills older MyBudget can read (the `bills` list). */
+    fun forOldBudget(bills: List<Upcoming>): List<Upcoming> = bills.filter { it.currency == OLD_CURRENCY }
+
+    /** Unpaid bills from a month back (overdue) to two months ahead, by date: what's left to pay, or no amount. */
     fun upcoming(items: List<ItineraryItem>, today: LocalDate): List<Upcoming> = items.asSequence()
-        .filter { it.category == "Bills" && !it.skipped && it.billCurrency == CURRENCY && it.date in today.minusDays(DAYS_BACK)..today.plusDays(DAYS_AHEAD) }
+        .filter { it.category == "Bills" && !it.skipped && it.date in today.minusDays(DAYS_BACK)..today.plusDays(DAYS_AHEAD) }
         .mapNotNull { item ->
             val left = Payments.remaining(item.billAmountMinor, item.paid, item.payments)
             when {
@@ -50,7 +58,7 @@ object BudgetLink {
         }
         .sortedWith(compareBy({ it.first.date }, { it.first.id }))
         .take(MAX_UPCOMING)
-        .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left) }
+        .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left, item.billCurrency) }
         .toList()
 
     fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}"
@@ -58,9 +66,8 @@ object BudgetLink {
     // Messages waiting for MyBudget are kept on disk (BudgetOutbox), one line each: fields separated by tabs, with
     // backslash, tab and line breaks escaped. null for a line this version can't read (it's dropped).
     fun encode(m: Message): String = when (m) {
-        is Message.Add -> listOf("A", m.paymentId, m.billKey, m.payee, m.amount?.toString() ?: "", m.date.toString(), m.upcomingId)
+        is Message.Add -> listOf("A", m.paymentId, m.billKey, m.payee, m.amount?.toString() ?: "", m.date.toString(), m.upcomingId, m.currency)
         is Message.Undone -> listOf("U", m.paymentId)
-        is Message.NotAud -> listOf("N", m.currency)
     }.joinToString("\t") { it.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r") }
 
     fun decode(line: String): Message? = runCatching {
@@ -76,17 +83,16 @@ object BudgetLink {
         }
         f += cell.toString()
         when (f[0]) {
-            "A" -> Message.Add(f[1], f[2], f[3], f[4].takeIf { it.isNotEmpty() }?.toLong(), LocalDate.parse(f[5]), f.getOrElse(6) { "" })
+            // Lines written before currencies were sent are AUD (only AUD bills went then).
+            "A" -> Message.Add(f[1], f[2], f[3], f[4].takeIf { it.isNotEmpty() }?.toLong(), LocalDate.parse(f[5]), f.getOrElse(6) { "" }, f.getOrElse(7) { OLD_CURRENCY })
             "U" -> Message.Undone(f[1])
-            "N" -> Message.NotAud(f[1])
-            else -> null
+            else -> null // also "N" (another currency, not sent) from before: nothing to send now
         }
     }.getOrNull()
 
     sealed interface Message {
-        data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate, val upcomingId: String = "") : Message
+        data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate, val upcomingId: String = "", val currency: String = OLD_CURRENCY) : Message
         data class Undone(val paymentId: String) : Message
-        data class NotAud(val currency: String) : Message
     }
 
     // The same for every occurrence of a repeating bill, so MyBudget can suggest the category it had last time.
@@ -107,10 +113,11 @@ object BudgetLink {
         // Hunt 22 L1: paid without an amount (MyBudget has it by the bill) and no longer paid that way, whatever its amount
         // now: given one later and then unpaid, MyBudget was never told, and paying again made a second expense there.
         if (before.paid && liveBefore.isEmpty() && !(after.paid && liveAfter.isEmpty())) undone += unpricedPaymentId(after)
-        // MyBudget never had a payment in another currency, so it isn't told about one being undone either.
-        if (after.billCurrency != CURRENCY) return if (added.isNotEmpty() || paidNow) listOf(Message.NotAud(after.billCurrency)) else emptyList()
+        // Every currency goes: MyBudget adds only bills in its budget's currency and says so for others. An undone payment
+        // it never added finds nothing there and asks nothing.
+        val currency = after.billCurrency
         return undone.map { Message.Undone(it) } +
-            added.map { Message.Add(it.id, billKey(after), after.title, it.amount, it.date, upcomingId(after)) } +
-            listOfNotNull(if (paidNow) Message.Add(unpricedPaymentId(after), billKey(after), after.title, null, LocalDate.now(), upcomingId(after)) else null)
+            added.map { Message.Add(it.id, billKey(after), after.title, it.amount, it.date, upcomingId(after), currency) } +
+            listOfNotNull(if (paidNow) Message.Add(unpricedPaymentId(after), billKey(after), after.title, null, LocalDate.now(), upcomingId(after), currency) else null)
     }
 }

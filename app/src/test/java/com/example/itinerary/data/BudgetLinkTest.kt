@@ -13,8 +13,8 @@ class BudgetLinkTest {
         val messages = listOf(
             BudgetLink.Message.Add("pay-1", "planner-series-s", "Tab\there, new\nline and back\\slash", 14280, LocalDate.of(2026, 10, 7), "planner-bill-7"),
             BudgetLink.Message.Add("planner-paid-3", "planner-bill-3", "No amount", null, LocalDate.of(2026, 10, 8)),
-            BudgetLink.Message.Undone("pay-1"),
-            BudgetLink.Message.NotAud("USD"))
+            BudgetLink.Message.Add("pay-2", "planner-bill-4", "Hotel", 9900, LocalDate.of(2026, 10, 8), "planner-bill-4", "USD"),
+            BudgetLink.Message.Undone("pay-1"))
         for (m in messages) {
             val line = BudgetLink.encode(m)
             assertFalse("one line: $line", line.contains('\n'))
@@ -24,6 +24,9 @@ class BudgetLinkTest {
         assertNull(BudgetLink.decode("A\ttoo\tfew"))
         // Written before the upcoming id existed: still read.
         assertEquals(BudgetLink.Message.Add("p", "k", "x", 5, LocalDate.of(2026, 1, 2)), BudgetLink.decode("A\tp\tk\tx\t5\t2026-01-02"))
+        // Written before currencies were sent: AUD; an old "another currency" line is dropped.
+        assertEquals("AUD", (BudgetLink.decode("A\tp\tk\tx\t5\t2026-01-02\tplanner-bill-1") as BudgetLink.Message.Add).currency)
+        assertNull(BudgetLink.decode("N\tUSD"))
     }
 
     @Test fun paidBillsNameTheirUpcomingEntry() {
@@ -36,7 +39,7 @@ class BudgetLinkTest {
         assertEquals("planner-bill-7", paidNow.upcomingId)
     }
 
-    @Test fun upcomingBillsAreUnpaidAudBillsNearToday() {
+    @Test fun upcomingBillsAreUnpaidBillsNearToday() {
         val today = LocalDate.of(2026, 10, 7)
         fun at(id: Long, date: LocalDate, amount: Long? = 5000) = bill(amount).copy(id = id, date = date, title = "Bill $id")
         val items = listOf(
@@ -46,14 +49,16 @@ class BudgetLinkTest {
             at(4, today.plusDays(4)).copy(payments = listOf(BillPayment(id = "p", amount = 2000))), // part paid: what's left
             at(5, today.plusDays(6), amount = null),                                   // no amount
             at(6, today.plusDays(7), amount = null).copy(paid = true),                 // no amount, paid
-            at(7, today.plusDays(8)).copy(billCurrency = "USD"),                       // not AUD
+            at(7, today.plusDays(8)).copy(billCurrency = "USD"),                       // another currency: billsAll only
             at(8, today.plusDays(9)).copy(skipped = true),                             // skipped
             at(9, today.plusDays(63)),                                                 // too far ahead
             at(10, today.minusDays(32)),                                               // too long ago
             at(11, today.plusDays(2)).copy(category = "Food"),                         // not a bill
             at(12, today.plusDays(1)).copy(seriesId = "s1"))
         val upcoming = BudgetLink.upcoming(items, today)
-        assertEquals(listOf(2L, 12L, 1L, 4L, 5L), upcoming.map { it.id.removePrefix("planner-bill-").toLong() })
+        assertEquals(listOf(2L, 12L, 1L, 4L, 5L, 7L), upcoming.map { it.id.removePrefix("planner-bill-").toLong() })
+        assertEquals("USD", upcoming.last().currency)
+        assertEquals(listOf(2L, 12L, 1L, 4L, 5L), BudgetLink.forOldBudget(upcoming).map { it.id.removePrefix("planner-bill-").toLong() })
         assertEquals(3000L, upcoming.first { it.id == "planner-bill-4" }.amount)
         assertNull(upcoming.first { it.id == "planner-bill-5" }.amount)
         assertEquals("planner-series-s1", upcoming.first { it.id == "planner-bill-12" }.billKey)
@@ -109,11 +114,14 @@ class BudgetLinkTest {
         assertEquals(listOf(again.payments.single().id), BudgetLink.changes(unpaid, again).map { (it as BudgetLink.Message.Add).paymentId })
     }
 
-    @Test fun otherCurrenciesAreNotSent() {
+    // MyBudget keeps the bills in its budget's currency, so every currency goes, named.
+    @Test fun otherCurrenciesAreSentWithTheirCurrency() {
         val before = bill(currency = "USD")
         val paid = Payments.setPaid(before, true)
-        assertEquals(listOf(BudgetLink.Message.NotAud("USD")), BudgetLink.changes(before, paid))
-        assertTrue(BudgetLink.changes(paid, Payments.setPaid(paid, false)).isEmpty())
+        val add = BudgetLink.changes(before, paid).single() as BudgetLink.Message.Add
+        assertEquals("USD", add.currency)
+        assertEquals(listOf(BudgetLink.Message.Undone(add.paymentId)), BudgetLink.changes(paid, Payments.setPaid(paid, false)))
+        assertEquals("AUD", (BudgetLink.changes(bill(), Payments.setPaid(bill(), true)).single() as BudgetLink.Message.Add).currency)
     }
 
     @Test fun repeatingBillsShareAKeyAndOtherCategoriesSendNothing() {

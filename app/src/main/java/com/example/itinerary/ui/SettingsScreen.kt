@@ -137,7 +137,7 @@ fun SettingsScreen(
                         settings.setSendBillsToBudget(on)
                         if (!on) { sendUpcomingBills(context, emptyList()); (context.applicationContext as com.example.itinerary.ItineraryApp).budgetOutbox.clear() } // MyBudget drops the upcoming bills; nothing waits
                     })
-                    Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. MyBudget also sees your upcoming bills, to plan for them. AUD bills only."
+                    Text(if (budgetInstalled) "When you mark a bill paid, MyBudget opens to add it as an expense. MyBudget also sees your upcoming bills, to plan for them. MyBudget keeps bills in its budget's currency."
                         else "MyBudget isn't installed on this phone, so nothing is sent.", style = MaterialTheme.typography.bodySmall)
                     // RS-4: not Agenda settings: a heading of their own.
                     SettingsHeading("Start and notes")
