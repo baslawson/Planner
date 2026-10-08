@@ -24,6 +24,9 @@ object BudgetLink {
     const val EXTRA_UPCOMING_ID = "upcomingId"
     // MyBudget's reply: one line Planner shows as a toast ("Added to MyBudget: Utilities −$142.80").
     const val EXTRA_SUMMARY = "summary"
+    // Hunt 23 P4: MyBudget 0.0.8 and later also say which currency their budget is in, so bills in another currency (which
+    // MyBudget can't keep) aren't opened there at all.
+    const val EXTRA_BUDGET_CURRENCY = "budgetCurrency"
     const val NOTE = "From Planner"
     // The only currency of MyBudget 0.0.7 and earlier, which read the `bills` list and plan every bill in it.
     private const val OLD_CURRENCY = "AUD"
@@ -61,13 +64,28 @@ object BudgetLink {
         .map { (item, left) -> Upcoming(upcomingId(item), billKey(item), item.title.take(80), item.date, left, item.billCurrency) }
         .toList()
 
-    fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}"
+    fun upcomingId(item: ItineraryItem): String = "planner-bill-${item.id}$installId"
+
+    /**
+     * Hunt 23: added to the ids made from a bill's database id, which start again from 1 when Planner is installed afresh
+     * (or its data cleared): without it a new bill could be taken for an old one in MyBudget ("Already in MyBudget").
+     * Empty for an install that had data before this came in, so the ids MyBudget already holds still match.
+     */
+    @Volatile var installId = ""
+        private set
+
+    /** Called before the database first opens; [freshData]: it doesn't exist yet. */
+    fun useInstallId(context: android.content.Context, freshData: Boolean) {
+        val prefs = context.getSharedPreferences("budget_link", android.content.Context.MODE_PRIVATE)
+        installId = prefs.getString("installId", null) ?: (if (freshData) "-" + java.util.UUID.randomUUID().toString().take(8) else "")
+            .also { prefs.edit().putString("installId", it).commit() }
+    }
 
     // Messages waiting for MyBudget are kept on disk (BudgetOutbox), one line each: fields separated by tabs, with
     // backslash, tab and line breaks escaped. null for a line this version can't read (it's dropped).
     fun encode(m: Message): String = when (m) {
         is Message.Add -> listOf("A", m.paymentId, m.billKey, m.payee, m.amount?.toString() ?: "", m.date.toString(), m.upcomingId, m.currency)
-        is Message.Undone -> listOf("U", m.paymentId)
+        is Message.Undone -> listOf("U", m.paymentId, m.currency)
     }.joinToString("\t") { it.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r") }
 
     fun decode(line: String): Message? = runCatching {
@@ -85,21 +103,21 @@ object BudgetLink {
         when (f[0]) {
             // Lines written before currencies were sent are AUD (only AUD bills went then).
             "A" -> Message.Add(f[1], f[2], f[3], f[4].takeIf { it.isNotEmpty() }?.toLong(), LocalDate.parse(f[5]), f.getOrElse(6) { "" }, f.getOrElse(7) { OLD_CURRENCY })
-            "U" -> Message.Undone(f[1])
+            "U" -> Message.Undone(f[1], f.getOrElse(2) { OLD_CURRENCY })
             else -> null // also "N" (another currency, not sent) from before: nothing to send now
         }
     }.getOrNull()
 
     sealed interface Message {
         data class Add(val paymentId: String, val billKey: String, val payee: String, val amount: Long?, val date: LocalDate, val upcomingId: String = "", val currency: String = OLD_CURRENCY) : Message
-        data class Undone(val paymentId: String) : Message
+        data class Undone(val paymentId: String, val currency: String = OLD_CURRENCY) : Message
     }
 
     // The same for every occurrence of a repeating bill, so MyBudget can suggest the category it had last time.
-    fun billKey(item: ItineraryItem): String = item.seriesId?.let { "planner-series-$it" } ?: "planner-bill-${item.id}"
+    fun billKey(item: ItineraryItem): String = item.seriesId?.let { "planner-series-$it" } ?: "planner-bill-${item.id}$installId"
 
     // A bill without an amount gets no payment entry when it is marked paid (Payments.setPaid): it goes by the bill.
-    fun unpricedPaymentId(item: ItineraryItem): String = "planner-paid-${item.id}"
+    fun unpricedPaymentId(item: ItineraryItem): String = "planner-paid-${item.id}$installId"
 
     /** What MyBudget should hear about a bill going from [before] to [after]: payments that now count and ones undone. */
     fun changes(before: ItineraryItem, after: ItineraryItem): List<Message> {
@@ -116,7 +134,7 @@ object BudgetLink {
         // Every currency goes: MyBudget adds only bills in its budget's currency and says so for others. An undone payment
         // it never added finds nothing there and asks nothing.
         val currency = after.billCurrency
-        return undone.map { Message.Undone(it) } +
+        return undone.map { Message.Undone(it, currency) } +
             added.map { Message.Add(it.id, billKey(after), after.title, it.amount, it.date, upcomingId(after), currency) } +
             listOfNotNull(if (paidNow) Message.Add(unpricedPaymentId(after), billKey(after), after.title, null, LocalDate.now(), upcomingId(after), currency) else null)
     }

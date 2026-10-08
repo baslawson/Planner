@@ -34,6 +34,7 @@ class ItineraryApp : Application() {
 
     // Internal so instrumented tests can put outside-calendar events in place without a server.
     internal val database: AppDatabase by lazy {
+        com.example.itinerary.data.BudgetLink.useInstallId(this, freshData = !getDatabasePath("itinerary.db").exists())
         Room.databaseBuilder(this, AppDatabase::class.java, "itinerary.db")
             .addMigrations(*com.example.itinerary.data.ALL_MIGRATIONS)
             .build()

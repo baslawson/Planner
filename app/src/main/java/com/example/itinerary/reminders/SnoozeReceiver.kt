@@ -11,6 +11,8 @@ import java.time.ZonedDateTime
 fun snoozeTime(tomorrow: Boolean, now: ZonedDateTime = ZonedDateTime.now()): Long =
     (if (tomorrow) now.toLocalDate().plusDays(1).atTime(9, 0).atZone(now.zone) else now.plusHours(1)).toInstant().toEpochMilli()
 
+// Hunt 23: nothing posts this any more (snoozing goes through SnoozeActivity's chooser). Kept for notifications an earlier
+// version posted, whose Snooze buttons still come here, and for DraftRecoveryUiTest. Not exported: only Planner can send it.
 class SnoozeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val token = intent.getStringExtra(ReminderScheduler.EXTRA_SNOOZE_TOKEN) ?: return

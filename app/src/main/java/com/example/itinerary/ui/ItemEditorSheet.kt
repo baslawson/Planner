@@ -1193,8 +1193,12 @@ private fun ItemEditorForm(
                     }
                     else error = "The scanned currency differs from the bill's payment history. Check the amount manually."
                 }
-                // Offered only for an AUD bill (the dialog checks), so Save keeps them (Bills.bpayForCurrency).
-                suggestedBpay?.let { (biller, reference) -> bpayBillerCode = biller; bpayReference = reference }
+                // Offered only for an AUD bill (the dialog checks), so Save keeps them (Bills.bpayForCurrency). Hunt 23: unless
+                // the scan's currency was refused above, leaving the bill in one without BPAY: then they aren't taken either.
+                suggestedBpay?.let { (biller, reference) ->
+                    if (Bills.hasBpay(billCurrency)) { bpayBillerCode = biller; bpayReference = reference }
+                    else if (error == null) error = "BPAY is for AUD bills only, so the scanned BPAY numbers weren't used."
+                }
                 selectCategory("Bills")
                 billSuggestion = null
                 billReviewFiles = emptyList()

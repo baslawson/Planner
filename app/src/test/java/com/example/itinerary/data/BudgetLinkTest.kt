@@ -120,7 +120,7 @@ class BudgetLinkTest {
         val paid = Payments.setPaid(before, true)
         val add = BudgetLink.changes(before, paid).single() as BudgetLink.Message.Add
         assertEquals("USD", add.currency)
-        assertEquals(listOf(BudgetLink.Message.Undone(add.paymentId)), BudgetLink.changes(paid, Payments.setPaid(paid, false)))
+        assertEquals(listOf(BudgetLink.Message.Undone(add.paymentId, "USD")), BudgetLink.changes(paid, Payments.setPaid(paid, false)))
         assertEquals("AUD", (BudgetLink.changes(bill(), Payments.setPaid(bill(), true)).single() as BudgetLink.Message.Add).currency)
     }
 

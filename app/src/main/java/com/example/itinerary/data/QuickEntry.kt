@@ -1173,10 +1173,23 @@ object QuickEntry {
             return end to "That end date isn't valid."
         }
         repeatUntilText?.let { raw ->
-            val end = untilEnd(raw, today).let { (end, problem) -> end ?: return error(problem) }
+            var end = untilEnd(raw, today).let { (end, problem) -> end ?: return error(problem) }
+            // Hunt 23: "every day from next Monday until Friday": the Friday after it starts, not this week's.
+            if (end < date && rx("^(?:(?:next|this)\\s+)?(?:$weekdays)$").matches(raw.trim())) untilEnd(raw, date).first?.let { end = it }
             if (end < date) return error("The repeat ends before it starts. Choose a later end date.")
             repeatCount = occurrencesWhile(repeat, date, repeatAnchorDay) { it <= end }
             if (repeatCount !in 2..365) return error("Choose an end date that gives between 2 and 365 occurrences.")
+        }
+        // Hunt 23 P2: with a repeat, a date range is when it runs, each occurrence one day: "Physio daily 12-16 Oct" is five
+        // days of physio, not five-day entries every day.
+        var rangeEndsRepeat = false
+        rangeEnd?.takeIf { repeat != RepeatRule.NONE }?.let { end ->
+            if (countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null)
+                return error("End the repeat one way: a date, a number of times or a length.")
+            repeatCount = occurrencesWhile(repeat, date, repeatAnchorDay) { it <= end }
+            if (repeatCount !in 2..365) return error("Choose dates that give between 2 and 365 occurrences.")
+            rangeEnd = null
+            rangeEndsRepeat = true
         }
         // "Away tomorrow until Friday": the Friday from the first day. Until the first day itself is just that day.
         stayUntilText?.let { raw ->
@@ -1538,7 +1551,7 @@ object QuickEntry {
             if (title.isBlank()) "Add a name." else clarification,
             dateSpecified, duration, ambiguous, location,
             phrases.sortedBy { it.start }, dateChoices, timeChoices, clarification != null && title.isNotBlank(),
-            reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null, timePrompt,
+            reminderMinutes ?: if (reminderImplied) 0 else null, repeat, repeatCount, countMatches.isNotEmpty() || repeatPeriod != null || repeatUntilText != null || rangeEndsRepeat, timePrompt,
             taskHint, reminderImplied, endDate, extraTimes, pastSaid, nextDayTimes, periodInTitle, endTime, reminderUnit,
             reminderAt, if (reminderAt == null) 0 else if (reminderDaysBack > 0) reminderDaysBack else -1, repeatAnchorDay)
     }

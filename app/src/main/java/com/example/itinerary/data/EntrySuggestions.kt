@@ -32,9 +32,15 @@ object BillSuggestions {
     private val billerLabel = Regex("(?i)\\bbiller\\s*(?:code|no\\.?|number)?\\b\\s*[:#=-]?\\s*")
     private val referenceLabel = Regex("(?i)\\b(?:customer\\s+reference(?:\\s+(?:no\\.?|number))?|CRN|ref(?:erence)?(?:\\s*(?:no\\.?|number))?)\\b\\.?\\s*[:#=-]?\\s*")
     // After the label: "(CRN):" or ":" may come before the number; the number stops at the first other character.
-    private fun digits(value: String, sizes: IntRange): String? =
-        Regex("^[0-9][0-9 ]*[0-9]|^[0-9]").find(value.trim().replace(Regex("^\\([^)]{1,12}\\)\\s*[:#=-]?\\s*"), ""))
-            ?.value?.trim()?.replace(" ", "")?.takeIf { it.length in sizes }
+    private fun digits(value: String, sizes: IntRange): String? {
+        val rest = value.trim().replace(Regex("^\\([^)]{1,12}\\)\\s*[:#=-]?\\s*"), "")
+        val number = Regex("^[0-9][0-9 ]*[0-9]|^[0-9]").find(rest) ?: return null
+        // Hunt 23: digits that are only the start of something else ("Ref 2026/123", "01/10/2026", "12.50") are no number.
+        // A full stop or comma that ends the sentence is fine.
+        val next = rest.getOrNull(number.range.last + 1); val after = rest.getOrNull(number.range.last + 2)
+        if (next != null && !next.isWhitespace() && !(next in ".,;:)" && after?.isDigit() != true)) return null
+        return number.value.replace(" ", "").takeIf { it.length in sizes }
+    }
     /** The biller code (2–10 digits) and reference (2–20 digits, spaces dropped) from a BPAY box; null when unclear. */
     private fun bpay(lines: List<String>): Pair<String?, String?> {
         if (lines.none { bpayMark.containsMatchIn(it) }) return null to null

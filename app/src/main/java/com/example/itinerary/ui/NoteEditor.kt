@@ -394,15 +394,18 @@ fun NoteEditor(initial: PlannerNote, creating: Boolean, notebooks: List<String>,
     // [theirs] (a merge with a change made elsewhere) into the fields [mine] (what was sent) didn't change since: [now].
     fun takeTheirs(theirs: PlannerNote, mine: PlannerNote, now: PlannerNote) {
         var words = false
+        // Hunt 23: what saving itself tidied (a trimmed title, the body's trailing space) is no change from elsewhere: it
+        // would be put into the field being typed in, and clear Undo.
+        val sent = Notes.clean(mine)
         // Hunt 21 N1: also while the title is automatic: a title given elsewhere comes in (and stops it being automatic,
         // unless it is the first line), or the next save would write the first line back over it.
-        if (now.title == mine.title && theirs.title != mine.title) {
+        if (now.title == mine.title && theirs.title != sent.title) {
             autoTitle = autoTitleFor(theirs); title = if (autoTitle) "" else theirs.title; words = true
         }
-        if (now.content == mine.content && theirs.content != mine.content) {
+        if (now.content == mine.content && theirs.content != sent.content) {
             content = TextFieldValue(theirs.content, TextRange(theirs.content.length)); words = true
         }
-        if (now.notebook == mine.notebook && theirs.notebook != mine.notebook) { notebook = theirs.notebook; words = true }
+        if (now.notebook == mine.notebook && theirs.notebook != sent.notebook) { notebook = theirs.notebook; words = true }
         if (words) undo.reload() // EU-1: another device's words, not a step Undo could take back unseen
         if (now.color == mine.color) color = theirs.color
         if (now.pinned == mine.pinned) pinned = theirs.pinned

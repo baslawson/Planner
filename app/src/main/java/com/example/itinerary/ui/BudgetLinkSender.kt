@@ -54,6 +54,19 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
     private var waiting: BudgetLink.Message? = null
     lateinit var launcher: ActivityResultLauncher<Intent>
 
+    /**
+     * Hunt 23 P5: called from MainActivity.onCreate with what [saved] kept. Recreated (or after Android ended Planner), the
+     * message MyBudget has open is still waited for, so its answer is matched to it and it isn't opened a second time.
+     * Started afresh, nothing is open any more: what was in flight goes again (MyBudget adds a payment once).
+     */
+    fun restore(saved: String?) {
+        val message = saved?.let { BudgetLink.decode(it) }?.takeIf { it in outbox.pending() }
+        waiting = message; outbox.inFlight = message
+    }
+
+    /** What [restore] needs after a recreation. */
+    fun saved(): String? = waiting?.let { BudgetLink.encode(it) }
+
     /** Sends what's waiting in the outbox (when Planner starts, and when a bill is paid or unpaid). */
     fun resume() = next()
 
@@ -61,6 +74,7 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         val sent = waiting ?: return
         waiting = null; outbox.inFlight = null
         outbox.remove(sent)
+        data?.getStringExtra(BudgetLink.EXTRA_BUDGET_CURRENCY)?.trim()?.takeIf { it.length == 3 }?.let { outbox.budgetCurrency = it }
         val summary = data?.getStringExtra(BudgetLink.EXTRA_SUMMARY)?.take(160)?.takeIf { it.isNotBlank() }
         when {
             resultCode == Activity.RESULT_OK && summary != null -> toast(summary)
@@ -75,6 +89,14 @@ class BudgetLinkSender(private val activity: Activity, private val outbox: com.e
         val message = queue.removeFirstOrNull() ?: return
         // L3: taken back meanwhile (paid and undone before it went): it has left the outbox.
         if (message !in outbox.pending()) return next()
+        // Hunt 23 P4: MyBudget said its budget is in another currency: it would only refuse this one, so it isn't opened.
+        val currency = when (message) { is BudgetLink.Message.Add -> message.currency; is BudgetLink.Message.Undone -> message.currency }
+        val budgetCurrency = outbox.budgetCurrency
+        if (budgetCurrency != null && !currency.equals(budgetCurrency, ignoreCase = true)) {
+            outbox.remove(message)
+            if (message is BudgetLink.Message.Add) toast("Not sent to MyBudget: this bill is in $currency, but your budget is in $budgetCurrency.")
+            return next()
+        }
         val intent = budgetIntent(message)
         // Not reachable: nothing waits for a MyBudget that isn't there (it would pile up and arrive long after).
         if (!budgetLinkInstalled(activity)) {

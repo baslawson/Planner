@@ -1519,7 +1519,12 @@ class Repository(
         val jobs: List<Pair<Long, () -> Unit>> = reminders.mapNotNull { reminder -> items[reminder.itemId]?.let { item -> eventReminderAt(item, reminder) to {
             if (item.paid || item.skipped) scheduler.cancel(reminder.id)
             else if (!ReminderDeliveries.delivered(delivered[reminder.id], item, reminder)) scheduler.reconcile(item, reminder)
-        } } } + tasks.map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } } +
+        } } } +
+            // Hunt 23: a task done with no reminder, or one two days gone, has had its alarm taken away (completing it
+            // cancels it): going through each again (a file read and calls into Android) held the lock for seconds once
+            // done tasks piled up (a daily task leaves one a day).
+            tasks.filter { t -> !t.done || t.activeReminderAt?.let { it > System.currentTimeMillis() - 2 * 86_400_000L } == true }
+                .map { task -> (task.activeReminderAt ?: Long.MAX_VALUE) to { scheduler.scheduleTask(task) } } +
             notes.filter { it.reminderAt != null }.map { note -> note.activeReminderAt!! to { scheduler.scheduleNote(note) } }
         var failure: Exception? = null
         jobs.sortedByDescending { it.first }.forEach { (_, job) -> try { job() } catch (e: Exception) { failure = e } }

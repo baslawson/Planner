@@ -32,6 +32,10 @@ class BootReceiver : BroadcastReceiver() {
                 // Only a reboot leaves due alarms unseen for long: a time change fires past ones late, an update takes seconds.
                 if (intent.action == Intent.ACTION_BOOT_COMPLETED) showMissedReminders(context, afterBoot = true)
                 app.repository.rescheduleAllReminders()
+            } catch (e: Exception) {
+                // Hunt 23: a failure here (storage full, say) must not crash Planner in the background; the next boot,
+                // update or ring tries again.
+                android.util.Log.w("BootReceiver", "Couldn't set the reminders again (${intent.action})", e)
             } finally {
                 pending.finish()
             }

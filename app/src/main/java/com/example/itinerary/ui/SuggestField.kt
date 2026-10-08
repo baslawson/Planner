@@ -45,7 +45,13 @@ fun SuggestField(
     // Hunt 21 S3: the text with its cursor. Typing keeps the cursor where it is; a new value from outside (a suggestion
     // picked) puts it at the end, so typing on adds to the end, not into the middle of the picked words.
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(value, androidx.compose.ui.text.TextRange(value.length))) }
-    if (field.text != value) field = androidx.compose.ui.text.input.TextFieldValue(value, androidx.compose.ui.text.TextRange(value.length))
+    // Hunt 23: what was just typed, so a value the screen changed from it (a line break taken out, the length cap) keeps the
+    // cursor where it was, shifted by what went, rather than jumping it to the end.
+    var sent by remember { mutableStateOf<String?>(null) }
+    if (field.text != value) {
+        val cursor = if (sent != null && field.text == sent) (field.selection.end - (field.text.length - value.length)).coerceIn(0, value.length) else value.length
+        field = androidx.compose.ui.text.input.TextFieldValue(value, androidx.compose.ui.text.TextRange(cursor))
+    }
     // S7: Done closes the list too, then does what it did (the caller's action, else closing the keyboard).
     val actions = KeyboardActions(onDone = { open = false; keyboardActions.onDone?.invoke(this) ?: defaultKeyboardAction(androidx.compose.ui.text.input.ImeAction.Done) },
         onGo = keyboardActions.onGo, onNext = keyboardActions.onNext, onPrevious = keyboardActions.onPrevious,
@@ -54,7 +60,7 @@ fun SuggestField(
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it; if (enabled) runCatching { focus.requestFocus() } }) {
         OutlinedTextField(
             value = field,
-            onValueChange = { typed -> val changed = typed.text != field.text; field = typed; if (changed) { onValueChange(typed.text); open = true } },
+            onValueChange = { typed -> val changed = typed.text != field.text; field = typed; if (changed) { sent = typed.text; onValueChange(typed.text); open = true } },
             modifier = Modifier.fillMaxWidth().focusRequester(focus).menuAnchor(MenuAnchorType.PrimaryEditable, enabled)
                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) open = true },
             label = { Text(label) },
@@ -71,7 +77,7 @@ fun SuggestField(
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false },
             modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(scroll, inset = 8.dp), scrollState = scroll) {
             suggestions.forEach { name ->
-                DropdownMenuItem(text = { Text(shown(name)) }, onClick = { onPick(name); open = false })
+                DropdownMenuItem(text = { Text(shown(name)) }, onClick = { sent = null; onPick(name); open = false })
             }
         }
     }

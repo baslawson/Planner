@@ -12,7 +12,15 @@ class BudgetOutbox(context: Context) {
     private val prefs = context.getSharedPreferences("budget_outbox", Context.MODE_PRIVATE)
 
     // The message MyBudget has open now (BudgetLinkSender), which an Undone can't take back here: MyBudget must hear it.
-    @Volatile var inFlight: BudgetLink.Message? = null
+    // Hunt 23 P3: on disk, as Android may end Planner while MyBudget has it open and an Undone come from a notification.
+    var inFlight: BudgetLink.Message?
+        @Synchronized get() = prefs.getString(KEY_IN_FLIGHT, null)?.let { BudgetLink.decode(it) }
+        @Synchronized set(value) {
+            prefs.edit().apply { if (value == null) remove(KEY_IN_FLIGHT) else putString(KEY_IN_FLIGHT, BudgetLink.encode(value)) }.commit()
+        }
+
+    // Hunt 23 P4: the currency MyBudget last said its budget is in (BudgetLinkSender), while Planner runs; null until it answers.
+    @Volatile var budgetCurrency: String? = null
 
     @Synchronized fun add(messages: List<BudgetLink.Message>) {
         if (messages.isEmpty()) return
@@ -32,11 +40,12 @@ class BudgetOutbox(context: Context) {
         val all = pending().toMutableList()
         if (all.remove(message)) save(all)
     }
-    @Synchronized fun clear() { prefs.edit().remove(KEY).commit() }
+    @Synchronized fun clear() { prefs.edit().remove(KEY).remove(KEY_IN_FLIGHT).commit() }
     private fun save(all: List<BudgetLink.Message>) { prefs.edit().putString(KEY, all.joinToString("\n") { BudgetLink.encode(it) }).commit() }
 
     private companion object {
         const val KEY = "messages"
+        const val KEY_IN_FLIGHT = "in_flight"
         const val MAX = 100
     }
 }

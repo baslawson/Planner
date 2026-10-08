@@ -93,8 +93,8 @@ class AlarmService : Service() {
                     val cancelled = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
                         .setSmallIcon(R.drawable.ic_notification).setContentTitle("Reminder cancelled")
                         .setCategory(NotificationCompat.CATEGORY_STATUS).setSilent(true).build()
-                    ServiceCompat.startForeground(this, NOTIFICATION_ID, cancelled, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    // Hunt 23 P1: refused after a restart from the background (Android 12+), it has no deadline to meet.
+                    if (goForeground(cancelled)) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
                 }
                 // Android ending the process (low memory, seen right after an unlock) must not end the alarm without anyone
@@ -110,7 +110,8 @@ class AlarmService : Service() {
         // newcomer stopped by itself seconds later): it gives way, as its normal notification with its sound, and the alarm
         // rings on. Its start is set aside, done with when the alarm ends.
         if (extras != null && timed(extras) && ringing?.let { !timed(it) } == true) {
-            showAsNotification(extras)
+            // Hunt 23: delivered again after a restart, it has had its sound already.
+            showAsNotification(extras, silent = redelivered)
             OwnedAlarmStarts.finish(this, extras)
             ignoredStart = maxOf(ignoredStart, startId)
             return
@@ -134,12 +135,13 @@ class AlarmService : Service() {
         // gets its rebuild below.
         val builtLocked = !DirectBoot.isUnlocked(this)
         // Must be called promptly after startForegroundService, even if there is nothing to ring for.
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            notification(extras),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-        )
+        // Hunt 23 P1: Android may refuse it after it restarted the service in the background (Android 12+, a start delivered
+        // again): rather than crash (and be restarted to crash again), the reminder is left as its normal notification.
+        if (!goForeground(notification(extras))) {
+            extras?.let { showAsNotification(it, missed = redelivered && !timed(it)) }
+            stopRinging(startId)
+            return
+        }
         // The one that gave way is a notification now: its start is done with, not to be delivered again.
         if (previous != null && extras != null) stopSelfResult(previousStart)
         if (extras == null) {
@@ -160,6 +162,15 @@ class AlarmService : Service() {
         startVibration()
         handler.removeCallbacks(giveUp)
         handler.postDelayed(giveUp, ringFor)
+    }
+
+    // Hunt 23 P1: false when Android won't let it run in the foreground now (ForegroundServiceStartNotAllowedException).
+    private fun goForeground(shown: android.app.Notification): Boolean = try {
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, shown, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        true
+    } catch (e: IllegalStateException) {
+        android.util.Log.w("AlarmService", "Couldn't ring in the foreground", e)
+        false
     }
 
     // The ringing notification for [extras]. [quiet]: built again, without popping up a second time.

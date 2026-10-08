@@ -29,6 +29,8 @@ object TaskEventConversion {
             dropped += "The repeat (${TaskRepeat.label(task.repeat, task.repeatDays)}): events can't repeat after completion."
             RepeatRule.NONE.name
         } else task.repeat
+        // Hunt 23: said as the other way round says it ("The series' end"): the series gets the event editor's 12.
+        if (repeat != RepeatRule.NONE.name) dropped += "Repeating with no end: a repeating event has a set number, 12 to start with. Change it before saving."
         if (task.priority != TaskPriority.NORMAL) dropped += "The ${task.priority.label.lowercase()} priority."
         if (task.prerequisiteIds.isNotEmpty()) dropped += "The tasks it waits for."
         if (hasTimeBlocks) dropped += "Its time blocks stay in the calendar, without their task."

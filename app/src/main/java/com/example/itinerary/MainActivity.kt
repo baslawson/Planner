@@ -188,6 +188,7 @@ class MainActivity : ComponentActivity() {
         outState.putString("entryAction", entryAction)
         outState.putString("widgetDate", widgetDate?.toString())
         outState.putString("noteId", noteId)
+        outState.putString("budgetWaiting", budgetLink.saved())
         super.onSaveInstanceState(outState)
     }
     override fun onNewIntent(intent: Intent) {
@@ -348,6 +349,7 @@ class MainActivity : ComponentActivity() {
             }
             runCatching { store.sweep().takeIf { it.isNotEmpty() }?.let { app.repository.releaseTaskFiles(it) } }
         } } }
+        budgetLink.restore(savedInstanceState?.getString("budgetWaiting"))
         if (actsOnLaunchIntent(intent?.flags ?: 0, savedInstanceState == null)) { stopAlarmIfRequested(intent); readWidgetIntent(intent); importSharedFiles(intent) }
         // Shared files, once copied, open like a shared text, in the window on screen: only a started one takes them, so a
         // window closing as a new share opens Planner (CLEAR_TASK) can't take them away with it. One at a time, once this

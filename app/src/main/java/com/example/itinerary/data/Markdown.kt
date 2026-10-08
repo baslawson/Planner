@@ -143,11 +143,14 @@ object Markdown {
 
     /** [content] with the checklist box on line [line] ticked or cleared; anything else is left exactly as it was. */
     fun toggle(content: String, line: Int): String {
-        val lines = content.split('\n').toMutableList()
-        val match = lines.getOrNull(line)?.let { Regex("^(\\s*[-*+]\\s+\\[)([ xX])(].*)$").find(it) } ?: return content
+        // Hunt 23: the lines [parse] counts (Windows and old Mac line ends too), each line end left as it was.
+        val ends = Regex("\r\n|\r|\n").findAll(content).map { it.range }.toList()
+        if (line < 0 || line > ends.size) return content
+        val start = if (line == 0) 0 else ends[line - 1].last + 1
+        val end = ends.getOrNull(line)?.first ?: content.length
+        val match = Regex("^(\\s*[-*+]\\s+\\[)([ xX])(].*)$").find(content.substring(start, end)) ?: return content
         val (before, mark, after) = match.destructured
-        lines[line] = before + (if (mark == " ") "x" else " ") + after
-        return lines.joinToString("\n")
+        return content.substring(0, start) + before + (if (mark == " ") "x" else " ") + after + content.substring(end)
     }
 
     /** An edit from the toolbar: the new text and where the selection goes. */

@@ -19,7 +19,7 @@ class TaskEventConversionTest {
         assertEquals(ItineraryItem(tripId = 0, date = due, startTime = null, title = "Shopping", notes = "list", checklist = list, repeatRule = "WEEKLY"), c.result)
         // The reminder a day before 09:00 is "1 day before" the all-day event.
         assertEquals(listOf(Reminder(itemId = 0, amount = 1, unit = ReminderUnit.DAYS)), c.reminders)
-        assertEquals(emptyList<String>(), c.dropped)
+        assertEquals(listOf("Repeating with no end: a repeating event has a set number, 12 to start with. Change it before saving."), c.dropped)
     }
 
     @Test fun whatATaskLeavesBehind() {
