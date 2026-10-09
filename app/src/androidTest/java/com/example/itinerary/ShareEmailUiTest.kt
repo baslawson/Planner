@@ -137,16 +137,15 @@ class ShareEmailUiTest {
         app.repository.deleteItem(bill)
     }
 
-    @Test fun noteOpensOnTheNotesPageAndIsSavedOnlyBySave() = runBlocking {
+    // Notes save by themselves (since 0.0.24): Close saves the shared note without asking.
+    @Test fun noteOpensOnTheNotesPageAndCloseSavesIt() = runBlocking {
         share(email("QA recipe from Sam", "Two eggs, flour and milk."))
         click("Add note")
         await { find("Add to Planner") == null && nodes().any { it.isEditable && it.text?.toString() == "QA recipe from Sam" } }
         screenshot("email-share-note")
-        assertFalse(app.repository.allNotes().any { it.title == "QA recipe from Sam" })
         click("Close")
-        await { find("Save changes?") != null }
-        click("Save")
-        await { runBlocking { app.repository.allNotes() }.any { it.title == "QA recipe from Sam" } }
+        await { find("Note options") == null && runBlocking { app.repository.allNotes() }.any { it.title == "QA recipe from Sam" } }
+        assertNull(find("Save changes?"))
         val note = app.repository.allNotes().single { it.title == "QA recipe from Sam" }
         assertTrue(note.content.contains("Two eggs, flour and milk."))
         assertTrue(note.content.startsWith("From: QA Sender <sender@example.com>"))
@@ -164,10 +163,9 @@ class ShareEmailUiTest {
             await { find("Add to Planner") == null && nodes().any { it.isEditable && it.text?.toString() == "QA recipe from Sam" } }
             assertNull(findStarting("You have an unfinished note"))
             assertEquals("typed there", NoteDraftStore(context).read(left.id)?.note?.content)
-            click("Close"); await { find("Save changes?") != null }
-            click("Discard")
-            await { find("Save changes?") == null }
-            assertFalse(app.repository.allNotes().any { it.title == "QA recipe from Sam" })
+            // Close would save it (auto save); ⋮ Discard throws the new note away.
+            click("Note options"); click("Discard")
+            await { find("Note options") == null && runBlocking { app.repository.allNotes() }.none { it.title == "QA recipe from Sam" } }
         } finally { NoteDraftStore.windowClosed(other, gone = true) }
     }
 }

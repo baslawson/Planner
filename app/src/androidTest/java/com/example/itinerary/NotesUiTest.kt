@@ -720,7 +720,9 @@ class NotesUiTest {
         val bold = bounds("Bold")
         screenshot("pinned-tools")
         assertTrue("Bold ${bold.bottom} should touch the keyboard at $top", bold.bottom <= top + 2 && top - bold.bottom <= 16 * density)
-        assertTrue("Bold ${bold.top} should be below Save ${bounds("Save").bottom}", bold.top >= bounds("Save").bottom)
+        // The ✓ is "Saved" once the auto save after typing has run.
+        val save = listOf("Save", "Saving…", "Saved").first { find(it) != null }.let(::bounds)
+        assertTrue("Bold ${bold.top} should be below Save ${save.bottom}", bold.top >= save.bottom)
         listOf("Italic", "Strikethrough", "Heading", "Bulleted list", "Checklist", "Code").forEach { assertNotNull(it, find(it)) }
         // A selected word, then Bold: the note box keeps the keyboard and the buttons stay put.
         nodes().filter { it.isVisibleToUser && it.isEditable }[1].performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
