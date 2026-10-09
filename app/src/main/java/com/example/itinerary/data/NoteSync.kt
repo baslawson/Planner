@@ -216,7 +216,8 @@ fun Repository.asNoteStore(): NoteStore = object : NoteStore {
 /**
  * Two-way sync of Planner's notes with the Nextcloud Notes app, on the backup login. A pass reads every note there,
  * then for each linked pair compares both sides with what was last synced: one side changed → the other follows; both →
- * Nextcloud's version wins in the note and Planner's is kept as a "(conflict copy)" (sent up as a new note); deleted on
+ * merged line by line (NoteMerge), or, where both changed the same lines, Nextcloud's version wins in the note and
+ * Planner's is kept as a "(conflict copy)" (sent up as a new note); deleted on
  * Nextcloud → Recently deleted here unless changed here. Deleted in Planner → conditionally deleted through DAV;
  * a changed version comes back, and a file that cannot be verified waits. Then Nextcloud's new notes come in
  * (linked to an identical one here first), and Planner's new notes go
@@ -472,9 +473,23 @@ class NoteSync(
                             NotesApi.Write.Gone -> { rows.delete(row.noteId); push(mine) }
                         }
                         else -> {
-                            // Both changed (or it's read-only there): Nextcloud's version here, then Planner's as a copy
-                            // (only once the note itself is updated, so a failed update doesn't make a second copy).
                             val updated = NoteMapping.apply(mine, theirs)
+                            // Both changed: merged when they changed different lines (NoteMerge), here and there. If
+                            // Nextcloud's changed again meanwhile, the next pass merges with that.
+                            val merged = if (theirs.readonly) null else NoteMerge.merge(row, mine, updated)
+                            if (merged != null) {
+                                if (NoteMapping.fields(merged) == NoteMapping.fields(updated)) {
+                                    if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                                } else if (put(merged, mine)) when (val result = api.update(account, theirs.id, theirs.etag,
+                                    NoteMapping.remoteTitle(merged), merged.content, merged.notebook, merged.pinned)) {
+                                    is NotesApi.Write.Done -> { wrote[0] = true; rows.put(NoteMapping.row(merged, key, result.note)) }
+                                    NotesApi.Write.Changed -> {}
+                                    NotesApi.Write.Gone -> { rows.delete(row.noteId); push(merged) }
+                                }
+                                return@each
+                            }
+                            // Overlapping changes (or it's read-only there): Nextcloud's version here, then Planner's as a
+                            // copy (only once the note itself is updated, so a failed update doesn't make a second copy).
                             if (put(updated, mine)) {
                                 rows.put(NoteMapping.row(updated, key, theirs))
                                 if (NoteMapping.fields(updated) != NoteMapping.fields(mine)) conflictCopy(mine)

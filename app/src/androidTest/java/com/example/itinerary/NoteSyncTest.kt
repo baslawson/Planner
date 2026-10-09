@@ -190,6 +190,19 @@ class NoteSyncTest {
             assertTrue(sync.sync())
             assertEquals("phone version", remoteByTitle("Groceries (conflict copy)").value.content)
 
+            // Changed in both places on different lines: merged, here and there, with no copy (NoteMerge).
+            repo.saveNote(byTitle("Groceries").copy(content = "server version\nbread\neggs"), create = false)
+            assertTrue(sync.sync())
+            repo.saveNote(byTitle("Groceries").copy(content = "server version\nbread\neggs\ncheese"), create = false)
+            fake.edit(groceriesRemote.key) { it.copy(content = "milk\nbread\neggs") }
+            assertTrue(sync.sync())
+            assertEquals("milk\nbread\neggs\ncheese", byTitle("Groceries").content)
+            assertEquals("milk\nbread\neggs\ncheese", fake.notes[groceriesRemote.key]!!.content)
+            assertEquals(0, sync.state.value.conflicts)
+            assertEquals(1, local().count { it.title.endsWith("(conflict copy)") })
+            assertTrue(sync.sync())
+            assertEquals("Settled: nothing more to send", "milk\nbread\neggs\ncheese", byTitle("Groceries").content)
+
             // Changed there while a send was on its way (412): nothing overwritten; settled as a conflict next pass.
             repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nmine"), create = false)
             fake.beforePut = { id -> fake.beforePut = null; fake.edit(id) { it.copy(content = "Recipe\ntheirs") } }
