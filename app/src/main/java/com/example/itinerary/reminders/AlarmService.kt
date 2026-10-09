@@ -140,7 +140,12 @@ class AlarmService : Service() {
         // Must be called promptly after startForegroundService, even if there is nothing to ring for.
         // Hunt 23 P1: Android may refuse it after it restarted the service in the background (Android 12+, a start delivered
         // again): rather than crash (and be restarted to crash again), the reminder is left as its normal notification.
-        if (!goForeground(notification(extras))) {
+        // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
+        // alarm long past that is left as missed. A timed one rings only what is left of its seconds; with none left it is
+        // its normal notification. Hunt 26 E1: worked out first, so one with nothing left goes into the foreground silently
+        // (no ringing card popping up for a moment before it is replaced).
+        val ringFor = extras?.let { AlarmRestart.ringFor(redelivered, it.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis(), it.getInt(EXTRA_RING_FOR, 0)) }
+        if (!goForeground(notification(extras, silent = extras != null && ringFor == null))) {
             // Hunt 24 D3: a timed one delivered again has had its sound already, as one that gives way (above).
             extras?.let { showAsNotification(it, missed = redelivered && !timed(it), silent = redelivered && timed(it)) }
             stopRinging(startId)
@@ -156,11 +161,6 @@ class AlarmService : Service() {
         // unlocked, the notification is built again with it.
         if (builtLocked) rebuildAtUnlock()
 
-        // After a restart it rings for what is left of its time from the reminder's own time (at least a minute), and an
-        // alarm long past that is left as missed. A timed one rings only what is left of its seconds; with none left it is
-        // its normal notification.
-        val ringFor = AlarmRestart.ringFor(redelivered, extras.getLong(ReminderScheduler.EXTRA_TRIGGER, 0L), System.currentTimeMillis(),
-            extras.getInt(EXTRA_RING_FOR, 0))
         if (ringFor == null) { if (timed(extras)) onRangOut() else onGiveUp(); return }
         startSound()
         startVibration()
@@ -178,7 +178,7 @@ class AlarmService : Service() {
     }
 
     // The ringing notification for [extras]. [quiet]: built again, without popping up a second time.
-    private fun notification(extras: Bundle?, quiet: Boolean = false): android.app.Notification {
+    private fun notification(extras: Bundle?, quiet: Boolean = false, silent: Boolean = false): android.app.Notification {
         val content = reminderContent(this, extras)
         val timed = timed(extras)
         return NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
@@ -195,6 +195,7 @@ class AlarmService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
             .setOnlyAlertOnce(quiet)
+            .setSilent(silent)
             .setContentIntent(openAndStop(stopToken))
             // Android 14+ lets the user swipe even this ongoing notification away (not on the lock screen). Swiping it is
             // the only thing left to do, so it counts as Stop: otherwise it would ring on with nothing to stop it.

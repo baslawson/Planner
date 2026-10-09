@@ -194,10 +194,8 @@ class Repository(
             val members = if (item.id != 0L && options.entireSeries && item.seriesId != null)
                 itemDao.forSeries(item.seriesId) else emptyList()
             val dates = if (members.isNotEmpty()) {
-                val shift = ChronoUnit.DAYS.between(originalDate, item.date)
-                if (options.changeRepeat && options.repeat != RepeatRule.NONE)
-                    options.repeat.dates(members.first().date.plusDays(shift), members.size)
-                else members.map { it.date.plusDays(shift) }
+                seriesEditDates(members.map { it.date }, ChronoUnit.DAYS.between(originalDate, item.date),
+                    RepeatRule.parse(members.first().repeatRule), options.changeRepeat, options.repeat)
             } else options.repeat.dates(item.date, options.count, options.anchorDay)
             val excluded = if (item.id == 0L) emptySet() else members.mapTo(hashSetOf(item.id)) { it.id }
             Bills.duplicates(item, itemDao.billCandidates(item.billAmountMinor, item.billCurrency, dates), dates.toSet(), excluded)
@@ -906,9 +904,8 @@ class Repository(
                         repeatRule = if (series == null) "NONE" else options.repeat.name) }
                 }
                 options.entireSeries && original?.seriesId != null -> {
-                    val shift = ChronoUnit.DAYS.between(original.date, item.date)
-                    val dates = if (options.changeRepeat && options.repeat != RepeatRule.NONE)
-                        options.repeat.dates(members.first().date.plusDays(shift), members.size) else members.map { it.date.plusDays(shift) }
+                    val dates = seriesEditDates(members.map { it.date }, ChronoUnit.DAYS.between(original.date, item.date),
+                        RepeatRule.parse(original.repeatRule), options.changeRepeat, options.repeat)
                     members.mapIndexed { index, old -> seriesOccurrence(item, old, dates[index], options.changeRepeat, options.repeat) }
                 }
                 else -> listOf(item)

@@ -86,6 +86,7 @@ import com.example.itinerary.data.Bills
 import com.example.itinerary.data.TemplateContent
 import com.example.itinerary.data.EventSaveOptions
 import com.example.itinerary.data.RepeatRule
+import com.example.itinerary.data.seriesEditDates
 import com.example.itinerary.data.overlappingEvents
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.input.KeyboardType
@@ -493,11 +494,9 @@ private fun ItemEditorForm(
         when {
             creatingSeries -> repeat.dates(date, count?.coerceIn(1, 365) ?: 1, anchorDay)
             seriesEdit -> {
-                val shift = java.time.temporal.ChronoUnit.DAYS.between(initial.date, date)
                 val members = allEvents.filter { it.seriesId == initial.seriesId }.sortedBy { it.date }
-                if (changeRepeat && repeat != RepeatRule.NONE && members.isNotEmpty())
-                    repeat.dates(members.first().date.plusDays(shift), members.size)
-                else members.map { it.date.plusDays(shift) }
+                seriesEditDates(members.map { it.date }, java.time.temporal.ChronoUnit.DAYS.between(initial.date, date),
+                    RepeatRule.parse(initial.repeatRule), changeRepeat, repeat)
             }
             else -> listOf(date)
         }

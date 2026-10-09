@@ -33,9 +33,13 @@ fun rememberNotificationState(): NotificationState {
     // Re-checked on resume because the change happens in a system dialog or settings screen.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { enabled = notificationsEnabled(context) }
 
+    // Hunt 26 E2: whether the prompt was asked for before this request. A first prompt backed out of comes back denied with no
+    // rationale too, like one Android no longer shows, so only after an earlier ask does a refusal go to settings.
+    val asked = remember { context.getSharedPreferences("notification_prompt", Context.MODE_PRIVATE) }
+    var askedBefore by remember { mutableStateOf(false) }
     val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         enabled = notificationsEnabled(context)
-        if (!granted) {
+        if (!granted && askedBefore) {
             // Once Android stops offering the prompt, settings is the only way left.
             val activity = context.findActivity()
             val canAskAgain = activity != null &&
@@ -48,7 +52,11 @@ fun rememberNotificationState(): NotificationState {
         val needsPermission = Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
-        if (needsPermission) requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) else openNotificationSettings(context)
+        if (needsPermission) {
+            askedBefore = asked.getBoolean("asked", false)
+            asked.edit().putBoolean("asked", true).apply()
+            requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else openNotificationSettings(context)
     }
 }
 

@@ -173,3 +173,21 @@ data class EventSaveOptions(
 fun millisUntilNextDay(now: java.time.ZonedDateTime): Long =
     java.time.Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(now.zone))
         .toMillis().coerceAtLeast(1)
+
+/**
+ * The dates of an entire-series edit: [memberDates] in date order, the opened occurrence moved by [shift] days. A changed
+ * repeat ([changeRepeat], [newRule]) starts again from the first member moved by [shift]. Otherwise each member moves by
+ * [shift] days, except a monthly series ([seriesRule] MONTHLY or EVERY_N_MONTHS) moved within the month: each member keeps
+ * its month and takes the series' day moved by [shift], since plain day shifts put a month-end that was cut short in the
+ * next month (a 30 Jan series moved to the 31st: Feb 28 → Mar 1; hunt 26 D1). The series' day is its members' latest day of
+ * the month, which survives in a short month's 28th only as the 30th or 31st of the others; a new monthly repeat keeps it
+ * too (Nov 30, Dec 31 … every 2 months → Jan 31, Mar 31; D2).
+ */
+fun seriesEditDates(memberDates: List<LocalDate>, shift: Long, seriesRule: RepeatRule?, changeRepeat: Boolean, newRule: RepeatRule): List<LocalDate> {
+    if (memberDates.isEmpty()) return memberDates
+    val monthly = seriesRule?.kind == RepeatRule.Kind.MONTHLY || seriesRule?.kind == RepeatRule.Kind.EVERY_N_MONTHS
+    val day = (memberDates.maxOf { it.dayOfMonth } + shift).takeIf { monthly && it in 1..31 }?.toInt() // a monthly series' day only
+    if (changeRepeat && newRule != RepeatRule.NONE) return newRule.dates(memberDates.first().plusDays(shift), memberDates.size, day ?: 0)
+    if (!monthly || shift == 0L || day == null) return memberDates.map { it.plusDays(shift) }
+    return memberDates.map { YearMonth.from(it).let { month -> month.atDay(minOf(day, month.lengthOfMonth())) } }
+}
