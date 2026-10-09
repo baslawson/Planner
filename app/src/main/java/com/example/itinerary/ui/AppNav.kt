@@ -110,6 +110,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         if (shareOpen == null) shareOpen = wanted
         else if (shareOpen != wanted) Toast.makeText(app, "Close this share first. Then the new one opens.", Toast.LENGTH_LONG).show()
     }
+    // The item a share was just added to ("Add to existing…"): opened once the share has closed (see below).
+    var openAfterShare by remember { mutableStateOf<com.example.itinerary.data.ShareTargets.Target?>(null) }
     val sharedEvent = shareOpen?.let { open -> key(open) {
         // With another share waiting it opens next; otherwise the share is done.
         SharedTextReview(open.first, open.second, onClosed = {
@@ -118,7 +120,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         }, onNote = { note ->
             sharedNote = note
             if (nav.currentDestination?.route != "notes") nav.navigate("notes") { launchSingleTop = true }
-        })
+        }, onAddedTo = { openAfterShare = it })
     } }
     // The task open from the widget. A second widget task (a new [widgetTaskId]) waits until this one's editor has
     // closed the usual way, "Save changes?" included; Keep editing there drops it (E4: the editor used to be reused).
@@ -147,6 +149,19 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
     }
     // U-13: the note a reminder's tap asked for, handed to the Notes page (see below).
     var noteToOpen by rememberSaveable { mutableStateOf<String?>(null) }
+    // After "Add to existing…": a note opens on Notes, a task in its editor (as a widget task does), an event or bill on its day.
+    LaunchedEffect(openAfterShare) {
+        val target = openAfterShare ?: return@LaunchedEffect
+        openAfterShare = null
+        when (target.kind) {
+            com.example.itinerary.data.ShareTargets.Kind.NOTE -> {
+                noteToOpen = target.id
+                if (nav.currentDestination?.route != "notes") nav.navigate("notes") { launchSingleTop = true }
+            }
+            com.example.itinerary.data.ShareTargets.Kind.TASK -> widgetTaskOpen = target.id
+            else -> target.date?.let { nav.navigate("calendar?date=$it") { popUpTo("agenda") } }
+        }
+    }
     var viewRestored by rememberSaveable { mutableStateOf(false) }
     // SX-1: opened over Agenda for a share, reminder, shortcut or file: that Agenda isn't recorded as where the person left
     // Planner, also when Android rebuilds this window later, until they go somewhere themselves.

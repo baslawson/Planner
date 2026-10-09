@@ -123,7 +123,8 @@ internal fun sharedDraftBlock(value: String, draftExists: Boolean, eventEditorOp
 // unsaved, so Close asks before dropping it.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNote: (PlannerNote) -> Unit = {}): ItineraryItem? {
+fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNote: (PlannerNote) -> Unit = {},
+                     onAddedTo: (ShareTargets.Target) -> Unit = {}): ItineraryItem? {
     val app = LocalContext.current.applicationContext as ItineraryApp
     // A share of files (SharedFiles): its text stands for the files, already copied, and what came with them.
     val filesId = remember(text) { SharedFiles.idOf(text) }
@@ -172,6 +173,8 @@ fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNot
     val bill = read?.second
     val ready = content.isFailure || read != null
     var destination by rememberSaveable(text, subject) { mutableStateOf("") }
+    // "Add to existing…": the share goes to an event, bill, task or note that is already there (ShareToExisting).
+    var toExisting by rememberSaveable(text, subject) { mutableStateOf(false) }
     // What the editor opens with (date, time, amount, currency), fixed when it is chosen: rebuilt after Android closed
     // Planner, the event must be the one its draft was made from at once, before the text is read again (Q-2, SH-11).
     var chosen by rememberSaveable(text, subject) { mutableStateOf("{}") }
@@ -219,12 +222,18 @@ fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNot
     fun choose(value: String) { if (!checking) { checking = true; checkScope.launch { try { chooseChecked(value) } finally { checking = false } } } }
     val dateFormat = LocalDateFormat.current
     val is24Hour = LocalTimeFormat.current.is24Hour(LocalContext.current)
-    if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
+    if (destination.isEmpty() && toExisting) ShareToExisting(files, if (filesId != null) staged?.caption else text, onBack = { toExisting = false },
+        onAdded = { target, message ->
+            android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()
+            onAddedTo(target); onDismiss()
+        })
+    else if (destination.isEmpty()) PlannerDialog("Add to Planner", onDismissRequest = onDismiss,
         primary = DialogAction("Add task", enabled = content.isSuccess && ready && !checking) { choose("task") },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
         extra = listOf(DialogAction("Add event", enabled = content.isSuccess && ready && !checking) { choose("event") },
             DialogAction("Add bill", enabled = content.isSuccess && ready && !checking) { choose("bill") },
-            DialogAction("Add note", enabled = content.isSuccess && ready && !checking) { choose("note") })) {
+            DialogAction("Add note", enabled = content.isSuccess && ready && !checking) { choose("note") },
+            DialogAction("Add to existing…", enabled = content.isSuccess && ready && !checking) { error = null; toExisting = true })) {
             Text(content.getOrNull()?.title ?: content.exceptionOrNull()?.message.orEmpty())
             if (files.isNotEmpty()) Text(SharedFiles.summary(files))
             if (!ready) Text("Reading the text…")

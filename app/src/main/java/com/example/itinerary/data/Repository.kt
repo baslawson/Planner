@@ -838,6 +838,29 @@ class Repository(
         options: EventSaveOptions = EventSaveOptions(),
     ): Long = changes.withLock { saveItemIdLocked(item, added, removed, addedReminders, removedReminders, options) }
 
+    // "Add to existing…" for a share: the events, tasks and notes it can go to, as they are now.
+    suspend fun shareCandidates(): Triple<List<ItineraryItem>, List<PlannerTask>, List<PlannerNote>> =
+        Triple(itemDao.all(), taskDao.all(), noteDao.all())
+
+    // A share added to an item that exists: [files] (already in the attachment store) after its own, [text] after its notes
+    // (ShareTargets). An event or bill gets them on the one occurrence picked, as its editor would add them. Returns its title.
+    suspend fun addShareTo(target: ShareTargets.Target, files: List<Attachment>, text: String?): String = when (target.kind) {
+        ShareTargets.Kind.EVENT, ShareTargets.Kind.BILL -> {
+            val item = itemDao.byId(target.id.toLong()) ?: throw IllegalStateException("That event is no longer here.")
+            val have = attachmentDao.forItem(item.id)
+            val added = ShareTargets.withFiles(have, files).drop(have.size)
+            saveItemId(item.copy(notes = ShareTargets.withText(item.notes, text, EventText.MAX_NOTES)),
+                added = added.map { it.copy(id = 0, itemId = item.id) })
+            item.title
+        }
+        ShareTargets.Kind.TASK -> saveTaskIf(target.id) {
+            it.copy(attachments = ShareTargets.withFiles(it.attachments, files), notes = ShareTargets.withText(it.notes, text, Int.MAX_VALUE))
+        }?.title ?: throw IllegalStateException("That task is no longer here.")
+        ShareTargets.Kind.NOTE -> updateNote(target.id) {
+            it.copy(attachments = ShareTargets.withFiles(it.attachments, files), content = ShareTargets.withText(it.content, text, Notes.MAX_CONTENT))
+        }?.let { target.title } ?: throw IllegalStateException("That note is no longer here.")
+    }
+
     // Two-way sync: [change] made to event [id] as it is at that moment and saved, with no other change in between (a
     // save made meanwhile is never overwritten by an older copy). [change] returns null to leave it. Returns the event
     // as saved, or null when nothing was saved (also when the event is gone).
