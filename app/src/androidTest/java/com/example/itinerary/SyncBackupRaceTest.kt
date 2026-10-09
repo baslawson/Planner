@@ -35,7 +35,9 @@ class SyncBackupRaceTest {
         override fun getSharedPreferences(name: String, mode: Int) = base.getSharedPreferences("hunt_sb_$name", mode)
     }
 
-    @Test fun conditionalDavDeletePreservesConcurrentEditAndPropagatesNormalDeletion() = runBlocking {
+    // As Nextcloud Notes' own app: a note deleted in Planner (its Undo gone) is deleted there with the Notes API, also when
+    // it was changed there just before (the last change wins); the link goes and nothing comes back.
+    @Test fun localDeletionDeletesThereAsNextcloudNotesDoes() = runBlocking {
         val root = File(base.cacheDir, "hunt-sb-delete").apply { deleteRecursively(); mkdirs() }
         val context = isolated(root)
         val db = Room.inMemoryDatabaseBuilder(base, AppDatabase::class.java).build()
@@ -61,23 +63,13 @@ class SyncBackupRaceTest {
             val local = repo.allNotes().single()
             repo.deleteNote(local.id)
             repo.pendingDeletions.value.toList().forEach { repo.finishDeletion(it.token) }
-            var raced = false
-            fake.beforeDavDelete = { deleting ->
-                raced = true; fake.beforeDavDelete = null
-                fake.edit(deleting) { it.copy(content = "new remote words saved immediately before DELETE") }
-            }
+            fake.edit(id) { it.copy(content = "new remote words saved before the delete went") }
             assertTrue(sync.sync())
-            assertTrue("The real conditional DAV DELETE interleaving must run", raced)
-            assertTrue("Unsafe Notes DELETE must never run", fake.requests.none { it.startsWith("DELETE /index.php/") })
-            assertEquals("new remote words saved immediately before DELETE", fake.notes[id]!!.content)
-            assertTrue(repo.allNotes().isEmpty())
-            assertTrue(sync.sync())
-            assertEquals("new remote words saved immediately before DELETE", repo.allNotes().single().content)
-            repo.deleteNote(repo.allNotes().single().id)
-            repo.pendingDeletions.value.toList().forEach { repo.finishDeletion(it.token) }
-            assertTrue(sync.sync())
-            assertFalse("Ordinary local deletion must remove the synced remote file", fake.notes.containsKey(id))
+            assertFalse("Deleted there too", fake.notes.containsKey(id))
+            assertTrue("With the Notes API", fake.requests.any { it.startsWith("DELETE /index.php/apps/notes/api/v1/notes/$id") })
             assertTrue(db.sentNoteDao().all().isEmpty())
+            assertTrue(sync.sync())
+            assertTrue("Nothing comes back", repo.allNotes().isEmpty())
             assertEquals(0, sync.state.value.keptRemote)
         } finally {
             db.close(); server.shutdown(); root.deleteRecursively()
@@ -178,61 +170,6 @@ class SyncBackupRaceTest {
             first.clear(); root.deleteRecursively()
             KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
         }
-    }
-
-    @Test fun davDeletionRefusesUnverifiableOrForeignFiles() {
-        val cert = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
-        val trusted = HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate).build()
-        val server = MockWebServer()
-        server.useHttps(HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(), false)
-        var href = "/remote.php/dav/files/qa/Notes/101.txt"
-        var fileId = 101L
-        var tag: String? = "&quot;dav1&quot;"
-        var collection = false
-        var deletes = 0
-        var body = "different replacement bytes"
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when (request.method) {
-                "PROPFIND" -> MockResponse().setResponseCode(207).setBody(
-                    "<d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\"><d:response><d:href>$href</d:href>" +
-                    "<d:propstat><d:prop><d:resourcetype>${if (collection) "<d:collection/>" else ""}</d:resourcetype>" +
-                    "<oc:fileid>$fileId</oc:fileid>${tag?.let { "<d:getetag>$it</d:getetag>" }.orEmpty()}" +
-                    "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>")
-                "GET" -> MockResponse().setBody(body)
-                "DELETE" -> { deletes++; MockResponse().setResponseCode(204) }
-                else -> MockResponse().setResponseCode(405)
-            }
-        }
-        server.start()
-        try {
-            val http = OkHttpClient.Builder().sslSocketFactory(trusted.sslSocketFactory(), trusted.trustManager).build()
-            val client = NextcloudClient(http)
-            val account = NextcloudAccount.create(server.url("/").toString(), "qa", "qa-test-password")
-            fun attempt(path: String = "Notes", category: String = "") = client.deleteNoteFile(account, path, category, 101, "original", { true })
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt("../Notes"))
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt(category = "%2e%2e/Other"))
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt(category = "A%2fB"))
-            href = "/remote.php/dav/files/other/Notes/101.txt"
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt())
-            href = "/remote.php/dav/files/qa/Notes/101.txt"
-            fileId = 999L
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt())
-            fileId = 101L; tag = null
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt())
-            tag = "W/&quot;dav1&quot;"
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt())
-            tag = "&quot;dav1&quot;"; collection = true
-            assertEquals(NextcloudClient.NoteDelete.UNSUPPORTED, attempt())
-            collection = false
-            assertEquals(NextcloudClient.NoteDelete.CHANGED, attempt()) // File replaced since the Notes snapshot.
-            assertEquals(0, deletes)
-            body = "original"
-            assertEquals(NextcloudClient.NoteDelete.CHANGED,
-                client.deleteNoteFile(account, "Notes", "", 101, "original") { false }) // Notes metadata changed.
-            assertEquals(0, deletes)
-            assertEquals(NextcloudClient.NoteDelete.DELETED, attempt()) // Positive control: server can delete a verified file.
-            assertEquals(1, deletes)
-        } finally { server.shutdown() }
     }
 
 }

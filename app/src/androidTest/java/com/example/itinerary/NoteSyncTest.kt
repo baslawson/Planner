@@ -180,45 +180,37 @@ class NoteSyncTest {
             assertTrue(sync.sync())
             assertEquals("Recipe\n1. Boil water\n2. Add pasta", byTitle("Recipe").content); assertEquals("Kitchen", byTitle("Recipe").notebook)
 
-            // Changed in both places: Nextcloud's in the note, Planner's as a conflict copy, which then goes up.
+            // Changed in both places before a sync: Planner's is sent and kept there, as Nextcloud Notes' own app does
+            // (no If-Match: the last one written wins), and there's no conflict copy.
             repo.saveNote(byTitle("Groceries").copy(content = "phone version"), create = false)
             fake.edit(groceriesRemote.key) { it.copy(content = "server version") }
             assertTrue(sync.sync())
+            assertEquals("phone version", byTitle("Groceries").content)
+            assertEquals("phone version", fake.notes[groceriesRemote.key]!!.content)
+            assertEquals(0, sync.state.value.ownCopies)
+            assertTrue(local().none { it.title.endsWith("(conflict copy)") })
+
+            // Changed only there: it comes in.
+            fake.edit(groceriesRemote.key) { it.copy(content = "server version") }
+            assertTrue(sync.sync())
             assertEquals("server version", byTitle("Groceries").content)
-            assertEquals("phone version", byTitle("Groceries (conflict copy)").content)
-            assertEquals(1, sync.state.value.conflicts)
-            assertTrue(sync.sync())
-            assertEquals("phone version", remoteByTitle("Groceries (conflict copy)").value.content)
 
-            // Changed in both places on different lines: merged, here and there, with no copy (NoteMerge).
-            repo.saveNote(byTitle("Groceries").copy(content = "server version\nbread\neggs"), create = false)
-            assertTrue(sync.sync())
-            repo.saveNote(byTitle("Groceries").copy(content = "server version\nbread\neggs\ncheese"), create = false)
-            fake.edit(groceriesRemote.key) { it.copy(content = "milk\nbread\neggs") }
-            assertTrue(sync.sync())
-            assertEquals("milk\nbread\neggs\ncheese", byTitle("Groceries").content)
-            assertEquals("milk\nbread\neggs\ncheese", fake.notes[groceriesRemote.key]!!.content)
-            assertEquals(0, sync.state.value.conflicts)
-            assertEquals(1, local().count { it.title.endsWith("(conflict copy)") })
-            assertTrue(sync.sync())
-            assertEquals("Settled: nothing more to send", "milk\nbread\neggs\ncheese", byTitle("Groceries").content)
-
-            // Changed there while a send was on its way (412): nothing overwritten; settled as a conflict next pass.
+            // Changed there while Planner's change was on its way: Planner's still goes up (the last one written wins).
             repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nmine"), create = false)
             fake.beforePut = { id -> fake.beforePut = null; fake.edit(id) { it.copy(content = "Recipe\ntheirs") } }
             assertTrue(sync.sync())
-            assertEquals("Recipe\ntheirs", fake.notes[recipeId]!!.content)
+            assertEquals("Recipe\nmine", fake.notes[recipeId]!!.content)
             assertTrue(sync.sync())
-            assertEquals("Recipe\ntheirs", byTitle("Recipe").content)
-            assertTrue(local().any { it.content == "Recipe\nmine" && it.title.endsWith("(conflict copy)") })
+            assertEquals("Recipe\nmine", byTitle("Recipe").content)
+            assertTrue(local().none { it.title.endsWith("(conflict copy)") })
 
             // Deleted on Nextcloud: to Recently deleted here.
             fake.notes.remove(recipeId)
             assertTrue(sync.sync())
-            assertTrue(local().none { it.content == "Recipe\ntheirs" })
-            assertTrue(repo.snapshot().deleted.any { DeletedCodec.decode(it.payload).notes.any { n -> n.content == "Recipe\ntheirs" } })
+            assertTrue(local().none { it.content == "Recipe\nmine" })
+            assertTrue(repo.snapshot().deleted.any { DeletedCodec.decode(it.payload).notes.any { n -> n.content == "Recipe\nmine" } })
 
-            // Deleted in Planner: held during Undo, then its backing file is deleted conditionally.
+            // Deleted in Planner: held during Undo, then deleted there too.
             repo.deleteNote(byTitle("Groceries").id)
             assertTrue(sync.sync())
             assertTrue(fake.notes.values.any { it.title == "Groceries" })
@@ -236,8 +228,11 @@ class NoteSyncTest {
             assertTrue(sync.sync())
             assertEquals(puts, fake.requests.count { it.startsWith("PUT") })
             assertEquals("Shared\nfrom a colleague", fake.notes[shared]!!.content)
+            // Read-only there: the edit can't go up, so the shared note keeps Nextcloud's and the edit is a note of its own.
             assertEquals("Shared\nfrom a colleague", byTitle("Shared").content)
-            assertTrue(local().any { it.content == "Shared\nmy edit" })
+            assertEquals("Shared\nmy edit", local().single { it.title.endsWith("(my copy)") }.content)
+            assertEquals("Counted for the sync status", 1, sync.state.value.ownCopies)
+            assertTrue(local().none { it.title.endsWith("(conflict copy)") })
             assertEquals("x".repeat(Notes.MAX_CONTENT + 1), fake.notes[long]!!.content)
 
             // Links forgotten (a restored backup): matching content relinks without duplicates.
@@ -311,7 +306,7 @@ class NoteSyncTest {
             val shared = repo.allNotes().single { Notes.label(it) == "Shared" }
             repo.updateNote(shared.id) { it.copy(pinned = true) }
             assertTrue(sync.sync())
-            assertEquals(0, sync.state.value.conflicts)
+            assertEquals(0, sync.state.value.ownCopies)
             assertTrue(repo.allNotes().single { Notes.label(it) == "Shared" }.pinned)
             assertEquals(7, repo.allNotes().size)
             repo.deleteNote(shared.id); repo.finishDeletion(repo.pendingDeletions.value.single().token)

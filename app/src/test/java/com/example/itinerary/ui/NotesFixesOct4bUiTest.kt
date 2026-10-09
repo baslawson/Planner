@@ -6,12 +6,12 @@ import java.io.File
 
 /** Bug hunt 4 Oct (b): the Notes sync message (N6-2) and a camera photo left in a recovered draft (SH-9). */
 class NotesFixesOct4bUiTest {
-    // N6-2: "left as they are" was dropped whenever conflict copies were made.
+    // N6-2: "left as they are" was dropped whenever the first count was there.
     @Test fun syncMessageKeepsBothCounts() {
         assertEquals("", syncCounts(0, 0))
-        assertEquals(" · 1 conflict copy made (changed in both places)", syncCounts(1, 0))
+        assertEquals(" · 1 edit to a shared read-only note kept as your own copy", syncCounts(1, 0))
         assertEquals(" · 2 notes left as they are (text or notebook doesn't fit Planner, or Nextcloud wouldn't take the change)", syncCounts(0, 2))
-        assertEquals(" · 3 conflict copies made (changed in both places) · 1 note left as they are (text or notebook doesn't fit Planner, " +
+        assertEquals(" · 3 edits to a shared read-only note kept as your own copy · 1 note left as they are (text or notebook doesn't fit Planner, " +
             "or Nextcloud wouldn't take the change)", syncCounts(3, 1))
     }
 

@@ -753,21 +753,21 @@ private fun NoteSyncDialog(onDismiss: () -> Unit) {
             val message = when {
                 state.running -> "Syncing…"
                 state.error != null -> state.error!!
-                state.lastSynced != null -> "Synced " + momentLabel(state.lastSynced!!, short = true) + syncCounts(state.conflicts, state.skipped)
+                state.lastSynced != null -> "Synced " + momentLabel(state.lastSynced!!, short = true) + syncCounts(state.ownCopies, state.skipped)
                 else -> "Not synced yet."
             }
             Text(message, style = MaterialTheme.typography.bodyMedium,
                 color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            if (state.keptRemote > 0) Text("${state.keptRemote} deletion${if (state.keptRemote == 1) "" else "s"} waiting: Nextcloud's note files couldn't be verified safely. " +
+            if (state.keptRemote > 0) Text("${state.keptRemote} deletion${if (state.keptRemote == 1) "" else "s"} waiting: Nextcloud didn't let Planner delete ${if (state.keptRemote == 1) "it" else "them"} there. " +
                 "Try syncing again, or delete those notes in Nextcloud.", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
-// After "Synced …": the conflict copies made and the notes left as they are, each only when there are some (N6-2: the
-// second was lost whenever there was a first).
-internal fun syncCounts(conflicts: Int, skipped: Int): String = listOfNotNull(
-    if (conflicts > 0) "$conflicts conflict cop${if (conflicts == 1) "y" else "ies"} made (changed in both places)" else null,
+// After "Synced …": shared read-only notes edited here and kept as "(my copy)", and the notes left as they are, each only
+// when there are some (N6-2: the second was lost whenever there was a first).
+internal fun syncCounts(ownCopies: Int, skipped: Int): String = listOfNotNull(
+    if (ownCopies > 0) "$ownCopies edit${if (ownCopies == 1) "" else "s"} to a shared read-only note kept as your own copy" else null,
     if (skipped > 0) "$skipped note${if (skipped == 1) "" else "s"} left as they are (text or notebook doesn't fit Planner, or Nextcloud wouldn't take the change)" else null,
 ).joinToString("") { " · $it" }
 

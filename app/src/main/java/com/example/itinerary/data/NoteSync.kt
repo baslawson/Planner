@@ -110,28 +110,10 @@ class NotesApi(client: OkHttpClient) {
         }
     }
 
-    fun delete(account: NextcloudAccount, expected: RemoteNote): NextcloudClient.NoteDelete {
-        if (expected.etag == null || expected.readonly) return NextcloudClient.NoteDelete.UNSUPPORTED
-        val settings = account.server.newBuilder().addPathSegments("index.php/apps/notes/api/v1/settings").build()
-        val (code, body) = call(account, Request.Builder().url(settings).get())
-        if (code == 400 || code == 404 || code == 405) return NextcloudClient.NoteDelete.UNSUPPORTED
-        if (code != 200) fail(code)
-        val path = runCatching { JSONObject(body).getString("notesPath") }.getOrNull()
-            ?: return NextcloudClient.NoteDelete.UNSUPPORTED
-        // API etags cover metadata too, whereas DAV etags protect the backing file's bytes.
-        return try {
-            NextcloudClient(http).deleteNoteFile(account, path, expected.category, expected.id, expected.content) {
-                val (status, fresh) = call(account, Request.Builder().url(notes(account, expected.id)).get())
-                if (status == 404) false
-                else {
-                    if (status != 200) fail(status)
-                    parse(JSONObject(fresh)) == expected
-                }
-            }
-        } catch (_: BackupException) {
-            // A Notes-only deployment or refused DAV access leaves only this deletion pending; other notes still sync.
-            NextcloudClient.NoteDelete.UNSUPPORTED
-        }
+    /** Deletes note [id] there, as Nextcloud Notes' own app does (no condition); already gone is fine. */
+    fun remove(account: NextcloudAccount, id: Long) {
+        val (code, _) = call(account, Request.Builder().url(notes(account, id)).delete())
+        if (code != 200 && code != 204 && code != 404) fail(code)
     }
 
     private fun payload(title: String, content: String, category: String, favorite: Boolean) = JSONObject()
@@ -214,14 +196,13 @@ fun Repository.asNoteStore(): NoteStore = object : NoteStore {
 }
 
 /**
- * Two-way sync of Planner's notes with the Nextcloud Notes app, on the backup login. A pass reads every note there,
- * then for each linked pair compares both sides with what was last synced: one side changed → the other follows; both →
- * merged line by line (NoteMerge), or, where both changed the same lines, Nextcloud's version wins in the note and
- * Planner's is kept as a "(conflict copy)" (sent up as a new note); deleted on
- * Nextcloud → Recently deleted here unless changed here. Deleted in Planner → conditionally deleted through DAV;
- * a changed version comes back, and a file that cannot be verified waits. Then Nextcloud's new notes come in
- * (linked to an identical one here first), and Planner's new notes go
- * up. Updates use If-Match to protect changes made since the list was read.
+ * Two-way sync of Planner's notes with the Nextcloud Notes app, on the backup login, the way Nextcloud Notes' own Android
+ * app does it (its NotesServerSyncTask): a note changed here since it was last synced (what [SentNote] keeps) is sent and
+ * Planner's version is kept there, with no If-Match (the last one written wins: no conflict copies); a note not changed
+ * here takes Nextcloud's, but only if it hasn't been edited here during the pass (put's expected version; the edit then
+ * goes up next time). Deleted on Nextcloud → Recently deleted here unless changed here (then it goes up again). Deleted in
+ * Planner (Undo gone) → deleted there. Then Nextcloud's new notes come in (linked to an identical one here first), and
+ * Planner's new notes go up.
  * Colour, tags, attachments, reminders and Archive stay on the phone.
  */
 class NoteSync(
@@ -234,8 +215,9 @@ class NoteSync(
     private val pendingDeleted: () -> Set<String> = { emptySet() },
     private val scope: CoroutineScope? = null,
 ) {
-    // [skipped]: notes the last pass left alone (too long for Planner, or refused by Nextcloud).
-    data class State(val running: Boolean = false, val error: String? = null, val lastSynced: Long? = null, val conflicts: Int = 0,
+    // [ownCopies]: shared read-only notes edited here, kept as "(my copy)"; [skipped]: notes the last pass left alone (too
+    // long for Planner, or refused by Nextcloud); [keptRemote]: notes deleted here that Nextcloud wouldn't delete there.
+    data class State(val running: Boolean = false, val error: String? = null, val lastSynced: Long? = null, val ownCopies: Int = 0,
                      val skipped: Int = 0, val keptRemote: Int = 0)
 
     private val rows = db.sentNoteDao()
@@ -369,10 +351,10 @@ class NoteSync(
                 try {
                     val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() }
                         ?: throw NotesApiException("Sign in to Nextcloud first, in Settings → Nextcloud.")
-                    val (conflicts, skipped, keptRemote) = withContext(Dispatchers.IO) { pass(account, wrote) }
+                    val (ownCopies, skipped, keptRemote) = withContext(Dispatchers.IO) { pass(account, wrote) }
                     val now = System.currentTimeMillis()
                     prefs.edit().putLong(KEY_LAST, now).apply()
-                    _state.value = State(lastSynced = now, conflicts = conflicts, skipped = skipped, keptRemote = keptRemote)
+                    _state.value = State(lastSynced = now, ownCopies = ownCopies, skipped = skipped, keptRemote = keptRemote)
                     true to wrote[0]
                 } catch (e: Exception) {
                     _state.value = _state.value.copy(running = false, error = (e as? NotesApiException)?.message
@@ -385,8 +367,8 @@ class NoteSync(
         return result
     }
 
-    // One pass; returns how many conflict copies it made and how many notes it left alone. [wrote][0]: set once it has
-    // changed anything on either side.
+    // One pass; returns how many "(my copy)" notes it made, how many notes it left alone and how many deletions Nextcloud
+    // wouldn't do (see State). [wrote][0]: set once it has changed anything on either side.
     private suspend fun pass(account: NextcloudAccount, wrote: BooleanArray): Triple<Int, Int, Int> {
         val key = CalendarSync.accountKey(account)
         val (list, tag) = api.listTagged(account)
@@ -394,7 +376,7 @@ class NoteSync(
         listTag = tag?.let { key to it }
         val remote = list.associateBy { it.id }
         val pending = pendingDeleted()
-        var conflicts = 0
+        var ownCopies = 0
         var skipped = 0
         var keptRemote = 0
         // Links made for another login don't count here.
@@ -410,11 +392,6 @@ class NoteSync(
             wrote[0] = true
             rows.put(NoteMapping.row(note, key, made))
         }
-        suspend fun conflictCopy(mine: PlannerNote) {
-            val copy = mine.copy(id = java.util.UUID.randomUUID().toString(),
-                title = (Notes.label(mine) + " (conflict copy)").take(Notes.MAX_TITLE), reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
-            if (put(copy, null)) conflicts++
-        }
         // One note Nextcloud refuses (a shared note it won't let Planner change, say) is left as it is; the rest go on.
         // A login or connection problem still stops the pass.
         suspend fun each(block: suspend () -> Unit) {
@@ -425,24 +402,21 @@ class NoteSync(
             val mine = local[row.noteId]
             val theirs = remote[row.remoteId]
             when {
-                // Delete the backing note file conditionally; a changed or unverifiable version waits safely.
+                // Deleted here (its Undo gone): deleted there too, as Nextcloud Notes' own app does.
                 mine == null -> {
                     if (row.noteId in pending) return@each
                     if (theirs == null) { rows.delete(row.noteId); return@each }
-                    if (theirs.etag == row.etag && !theirs.readonly) {
-                        when (api.delete(account, theirs)) {
-                            NextcloudClient.NoteDelete.DELETED -> { wrote[0] = true; rows.delete(row.noteId) }
-                            NextcloudClient.NoteDelete.CHANGED -> {} // New version reconciled on the next pass.
-                            NextcloudClient.NoteDelete.UNSUPPORTED -> keptRemote++
-                        }
+                    // N16-2: a shared read-only note is left there, its link kept so it isn't imported again; changed there
+                    // since, it comes back below as a new note.
+                    if (theirs.readonly) {
+                        if (theirs.etag == row.etag) keptRemote++ else { rows.delete(row.noteId); linkedRemote.remove(theirs.id) }
+                        return@each
                     }
-                    // N16-2: shared read-only and unchanged: left there, and its link kept so it isn't imported again.
-                    else if (theirs.etag == row.etag) {}
-                    else {
-                        // Changed there: kept there, and it comes back below as a new note.
-                        rows.delete(row.noteId)
-                        linkedRemote.remove(theirs.id)
-                    }
+                    // Refused there (not a login problem): kept there and its link with it, tried again next pass, and
+                    // said in the sync status as a deletion waiting.
+                    try { api.remove(account, theirs.id) }
+                    catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) { keptRemote++; return@each } else throw e }
+                    wrote[0] = true; rows.delete(row.noteId)
                 }
                 // Deleted on Nextcloud: to Recently deleted, unless changed here since (then it goes up again).
                 theirs == null -> {
@@ -451,6 +425,10 @@ class NoteSync(
                 }
                 !NoteMapping.fits(theirs) -> skipped++
                 else -> {
+                    // As Nextcloud Notes' own app: a note changed here (since it was last synced) is sent, and Planner's
+                    // version is the one kept there (no If-Match: the last one written wins, no conflict copy); one not
+                    // changed here takes Nextcloud's, written only if it hasn't been edited here meanwhile (put's
+                    // expected version), else the edit goes up on the next pass.
                     val mineChanged = NoteMapping.fields(mine) != NoteMapping.fields(row)
                     val theirsChanged = theirs.etag != row.etag
                     // Only filed or pinned differently here: a read-only note keeps that on the phone, nothing to send.
@@ -465,35 +443,24 @@ class NoteSync(
                             val updated = if (theirsChanged) NoteMapping.apply(mine, theirs).copy(notebook = mine.notebook, pinned = mine.pinned) else mine
                             if (updated == mine || put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
                         }
-                        !theirsChanged && !theirs.readonly -> when (val result = api.update(account, theirs.id, theirs.etag,
+                        // Shared read-only there (Nextcloud Notes' own app doesn't let it be edited) and its words changed
+                        // here: they can't go up, so the shared note keeps Nextcloud's and the edit becomes a note of its
+                        // own, "(my copy)", which goes up below as a new note. The copy is saved first, so the edit is never
+                        // only in the note about to take Nextcloud's words (edited again meanwhile: left for the next pass).
+                        theirs.readonly -> {
+                            val copy = mine.copy(id = java.util.UUID.randomUUID().toString(), title = (Notes.label(mine) + " (my copy)").take(Notes.MAX_TITLE),
+                                reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
+                            if (put(copy, null)) {
+                                ownCopies++
+                                val updated = NoteMapping.apply(mine, theirs)
+                                if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
+                            }
+                        }
+                        else -> when (val result = api.update(account, theirs.id, null,
                             NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned)) {
                             is NotesApi.Write.Done -> { wrote[0] = true; rows.put(NoteMapping.row(mine, key, result.note)) }
-                            // Changed there meanwhile: settled on the next pass, with its new version.
                             NotesApi.Write.Changed -> {}
                             NotesApi.Write.Gone -> { rows.delete(row.noteId); push(mine) }
-                        }
-                        else -> {
-                            val updated = NoteMapping.apply(mine, theirs)
-                            // Both changed: merged when they changed different lines (NoteMerge), here and there. If
-                            // Nextcloud's changed again meanwhile, the next pass merges with that.
-                            val merged = if (theirs.readonly) null else NoteMerge.merge(row, mine, updated)
-                            if (merged != null) {
-                                if (NoteMapping.fields(merged) == NoteMapping.fields(updated)) {
-                                    if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
-                                } else if (put(merged, mine)) when (val result = api.update(account, theirs.id, theirs.etag,
-                                    NoteMapping.remoteTitle(merged), merged.content, merged.notebook, merged.pinned)) {
-                                    is NotesApi.Write.Done -> { wrote[0] = true; rows.put(NoteMapping.row(merged, key, result.note)) }
-                                    NotesApi.Write.Changed -> {}
-                                    NotesApi.Write.Gone -> { rows.delete(row.noteId); push(merged) }
-                                }
-                                return@each
-                            }
-                            // Overlapping changes (or it's read-only there): Nextcloud's version here, then Planner's as a
-                            // copy (only once the note itself is updated, so a failed update doesn't make a second copy).
-                            if (put(updated, mine)) {
-                                rows.put(NoteMapping.row(updated, key, theirs))
-                                if (NoteMapping.fields(updated) != NoteMapping.fields(mine)) conflictCopy(mine)
-                            }
                         }
                     }
                 }
@@ -529,7 +496,7 @@ class NoteSync(
 
         // Planner's notes not on Nextcloud yet go up.
         for (mine in free) each { push(mine) }
-        return Triple(conflicts, skipped, keptRemote)
+        return Triple(ownCopies, skipped, keptRemote)
     }
 
     companion object {
