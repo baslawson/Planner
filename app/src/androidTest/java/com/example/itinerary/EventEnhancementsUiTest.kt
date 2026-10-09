@@ -30,7 +30,7 @@ class EventEnhancementsUiTest {
         click("QA original event") // Agenda → Calendar.
         click("QA original event") // Calendar → Editor.
         await { find("Edit event") != null }
-        click("Duplicate event")
+        click("Event options"); click("Duplicate event") // in the editor's ⋮ menu
         await { find("Duplicate event") != null && nodes().any { it.isEditable } }
         setText(nodes().first { it.isEditable }, "QA copied event")
         click("All day") // All-day copies must not show a time collision.

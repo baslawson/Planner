@@ -101,6 +101,14 @@ class ChecklistJumpUiTest {
         Thread.sleep(800)
         if (find("Edit event") == null) click("QA Trip day")
         checkJump("Edit event")
+        // Folded by hand: the button still offers it, and a tap unfolds it on the way there.
+        clickJump()
+        click("Checklist")
+        await { find("Charger") == null }
+        repeat(4) { swipe(down = true) }
+        clickJump()
+        await { find("Charger") != null && jump() == null }
+        screenshot("Edit event-unfolded")
     }
 
     @Test fun noButtonWithoutChecklistItems() {

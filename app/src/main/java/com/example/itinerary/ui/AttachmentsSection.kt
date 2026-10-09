@@ -59,14 +59,18 @@ fun AttachmentsSection(
     onViewText: (Attachment) -> Unit = {},
     // Null hides "Suggest bill details", e.g. in a task's time block, which can't be a bill.
     onSuggestBill: ((Attachment) -> Unit)? = {},
+    // False when whatever holds it draws the divider and heading (the event editor's FoldSection).
+    heading: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        HeadingText(
-            "Attachments",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
+        if (heading) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            HeadingText(
+                "Attachments",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         attachments.forEach { attachment ->
             AttachmentRow(attachment, store, enabled = !readingText, onOpen = { onOpen(attachment) }, onRemove = { onRemove(attachment) })
             if (com.example.itinerary.scanner.DocumentText.supports(attachment)) {

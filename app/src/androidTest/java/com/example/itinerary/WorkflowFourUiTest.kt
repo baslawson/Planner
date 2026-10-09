@@ -171,9 +171,10 @@ class WorkflowFourUiTest {
             activity = share("Meet at the station", "QA buffered appointment")
             click("Add event")
             click("All day")
+            click("1 hour") // the editor's quick lengths (there is no minutes box)
+            click("Travel buffers") // folded away until set
             field("Before (min)", "20")
             field("After (min)", "15")
-            field("Duration in minutes (optional)", "60")
             screenshot("event-buffers")
             saveAndClose()
             await { data().items.any { it.title == "QA buffered appointment" } }
@@ -183,7 +184,7 @@ class WorkflowFourUiTest {
             val dependent = PlannerTask(title = "QA book hotel", dueDate = LocalDate.now())
             app.repository.saveTask(dependent)
             ins.runOnMainSync { activity.setContent { ItineraryTheme { TaskEditor(dependent, false) {} } } }
-            click("Add prerequisite")
+            click("Prerequisites"); click("Add prerequisite") // unfold it first
             click("QA confirm dates")
             screenshot("task-prerequisite")
             click("Save")

@@ -16,8 +16,11 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+// [trigger]: how they are offered instead of the two buttons (the event editor's ⋮ menu), given "Use template" (null
+// when it isn't offered, or can't be used now) and "Save as template" (null while it can't be saved).
 fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: () -> TemplateContent,
-    onApply: (TemplateContent) -> Unit, canApply: Boolean = true, billTask: Boolean = false) {
+    onApply: (TemplateContent) -> Unit, canApply: Boolean = true, billTask: Boolean = false,
+    trigger: (@Composable (use: (() -> Unit)?, save: (() -> Unit)?) -> Unit)? = null) {
     val repo = (LocalContext.current.applicationContext as ItineraryApp).repository
     val templates by repo.templates.collectAsStateWithLifecycle(initialValue = emptyList())
     val matchingTemplates = remember(templates, billTask) {
@@ -30,9 +33,12 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
     var deleting by remember { mutableStateOf<EventTemplate?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (isNew) OutlinedButton(enabled = canApply, onClick = { choosing = true; error = null }) { Text("Use template") }
-        TextButton(enabled = enabled, onClick = { name = title.take(80); saving = true; error = null }) { Text("Save as template") }
+    val use = { choosing = true; error = null }
+    val save = { name = title.take(80); saving = true; error = null }
+    if (trigger != null) trigger(use.takeIf { isNew && canApply }, save.takeIf { enabled })
+    else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (isNew) OutlinedButton(enabled = canApply, onClick = use) { Text("Use template") }
+        TextButton(enabled = enabled, onClick = save) { Text("Save as template") }
     }
     if (saving) PlannerDialog(if (billTask) "Save bill template" else "Save event template", onDismissRequest = { if (!busy) saving = false },
         primary = DialogAction("Save template", enabled = !busy && name.isNotBlank()) {

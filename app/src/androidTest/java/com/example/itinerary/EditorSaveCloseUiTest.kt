@@ -159,7 +159,7 @@ class EditorSaveCloseUiTest {
         click("Save")
         await { data().tasks.any { it.title=="QA task keep editing" } }
         val id=data().tasks.single { it.title=="QA task keep editing" }.id
-        await { find("Edit task")!=null && find("Duplicate task")!=null && find("Schedule time")!=null }
+        await { find("Edit task")!=null && find("Task options")!=null }
         assertNotNull(pickEditable(nodes(),"QA task keep editing"))
         assertFalse(enabled("Save"))
         screenshot("new-task-saved-still-open")

@@ -89,11 +89,11 @@ class SeventhFeaturesUiTest {
             // month during its first half, and the totals below count this month only).
             addedReminders=listOf(Reminder(itemId=0,amount=3,unit=ReminderUnit.DAYS)),options=EventSaveOptions(RepeatRule.MONTHLY,3))
         open();click("QA power bill");click("QA power bill")
-        click("Save as template");setText("QA power bill","Power bill preset");click("Save template")
+        click("Bill options");click("Save as template");setText("QA power bill","Power bill preset");click("Save template")
         await { data().templates.any { it.name=="Power bill preset" } }
         click("Close") // nothing changed in the bill; a bill opens from the agenda, so Close returns there
         // Bill templates are offered only in the bill editor.
-        click("Add menu");click("Add task");click("Bill payment");click("Use template");click("Apply Power bill preset")
+        click("Add menu");click("Add task");click("Bill payment");click("Bill options");click("Use template");click("Apply Power bill preset")
         setText("QA power bill","QA templated bill");setText("123.45","222.22")
         screenshot("template-applied")
         saveAndClose()

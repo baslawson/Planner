@@ -1,11 +1,11 @@
 package com.example.itinerary.ui
 import com.example.itinerary.ui.MatrixIconButton as IconButton
 import com.example.itinerary.ui.MatrixFilterChip as FilterChip
+import com.example.itinerary.ui.MatrixOutlinedButton as OutlinedButton
 
 import com.example.itinerary.data.billTaskSummary
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +25,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -164,6 +171,9 @@ fun SearchScreen(
                     label = { Text("Search events and tasks") },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                     isError = outcome.invalidDates.isNotEmpty(),
+                    // The same rounded shape as the buttons under it, with a search icon.
+                    shape = ControlShape,
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
@@ -181,25 +191,35 @@ fun SearchScreen(
                 val grouped = remember(visibleOutcome) { groupResults(visibleOutcome) }
                 LazyScrollHints(Modifier.fillMaxSize()) { hintState -> LazyColumn(Modifier.fillMaxSize(), state = hintState, contentPadding = PaddingValues(bottom = 24.dp)) {
                     item(key = "search-controls") { Column {
-                        SavedSearchControls(query, categories, showCompleted) { saved ->
-                            query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
-                        }
-                        // The categories work as tags: pick one or more to narrow the search.
-                        Row(
-                            Modifier
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            categoryChips.forEach { category ->
-                                FilterChip(
-                                    selected = category in categories,
-                                    onClick = {
-                                        categories = if (category in categories) categories - category else categories + category
-                                    },
-                                    label = { Text(category) },
-                                )
+                        // One tidy row under the box: the category list first, then Save search and Saved searches.
+                        SavedSearchControls(query, categories, showCompleted, more = {
+                            // The categories work as tags: pick one or more to narrow the search. A dropdown list with a tick
+                            // box each, not a row of chips that scrolls sideways (user, 10 Oct); it stays open while picking.
+                            var pickingCategories by remember { mutableStateOf(false) }
+                            Box {
+                                val picked = categoryChips.filter { it in categories }
+                                OutlinedButton(onClick = { pickingCategories = true }) {
+                                    Text(if (picked.isEmpty()) "All categories" else picked.joinToString(", "), maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                                }
+                                // A long list stops at about six rows and scrolls with the app's scroll bar, as every other
+                                // dropdown does; it opens at the top each time.
+                                val menuScroll = remember { androidx.compose.foundation.ScrollState(0) }
+                                LaunchedEffect(pickingCategories) { if (pickingCategories) menuScroll.scrollTo(0) }
+                                DropdownMenu(expanded = pickingCategories, onDismissRequest = { pickingCategories = false },
+                                    modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT).scrollBar(menuScroll, inset = 8.dp), scrollState = menuScroll) {
+                                    DropdownMenuItem(text = { Text("All categories") }, onClick = { categories = emptySet(); pickingCategories = false },
+                                        leadingIcon = { RadioButton(selected = categories.isEmpty(), onClick = null) })
+                                    categoryChips.forEach { category ->
+                                        DropdownMenuItem(text = { Text(category) },
+                                            onClick = { categories = if (category in categories) categories - category else categories + category },
+                                            leadingIcon = { Checkbox(checked = category in categories, onCheckedChange = null) })
+                                    }
+                                }
                             }
+                        }) { saved ->
+                            query = saved.query; categories = saved.categories; showCompleted = saved.showCompleted
                         }
                         if (tasks.any { it.done } || (categoryCounts["Bills"] ?: 0) > 0) FilterChip(selected = showCompleted, enabled = !selection.active,
                             onClick = { showCompleted = !showCompleted }, label = { Text("Show completed tasks") }, modifier = Modifier.padding(horizontal = 16.dp))

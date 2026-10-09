@@ -67,6 +67,7 @@ fun DangerButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
+        shape = ControlShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.error,
             contentColor = MaterialTheme.colorScheme.onError,
@@ -87,7 +88,7 @@ fun DangerOutlinedButton(
 ) {
     val red = MaterialTheme.colorScheme.error
     val muted = MaterialTheme.colorScheme.onSurface
-    androidx.compose.material3.OutlinedButton(onClick, modifier, enabled,
+    androidx.compose.material3.OutlinedButton(onClick, modifier, enabled, shape = ControlShape,
         colors = ButtonDefaults.outlinedButtonColors(containerColor = red.copy(alpha = 0.08f), contentColor = red,
             disabledContainerColor = muted.copy(alpha = 0.04f),
             disabledContentColor = muted.copy(alpha = if (com.example.itinerary.ui.theme.LocalHighContrast.current) 0.6f else 0.38f)),
@@ -120,20 +121,22 @@ fun EditorActions(
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp, Alignment.End),
         // Wrapped lines leave room for each button's 48 dp touch area, so a wrapped Save can't overlap Close's.
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-        val size = Modifier.heightIn(min = 30.dp)
+        // Every button centred on the row's middle line: Undo and Redo are taller (a 48 dp touch area) and otherwise sat
+        // lower than Close and Save (user, 10 Oct: "they dont align with other buttons").
+        val size = Modifier.heightIn(min = 30.dp).align(Alignment.CenterVertically)
         val padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 17.dp, vertical = 2.dp)
         val label = MaterialTheme.typography.labelLarge.let { it.copy(fontSize = it.fontSize * 0.9f, lineHeight = it.lineHeight * 0.9f) }
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 36.dp) {
             if (onDelete != null) DangerOutlinedButton(enabled = deleteEnabled, onClick = onDelete, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Delete") } }
             androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-            // RS-1: Undo and Redo, tapped often, sit away from Delete (beside Close), with a full 48 dp touch area.
+            // RS-1: Undo and Redo, tapped often, sit away from Delete (beside Close), with a full 48 dp touch area. Plain arrows
+            // as in the note editor, not outlined pills (user, 10 Oct: the pills, grey while unused, looked unprofessional).
             if (undo != null) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 48.dp) {
-                val tight = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                OutlinedButton(enabled = undoEnabled && undo.canUndo, onClick = undo::undo, contentPadding = tight, modifier = size) {
-                    androidx.compose.material3.Icon(UndoIcons.undo, contentDescription = "Undo", modifier = Modifier.size(18.dp)) }
-                OutlinedButton(enabled = undoEnabled && undo.canRedo, onClick = undo::redo, contentPadding = tight, modifier = size) {
-                    androidx.compose.material3.Icon(UndoIcons.redo, contentDescription = "Redo", modifier = Modifier.size(18.dp)) }
+                MatrixIconButton(enabled = undoEnabled && undo.canUndo, onClick = undo::undo, modifier = Modifier.align(Alignment.CenterVertically)) {
+                    androidx.compose.material3.Icon(UndoIcons.undo, contentDescription = "Undo", modifier = Modifier.size(22.dp)) }
+                MatrixIconButton(enabled = undoEnabled && undo.canRedo, onClick = undo::redo, modifier = Modifier.align(Alignment.CenterVertically)) {
+                    androidx.compose.material3.Icon(UndoIcons.redo, contentDescription = "Redo", modifier = Modifier.size(22.dp)) }
             }
             OutlinedButton(enabled = closeEnabled, onClick = onClose, modifier = size, contentPadding = padding) {
                 androidx.compose.material3.ProvideTextStyle(label) { Text("Close") } }

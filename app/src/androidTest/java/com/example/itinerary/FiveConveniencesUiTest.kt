@@ -73,7 +73,8 @@ class FiveConveniencesUiTest {
         assertTrue(saved.checklist.first().done)
         assertEquals("Confirm booking",saved.checklist.last().text)
         click("QA conveniences")
-        click("Duplicate event")
+        click("Event options");click("Duplicate event")
+        await { find("Duplicate event") != null && nodes().any { it.isEditable } } // the ⋮ menu has closed and the copy is open
         setText(nodes().first { it.isEditable },"QA conveniences copy")
         saveAndClose()
         await { snapshot().items.any { it.title == "QA conveniences copy" } }

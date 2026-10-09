@@ -11,6 +11,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -20,7 +26,8 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: Boolean, onOpen: (SavedSearch) -> Unit) {
+// [more]: further controls on the same wrapping row (Search's category list), so they all line up as one tidy row.
+fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: Boolean, more: @Composable () -> Unit = {}, onOpen: (SavedSearch) -> Unit) {
     val settings = (LocalContext.current.applicationContext as ItineraryApp).settings
     val saved by settings.savedSearches.collectAsStateWithLifecycle()
     var choosing by rememberSaveable { mutableStateOf(false) }
@@ -29,9 +36,20 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
     var error by remember { mutableStateOf<String?>(null) }
     fun update(values: List<SavedSearch>) = try { settings.setSavedSearches(values); true }
         catch (e: Exception) { error = e.message ?: "Couldn't save searches."; false }
-    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(enabled = query.isNotBlank() || categories.isNotEmpty(), onClick = { name = ""; naming = true; error = null }) { Text("Save search") }
-        TextButton(onClick = { choosing = true; error = null }) { Text("Saved searches (${saved.size})") }
+    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        more()
+        // Compact icon buttons (☆ save, ☰ saved with their count), so the row fits on one line; screen readers and
+        // tests still read "Save search" and "Saved searches (n)".
+        val tight = PaddingValues(horizontal = 12.dp)
+        OutlinedButton(enabled = query.isNotBlank() || categories.isNotEmpty(), onClick = { name = ""; naming = true; error = null },
+            contentPadding = tight, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Save search" }) {
+            Icon(Icons.Filled.Star, contentDescription = null) }
+        OutlinedButton(onClick = { choosing = true; error = null }, contentPadding = tight,
+            modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Saved searches (${saved.size})" }) {
+            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null); Spacer(Modifier.width(6.dp))
+            // The label above already says the count; read once, not twice.
+            Text("${saved.size}", Modifier.clearAndSetSemantics { }) }
     }
     if (naming) PlannerDialog("Save search", onDismissRequest = { naming = false },
         primary = DialogAction(if (saved.any { it.name.equals(name.trim(), true) }) "Replace" else "Save", enabled = name.isNotBlank()) {
@@ -59,13 +77,14 @@ fun SavedSearchControls(query: String, categories: Set<String>, showCompleted: B
 }
 
 @Composable
-fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onChange: (List<String>) -> Unit) {
+// [heading]: false when whatever holds it draws its heading (the task editor's FoldSection).
+fun TaskPrerequisites(taskId: String, ids: List<String>, enabled: Boolean, onChange: (List<String>) -> Unit, heading: Boolean = true) {
     val app = LocalContext.current.applicationContext as ItineraryApp
     val tasks by app.repository.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
     var choosing by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var opening by rememberSaveable { mutableStateOf<String?>(null) }
-    Text("Prerequisites", style = MaterialTheme.typography.titleMedium)
+    if (heading) Text("Prerequisites", style = MaterialTheme.typography.titleMedium)
     ids.forEach { id ->
         val task = tasks.find { it.id == id }
         Row(Modifier.fillMaxWidth()) {

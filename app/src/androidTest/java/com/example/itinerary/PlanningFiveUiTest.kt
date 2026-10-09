@@ -139,7 +139,7 @@ class PlanningFiveUiTest {
         val activity = ins.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         try {
             ins.runOnMainSync { activity.setContent { ItineraryTheme { TaskEditor(task, false) {} } } }
-            click("Duplicate task")
+            click("Task options"); click("Duplicate task") // in the editor's ⋮ menu
             reveal { find("Choose due date") != null }
             screenshot("duplicate-task")
             saveAndClose() // the duplicate's editor stays open after Save; Close returns to the original task
@@ -147,7 +147,7 @@ class PlanningFiveUiTest {
             val duplicate = data().tasks.single { it.title == task.title && it.id != task.id }
             assertNull(duplicate.dueDate); assertFalse(duplicate.checklist.single().done)
             assertEquals(task, data().tasks.single { it.id == task.id })
-            click("Schedule time")
+            click("Task options"); click("Schedule time")
             screenshot("schedule-task")
             click("Review time block")
             reveal { find("Linked task: QA planning task · Not completed") != null }

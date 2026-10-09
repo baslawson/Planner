@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
@@ -215,21 +214,24 @@ fun ReminderSectionFrame(
         }
         hints.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         rows()
-        // Bug notes 2: the ways to add one are a dropdown list, not a row of chips that scrolls sideways.
-        if (chips.isNotEmpty()) DropdownChoice("Add reminder", chips, enabled, quiet = true, icon = Icons.Filled.Add, arrow = false)
+        // Bug notes 2: the ways to add one are a dropdown list, not a row of chips that scrolls sideways. A full-width
+        // outlined button like the other actions in the editors (user, 10 Oct: as plain text it was small and easy to miss).
+        if (chips.isNotEmpty()) DropdownChoice("Add reminder", chips, enabled, icon = Icons.Filled.Notifications, arrow = false, fill = true)
     }
 }
 
 /**
  * An outlined "[label] ▾" button whose list runs one of [choices] (its own text and action). [quiet]: a plain text button
  * instead (inside a reminder's card), with [icon] before the label, no ▾ without [arrow], and [description] for TalkBack.
+ * [fill]: the button takes the full width.
  */
 @Composable
 internal fun DropdownChoice(label: String, choices: List<Pair<String, () -> Unit>>, enabled: Boolean = true, quiet: Boolean = false,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null, arrow: Boolean = true, description: String? = null) {
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null, arrow: Boolean = true, description: String? = null, fill: Boolean = false) {
     var open by remember { mutableStateOf(false) }
-    androidx.compose.foundation.layout.Box {
-        val described = if (description != null) Modifier.semantics { contentDescription = description } else Modifier
+    androidx.compose.foundation.layout.Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
+        val described = (if (fill) Modifier.fillMaxWidth() else Modifier)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
         val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
             if (icon != null) { Icon(icon, contentDescription = null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
             Text(label)

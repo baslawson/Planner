@@ -30,11 +30,15 @@ import com.example.itinerary.data.ChecklistEntry
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-// [anchor]: where the section is on screen, for ChecklistJumpButton.
+// [anchor]: where the section is on screen, for ChecklistJumpButton. Without [heading] its divider and heading are
+// drawn by whatever holds it (the event editor's FoldSection, which then marks the top of it).
 @Composable
-fun ChecklistSection(entries: List<ChecklistEntry>, onChange: (List<ChecklistEntry>) -> Unit, anchor: ChecklistAnchor? = null) {
-    HorizontalDivider(if (anchor == null) Modifier else Modifier.onGloballyPositioned { anchor.top = it.positionInWindow().y })
-    HeadingText("Checklist", style = MaterialTheme.typography.titleMedium)
+fun ChecklistSection(entries: List<ChecklistEntry>, onChange: (List<ChecklistEntry>) -> Unit, anchor: ChecklistAnchor? = null,
+    heading: Boolean = true) {
+    if (heading) {
+        HorizontalDivider(if (anchor == null) Modifier else Modifier.onGloballyPositioned { anchor.top = it.positionInWindow().y })
+        HeadingText("Checklist", style = MaterialTheme.typography.titleMedium)
+    }
     entries.forEachIndexed { index, task ->
         key(task.id) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -66,6 +70,8 @@ fun checklistProgress(entries: List<ChecklistEntry>): String = "${entries.count 
 class ChecklistAnchor {
     var top by mutableStateOf<Float?>(null)
     var bottom by mutableStateOf<Float?>(null)
+    // Unfolds a checklist that is folded away (the event editor's FoldSection), so the jump lands on its items.
+    var unfold: (() -> Unit)? = null
 }
 
 object ChecklistJump {
@@ -94,10 +100,17 @@ fun BoxScope.ChecklistJumpButton(entries: List<ChecklistEntry>, anchor: Checklis
     val show = ChecklistJump.shows(entries.isNotEmpty(), known, inView, WindowInsets.isImeVisible, scroll.maxValue - scroll.value, zone)
     val scope = rememberCoroutineScope()
     val margin = with(LocalDensity.current) { 12.dp.toPx() }
+    // The checklist ends up in the middle of the screen (user, 10 Oct); one taller than the screen starts at its top.
     fun jump() {
-        val at = anchor.top ?: return
-        val from = viewTop ?: return
-        scope.launch { scroll.animateScrollTo((scroll.value + at - from - margin).roundToInt().coerceIn(0, scroll.maxValue)) }
+        anchor.unfold?.invoke()
+        scope.launch {
+            // An unfolded checklist is measured a frame or two later: its new bottom is needed to find its middle.
+            repeat(2) { androidx.compose.runtime.withFrameNanos { } }
+            val top = anchor.top ?: return@launch; val bottom = anchor.bottom ?: return@launch
+            val from = viewTop ?: return@launch; val to = viewBottom ?: return@launch
+            val shift = if (bottom - top > to - from - 2 * margin) top - from - margin else (top + bottom) / 2 - (from + to) / 2
+            scroll.animateScrollTo((scroll.value + shift).roundToInt().coerceIn(0, scroll.maxValue))
+        }
     }
     val label = "Go to checklist, ${entries.count { it.done }} of ${entries.size} done"
     AnimatedVisibility(show, Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 16.dp),

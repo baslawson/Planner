@@ -25,6 +25,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -415,7 +417,40 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                HeadingText(if (creating) "Add task" else "Edit task", style = MaterialTheme.typography.headlineSmall)
+                // The heading with a ⋮ menu for what is used now and then (Duplicate, Schedule time, Make it an event), so the
+                // form starts with what is typed every time, as the event editor (user, 10 Oct).
+                val conversions = LocalConversions.current
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    HeadingText(if (creating) "Add task" else "Edit task", modifier = Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
+                    if (!creating) {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            MatrixIconButton(enabled = !busy, onClick = { menuOpen = true }) {
+                                Icon(androidx.compose.material.icons.Icons.Filled.MoreVert, contentDescription = "Task options")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Duplicate task") }, enabled = title.isNotBlank(), onClick = {
+                                    menuOpen = false
+                                    duplicate = initial.copy(title = title, notes = notes, priority = TaskPriority.valueOf(priority),
+                                        checklist = checklist, attachments = attachments, repeat = repeat, prerequisiteIds = prerequisiteIds,
+                                        repeatDays = repeatDays.toIntOrNull() ?: initial.repeatDays).duplicateForEditing()
+                                })
+                                DropdownMenuItem(text = { Text("Schedule time") }, onClick = {
+                                    menuOpen = false
+                                    if (EditorDraftStore.openEditors.value > 0 || runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
+                                        error = "Close your current event editor before scheduling another block."
+                                    else schedule = true
+                                })
+                                // Wish list #1: the same task as an event instead. From what is saved, so nothing typed is lost.
+                                if (conversions != null && TaskEventConversion.canMakeEvent(initial)) DropdownMenuItem(text = { Text("Make it an event") }, onClick = {
+                                    menuOpen = false
+                                    if (unsaved) error = "Save or discard your changes first, then make it an event."
+                                    else { conversions.taskToEvent(initial.id); onDismiss() }
+                                })
+                            }
+                        }
+                    }
+                }
                 notice?.let { ConversionNotice(it) }
                 if (changedElsewhere || deletedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                     FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -431,30 +466,15 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 SuggestField(title, onValueChange = { if (it.length <= 500) title = it.replace('\n', ' ') }, label = "Task title",
                     suggestions = pastTasks, onPick = { title = it }, enabled = !busy, singleLine = false,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
-                if (!creating) {
-                    TextButton(enabled = !busy && title.isNotBlank(), onClick = {
-                        duplicate = initial.copy(title = title, notes = notes, priority = TaskPriority.valueOf(priority),
-                            checklist = checklist, attachments = attachments, repeat = repeat, prerequisiteIds = prerequisiteIds,
-                            repeatDays = repeatDays.toIntOrNull() ?: initial.repeatDays).duplicateForEditing()
-                    }) { Text("Duplicate task") }
-                    TextButton(enabled = !busy, onClick = {
-                        if (EditorDraftStore.openEditors.value > 0 || runCatching { EditorDraftStore(context).read() }.getOrNull() != null)
-                            error = "Close your current event editor before scheduling another block."
-                        else schedule = true
-                    }) { Text("Schedule time") }
-                    // Wish list #1: the same task as an event instead. From what is saved, so nothing typed is lost.
-                    val conversions = LocalConversions.current
-                    if (conversions != null && TaskEventConversion.canMakeEvent(initial)) TextButton(enabled = !busy, onClick = {
-                        if (unsaved) error = "Save or discard your changes first, then make it an event."
-                        else { conversions.taskToEvent(initial.id); onDismiss() }
-                    }) { Text("Make it an event") }
-                    TaskTimeBlocks(initial.id)
-                }
+                // When: the due date, the repeat, its time blocks and the reminder, which counts from them.
+                EditorGroupHeading("When")
                 Text("Due date (optional)", style = MaterialTheme.typography.labelLarge)
-                TextButton(enabled = !busy, onClick = { choosingDate = true }) {
-                    Text(date?.let { LocalDate.parse(it).dayLabel(LocalDateFormat.current) } ?: "Choose due date")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedButton(enabled = !busy, onClick = { choosingDate = true }) {
+                        Text(date?.let { LocalDate.parse(it).dayLabel(LocalDateFormat.current) } ?: "Choose due date")
+                    }
+                    if (date != null) TextButton(enabled = !busy, onClick = { date = null }) { Text("Remove due date") }
                 }
-                if (date != null) TextButton(enabled = !busy, onClick = { date = null }) { Text("Remove due date") }
                 val repeatKind = TaskRepeat.of(repeat)
                 SettingsDropdown(label = "Repeat", current = if (repeatKind.detailed) RepeatRule.parse(repeat)?.label ?: repeatKind.label else repeatKind.label,
                     options = TaskRepeat.entries.toList(), onSelect = { kind ->
@@ -468,6 +488,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) repeatDays = it }, enabled = !busy,
                     label = { Text("Days after completion (1–3650)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (repeat != TaskRepeat.NONE.name) Text("Completing this task creates the next occurrence. Missed calendar dates are skipped.", style = MaterialTheme.typography.bodySmall)
+                // Its time blocks in the calendar (Schedule time in ⋮ adds one).
+                if (!creating) TaskTimeBlocks(initial.id)
                 // The same layout as an event's Reminders section; a task has one reminder at a date and time.
                 var presetsStale by remember { mutableIntStateOf(0) }
                 val presets = remember(date, reminderAt, presetsStale) { taskReminderPresets(date?.let(LocalDate::parse)) }
@@ -505,6 +527,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         }
                     }
                 }
+                // Details: priority and notes; then the parts most tasks don't need, folded away until they hold something.
+                EditorGroupHeading("Details")
                 Text("Priority", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TaskPriority.entries.forEach { option ->
@@ -513,10 +537,27 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 }
                 OutlinedTextField(notes, onValueChange = { if (it.length <= 20_000) notes = it }, label = { Text("Notes (optional)") },
                     enabled = !busy, minLines = 4, modifier = Modifier.fillMaxWidth())
-                TaskPrerequisites(initial.id, prerequisiteIds, enabled = !busy, onChange = { prerequisiteIds = it })
-                ChecklistSection(checklist, onChange = { if (!busy) checklist = it }, anchor = checklistAnchor)
-                HorizontalDivider()
-                HeadingText("Attachments", style = MaterialTheme.typography.titleMedium)
+                // Each opens by itself once it holds something, so nothing saved is out of sight.
+                var prerequisitesOpen by rememberSaveable { mutableStateOf(prerequisiteIds.isNotEmpty()) }
+                LaunchedEffect(prerequisiteIds.isNotEmpty()) { if (prerequisiteIds.isNotEmpty()) prerequisitesOpen = true }
+                FoldSection("Prerequisites", if (prerequisiteIds.isEmpty()) "None" else if (prerequisiteIds.size == 1) "1 task" else "${prerequisiteIds.size} tasks", prerequisitesOpen, { prerequisitesOpen = !prerequisitesOpen }) {
+                    TaskPrerequisites(initial.id, prerequisiteIds, enabled = !busy, onChange = { prerequisiteIds = it }, heading = false)
+                }
+                var checklistOpen by rememberSaveable { mutableStateOf(checklist.isNotEmpty()) }
+                LaunchedEffect(checklist.isNotEmpty()) { if (checklist.isNotEmpty()) checklistOpen = true }
+                // The floating "Checklist 1/3" button opens it too when it was folded by hand.
+                SideEffect { checklistAnchor.unfold = { checklistOpen = true } }
+                FoldSection("Checklist", if (checklist.isEmpty()) "None" else checklistProgress(checklist), checklistOpen, { checklistOpen = !checklistOpen },
+                    // Where the checklist is, for its jump button: its heading, and while folded its bottom too.
+                    headerModifier = Modifier.onGloballyPositioned {
+                        checklistAnchor.top = it.positionInWindow().y
+                        if (!checklistOpen) checklistAnchor.bottom = it.positionInWindow().y + it.size.height
+                    }) {
+                    ChecklistSection(checklist, onChange = { if (!busy) checklist = it }, anchor = checklistAnchor, heading = false)
+                }
+                var attachmentsOpen by rememberSaveable { mutableStateOf(attachments.isNotEmpty()) }
+                LaunchedEffect(attachments.size) { if (attachments.isNotEmpty()) attachmentsOpen = true }
+                FoldSection("Attachments", if (attachments.isEmpty()) "None" else "${attachments.size} attached", attachmentsOpen, { attachmentsOpen = !attachmentsOpen }) {
                 attachments.forEach { attachment ->
                     AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) }, onRemove = {
                         attachments = attachments.filterNot { it.fileName == attachment.fileName }
@@ -536,6 +577,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
                         catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
                     }) { Text("Take photo") }
+                }
                 }
             } }
             HorizontalDivider()

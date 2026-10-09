@@ -185,7 +185,8 @@ class BillTaskWorkflowUiTest {
         assertEquals(reminders, data().reminders.filter { it.itemId == before.id })
         assertEquals(attachments, data().attachments.filter { it.itemId == before.id })
         click("This week"); reveal { find(title) != null }; click("Upcoming"); reveal { find(title) != null }
-        click("Search"); click("Tasks"); setText("",title)
+        click("Search"); click("All categories"); click("Tasks"); back() // the categories are a dropdown list, open while picking
+        setText("",title)
         reveal { find(title) != null }; screenshot("bill-task-search")
         click(title); await { find("Edit bill task") != null }
         click("Delete"); await { find("Delete bill?") != null }; click("Cancel"); click("Close"); click("Back")

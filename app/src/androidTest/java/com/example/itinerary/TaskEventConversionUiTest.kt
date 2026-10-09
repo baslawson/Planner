@@ -110,7 +110,7 @@ class TaskEventConversionUiTest {
         click("QA make series")
         if (find("Edit event") == null) { Thread.sleep(700); if (find("Edit event") == null) click("QA make series") }
         await { find("Edit event") != null }
-        click("Make it a task")
+        click("Event options"); click("Make it a task")
         await { find("Whole series") != null }
         click("Whole series")
         await { find("Add task") != null && has("Saving makes this task") }

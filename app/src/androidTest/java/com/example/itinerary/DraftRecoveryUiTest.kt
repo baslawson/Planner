@@ -72,7 +72,7 @@ class DraftRecoveryUiTest {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"QA recovered bill")
         }))
         click("Does not repeat");click("Fortnightly")
-        click("Scan document")
+        click("Attachments");click("Scan document") // folded away until the bill has one
     }
     // Deterministic camera boundary for the prepare stage, while exercising the real editor and scanner.
     @HarnessStage @Test fun prepareWithCapturedPage() {

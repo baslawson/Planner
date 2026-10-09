@@ -127,7 +127,7 @@ class SixTaskFeaturesUiTest {
         fresh(); click("Add menu"); click("Add task"); click("To-do task")
         field("Task title", "QA six repeat")
         click("Never"); click("Weekly")
-        click("Add task"); field("Task 1", "Pack documents")
+        click("Checklist"); click("Add task"); field("Task 1", "Pack documents") // unfold it first
         screenshot("repeat-checklist-editor")
         // Leaving without Close keeps the draft (Close or Back would ask "Save changes?"): restart the app.
         open(); await { find("AGENDA")!=null }
@@ -219,7 +219,7 @@ class SixTaskFeaturesUiTest {
     @Test fun taskFilePickerAndPhotoCapture() = runBlocking {
         fresh();click("Add menu");click("Add task");click("To-do task")
         field("Task title","QA six attachments")
-        click("Attach file")
+        click("Attachments");click("Attach file") // folded away until the task has one
         await { nodes().any { it.packageName?.toString()=="com.google.android.documentsui" } }
         screenshot("task-file-picker"); back()
         // A second tap while the camera opens makes no second photo file (as in the note editor).
@@ -255,7 +255,7 @@ class SixTaskFeaturesUiTest {
         click("Never");click("Days after completion")
         field("Days after completion (1–3650)","12")
         field("Notes (optional)","Recover after process death")
-        click("Add task");field("Task 1","Keep this step")
+        click("Checklist");click("Add task");field("Task 1","Keep this step")
         await { TaskDraftStore(context).read("new")?.optString("title")=="QA six cold draft" }
         screenshot("draft-before-kill")
     }
@@ -342,7 +342,7 @@ class SixTaskFeaturesUiTest {
         setText("QA six grow", long)
         await { nodes().any { it.isEditable && it.text?.toString()==long } }
         assertTrue("title box grew (${heightOf(long)} > $short)", heightOf(long) > short*1.5)
-        click("Add task"); field("Task 1", "Short")
+        click("Checklist"); click("Add task"); field("Task 1", "Short")
         val shortItem=heightOf("Short")
         val longItem="Bring the signed lease, two forms of ID, the bond receipt and the spare key for the letterbox"
         setText("Short", longItem)
@@ -366,7 +366,7 @@ class SixTaskFeaturesUiTest {
             resolver.openOutputStream(document)!!.use { it.write("QA document bytes for task attachment\n".toByteArray()) }
             fresh();click("Add menu");click("Add task");click("To-do task")
             field("Task title","QA six document")
-            click("Attach file");click("QA-six-document.txt")
+            click("Attachments");click("Attach file");click("QA-six-document.txt")
             reveal { find("QA-six-document.txt")!=null && find("Save")!=null };screenshot("task-document-attached");saveAndClose()
             await { data().tasks.any { it.title=="QA six document" } }
             val attachment=data().tasks.single { it.title=="QA six document" }.attachments.single()

@@ -36,8 +36,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -694,12 +697,51 @@ private fun ItemEditorForm(
                     .padding(bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-            HeadingText(
-                if (billTask) { if (duplicating) "Duplicate bill" else if (isNew) "New bill task" else "Edit bill task" }
-                else if (duplicating) "Duplicate event" else if (isNew) "New event" else "Edit event",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            // The heading with a ⋮ menu for what is used now and then (templates, Duplicate, Make it a task), so the form
+            // starts with what is typed every time (user, 10 Oct: a cleaner editor).
+            val conversions = LocalConversions.current
+            val canMakeTask = !isNew && conversions != null && !billTask && !duplicating && !deletedElsewhere
+            TemplateActions(isNew = isNew, title = title, billTask = billTask, canApply = !busy && !readingText,
+                enabled = !busy && !readingText && title.isNotBlank() && validBillAmount && validDuration && (billTask || validBuffers) && validRepeat && checklist.all { it.text.isNotBlank() },
+                content = { TemplateContent(currentItem(), shownReminders, repeat,
+                    if (repeat == RepeatRule.NONE) 1 else if (!creatingSeries) allEvents.count { it.seriesId == initial.seriesId }.coerceIn(2, 365) else count?.coerceIn(2, 365) ?: 12) }, onApply = ::applyTemplate,
+                trigger = { use, saveTemplate ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        HeadingText(
+                            if (billTask) { if (duplicating) "Duplicate bill" else if (isNew) "New bill task" else "Edit bill task" }
+                            else if (duplicating) "Duplicate event" else if (isNew) "New event" else "Edit event",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        var menuOpen by remember { mutableStateOf(false) }
+                        androidx.compose.foundation.layout.Box {
+                            com.example.itinerary.ui.MatrixIconButton(enabled = !busy, onClick = { menuOpen = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = if (billTask) "Bill options" else "Event options")
+                            }
+                            androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                if (isNew) androidx.compose.material3.DropdownMenuItem(text = { Text("Use template") }, enabled = use != null,
+                                    onClick = { menuOpen = false; use?.invoke() })
+                                androidx.compose.material3.DropdownMenuItem(text = { Text("Save as template") }, enabled = saveTemplate != null,
+                                    onClick = { menuOpen = false; saveTemplate?.invoke() })
+                                if (!isNew) androidx.compose.material3.DropdownMenuItem(text = { Text(if (billTask) "Duplicate bill" else "Duplicate event") }, onClick = {
+                                    menuOpen = false
+                                    // A copy is a new event: what was typed before isn't undone into it (ER-3).
+                                    undo.reload()
+                                    duplicating = true; entireSeries = false; repeat = RepeatRule.NONE; paid = false; payments = emptyList(); checklist = checklist.map { it.copy(done = false) } })
+                                // Wish list #1: the same event as a task instead. From what is saved, so nothing typed is lost.
+                                if (canMakeTask) androidx.compose.material3.DropdownMenuItem(text = { Text("Make it a task") }, onClick = {
+                                    menuOpen = false
+                                    if (unsaved) error = "Save or discard your changes first, then make it a task."
+                                    else if (initial.seriesId != null) askingMakeTask = true
+                                    else { conversions?.eventToTask(initial.id, false); onDismiss() }
+                                })
+                            }
+                        }
+                    }
+                })
+            if (askingMakeTask) MakeTaskSeriesChoice(onChoose = { whole -> askingMakeTask = false; conversions?.eventToTask(initial.id, whole); onDismiss() },
+                onDismiss = { askingMakeTask = false })
             if (isNew && !duplicating) notice?.let { ConversionNotice(it) }
             if (changedElsewhere) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                 FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -709,30 +751,17 @@ private fun ItemEditorForm(
                     TextButton(enabled = !busy && !readingText, onClick = { if (unsaved) askingReload = true else reload() }) { Text("Reload") }
                 }
             }
-            TemplateActions(isNew = isNew, title = title, billTask = billTask, canApply = !busy && !readingText,
-                enabled = !busy && !readingText && title.isNotBlank() && validBillAmount && validDuration && (billTask || validBuffers) && validRepeat && checklist.all { it.text.isNotBlank() },
-                content = { TemplateContent(currentItem(), shownReminders, repeat,
-                    if (repeat == RepeatRule.NONE) 1 else if (!creatingSeries) allEvents.count { it.seriesId == initial.seriesId }.coerceIn(2, 365) else count?.coerceIn(2, 365) ?: 12) }, onApply = ::applyTemplate)
             initial.linkedTaskId?.let { LinkedTaskSection(it) }
             if (initial.skipped && !isNew) Text("This occurrence is skipped. Restore it from its action menu to resume reminders.")
-            if (!isNew) {
-                TextButton(enabled = !busy, onClick = {
-                    // A copy is a new event: what was typed before isn't undone into it (ER-3).
-                    undo.reload()
-                    duplicating = true; entireSeries = false; repeat = RepeatRule.NONE; paid = false; payments = emptyList(); checklist = checklist.map { it.copy(done = false) } }) {
-                    Text(if (billTask) "Duplicate bill" else "Duplicate event")
+            // A banner, with the way out of it beside it.
+            if (recovered != null) Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                FlowRow(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Unfinished draft recovered. Save to keep your changes.",
+                        color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.align(Alignment.CenterVertically))
+                    TextButton(enabled = !busy && !readingText, onClick = ::discard) { Text("Discard draft") }
                 }
-                // Wish list #1: the same event as a task instead. From what is saved, so nothing typed is lost.
-                val conversions = LocalConversions.current
-                if (conversions != null && !billTask && !duplicating && !deletedElsewhere) TextButton(enabled = !busy, onClick = {
-                    if (unsaved) error = "Save or discard your changes first, then make it a task."
-                    else if (initial.seriesId != null) askingMakeTask = true
-                    else { conversions.eventToTask(initial.id, false); onDismiss() }
-                }) { Text("Make it a task") }
-                if (askingMakeTask) MakeTaskSeriesChoice(onChoose = { whole -> askingMakeTask = false; conversions?.eventToTask(initial.id, whole); onDismiss() },
-                    onDismiss = { askingMakeTask = false })
             }
-            if (recovered != null) Text("Unfinished draft recovered. Save to keep your changes.")
             if (duplicating) Text("Edit this copy, then Save to add it. The original is kept.")
             if (!isNew && !deletedElsewhere && initial.seriesId != null) {
                 Text("${RepeatRule.parse(initial.repeatRule)?.label ?: "Repeating"} series")
@@ -742,19 +771,6 @@ private fun ItemEditorForm(
                 }
                 if (entireSeries) Text("Changes apply to every remaining occurrence, including earlier dates. Moving the date shifts all occurrences by the same number of days.")
             }
-            // Saffron pill so the day being edited is easy to spot; tap it to pick another date.
-            Text(
-                spanEnd?.let { "${spanLabel(date, it)} ▾" } ?: "${if (billTask) "Due " else ""}${date.dayLabel(LocalDateFormat.current)} ▾",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.secondaryContainer)
-                    .clickable(role = Role.Button, onClickLabel = if (billTask) "Change due date" else if (spanEnd != null) "Change dates" else "Change date") {
-                        if (spanEnd != null) pickingRange = true else pickingDate = true }
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-            )
             // Titles used before, as you type: picking one fills in what went with it last time where nothing is entered
             // yet (an event's place and category; a bill's payee, amount and currency).
             // Prepared once per change to the events (hunt 21 S5), so each letter only filters, not every event again.
@@ -828,7 +844,8 @@ private fun ItemEditorForm(
                 }
                 if (payments.isNotEmpty()) Text("Currency is fixed while payment history exists.", style = MaterialTheme.typography.bodySmall)
             }
-            // Wraps onto more lines rather than scrolling, so the Other button is always in view.
+            // Wraps onto more lines rather than scrolling, so the Other button is always in view. Removing categories is in
+            // Other's dialog, away from the choices.
             if (!billTask) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 categoryChips.filterNot { it == "Bills" }.forEach { c ->
                     FilterChip(
@@ -843,30 +860,29 @@ private fun ItemEditorForm(
                     label = { Text("Other") },
                     leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
                 )
-                if (categoryChips.isNotEmpty()) {
-                    AssistChip(
-                        onClick = { removingCategories = true },
-                        label = { Text("Remove…") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
-                    )
-                }
             }
-            // Colours the event's bar and title in the day's list, so events can be told apart.
-            HeadingText("Colour", style = MaterialTheme.typography.titleSmall)
-            PlanColorPicker(
-                selected = colorIndex,
-                onSelect = { colorIndex = it; customColor = null },
-                custom = customColor?.let { Color(it) },
-                onPickCustom = { pickingColor = true },
-                // Offer every colour used by automatic selection; the swatches wrap as needed.
-                count = PlanColors.EVENT_COUNT,
+
+            // When: the date, all day or a time with its end, the repeat, then the reminders, which count from them.
+            EditorGroupHeading("When")
+            // Saffron pill so the day being edited is easy to spot; tap it to pick another date.
+            Text(
+                spanEnd?.let { "${spanLabel(date, it)} ▾" } ?: "${if (billTask) "Due " else ""}${date.dayLabel(LocalDateFormat.current)} ▾",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .clickable(role = Role.Button, onClickLabel = if (billTask) "Change due date" else if (spanEnd != null) "Change dates" else "Change date") {
+                        if (spanEnd != null) pickingRange = true else pickingDate = true }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
             )
             // Keep the last chosen time when switching temporarily to all-day.
-            FlowRow(
+            val allDay = time == null
+            if (!timeBlock || allDay && !billTask) FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val allDay = time == null
                 if (!timeBlock) Row(
                     modifier = Modifier
                         .toggleable(
@@ -900,47 +916,31 @@ private fun ItemEditorForm(
                     Text("Multiple days", style = MaterialTheme.typography.bodyLarge)
                     Switch(checked = spanEnd != null, onCheckedChange = null)
                 }
-                if (!allDay) {
+            }
+            // A timed event: its start and end side by side, and quick lengths. The end sets the length (no minutes box).
+            if (!allDay) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ModeButton(
                         selected = true,
                         text = time!!.label(LocalTimeFormat.current, context),
                     ) { pickingTime = true }
-                }
-            }
-            if (time != null && !billTask) {
-                OutlinedButton(onClick = { pickingEndTime = true }) {
-                    Text(if (duration != null && duration in 1..1440) "End time: ${time!!.plusMinutes(duration.toLong()).label(LocalTimeFormat.current, context)}" else "Set end time")
-                }
-                OutlinedTextField(
-                    value = durationText,
-                    readOnly = busy,
-                    onValueChange = { durationText = it.filter(Char::isDigit).take(4) },
-                    label = { Text(if (timeBlock) "Duration in minutes" else "Duration in minutes (optional)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                    singleLine = true,
-                    isError = !validDuration,
-                    supportingText = { Text(if (!validDuration) "Enter 1–1440 minutes${if (timeBlock) "" else ", or leave blank"}" else
-                        duration?.let { eventEndLabel(date, time, it, LocalTimeFormat.current, context) }.orEmpty()) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOfNotNull((null to "No duration").takeIf { !timeBlock }, 30 to "30 min", 60 to "1 hour", 120 to "2 hours").forEach { (minutes, label) ->
-                        FilterChip(selected = durationText == minutes?.toString().orEmpty(),
-                            onClick = { durationText = minutes?.toString().orEmpty() }, label = { Text(label) })
+                    if (!billTask) OutlinedButton(onClick = { pickingEndTime = true }) {
+                        Text(if (duration != null && duration in 1..1440) "End time: ${time!!.plusMinutes(duration.toLong()).label(LocalTimeFormat.current, context)}" else "Set end time")
                     }
                 }
-                Text("Travel and preparation buffers", style = MaterialTheme.typography.titleSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(beforeText, { beforeText = it.filter(Char::isDigit).take(4) },
-                        label = { Text("Before (min)") }, readOnly = busy, singleLine = true, isError = before !in 0..1440,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                    OutlinedTextField(afterText, { afterText = it.filter(Char::isDigit).take(4) },
-                        label = { Text("After (min)") }, readOnly = busy, singleLine = true, isError = after !in 0..1440,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                if (!billTask) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOfNotNull((null to "No duration").takeIf { !timeBlock }, 30 to "30 min", 60 to "1 hour", 120 to "2 hours").forEach { (minutes, label) ->
+                            FilterChip(selected = durationText == minutes?.toString().orEmpty(),
+                                onClick = { durationText = minutes?.toString().orEmpty() }, label = { Text(label) })
+                        }
+                    }
+                    if (!validDuration) Text(if (timeBlock) "Choose an end time." else "Choose an end time within a day, or No duration.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    else duration?.let { eventEndLabel(date, time!!, it, LocalTimeFormat.current, context) }?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                Text("Reserve 0–1440 minutes on each side for travel or preparation. Included in clashes and free time; reminders keep the event's start time.", style = MaterialTheme.typography.bodySmall)
-                if ((before > 0 || after > 0) && duration == null)
-                    Text("Set an end time for precise buffers. Without one, clashes use the start time and free time uses your chosen default duration.", style = MaterialTheme.typography.bodySmall)
             }
             if (creatingSeries || seriesEdit) {
                 SettingsDropdown(
@@ -972,84 +972,12 @@ private fun ItemEditorForm(
             if (changeRepeat) Text(if (repeat == RepeatRule.NONE)
                 "All saved occurrences will become separate ${if (billTask) "bills" else "events"}. Their dates are kept."
                 else "Keeps all ${plannedDates.size} saved occurrences and spaces them ${repeat.label.replaceFirstChar { it.lowercase() }} from ${plannedDates.firstOrNull()?.dayLabel(LocalDateFormat.current).orEmpty()}.")
-            if (category != "Bills" && payments.isNotEmpty()) {
-                Text("Payment history", style = MaterialTheme.typography.titleMedium)
-                Text("Recorded payments are kept when you change the category.", style = MaterialTheme.typography.bodySmall)
-                PaymentSummary(Bills.parse(billAmountText), billCurrency, paid, payments)
-                PaymentHistory(payments, billCurrency, onReverse = null)
-            }
             if (!billTask && clashes.isNotEmpty()) {
                 Text(
                     "${if (duration == null && clashes.all { it.durationMinutes == null }) "Conflicts with (including buffers)" else "Overlaps with (including buffers)"} ${clashes.take(3).joinToString { it.title }}${if (clashes.size > 3) " and ${clashes.size - 3} more" else ""}. You can still save.",
                     color = MaterialTheme.colorScheme.tertiary,
                 )
             }
-            // Places (and payees) used before, as you type.
-            val pastPlaces = remember(location, history) { history.locations(location) }
-            SuggestField(
-                value = location,
-                onValueChange = { location = EventText.typed(location, it.replace('\n', ' '), EventText.MAX_LOCATION) },
-                label = if (billTask) "Payee / location (optional)" else "Location",
-                suggestions = pastPlaces,
-                onPick = { location = it.take(EventText.MAX_LOCATION) },
-                enabled = !busy,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                singleLine = false,
-            )
-            OutlinedTextField(
-                value = notes,
-                onValueChange = { notes = EventText.typed(notes, it, EventText.MAX_NOTES) },
-                readOnly = busy,
-                label = { Text("Notes") },
-                minLines = 2,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (readingText) Text("Reading document text…")
-            AttachmentsSection(
-                attachments = shownAttachments,
-                readingText = readingText,
-                onReadText = { attachment ->
-                    if (!readingText) scope.launch {
-                        readingText = true
-                        try {
-                            val indexed = com.example.itinerary.scanner.DocumentText.index(attachment, store)
-                            val index = added.indexOf(attachment)
-                            if (index >= 0) added[index] = indexed
-                            else if (removed.none { it.id == attachment.id }) { removed.add(attachment); added.add(indexed.copy(id = 0, itemId = 0)) }
-                        } finally { readingText = false }
-                    }
-                },
-                onViewText = { textPreview = it },
-                // A task's time block can't be a bill (D9), so it isn't offered bill details.
-                onSuggestBill = if (initial.linkedTaskId != null && !duplicating) null else { attachment -> billSuggestion = attachment },
-                store = store,
-                onTakePhoto = {
-                    val file = store.newPhotoFile()
-                    pendingPhoto = file
-                    try {
-                        takePhoto.launch(store.uriFor(file.name))
-                    } catch (_: ActivityNotFoundException) {
-                        pendingPhoto = null
-                        Toast.makeText(context, "No camera app available", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onAttachFile = { pickFile.launch(arrayOf("*/*")) },
-                onAddLink = { addingLink = true },
-                onScanDocument = {
-                    File(context.filesDir, "draft-scan").deleteRecursively()
-                    scanningPdf = true
-                },
-                onRemove = { attachment ->
-                    if (attachment in added) {
-                        added.remove(attachment)
-                        discardAddedFile(attachment)
-                    } else {
-                        removed += attachment
-                    }
-                },
-                onOpen = { openAttachment(context, store, it) },
-            )
-            ChecklistSection(checklist, onChange = { checklist = it }, anchor = checklistAnchor)
             RemindersSection(
                 billTask = billTask,
                 eventDate = date,
@@ -1105,6 +1033,129 @@ private fun ItemEditorForm(
                     }
                 },
             )
+
+            // Details: where, notes and colour; then the parts most events don't need, folded away until they hold something.
+            EditorGroupHeading("Details")
+            // Places (and payees) used before, as you type.
+            val pastPlaces = remember(location, history) { history.locations(location) }
+            SuggestField(
+                value = location,
+                onValueChange = { location = EventText.typed(location, it.replace('\n', ' '), EventText.MAX_LOCATION) },
+                label = if (billTask) "Payee / location (optional)" else "Location",
+                suggestions = pastPlaces,
+                onPick = { location = it.take(EventText.MAX_LOCATION) },
+                enabled = !busy,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                singleLine = false,
+            )
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = EventText.typed(notes, it, EventText.MAX_NOTES) },
+                readOnly = busy,
+                label = { Text("Notes") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // Colours the event's bar and title in the day's list, so events can be told apart. One line of swatches.
+            HeadingText("Colour", style = MaterialTheme.typography.titleSmall)
+            PlanColorPicker(
+                selected = colorIndex,
+                onSelect = { colorIndex = it; customColor = null },
+                custom = customColor?.let { Color(it) },
+                onPickCustom = { pickingColor = true },
+                // Offer every colour used by automatic selection; the swatches wrap as needed.
+                count = PlanColors.EVENT_COUNT,
+                // 34 dp circles, each in a 40 dp tap area (as before), touching: the same 6 dp gap shows between them.
+                swatchSize = 34.dp, touchSize = 40.dp,
+                spacing = 0.dp,
+            )
+            if (category != "Bills" && payments.isNotEmpty()) {
+                Text("Payment history", style = MaterialTheme.typography.titleMedium)
+                Text("Recorded payments are kept when you change the category.", style = MaterialTheme.typography.bodySmall)
+                PaymentSummary(Bills.parse(billAmountText), billCurrency, paid, payments)
+                PaymentHistory(payments, billCurrency, onReverse = null)
+            }
+
+            // Each opens by itself once it holds something, so nothing saved is out of sight.
+            var checklistOpen by rememberSaveable { mutableStateOf(checklist.isNotEmpty()) }
+            androidx.compose.runtime.LaunchedEffect(checklist.isNotEmpty()) { if (checklist.isNotEmpty()) checklistOpen = true }
+            // The floating "Checklist 1/3" button opens it too when it was folded by hand.
+            androidx.compose.runtime.SideEffect { checklistAnchor.unfold = { checklistOpen = true } }
+            FoldSection("Checklist", if (checklist.isEmpty()) "None" else checklistProgress(checklist), checklistOpen, { checklistOpen = !checklistOpen },
+                // Where the checklist is, for its jump button: its heading, and while folded its bottom too.
+                headerModifier = Modifier.onGloballyPositioned {
+                    checklistAnchor.top = it.positionInWindow().y
+                    if (!checklistOpen) checklistAnchor.bottom = it.positionInWindow().y + it.size.height
+                }) {
+                ChecklistSection(checklist, onChange = { checklist = it }, anchor = checklistAnchor, heading = false)
+            }
+            var attachmentsOpen by rememberSaveable { mutableStateOf(shownAttachments.isNotEmpty()) }
+            androidx.compose.runtime.LaunchedEffect(shownAttachments.size, readingText) { if (shownAttachments.isNotEmpty() || readingText) attachmentsOpen = true }
+            FoldSection("Attachments", if (shownAttachments.isEmpty()) "None" else "${shownAttachments.size} attached", attachmentsOpen, { attachmentsOpen = !attachmentsOpen }) {
+                if (readingText) Text("Reading document text…")
+                AttachmentsSection(
+                    attachments = shownAttachments,
+                    heading = false,
+                    readingText = readingText,
+                    onReadText = { attachment ->
+                        if (!readingText) scope.launch {
+                            readingText = true
+                            try {
+                                val indexed = com.example.itinerary.scanner.DocumentText.index(attachment, store)
+                                val index = added.indexOf(attachment)
+                                if (index >= 0) added[index] = indexed
+                                else if (removed.none { it.id == attachment.id }) { removed.add(attachment); added.add(indexed.copy(id = 0, itemId = 0)) }
+                            } finally { readingText = false }
+                        }
+                    },
+                    onViewText = { textPreview = it },
+                    // A task's time block can't be a bill (D9), so it isn't offered bill details.
+                    onSuggestBill = if (initial.linkedTaskId != null && !duplicating) null else { attachment -> billSuggestion = attachment },
+                    store = store,
+                    onTakePhoto = {
+                        val file = store.newPhotoFile()
+                        pendingPhoto = file
+                        try {
+                            takePhoto.launch(store.uriFor(file.name))
+                        } catch (_: ActivityNotFoundException) {
+                            pendingPhoto = null
+                            Toast.makeText(context, "No camera app available", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onAttachFile = { pickFile.launch(arrayOf("*/*")) },
+                    onAddLink = { addingLink = true },
+                    onScanDocument = {
+                        File(context.filesDir, "draft-scan").deleteRecursively()
+                        scanningPdf = true
+                    },
+                    onRemove = { attachment ->
+                        if (attachment in added) {
+                            added.remove(attachment)
+                            discardAddedFile(attachment)
+                        } else {
+                            removed += attachment
+                        }
+                    },
+                    onOpen = { openAttachment(context, store, it) },
+                )
+            }
+            if (time != null && !billTask) {
+                var buffersOpen by rememberSaveable { mutableStateOf(before != 0 || after != 0 || !validBuffers) }
+                androidx.compose.runtime.LaunchedEffect(before != 0 || after != 0 || !validBuffers) { if (before != 0 || after != 0 || !validBuffers) buffersOpen = true }
+                FoldSection("Travel buffers", if (before == 0 && after == 0) "None" else "$before min before · $after min after", buffersOpen, { buffersOpen = !buffersOpen }) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(beforeText, { beforeText = it.filter(Char::isDigit).take(4) },
+                            label = { Text("Before (min)") }, readOnly = busy, singleLine = true, isError = before !in 0..1440,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                        OutlinedTextField(afterText, { afterText = it.filter(Char::isDigit).take(4) },
+                            label = { Text("After (min)") }, readOnly = busy, singleLine = true, isError = after !in 0..1440,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    }
+                    Text("Reserve 0–1440 minutes on each side for travel or preparation. Included in clashes and free time; reminders keep the event's start time.", style = MaterialTheme.typography.bodySmall)
+                    if ((before > 0 || after > 0) && duration == null)
+                        Text("Set an end time for precise buffers. Without one, clashes use the start time and free time uses your chosen default duration.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
             } } // Close the inner scrollable Column
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
@@ -1248,6 +1299,7 @@ private fun ItemEditorForm(
                 }
                 addingCategory = false
             },
+            onRemove = if (categoryChips.none { it != "Bills" }) null else ({ addingCategory = false; removingCategories = true }),
         )
     }
     if (removingCategories) {

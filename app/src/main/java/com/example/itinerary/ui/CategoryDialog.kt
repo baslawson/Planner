@@ -88,7 +88,8 @@ fun RemoveCategoriesDialog(options: List<Pair<String, Int>>, onDismiss: () -> Un
 // so typing "food" picks Food instead of making a second one. "Bills" is refused (a bill is made with its own button).
 // Confirms with the name to store.
 @Composable
-fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+// [onRemove]: a "Remove categories…" button, which the event editor keeps here rather than beside its category chips.
+fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: (String) -> Unit, onRemove: (() -> Unit)? = null) {
     var text by rememberSaveable { mutableStateOf("") }
     val name = Categories.ownCategory(text, inUse)
     val bills = Categories.isBillsName(text)
@@ -99,6 +100,7 @@ fun CustomCategoryDialog(inUse: List<String>, onDismiss: () -> Unit, onConfirm: 
         onDismissRequest = onDismiss,
         primary = DialogAction("Add", enabled = name != null) { onConfirm(name!!) },
         dismiss = DialogAction("Cancel", onClick = onDismiss),
+        extra = listOfNotNull(onRemove?.let { DialogAction("Remove categories…", onClick = it) }),
     ) {
             OutlinedTextField(
                 value = text,

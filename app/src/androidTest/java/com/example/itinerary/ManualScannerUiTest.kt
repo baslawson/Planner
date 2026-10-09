@@ -34,7 +34,7 @@ class ManualScannerUiTest {
         val item = snapshot().items.single { it.title == "QA manual scan" }
         instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         click("QA manual scan"); click("QA manual scan")
-        click("Scan document")
+        click("Attachments"); click("Scan document") // folded away until the event has one
         capturePage()
         await { nodes().any { it.text?.toString()?.startsWith("Page 1 of 1 ·") == true } }
         val crop = nodes().first { it.contentDescription?.toString() == "Document crop. Adjust the four page corners." }

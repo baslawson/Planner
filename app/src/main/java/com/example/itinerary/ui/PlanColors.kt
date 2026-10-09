@@ -109,11 +109,17 @@ fun PlanColorPicker(
     onPickCustom: (() -> Unit)? = null,
     // How many of the palette colours to offer (the first ones).
     count: Int = PLAN_COLORS.size,
+    // Smaller swatches closer together fit the event editor's eight colours and its own on one line.
+    swatchSize: androidx.compose.ui.unit.Dp = 40.dp,
+    spacing: androidx.compose.ui.unit.Dp = 10.dp,
+    // The tap area of each swatch (at least [swatchSize]); see Swatch's touch.
+    touchSize: androidx.compose.ui.unit.Dp = swatchSize,
 ) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(spacing), verticalArrangement = Arrangement.spacedBy(spacing)) {
         PLAN_COLORS.take(count).forEachIndexed { index, option ->
             val chosen = custom == null && index == Math.floorMod(selected, PLAN_COLORS.size)
             Swatch(
+                size = swatchSize, touch = touchSize,
                 modifier = Modifier.background(option.color),
                 chosen = chosen,
                 description = option.name,
@@ -122,6 +128,7 @@ fun PlanColorPicker(
         }
         if (onPickCustom != null) {
             Swatch(
+                size = swatchSize, touch = touchSize,
                 modifier = if (custom != null) Modifier.background(custom) else Modifier.background(CUSTOM_COLOUR_BRUSH),
                 chosen = custom != null,
                 description = if (custom != null) "Custom colour, tap to change" else "Pick a custom colour",
@@ -144,24 +151,26 @@ fun Swatch(
     tick: Color = Color.White,
     // A thin outline round an unchosen swatch, so a pale one still shows on a pale page.
     outlined: Boolean = false,
+    size: androidx.compose.ui.unit.Dp = 40.dp,
+    // The area that takes a tap, round the drawn swatch: larger than [size] for small swatches, so they stay easy to hit.
+    touch: androidx.compose.ui.unit.Dp = size,
     content: (@Composable () -> Unit)? = null,
 ) {
-    Box(
-        Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .then(modifier)
-            .then(
-                when {
-                    chosen -> Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                    outlined -> Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    else -> Modifier
-                },
-            )
-            .selectable(selected = chosen, role = Role.RadioButton, onClick = onClick)
-            .semantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
-    ) {
-        if (chosen) Icon(Icons.Filled.Check, contentDescription = null, tint = tick) else content?.invoke()
+    val circle = Modifier
+        .size(size)
+        .clip(CircleShape)
+        .then(modifier)
+        .then(
+            when {
+                chosen -> Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                outlined -> Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                else -> Modifier
+            },
+        )
+    val tap = Modifier.selectable(selected = chosen, role = Role.RadioButton, onClick = onClick).semantics { contentDescription = description }
+    val inside: @Composable () -> Unit = { if (chosen) Icon(Icons.Filled.Check, contentDescription = null, tint = tick) else content?.invoke() }
+    if (touch <= size) Box(circle.then(tap), contentAlignment = Alignment.Center) { inside() }
+    else Box(Modifier.size(touch).clip(CircleShape).then(tap), contentAlignment = Alignment.Center) {
+        Box(circle, contentAlignment = Alignment.Center) { inside() }
     }
 }
