@@ -28,7 +28,11 @@ import java.util.concurrent.CopyOnWriteArrayList
  *  answers 404 as a server without the Notes app does; [beforePut] and [beforePost] run first (a change there while a sync
  *  runs, or a pass held there); a PUT to a note in [refused] answers 403; [noTag]: the list comes without an ETag. */
 class FakeNotes(private val user: String, private val password: String) : Dispatcher() {
-    data class N(val title: String, val content: String, val category: String, val favorite: Boolean, val etag: String, val readonly: Boolean = false)
+    // [modified]: the file's time in seconds, as Nextcloud keeps it: now on every change, or the "modified" a client sends.
+    data class N(val title: String, val content: String, val category: String, val favorite: Boolean, val etag: String, val readonly: Boolean = false,
+                 val modified: Long = 0)
+    // The server's clock (seconds); a test can set it apart from the phone's.
+    @Volatile var clock: () -> Long = { System.currentTimeMillis() / 1000 }
     val notes = ConcurrentHashMap<Long, N>()
     val requests = CopyOnWriteArrayList<String>()
     @Volatile var missing = false
@@ -42,11 +46,11 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
     private var nextId = 100L
     private var version = 0
     @Synchronized fun add(title: String, content: String, category: String = "", favorite: Boolean = false, readonly: Boolean = false): Long {
-        val id = ++nextId; notes[id] = N(title, content, category, favorite, "e${++version}", readonly); return id
+        val id = ++nextId; notes[id] = N(title, content, category, favorite, "e${++version}", readonly, clock()); return id
     }
-    @Synchronized fun edit(id: Long, change: (N) -> N) { notes[id] = change(notes[id]!!).copy(etag = "e${++version}") }
+    @Synchronized fun edit(id: Long, change: (N) -> N) { notes[id] = change(notes[id]!!.copy(modified = clock())).copy(etag = "e${++version}") }
     private fun json(id: Long, n: N) = JSONObject().put("id", id).put("etag", n.etag).put("title", n.title).put("content", n.content)
-        .put("category", n.category).put("favorite", n.favorite).put("modified", 1_790_000_000L).put("readonly", n.readonly)
+        .put("category", n.category).put("favorite", n.favorite).put("modified", n.modified).put("readonly", n.readonly)
     override fun dispatch(request: RecordedRequest): MockResponse {
         val path = request.requestUrl!!.encodedPath
         requests += "${request.method} $path"
@@ -98,6 +102,7 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                 request.method == "POST" && id == null -> {
                     val o = JSONObject(body)
                     val made = add(o.getString("title").ifBlank { o.getString("content").lineSequence().first() }, o.getString("content"), o.optString("category"), o.optBoolean("favorite"))
+                    o.optLong("modified").takeIf { it > 0 }?.let { m -> notes[made] = notes[made]!!.copy(modified = m) }
                     MockResponse().setBody(json(made, notes[made]!!).toString())
                 }
                 request.method == "PUT" && id != null -> {
@@ -106,7 +111,8 @@ class FakeNotes(private val user: String, private val password: String) : Dispat
                     val current = notes[id] ?: return@synchronized MockResponse().setResponseCode(404)
                     if (request.getHeader("If-Match") != null && request.getHeader("If-Match") != "\"${current.etag}\"") return@synchronized MockResponse().setResponseCode(412)
                     val o = JSONObject(body)
-                    edit(id) { it.copy(title = o.getString("title"), content = o.getString("content"), category = o.optString("category"), favorite = o.optBoolean("favorite")) }
+                    edit(id) { it.copy(title = o.getString("title"), content = o.getString("content"), category = o.optString("category"), favorite = o.optBoolean("favorite"),
+                        modified = o.optLong("modified").takeIf { m -> m > 0 } ?: it.modified) }
                     MockResponse().setBody(json(id, notes[id]!!).toString())
                 }
                 // The actual Notes API does not support If-Match on DELETE.
@@ -195,20 +201,47 @@ class NoteSyncTest {
             assertTrue(sync.sync())
             assertEquals("server version", byTitle("Groceries").content)
 
-            // Changed there while Planner's change was on its way: Planner's still goes up (the last one written wins).
+            // Changed there while Planner's change was on its way: If-Match refuses it (412) and the next sync decides by time
+            // (both changed within the same second: the phone's goes up).
             repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nmine"), create = false)
             fake.beforePut = { id -> fake.beforePut = null; fake.edit(id) { it.copy(content = "Recipe\ntheirs") } }
             assertTrue(sync.sync())
-            assertEquals("Recipe\nmine", fake.notes[recipeId]!!.content)
+            assertEquals("Recipe\ntheirs", fake.notes[recipeId]!!.content)
             assertTrue(sync.sync())
+            assertEquals("Recipe\nmine", fake.notes[recipeId]!!.content)
             assertEquals("Recipe\nmine", byTitle("Recipe").content)
             assertTrue(local().none { it.title.endsWith("(conflict copy)") })
+
+            // Quillpad's rule: changed on both sides, the newer edit wins. Nextcloud's two minutes later: it comes in.
+            repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nolder phone edit"), create = false)
+            val realClock = fake.clock
+            fake.clock = { System.currentTimeMillis() / 1000 + 120 }
+            fake.edit(recipeId) { it.copy(content = "Recipe\nnewer server edit") }
+            fake.clock = realClock
+            assertTrue(sync.sync())
+            assertEquals("Recipe\nnewer server edit", byTitle("Recipe").content)
+            assertEquals("Recipe\nnewer server edit", fake.notes[recipeId]!!.content)
+            // ...and the phone's two minutes later than Nextcloud's: it goes up.
+            fake.clock = { System.currentTimeMillis() / 1000 - 120 }
+            fake.edit(recipeId) { it.copy(content = "Recipe\nolder server edit") }
+            fake.clock = realClock
+            repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nnewer phone edit"), create = false)
+            assertTrue(sync.sync())
+            assertEquals("Recipe\nnewer phone edit", fake.notes[recipeId]!!.content)
+            assertEquals("The edit time went with it", byTitle("Recipe").modified / 1000, fake.notes[recipeId]!!.modified)
+            // Changed on one side only, whatever the clocks say: a phone clock behind Nextcloud's doesn't lose the edit.
+            fake.clock = { System.currentTimeMillis() / 1000 + 600 }
+            assertTrue(sync.sync())
+            repo.saveNote(byTitle("Recipe").copy(content = "Recipe\nphone behind"), create = false)
+            assertTrue(sync.sync())
+            assertEquals("Recipe\nphone behind", fake.notes[recipeId]!!.content)
+            fake.clock = realClock
 
             // Deleted on Nextcloud: to Recently deleted here.
             fake.notes.remove(recipeId)
             assertTrue(sync.sync())
-            assertTrue(local().none { it.content == "Recipe\nmine" })
-            assertTrue(repo.snapshot().deleted.any { DeletedCodec.decode(it.payload).notes.any { n -> n.content == "Recipe\nmine" } })
+            assertTrue(local().none { it.content == "Recipe\nphone behind" })
+            assertTrue(repo.snapshot().deleted.any { DeletedCodec.decode(it.payload).notes.any { n -> n.content == "Recipe\nphone behind" } })
 
             // Deleted in Planner: held during Undo, then deleted there too.
             repo.deleteNote(byTitle("Groceries").id)
@@ -235,7 +268,7 @@ class NoteSyncTest {
             assertTrue(local().none { it.title.endsWith("(conflict copy)") })
             assertEquals("x".repeat(Notes.MAX_CONTENT + 1), fake.notes[long]!!.content)
 
-            // Links forgotten (a restored backup): matching content relinks without duplicates.
+            // Links forgotten (a restored backup): paired again by title, without duplicates.
             assertTrue(sync.sync())
             val counts = local().size to fake.notes.size
             sync.forget()
@@ -648,12 +681,14 @@ class NoteSyncTest {
         waitFor("the restored note is sent after the restore") { r.fake.notes.values.any { it.content == "restored" } }
     }
 
-    // Bug hunt 18, R18-S3: a note matched by its words to Nextcloud's unlinked twin, edited here just as the pass files it
-    // (Nextcloud's notebook and favourite), is still linked: the next pass sends the edit as an update. Before, no link
-    // was kept, so the next pass brought Nextcloud's in and sent Planner's up as new notes (duplicates on both sides).
+    // Bug hunt 18, R18-S3 (Quillpad's logic): a note paired by title with Nextcloud's newer one, edited here just as the
+    // pass takes Nextcloud's version, keeps the edit and is still linked: the next sync sends the edit. Without the link the
+    // next sync paired the two again by title and took Nextcloud's, losing the edit.
     @Test fun aTwinEditedWhileItIsLinkedIsUpdatedNotDuplicated() = rig("note-sync-twin-edited") { r ->
         r.repo.saveNote(PlannerNote(title = "Groceries", content = "milk"), create = true)
+        r.fake.clock = { System.currentTimeMillis() / 1000 + 60 }
         val id = r.fake.add("Groceries", "milk", category = "Home", favorite = true)
+        r.fake.clock = { System.currentTimeMillis() / 1000 }
         val store = r.repo.asNoteStore()
         var edited = false
         val racing = object : NoteStore by store {
@@ -675,5 +710,51 @@ class NoteSyncTest {
         assertEquals("One note here", 1, r.repo.allNotes().size)
         assertEquals("milk\neggs", r.fake.notes[id]!!.content)
         assertEquals("milk\neggs", r.note("Groceries").content)
+    }
+
+    // E (user, 9 Oct): a link an older version made by content, to a duplicate there ("Shopping (2)"), is cleared once, and
+    // the note is paired again by title, so its edits reach the note the user looks at, not the duplicate.
+    @Test fun oldLinksAreClearedOnceAndNotesPairedByTitle() = rig("note-sync-relink") { r ->
+        val real = r.fake.add("Shopping", "Shopping\nbread")
+        val duplicate = r.fake.add("Shopping (2)", "Shopping\nbread")
+        val mine = r.repo.saveNote(PlannerNote(content = "Shopping\nbread"), create = true)
+        val account = NextcloudAccountStore(r.isolated, "planner.nextcloud.note-sync-relink").load()!!
+        val prefs = context.getSharedPreferences("note-sync-relink_note_sync", 0)
+        prefs.edit().remove(NoteSync.KEY_RELINKED).commit()
+        r.db.sentNoteDao().put(NoteMapping.row(mine, CalendarSync.accountKey(account), r.sync.api.list(account).single { it.id == duplicate }))
+        r.repo.saveNote(r.note("Shopping").copy(content = "Shopping\nbread\nmilk"), create = false)
+        assertTrue(r.sync.sync())
+        assertEquals("The edit reached the note named Shopping", "Shopping\nbread\nmilk", r.fake.notes[real]!!.content)
+        assertEquals("The duplicate is left as it was", "Shopping\nbread", r.fake.notes[duplicate]!!.content)
+        assertEquals(real, r.db.sentNoteDao().all().single { it.noteId == mine.id }.remoteId)
+        assertTrue(prefs.getBoolean(NoteSync.KEY_RELINKED, false))
+        // Once only: the next sync keeps the links, and the duplicate came in as a note of its own.
+        assertTrue(r.sync.sync())
+        assertEquals(2, r.repo.allNotes().size)
+        assertEquals(2, r.db.sentNoteDao().all().size)
+        assertEquals(2, r.fake.notes.size)
+    }
+
+    // Quillpad's per-note update: an edit goes up on its own (one PUT with If-Match and its edit time, no list); one
+    // changed there meanwhile (412) is left to a sync, which decides by time.
+    @Test fun anEditGoesUpOnItsOwn() = rig("note-sync-edit-alone") { r ->
+        val id = r.fake.add("Plan", "Plan\nday one")
+        assertTrue(r.sync.sync())
+        r.repo.saveNote(r.note("Plan").copy(content = "Plan\nday one\nday two"), create = false)
+        val before = r.fake.requests.size
+        assertTrue(r.sync.sendEdits())
+        assertEquals(listOf("PUT /index.php/apps/notes/api/v1/notes/$id"), r.fake.requests.drop(before))
+        assertEquals("Plan\nday one\nday two", r.fake.notes[id]!!.content)
+        assertEquals(r.note("Plan").modified / 1000, r.fake.notes[id]!!.modified)
+        // Edited there since the phone last saw it: the PUT is refused (412) and a sync is needed.
+        r.fake.edit(id) { it.copy(content = "Plan\nfrom the browser") }
+        r.repo.saveNote(r.note("Plan").copy(content = "Plan\nfrom the phone"), create = false)
+        assertFalse(r.sync.sendEdits())
+        assertEquals("Plan\nfrom the browser", r.fake.notes[id]!!.content)
+        // As the app wires it: an edit asks for a send half a second later, which goes up without a sync.
+        r.wired = true
+        assertTrue(r.sync.sync())
+        r.repo.saveNote(r.note("Plan").copy(content = "Plan\ntyped"), create = false)
+        waitFor("the edit sent") { r.fake.notes[id]!!.content == "Plan\ntyped" }
     }
 }

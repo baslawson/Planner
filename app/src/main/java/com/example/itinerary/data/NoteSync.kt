@@ -93,14 +93,17 @@ class NotesApi(client: OkHttpClient) {
         data object Gone : Write
     }
 
-    fun create(account: NextcloudAccount, title: String, content: String, category: String, favorite: Boolean): RemoteNote {
-        val (code, body) = call(account, Request.Builder().url(notes(account)).post(payload(title, content, category, favorite)))
+    // [modified]: the note's edit time in seconds, as Quillpad sends it: Nextcloud sets the file's time to it, so both sides
+    // then have the same time and the next sync leaves the note alone (0: none, Nextcloud uses now).
+    fun create(account: NextcloudAccount, title: String, content: String, category: String, favorite: Boolean, modified: Long = 0): RemoteNote {
+        val (code, body) = call(account, Request.Builder().url(notes(account)).post(payload(title, content, category, favorite, modified)))
         if (code != 200) fail(code)
         return parse(JSONObject(body))
     }
 
-    fun update(account: NextcloudAccount, id: Long, etag: String?, title: String, content: String, category: String, favorite: Boolean): Write {
-        val (code, body) = call(account, Request.Builder().url(notes(account, id)).put(payload(title, content, category, favorite))
+    fun update(account: NextcloudAccount, id: Long, etag: String?, title: String, content: String, category: String, favorite: Boolean,
+               modified: Long = 0): Write {
+        val (code, body) = call(account, Request.Builder().url(notes(account, id)).put(payload(title, content, category, favorite, modified))
             .apply { if (etag != null) header("If-Match", "\"$etag\"") })
         return when (code) {
             200 -> Write.Done(parse(JSONObject(body)))
@@ -116,8 +119,9 @@ class NotesApi(client: OkHttpClient) {
         if (code != 200 && code != 204 && code != 404) fail(code)
     }
 
-    private fun payload(title: String, content: String, category: String, favorite: Boolean) = JSONObject()
-        .put("title", title).put("content", content).put("category", category).put("favorite", favorite).toString().toRequestBody(json)
+    private fun payload(title: String, content: String, category: String, favorite: Boolean, modified: Long) = JSONObject()
+        .put("title", title).put("content", content).put("category", category).put("favorite", favorite)
+        .apply { if (modified > 0) put("modified", modified) }.toString().toRequestBody(json)
 
     private fun parse(o: JSONObject) = RemoteNote(o.getLong("id"), o.optString("etag").ifBlank { null }, o.optString("title"),
         o.optString("content"), o.optString("category"), o.optBoolean("favorite"), o.optLong("modified"), o.optBoolean("readonly"))
@@ -196,14 +200,18 @@ fun Repository.asNoteStore(): NoteStore = object : NoteStore {
 }
 
 /**
- * Two-way sync of Planner's notes with the Nextcloud Notes app, on the backup login, the way Nextcloud Notes' own Android
- * app does it (its NotesServerSyncTask): a note changed here since it was last synced (what [SentNote] keeps) is sent and
- * Planner's version is kept there, with no If-Match (the last one written wins: no conflict copies); a note not changed
- * here takes Nextcloud's, but only if it hasn't been edited here during the pass (put's expected version; the edit then
- * goes up next time). Deleted on Nextcloud → Recently deleted here unless changed here (then it goes up again). Deleted in
- * Planner (Undo gone) → deleted there. Then Nextcloud's new notes come in (linked to an identical one here first), and
- * Planner's new notes go up.
- * Colour, tags, attachments, reminders and Archive stay on the phone.
+ * Two-way sync of Planner's notes with the Nextcloud Notes app, on the backup login, with Quillpad's logic (user, 9 Oct:
+ * "learn how quillpad notes sync to nextcloud ... and then just use the same logic"):
+ * - An edit goes up on its own, half a second after it ([request] → [sendEdits]): that note only, with If-Match (the
+ *   version this phone last saw there) and its edit time, which Nextcloud gives the file, so both sides have the same time.
+ * - A sync ([pass]) decides each linked pair by edit time alone: Planner's newer → sent; Nextcloud's newer → taken; within
+ *   a second → left as it is. No merges and no conflict copies.
+ * - Deleted on one side → deleted on the other (here: to Recently deleted, also when changed here since).
+ * - Linking ([SentNote]): with no links yet (a first sync), notes are paired by title; after that a note not linked is
+ *   new, and is made on the other side. Links made by the versions before this logic are cleared once ([KEY_RELINKED]),
+ *   so a note linked by content to a duplicate there is paired again by its title.
+ * Colour, tags, attachments, reminders and Archive stay on the phone. A shared note Nextcloud has read-only: Planner's
+ * newer words become a note of its own, "(my copy)".
  */
 class NoteSync(
     private val db: AppDatabase,
@@ -268,8 +276,9 @@ class NoteSync(
         listTag = null; stuck = emptyMap(); checked = null; backoff.reset()
     }
 
-    // A pass a few seconds from now, once changes have settled (after an edit), or at once. A pass already running
-    // carries on (a pass's own writes come back here through the repository); one more follows it if needed.
+    // After an edit (as Quillpad): half a second later, once typing has stopped, the edited notes go up on their own
+    // ([sendEdits]); what that can't do alone (a new or deleted note, one changed there meanwhile) is left to a pass. A pass
+    // already running carries on (its own writes come back here through the repository); one more follows it if needed.
     fun request(delayMs: Long = SEND_DELAY_MS) {
         val scope = scope ?: return
         if (!_enabled.value) return
@@ -279,8 +288,45 @@ class NoteSync(
             waiting = scope.launch {
                 delay(delayMs)
                 synchronized(this@NoteSync) { waiting = null }
-                runCatching { sync() }
+                // An edit made while this one was being sent was only noted (again): its turn comes after (followUp).
+                runCatching { if (!sendEdits()) sync() else followUp() }
             }
+        }
+    }
+
+    /**
+     * Quillpad's per-note update: each linked note edited here since it was last synced is sent, with If-Match (the version
+     * this phone last saw there) and its edit time. False when a pass is needed instead: a note new or deleted here, one
+     * changed there meanwhile (412) or gone there, a refusal (a shared read-only note), or a failure.
+     */
+    suspend fun sendEdits(): Boolean = lock.withLock {
+        if (!_enabled.value) return@withLock true
+        withContext(NonCancellable) {
+            try {
+                val account = withContext(Dispatchers.IO) { runCatching { accounts.load() }.getOrNull() } ?: return@withContext false
+                val key = CalendarSync.accountKey(account)
+                val links = rows.all().filter { it.account == key }.associateBy { it.noteId }
+                if (links.isEmpty() || !prefs.getBoolean(KEY_RELINKED, false)) return@withContext false
+                val pending = pendingDeleted()
+                val local = store.all()
+                if (local.any { it.id !in links && it.id !in pending } || links.keys.any { id -> id !in pending && local.none { it.id == id } }) return@withContext false
+                var all = true
+                for (mine in local) {
+                    val row = links[mine.id] ?: continue
+                    if (NoteMapping.fields(mine) == NoteMapping.fields(row)) continue
+                    val result = withContext(Dispatchers.IO) {
+                        try { api.update(account, row.remoteId, row.etag, NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned, mine.modified / 1000) }
+                        catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) null else throw e }
+                    }
+                    if (result is NotesApi.Write.Done) rows.put(NoteMapping.row(mine, key, result.note)) else all = false
+                }
+                if (all) {
+                    val now = System.currentTimeMillis()
+                    prefs.edit().putLong(KEY_LAST, now).apply()
+                    _state.value = _state.value.copy(running = false, error = null, lastSynced = now)
+                }
+                all
+            } catch (e: Exception) { false }
         }
     }
 
@@ -367,8 +413,8 @@ class NoteSync(
         return result
     }
 
-    // One pass; returns how many "(my copy)" notes it made, how many notes it left alone and how many deletions Nextcloud
-    // wouldn't do (see State). [wrote][0]: set once it has changed anything on either side.
+    // One pass (Quillpad's synchronize): returns how many "(my copy)" notes it made, how many notes it left alone and how many
+    // deletions Nextcloud wouldn't do (see State). [wrote][0]: set once it has changed anything on either side.
     private suspend fun pass(account: NextcloudAccount, wrote: BooleanArray): Triple<Int, Int, Int> {
         val key = CalendarSync.accountKey(account)
         val (list, tag) = api.listTagged(account)
@@ -381,128 +427,139 @@ class NoteSync(
         var keptRemote = 0
         // Links made for another login don't count here.
         rows.all().filter { it.account != key }.forEach { rows.delete(it.noteId) }
+        // E (user, 9 Oct): the links the versions before this logic made (by content, possibly to a duplicate there) go once;
+        // this pass pairs the notes again by title.
+        if (!prefs.getBoolean(KEY_RELINKED, false)) { rows.deleteAll(); prefs.edit().putBoolean(KEY_RELINKED, true).apply() }
         val linked = rows.all()
-        var local = store.all().associateBy { it.id }
-        val linkedRemote = linked.mapTo(HashSet()) { it.remoteId }
+        val local = store.all().associateBy { it.id }
 
         suspend fun put(note: PlannerNote, expected: PlannerNote?) = store.put(note, expected).also { if (it) wrote[0] = true }
         suspend fun archive(id: String, expected: PlannerNote) = store.archive(id, expected).also { if (it) wrote[0] = true }
-        suspend fun push(note: PlannerNote) {
-            val made = api.create(account, NoteMapping.remoteTitle(note), note.content, note.notebook, note.pinned)
+        suspend fun link(note: PlannerNote, theirs: RemoteNote) = rows.put(NoteMapping.row(note, key, theirs))
+        // Sent with its edit time, which Nextcloud gives the file. Should Nextcloud's time come back otherwise, Planner's
+        // note takes it, so the next sync doesn't take the two for different versions.
+        suspend fun sent(mine: PlannerNote, theirs: RemoteNote) {
             wrote[0] = true
-            rows.put(NoteMapping.row(note, key, made))
+            val updated = if (theirs.modified > 0 && kotlin.math.abs(theirs.modified - mine.modified / 1000) > 1) mine.copy(modified = theirs.modified * 1000) else mine
+            if (updated == mine || put(updated, mine)) link(updated, theirs) else link(mine, theirs)
+        }
+        suspend fun push(note: PlannerNote) =
+            sent(note, api.create(account, NoteMapping.remoteTitle(note), note.content, note.notebook, note.pinned, note.modified / 1000))
+        // Nextcloud's version here. Edited here meanwhile (put refused: the edit is kept): linked all the same, as it was, so
+        // the next sync sees the edit (changed here only) and sends it, rather than pairing the note again and losing it.
+        suspend fun take(mine: PlannerNote?, theirs: RemoteNote) {
+            val updated = NoteMapping.apply(mine ?: PlannerNote(), theirs)
+            if (put(updated, mine)) link(updated, theirs) else if (mine != null) link(mine, theirs)
         }
         // One note Nextcloud refuses (a shared note it won't let Planner change, say) is left as it is; the rest go on.
         // A login or connection problem still stops the pass.
         suspend fun each(block: suspend () -> Unit) {
             try { block() } catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) skipped++ else throw e }
         }
+        // Both sides have the note: the newer edit wins, to the second (Quillpad: within a second is the same version). Only
+        // when both changed since the last sync ([row]; none on a first sync): one changed on one side alone wins whatever
+        // the two clocks say (Quillpad's times alone let a phone clock running behind Nextcloud's lose a newer edit).
+        // Changed on both within the same second: the phone's goes up (the two would otherwise stay different).
+        suspend fun settle(mine: PlannerNote, theirs: RemoteNote, row: SentNote?) {
+            if (!NoteMapping.fits(theirs)) { skipped++; return }
+            val here = mine.modified / 1000
+            val mineChanged = row == null || NoteMapping.fields(mine) != NoteMapping.fields(row)
+            val theirsChanged = row == null || theirs.etag != row.etag
+            val same = NoteMapping.sameText(mine.content, theirs.content) && NoteMapping.sameTitle(NoteMapping.remoteTitle(mine), theirs.title) &&
+                Notes.cleanNotebook(theirs.category) == mine.notebook && theirs.favorite == mine.pinned
+            val phoneWins = when {
+                !mineChanged && !theirsChanged -> return
+                mineChanged && !theirsChanged -> true
+                !mineChanged -> false
+                kotlin.math.abs(here - theirs.modified) <= 1 -> if (same) { link(mine, theirs); return } else true
+                else -> here > theirs.modified
+            }
+            when {
+                !phoneWins -> take(mine, theirs)
+                // Shared read-only there: its words can't go up. Only filed or pinned differently here: kept on the phone.
+                // Else the edit becomes a note of its own, "(my copy)" (saved first, so the words are never only in the
+                // note about to take Nextcloud's), which goes up next pass; the shared one takes Nextcloud's.
+                theirs.readonly -> if (NoteMapping.sameTitle(NoteMapping.remoteTitle(mine), theirs.title) && NoteMapping.sameText(mine.content, theirs.content)) link(mine, theirs) else {
+                    val copy = mine.copy(id = java.util.UUID.randomUUID().toString(), title = (Notes.label(mine) + " (my copy)").take(Notes.MAX_TITLE),
+                        reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
+                    if (put(copy, null)) { ownCopies++; take(mine, theirs) }
+                }
+                // If-Match: the version this pass read there. Changed there since (412): left for the next pass to decide.
+                else -> when (val result = api.update(account, theirs.id, theirs.etag, NoteMapping.remoteTitle(mine), mine.content,
+                    mine.notebook, mine.pinned, here)) {
+                    is NotesApi.Write.Done -> sent(mine, result.note)
+                    NotesApi.Write.Changed -> {}
+                    NotesApi.Write.Gone -> { rows.delete(mine.id); push(mine) }
+                }
+            }
+        }
 
-        for (row in linked) each {
+        val linkedRemote = HashSet<Long>()
+        val linkedLocal = HashSet<String>()
+        if (linked.isEmpty()) {
+            // A first sync (Quillpad's TITLE method): each note here is paired with Nextcloud's note of the same title.
+            val unpaired = list.toMutableList()
+            for (mine in local.values) {
+                if (mine.id in pending) continue
+                val title = NoteMapping.remoteTitle(mine)
+                // The same title exactly first: Nextcloud names a second note of a title "Shopping (2)", which the tolerant
+                // match (for titles Nextcloud tidied) would also take for "Shopping".
+                if (title.isBlank()) continue
+                val theirs = unpaired.firstOrNull { it.title.trim().equals(title, ignoreCase = true) }
+                    ?: unpaired.firstOrNull { NoteMapping.sameTitle(title, it.title) } ?: continue
+                unpaired.remove(theirs)
+                linkedRemote += theirs.id; linkedLocal += mine.id
+                each { settle(mine, theirs, null) }
+            }
+        } else for (row in linked) {
+            linkedRemote += row.remoteId; linkedLocal += row.noteId
             val mine = local[row.noteId]
             val theirs = remote[row.remoteId]
-            when {
-                // Deleted here (its Undo gone): deleted there too, as Nextcloud Notes' own app does.
-                mine == null -> {
-                    if (row.noteId in pending) return@each
-                    if (theirs == null) { rows.delete(row.noteId); return@each }
-                    // N16-2: a shared read-only note is left there, its link kept so it isn't imported again; changed there
-                    // since, it comes back below as a new note.
-                    if (theirs.readonly) {
-                        if (theirs.etag == row.etag) keptRemote++ else { rows.delete(row.noteId); linkedRemote.remove(theirs.id) }
-                        return@each
+            each {
+                when {
+                    // Deleted here (its Undo gone): deleted there too.
+                    mine == null -> {
+                        if (row.noteId in pending) return@each
+                        if (theirs == null) { rows.delete(row.noteId); return@each }
+                        // A shared read-only note is left there, its link kept so it isn't brought in again; changed there
+                        // since, it comes in again as a new note.
+                        if (theirs.readonly) {
+                            if (theirs.etag == row.etag) keptRemote++ else { rows.delete(row.noteId); linkedRemote.remove(theirs.id) }
+                            return@each
+                        }
+                        // Refused there (not a login problem): kept there and its link with it, tried again next pass, and
+                        // said in the sync status as a deletion waiting.
+                        try { api.remove(account, theirs.id) }
+                        catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) { keptRemote++; return@each } else throw e }
+                        wrote[0] = true; rows.delete(row.noteId)
                     }
-                    // Refused there (not a login problem): kept there and its link with it, tried again next pass, and
-                    // said in the sync status as a deletion waiting.
-                    try { api.remove(account, theirs.id) }
-                    catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) { keptRemote++; return@each } else throw e }
-                    wrote[0] = true; rows.delete(row.noteId)
-                }
-                // Deleted on Nextcloud: to Recently deleted, unless changed here since (then it goes up again).
-                theirs == null -> {
-                    rows.delete(row.noteId)
-                    if (NoteMapping.fields(mine) == NoteMapping.fields(row)) archive(mine.id, mine) else push(mine)
-                }
-                !NoteMapping.fits(theirs) -> skipped++
-                else -> {
-                    // As Nextcloud Notes' own app: a note changed here (since it was last synced) is sent, and Planner's
-                    // version is the one kept there (no If-Match: the last one written wins, no conflict copy); one not
-                    // changed here takes Nextcloud's, written only if it hasn't been edited here meanwhile (put's
-                    // expected version), else the edit goes up on the next pass.
-                    val mineChanged = NoteMapping.fields(mine) != NoteMapping.fields(row)
-                    val theirsChanged = theirs.etag != row.etag
-                    // Only filed or pinned differently here: a read-only note keeps that on the phone, nothing to send.
-                    val metaOnly = mine.title == row.title && mine.content == row.content
-                    when {
-                        !mineChanged && !theirsChanged -> {}
-                        !mineChanged -> {
-                            val updated = NoteMapping.apply(mine, theirs)
-                            if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
-                        }
-                        theirs.readonly && metaOnly -> {
-                            val updated = if (theirsChanged) NoteMapping.apply(mine, theirs).copy(notebook = mine.notebook, pinned = mine.pinned) else mine
-                            if (updated == mine || put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
-                        }
-                        // Shared read-only there (Nextcloud Notes' own app doesn't let it be edited) and its words changed
-                        // here: they can't go up, so the shared note keeps Nextcloud's and the edit becomes a note of its
-                        // own, "(my copy)", which goes up below as a new note. The copy is saved first, so the edit is never
-                        // only in the note about to take Nextcloud's words (edited again meanwhile: left for the next pass).
-                        theirs.readonly -> {
-                            val copy = mine.copy(id = java.util.UUID.randomUUID().toString(), title = (Notes.label(mine) + " (my copy)").take(Notes.MAX_TITLE),
-                                reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
-                            if (put(copy, null)) {
-                                ownCopies++
-                                val updated = NoteMapping.apply(mine, theirs)
-                                if (put(updated, mine)) rows.put(NoteMapping.row(updated, key, theirs))
-                            }
-                        }
-                        else -> when (val result = api.update(account, theirs.id, null,
-                            NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned)) {
-                            is NotesApi.Write.Done -> { wrote[0] = true; rows.put(NoteMapping.row(mine, key, result.note)) }
-                            NotesApi.Write.Changed -> {}
-                            NotesApi.Write.Gone -> { rows.delete(row.noteId); push(mine) }
-                        }
-                    }
+                    // Deleted on Nextcloud: deleted here too (to Recently deleted, where it can be put back), as Quillpad does.
+                    theirs == null -> { rows.delete(row.noteId); archive(mine.id, mine) }
+                    else -> settle(mine, theirs, row)
                 }
             }
         }
 
-        // Nextcloud's notes not linked yet: to one here with the same words (a restored backup, the same note added
-        // twice; Nextcloud may have tidied its title), or new.
-        local = store.all().associateBy { it.id }
-        val links = rows.all().associateBy { it.noteId }
-        val free = local.values.filter { it.id !in links && it.id !in pending }.toMutableList()
-        for (theirs in remote.values.filter { it.id !in linkedRemote }) each {
-            if (!NoteMapping.fits(theirs)) {
-                // N16-1: its copy here (same words, or the same title for one grown too long) is neither linked nor sent
-                // up again as a second note.
-                val copy = free.firstOrNull { NoteMapping.sameText(it.content, theirs.content) }
-                    ?: free.takeIf { theirs.content.length > Notes.MAX_CONTENT }?.firstOrNull { NoteMapping.sameTitle(NoteMapping.remoteTitle(it), theirs.title) }
-                copy?.let(free::remove)
-                skipped++; return@each
-            }
-            val incoming = NoteMapping.apply(PlannerNote(), theirs)
-            val twin = NoteMapping.twin(free, theirs, incoming.content)
-            if (twin != null) {
-                // Linked, with Nextcloud's notebook and favourite (Planner's title, colour, tags and so on stay).
-                free.remove(twin)
-                val linkedNote = twin.copy(notebook = incoming.notebook, pinned = incoming.pinned)
-                if (linkedNote == twin || put(linkedNote, twin)) rows.put(NoteMapping.row(linkedNote, key, theirs))
-                // R18-S3: edited here meanwhile: linked all the same, as it was, so the next pass sends the edit as an
-                // update (not the note up again, and Nextcloud's in again, as two new notes).
-                else rows.put(NoteMapping.row(twin, key, theirs))
-            } else if (put(incoming, null)) rows.put(NoteMapping.row(incoming, key, theirs))
+        // Nextcloud's notes not linked are new here; Planner's not linked go up as new ones there.
+        for (theirs in list) {
+            if (theirs.id in linkedRemote) continue
+            each { if (NoteMapping.fits(theirs)) take(null, theirs) else skipped++ }
         }
-
-        // Planner's notes not on Nextcloud yet go up.
-        for (mine in free) each { push(mine) }
+        val nowLinked = rows.all().mapTo(HashSet()) { it.noteId }
+        for (mine in store.all()) {
+            if (mine.id in linkedLocal || mine.id in pending || mine.id in nowLinked) continue
+            each { push(mine) }
+        }
         return Triple(ownCopies, skipped, keptRemote)
     }
 
     companion object {
-        const val SEND_DELAY_MS = 3_000L
+        // Half a second after an edit, as Quillpad (its RemoteUpdateDebounceTime).
+        const val SEND_DELAY_MS = 500L
         private const val KEY_ENABLED = "enabled"
         private const val KEY_LAST = "last_synced"
+        // Set once the links made before Quillpad's logic were cleared (E), so notes are paired by title again once.
+        internal const val KEY_RELINKED = "relinked_by_title"
         fun prefs(context: Context): android.content.SharedPreferences = context.getSharedPreferences("note_sync", Context.MODE_PRIVATE)
     }
 }

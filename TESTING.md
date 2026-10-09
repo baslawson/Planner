@@ -230,3 +230,20 @@ waiting for focus) and tests time out at random. Before a full run:
 Say what was checked and how it was proven. Then say plainly what was not covered, and why — an unreached case is a
 normal outcome, a case quietly omitted is not. If a slip happened while testing (a mis-tap, a script that stopped
 early), record it as a testing slip rather than an app fault, so the next person does not chase it.
+
+## Notes sync against a real Nextcloud (test server)
+
+A Nextcloud with the Notes app runs in Docker for testing notes sync (set up 2026-10-09): `C:\Users\bas\nextcloud-test`
+(`docker-compose.yml`, a self-signed `server.crt`/`server.key` for 10.0.2.2, and `admin-password.txt`; none of it is in
+this repo). Start it with `docker compose -p nextcloud-test up -d` in that folder, stop it with `docker compose -p
+nextcloud-test stop`. From the PC: `https://localhost:8443`; from the emulator: `https://10.0.2.2:8443`; login `qa`.
+
+`RealNextcloudNotesTest` runs Planner's sync code against it and checks every result through the Notes API, as the web
+editor sees it. It is skipped unless given the server's details, and it deletes every note of that login first, so only
+point it at this test server:
+
+```bash
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.itinerary.RealNextcloudNotesTest \
+  -e nextcloudUrl https://10.0.2.2:8443/ -e nextcloudUser qa -e nextcloudPassword "$(cat admin-password.txt)" \
+  -e nextcloudCert "$(base64 -w0 server.crt)" io.github.baslawson.planner.uitest.test/com.example.itinerary.PlannerTestRunner
+```
