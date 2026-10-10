@@ -553,7 +553,10 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         checklistAnchor.top = it.positionInWindow().y
                         if (!checklistOpen) checklistAnchor.bottom = it.positionInWindow().y + it.size.height
                     }) {
-                    ChecklistSection(checklist, onChange = { if (!busy) checklist = it }, anchor = checklistAnchor, heading = false)
+                    // Checklist items used before (events, bills and tasks), offered as one is typed.
+                    val allEvents by repo.allItems.collectAsStateWithLifecycle(initialValue = emptyList())
+                    val pastItems = remember(allEvents, allTasks) { EntryHistory.checklistItems(allEvents, allTasks) }
+                    ChecklistSection(checklist, onChange = { if (!busy) checklist = it }, anchor = checklistAnchor, heading = false, suggest = pastItems)
                 }
                 var attachmentsOpen by rememberSaveable { mutableStateOf(attachments.isNotEmpty()) }
                 LaunchedEffect(attachments.size) { if (attachments.isNotEmpty()) attachmentsOpen = true }

@@ -70,6 +70,28 @@ object EntryHistory {
         newestFirst(tasks.filter { it.id != except && it.title.isNotBlank() && matches(it.title, typed) }, today) { it.dueDate ?: LocalDate.MIN }
             .map { it.title.trim() }.distinctBy(Search::normalize).take(MAX)
 
+    /**
+     * Checklist items used before in events, bills and tasks (user, 10 Oct), made ready once: the most used first (a
+     * repeating event counts once, not once per date), each once. [ChecklistItems.like] then only filters them.
+     */
+    fun checklistItems(items: List<ItineraryItem>, tasks: List<PlannerTask>): ChecklistItems {
+        val texts = items.distinctBy { it.seriesId?.let { s -> "s$s" } ?: "e${it.id}" }.flatMap { it.checklist } + tasks.flatMap { it.checklist }
+        val counted = texts.map { it.text.trim() }.filter { it.isNotEmpty() }.groupBy(Search::normalize)
+            .map { (key, all) -> Triple(all.first(), key, all.size) }
+            .sortedWith(compareByDescending<Triple<String, String, Int>> { it.third }.thenBy { it.second })
+        return ChecklistItems(counted.map { it.first to it.second })
+    }
+
+    class ChecklistItems internal constructor(private val items: List<Pair<String, String>>) {
+        /** Items like [typed], leaving out those already in the checklist ([others]) and just what is typed. */
+        fun like(typed: String, others: List<String> = emptyList()): List<String> {
+            val needle = Search.normalize(typed.trim()); if (needle.isEmpty()) return emptyList()
+            val taken = others.mapTo(HashSet()) { Search.normalize(it.trim()) }
+            return items.filter { (text, key) -> key.contains(needle) && key !in taken && !text.equals(typed.trim(), ignoreCase = true) }
+                .take(MAX).map { it.first }
+        }
+    }
+
     /** Currency codes: the ones used, most used first, then [common]; those starting with [typed] (all when empty). */
     fun currencies(used: List<String>, typed: String, common: List<String>): List<String> {
         val start = typed.trim().uppercase()

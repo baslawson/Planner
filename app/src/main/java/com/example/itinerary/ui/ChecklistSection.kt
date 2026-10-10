@@ -33,8 +33,9 @@ import kotlin.math.roundToInt
 // [anchor]: where the section is on screen, for ChecklistJumpButton. Without [heading] its divider and heading are
 // drawn by whatever holds it (the event editor's FoldSection, which then marks the top of it).
 @Composable
+// [suggest]: checklist items used before, offered as an item is typed (the ones already in this list left out).
 fun ChecklistSection(entries: List<ChecklistEntry>, onChange: (List<ChecklistEntry>) -> Unit, anchor: ChecklistAnchor? = null,
-    heading: Boolean = true) {
+    heading: Boolean = true, suggest: com.example.itinerary.data.EntryHistory.ChecklistItems? = null) {
     if (heading) {
         HorizontalDivider(if (anchor == null) Modifier else Modifier.onGloballyPositioned { anchor.top = it.positionInWindow().y })
         HeadingText("Checklist", style = MaterialTheme.typography.titleMedium)
@@ -45,10 +46,14 @@ fun ChecklistSection(entries: List<ChecklistEntry>, onChange: (List<ChecklistEnt
                 Checkbox(checked = task.done, onCheckedChange = { done ->
                     onChange(entries.map { if (it.id == task.id) it.copy(done = done) else it })
                 }, modifier = Modifier.semantics { contentDescription = "Complete task ${index + 1}" })
-                OutlinedTextField(value = task.text, onValueChange = { value ->
-                    onChange(entries.map { if (it.id == task.id) it.copy(text = value.replace('\n', ' ')) else it })
-                }, label = { Text("Task ${index + 1}") }, modifier = Modifier.weight(1f),
-                    isError = task.text.isBlank(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done))
+                val setText = { value: String -> onChange(entries.map { if (it.id == task.id) it.copy(text = value.replace('\n', ' ')) else it }) }
+                val done = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done)
+                if (suggest != null) {
+                    val others = remember(entries, task.id) { entries.filter { it.id != task.id }.map { it.text } }
+                    SuggestField(task.text, setText, "Task ${index + 1}", suggestions = suggest.like(task.text, others), onPick = setText,
+                        keyboardOptions = done, singleLine = false, modifier = Modifier.weight(1f), isError = task.text.isBlank())
+                } else OutlinedTextField(value = task.text, onValueChange = setText, label = { Text("Task ${index + 1}") }, modifier = Modifier.weight(1f),
+                    isError = task.text.isBlank(), keyboardOptions = done)
                 IconButton(onClick = { onChange(entries.filterNot { it.id == task.id }) }) {
                     Icon(Icons.Default.Close, contentDescription = "Remove task ${index + 1}")
                 }

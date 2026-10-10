@@ -65,4 +65,31 @@ class EntryHistoryTest {
         assertEquals(listOf("NZD"), EntryHistory.currencies(emptyList(), "n", common))
         assertTrue(EntryHistory.currencies(emptyList(), "aud", common).isEmpty())
     }
+
+    // User, 10 Oct: checklist items used before are offered as one is typed.
+    @Test fun checklistItemsMostUsedFirstSeriesOnceAndNotTwice() {
+        fun list(vararg t: String) = t.map { ChecklistEntry(text = it) }
+        val events = listOf(
+            // One repeating event (three dates): its items count once.
+            event(10, "Trip", today, ).copy(seriesId = "trip-series", checklist = list("Charger", "Passport")),
+            event(11, "Trip", today.plusDays(7)).copy(seriesId = "trip-series", checklist = list("Charger", "Passport")),
+            event(12, "Trip", today.plusDays(14)).copy(seriesId = "trip-series", checklist = list("Charger", "Passport")),
+            event(13, "Gym", today).copy(checklist = list("Towel", "  ", "passport ")),
+            // Two separate events: Sunscreen counts twice, more than the repeating event's Charger (once).
+            event(14, "Beach", today).copy(checklist = list("Sunscreen")), event(15, "Swim", today).copy(checklist = list("Sunscreen")),
+        )
+        val tasks = listOf(PlannerTask(title = "Pack", checklist = list("Passport", "Tickets", "Café card")))
+        val past = EntryHistory.checklistItems(events, tasks)
+        // Passport: series once + Gym + task = 3; Charger: series once = 1. Capitals and spaces don't make a new item.
+        assertEquals(listOf("Passport"), past.like("pass"))
+        assertEquals(listOf("Charger"), past.like("char"))
+        assertEquals(listOf("Café card"), past.like("cafe"))
+        // Already in the checklist being edited, what is typed exactly, and an empty box: none.
+        assertTrue(past.like("pass", others = listOf("PASSPORT")).isEmpty())
+        assertTrue(past.like("Charger").isEmpty())
+        assertTrue(past.like("  ").isEmpty())
+        // Most used first: Passport (3) before the ones used once.
+        assertEquals("Passport", past.like("s").first())
+        assertEquals(listOf("Sunscreen", "Charger"), past.like("r").filter { it == "Sunscreen" || it == "Charger" })
+    }
 }

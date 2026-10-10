@@ -37,6 +37,9 @@ fun SuggestField(
     trailingIcon: (@Composable () -> Unit)? = null,
     // False for a title that may wrap onto more lines as it grows (Done still closes the keyboard).
     singleLine: Boolean = true,
+    // The box's place in its row (a checklist item's weight), and whether it shows as wrong (an empty checklist item).
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
@@ -57,7 +60,7 @@ fun SuggestField(
         onGo = keyboardActions.onGo, onNext = keyboardActions.onNext, onPrevious = keyboardActions.onPrevious,
         onSearch = keyboardActions.onSearch, onSend = keyboardActions.onSend)
     // S1: the box's own tap (what TalkBack's double-tap reaches, as the drop-down anchor) also puts the cursor in it.
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it; if (enabled) runCatching { focus.requestFocus() } }) {
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it; if (enabled) runCatching { focus.requestFocus() } }, modifier = modifier) {
         OutlinedTextField(
             value = field,
             onValueChange = { typed -> val changed = typed.text != field.text; field = typed; if (changed) { sent = typed.text; onValueChange(typed.text); open = true } },
@@ -66,6 +69,7 @@ fun SuggestField(
             label = { Text(label) },
             singleLine = singleLine,
             enabled = enabled,
+            isError = isError,
             keyboardOptions = keyboardOptions,
             keyboardActions = actions,
             trailingIcon = trailingIcon,

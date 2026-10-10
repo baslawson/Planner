@@ -120,4 +120,44 @@ class ChecklistJumpUiTest {
         Thread.sleep(1500)
         assertNull(jump())
     }
+
+    // User, 10 Oct: checklist items used before are offered as one is typed, and picking one fills it in.
+    @Test fun checklistItemsUsedBeforeAreSuggested() {
+        runBlocking { app.repository.saveTask(PlannerTask(title = "QA Packed before", checklist = list)) }
+        val task = PlannerTask(title = "QA New trip", dueDate = LocalDate.now())
+        runBlocking { app.repository.saveTask(task) }
+        ins.startActivitySync(Intent(context, MainActivity::class.java).setAction(com.example.itinerary.widget.TodayWidget.OPEN_TASK)
+            .putExtra("task_id", task.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        await { find("Edit task") != null }
+        hideQuickTestKeyboard(ins)
+        // Folded while empty: unfold it, then add an item.
+        repeat(4) { if (find("Checklist") == null) swipe(down = false) }
+        click("Checklist"); click("Add task")
+        lateinit var item: AccessibilityNodeInfo
+        await { nodes().lastOrNull { it.isEditable && it.isVisibleToUser && it.text.isNullOrEmpty() }?.also { item = it } != null }
+        item.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        item.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "pa") })
+        // The suggestions open in a popup window of their own, so look in every window of the app.
+        fun everyWindow(): List<AccessibilityNodeInfo> {
+            val info = ins.uiAutomation.serviceInfo; val before = info.flags
+            info.flags = before or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            ins.uiAutomation.serviceInfo = info
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 34) ins.uiAutomation.clearCache()
+                val result = mutableListOf<AccessibilityNodeInfo>()
+                fun visit(n: AccessibilityNodeInfo) { result += n; for (i in 0 until n.childCount) n.getChild(i)?.let(::visit) }
+                (ins.uiAutomation.windows.mapNotNull { it.root } + listOfNotNull(ins.uiAutomation.freshRoot)).distinctBy { it.windowId }.forEach(::visit)
+                return result
+            } finally { info.flags = before; ins.uiAutomation.serviceInfo = info }
+        }
+        fun suggestion(text: String) = everyWindow().firstOrNull { it.text?.toString() == text && !it.isEditable }
+        await { suggestion("Passport") != null }
+        assertNull("only matching items", suggestion("Charger"))
+        screenshot("checklist-suggestion")
+        // A real tap on it, as a finger would (the popup's nodes don't take an accessibility click from here).
+        val at = android.graphics.Rect().also { suggestion("Passport")!!.getBoundsInScreen(it) }
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand("input tap ${at.centerX()} ${at.centerY()}")).use { it.readBytes() }
+        await { nodes().any { it.isEditable && it.text?.toString() == "Passport" } }
+    }
 }

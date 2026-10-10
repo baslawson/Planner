@@ -1087,7 +1087,10 @@ private fun ItemEditorForm(
                     checklistAnchor.top = it.positionInWindow().y
                     if (!checklistOpen) checklistAnchor.bottom = it.positionInWindow().y + it.size.height
                 }) {
-                ChecklistSection(checklist, onChange = { checklist = it }, anchor = checklistAnchor, heading = false)
+                // Checklist items used before (events, bills and tasks), offered as one is typed.
+                val allTasks by repository.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
+                val pastItems = remember(allEvents, allTasks) { com.example.itinerary.data.EntryHistory.checklistItems(allEvents, allTasks) }
+                ChecklistSection(checklist, onChange = { checklist = it }, anchor = checklistAnchor, heading = false, suggest = pastItems)
             }
             var attachmentsOpen by rememberSaveable { mutableStateOf(shownAttachments.isNotEmpty()) }
             androidx.compose.runtime.LaunchedEffect(shownAttachments.size, readingText) { if (shownAttachments.isNotEmpty() || readingText) attachmentsOpen = true }

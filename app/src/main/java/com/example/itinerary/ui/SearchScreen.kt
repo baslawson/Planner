@@ -68,6 +68,9 @@ import androidx.compose.runtime.key
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 
 internal data class SearchRequest(val query: String, val categories: Set<String>, val today: LocalDate)
 
@@ -196,9 +199,28 @@ fun SearchScreen(
                             // The categories work as tags: pick one or more to narrow the search. A dropdown list with a tick
                             // box each, not a row of chips that scrolls sideways (user, 10 Oct); it stays open while picking.
                             var pickingCategories by remember { mutableStateOf(false) }
+                            // With the keyboard up there's no room under the button, so the list opened above it and then
+                            // jumped below once the keyboard closed (user, 10 Oct). Close the keyboard first and open the
+                            // list when it has gone (at most 800 ms later), so it appears once, under the button.
+                            val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+                            val imeBottom by androidx.compose.runtime.rememberUpdatedState(
+                                WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current))
+                            var waitingForKeyboard by remember { mutableStateOf(false) }
+                            LaunchedEffect(waitingForKeyboard) {
+                                if (waitingForKeyboard) {
+                                    kotlinx.coroutines.withTimeoutOrNull(800) {
+                                        androidx.compose.runtime.snapshotFlow { imeBottom }.first { it == 0 } }
+                                    waitingForKeyboard = false; pickingCategories = true
+                                }
+                            }
+                            fun openCategories() {
+                                if (imeBottom > 0) { focusManager.clearFocus(); keyboard?.hide(); waitingForKeyboard = true }
+                                else pickingCategories = true
+                            }
                             Box {
                                 val picked = categoryChips.filter { it in categories }
-                                OutlinedButton(onClick = { pickingCategories = true }) {
+                                OutlinedButton(onClick = ::openCategories) {
                                     Text(if (picked.isEmpty()) "All categories" else picked.joinToString(", "), maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                                     Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
