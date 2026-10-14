@@ -10,7 +10,7 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 ## Features
 
-- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it, and the + button can be dragged anywhere.
+- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it (an event on several days as one bar across them), and the + button can be dragged anywhere.
 - Offline natural-language Quick entry with editable previews.
 - Turn a task into an event or an event into a task, and Undo/Redo while typing in the editors.
 - Reminders that ring through silent and vibrate mode for a length chosen on each one (10 s, 30 s, 1 min or until stopped; or the plain notification sound), also after a restart before the phone is unlocked, recurring entries, calendar file import (.ics, including repeating events) and free-time search.

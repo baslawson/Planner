@@ -71,13 +71,57 @@ class CalendarChipsTest {
         assertEquals(mapOf("Rent" to true, "Power" to false, "Gym" to true), chips.associate { it.title to it.faded })
     }
 
-    @Test fun whatDoesNotFitBecomesPlusN() {
-        assertEquals(3 to 0, CalendarChips.fit(3, 3))
-        assertEquals(2 to 0, CalendarChips.fit(2, 4))
-        // Four entries in three lines: two shown, "+2" on the third.
-        assertEquals(2 to 2, CalendarChips.fit(4, 3))
-        assertEquals(0 to 5, CalendarChips.fit(5, 1))
-        assertEquals(0 to 2, CalendarChips.fit(2, 0))
-        assertEquals(0 to 0, CalendarChips.fit(0, 0))
+    // The week row Monday 5 to Sunday 11 October 2026.
+    private val week = List(7) { oct5.plusDays(it.toLong()) }
+    // Each piece as "title start-end@line", with ( and ) for a rounded start and end, [ and ] where it carries on.
+    private fun pieces(lines: WeekLines) = lines.pieces.sortedWith(compareBy({ it.line }, { it.start })).map {
+        "${if (it.opens) "(" else "["}${it.chip.title} ${it.start}-${it.end}@${it.line}${if (it.closes) ")" else "]"}"
+    }
+
+    @Test fun anEventOnSeveralDaysIsOneBarAndTheOthersFillTheGaps() {
+        val chips = CalendarChips.byDate(listOf(
+            event(1, "Trip", date = oct5.plusDays(1), end = oct5.plusDays(3)),
+            event(2, "Course", date = oct5.plusDays(2), end = oct5.plusDays(5)),
+            event(3, "Dentist", time = LocalTime.of(9, 0)),
+            event(4, "Gym", date = oct5.plusDays(5), time = LocalTime.of(7, 0)),
+            event(5, "Lunch", date = oct5.plusDays(4), time = LocalTime.of(12, 0)),
+            // Past midnight, so a bar over two days too (user, 14 Oct: "a").
+            event(6, "Party", date = oct5.plusDays(5), time = LocalTime.of(22, 0), minutes = 180),
+        ), listOf(PlannerTask(id = "t", title = "Tax", dueDate = oct5.plusDays(1))))
+        val lines = CalendarChips.weekLines(week, chips, slots = 4)
+        assertEquals(listOf(
+            "(Dentist 0-0@0)", "(Trip 1-3@0)", "(Lunch 4-4@0)", "(Party 5-6@0)",
+            "(Tax 1-1@1)", "(Course 2-5@1)",
+            // Tax and Lunch take the gaps on lines 1 and 0; on Saturday lines 0 and 1 are the party's and the course's.
+            "(Gym 5-5@2)",
+        ), pieces(lines))
+        assertEquals(List(7) { 0 }, lines.more)
+    }
+
+    @Test fun aBarCarriesOnIntoTheNextRowAndPastTheMonth() {
+        val chips = CalendarChips.byDate(listOf(event(1, "Holiday", date = oct5.minusDays(2), end = oct5.plusDays(9))), emptyList())
+        assertEquals(listOf("[Holiday 0-6@0]"), pieces(CalendarChips.weekLines(week, chips, slots = 3)))
+        assertEquals(listOf("[Holiday 0-2@0)"), pieces(CalendarChips.weekLines(week.map { it.plusWeeks(1) }, chips, slots = 3)))
+        assertEquals(listOf("(Holiday 5-6@0]"), pieces(CalendarChips.weekLines(week.map { it.minusWeeks(1) }, chips, slots = 3)))
+        // The blanks around a month: the first row of November (Sunday 1 November at the end) with a bar from October.
+        val novStart = List(6) { null } + LocalDate.of(2026, 11, 1)
+        val late = CalendarChips.byDate(listOf(event(2, "Late", date = LocalDate.of(2026, 10, 30), end = LocalDate.of(2026, 11, 2))), emptyList())
+        assertEquals(listOf("[Late 6-6@0]"), pieces(CalendarChips.weekLines(novStart, late, slots = 3)))
+    }
+
+    @Test fun whatDoesNotFitBecomesPlusNAndCutsABarThere() {
+        val chips = CalendarChips.byDate(listOf(
+            event(1, "Trip", date = oct5, end = oct5.plusDays(2)),
+            event(2, "Course", date = oct5, end = oct5.plusDays(2)),
+        ) + (3L..5L).map { event(it, "Meeting $it", date = oct5.plusDays(1), time = LocalTime.of(it.toInt() + 6, 0)) }, emptyList())
+        val lines = CalendarChips.weekLines(week, chips, slots = 2)
+        // Tuesday has 5 entries in 2 lines: the trip on the first, "+4" on the second, which cuts the course there.
+        assertEquals(listOf("(Trip 0-2@0)", "(Course 0-0@1]", "[Course 2-2@1)"), pieces(lines))
+        assertEquals(listOf(0, 4, 0, 0, 0, 0, 0), lines.more)
+        assertEquals(1, lines.moreLine)
+        // Everything fits in 5 lines: no "+N".
+        assertEquals(List(7) { 0 }, CalendarChips.weekLines(week, chips, slots = 5).more)
+        // No room at all: nothing laid out, the days show a dot.
+        assertEquals(emptyList<String>(), pieces(CalendarChips.weekLines(week, chips, slots = 0)))
     }
 }

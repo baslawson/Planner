@@ -121,6 +121,40 @@ class MaximisedCalendarUiTest {
         assertFalse(app.settings.calendarMaximised.value)
     }
 
+    // An event on several days is one bar per week row (drawn over the cells, hidden from TalkBack): each day it covers
+    // still names it, and the full month still opens. The bars themselves are checked by eye in the "bars" screenshot.
+    @Test fun eventsOnSeveralDaysAreBarsAndEachDayStillNamesThem() {
+        runBlocking {
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy.minusDays(1), endDate = busy.plusDays(8), startTime = null, title = "Holiday"))
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy, startTime = LocalTime.of(22, 0), durationMinutes = 180, title = "Party"))
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy.plusDays(1), endDate = busy.plusDays(2), startTime = null, title = "Course"))
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy.plusDays(1), startTime = LocalTime.of(9, 0), title = "Dentist"))
+            app.repository.saveTask(PlannerTask(title = "Tax return", dueDate = busy.plusDays(2)))
+        }
+        ins.targetContext.startActivity(Intent(ins.targetContext, MainActivity::class.java).apply {
+            action = "com.example.itinerary.widget.OPEN_DATE"
+            putExtra("widget_date", start.toString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        })
+        await("Calendar") { find("CALENDAR") != null && find("AGENDA") == null }
+        click("Calendar: full screen")
+        await("maximised") { described("Tuesday 15 April 2036, 2 entries") != null }
+        // The holiday on every day it covers, the party on the morning after too, in the Calendar's order.
+        assertEquals("Monday 14 April 2036, 1 entry: Holiday", described("Monday 14 April 2036")?.contentDescription?.toString())
+        assertEquals("Tuesday 15 April 2036, 2 entries: Holiday, Party", described("Tuesday 15 April 2036")?.contentDescription?.toString())
+        assertEquals("Wednesday 16 April 2036, 4 entries: Holiday, Course, Party, Dentist", described("Wednesday 16 April 2036")?.contentDescription?.toString())
+        assertEquals("Wednesday 23 April 2036, 1 entry: Holiday", described("Wednesday 23 April 2036")?.contentDescription?.toString())
+        assertEquals("Thursday 24 April 2036", described("Thursday 24 April 2036")?.contentDescription?.toString())
+        // The bars are drawn, not separate nodes: no "Holiday" text for TalkBack to read again on each day.
+        assertFalse(shows("Holiday"))
+        shot("bars")
+        // A tap on a bar opens the day under it.
+        val r = android.graphics.Rect().also { described("Friday 18 April 2036")!!.getBoundsInScreen(it) }
+        ins.uiAutomation.executeShellCommand("input tap ${r.centerX()} ${r.top + r.height() * 2 / 3}").close()
+        await("the day's list") { shows("Friday 18 April 2036") && find("Calendar: month")?.isSelected == true }
+        await("its entries listed") { shows("Holiday") }
+    }
+
     // The day's list has the tasks due that day under its events: ticking one leaves it there crossed out, and a tap
     // opens the task editor.
     @Test fun tasksDueThatDayAreInTheDaysList() {

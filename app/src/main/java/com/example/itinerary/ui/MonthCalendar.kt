@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.selection.selectable
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -91,7 +93,7 @@ import java.util.Locale
  * moving right to the previous one, as in other Android calendars (user, 14 Oct; it was the other way round before). The week strip moves a week the same way.
  * When [collapsed] it shrinks to the selected day's week, and the arrows move a week at a time.
  * Given [chips] (maximised) the month fills the height it is given, and each day lists its entries in small coloured
- * lines instead of the dot.
+ * lines instead of the dot, an event on more than one day as one bar across them.
  */
 @Composable
 fun MonthCalendar(
@@ -342,20 +344,12 @@ private fun WeekRow(
     onSelect: (LocalDate) -> Unit,
     chips: Map<LocalDate, List<DayChip>>? = null,
 ) {
+    if (chips != null) return MaximisedWeekRow(week, selected, today, onSelect, chips)
     Row(Modifier.fillMaxWidth()) {
         for (i in 0 until 7) {
             val date = week.getOrNull(i)
             if (date == null) {
                 Spacer(Modifier.weight(1f).height(LocalCalendarRowHeight.current))
-            } else if (chips != null) {
-                MaximisedDayCell(
-                    date = date,
-                    isSelected = date == selected,
-                    isToday = date == today,
-                    chips = chips[date].orEmpty(),
-                    onClick = { onSelect(date) },
-                    modifier = Modifier.weight(1f),
-                )
             } else {
                 DayCell(
                     date = date,
@@ -498,25 +492,91 @@ fun CalendarSizeBar(
 private val CHIP_GAP = 2.dp
 private val MAX_NUMBER_SIZE = 26.dp
 
-// A day of the maximised month: its number at the top, then as many of its entries as fit, one line each, and "+N"
-// for the rest. Too short for even one line (landscape), it falls back to the dot.
+// A week of the maximised month: the seven day cells, and over them each day's entries, one line each, laid out by
+// CalendarChips.weekLines. An event on more than one day is one bar across its days (user, 14 Oct), cut at the end of the
+// row and carried on in the next. The entries are hidden from TalkBack, which reads them from each day's cell, and a
+// tap on one goes through to the day under it. Too short for even one line (landscape), each day falls back to the dot.
+@Composable
+private fun MaximisedWeekRow(
+    week: List<LocalDate?>,
+    selected: LocalDate,
+    today: LocalDate,
+    onSelect: (LocalDate) -> Unit,
+    chips: Map<LocalDate, List<DayChip>>,
+) {
+    val colors = MaterialTheme.colorScheme
+    val rowHeight = LocalCalendarRowHeight.current
+    val chipStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
+    val chipHeight = with(LocalDensity.current) { 12.sp.toDp() } + 2.dp
+    val numberSize = minOf(MAX_NUMBER_SIZE, rowHeight - 4.dp)
+    val slots = ((rowHeight - 4.dp - numberSize - CHIP_GAP) / (chipHeight + CHIP_GAP)).toInt()
+    val lines = remember(week, chips, slots) { CalendarChips.weekLines(week, chips, slots) }
+    Box(Modifier.fillMaxWidth().height(rowHeight)) {
+        Row(Modifier.fillMaxWidth()) {
+            for (i in 0 until 7) {
+                val date = week.getOrNull(i)
+                if (date == null) {
+                    Spacer(Modifier.weight(1f).height(rowHeight))
+                } else {
+                    MaximisedDayCell(
+                        date = date,
+                        isSelected = date == selected,
+                        isToday = date == today,
+                        chips = chips[date].orEmpty(),
+                        dot = slots <= 0,
+                        numberSize = numberSize,
+                        onClick = { onSelect(date) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+        val moreCols = lines.more.indices.filter { lines.more[it] > 0 }
+        Layout(
+            content = {
+                lines.pieces.forEach { DayChipLine(it.chip, it.opens, it.closes, chipStyle) }
+                moreCols.forEach { col ->
+                    Text("+${lines.more[col]}", style = chipStyle, color = colors.onSurfaceVariant, maxLines = 1, textAlign = TextAlign.Center)
+                }
+            },
+            modifier = Modifier.matchParentSize().clearAndSetSemantics { },
+        ) { measurables, constraints ->
+            val cell = constraints.maxWidth / 7f
+            val inset = 1.dp.roundToPx()
+            val height = chipHeight.roundToPx()
+            fun lineTop(line: Int) = (2.dp + numberSize + CHIP_GAP + (chipHeight + CHIP_GAP) * line).roundToPx()
+            // A piece reaches the edge of its cell where the entry carries on, so the bar runs on without a gap.
+            val placed = measurables.mapIndexed { i, m ->
+                val piece = lines.pieces.getOrNull(i)
+                val (start, end, line) = if (piece != null) Triple(piece.start, piece.end, piece.line)
+                    else moreCols[i - lines.pieces.size].let { Triple(it, it, lines.moreLine) }
+                val left = (start * cell).roundToInt() + if (piece?.opens == false) 0 else inset
+                val right = ((end + 1) * cell).roundToInt() - if (piece?.closes == false) 0 else inset
+                Triple(m.measure(Constraints.fixed((right - left).coerceAtLeast(0), height)), left, lineTop(line))
+            }
+            layout(constraints.maxWidth, constraints.maxHeight) {
+                placed.forEach { (p, x, y) -> p.placeRelative(x, y) }
+            }
+        }
+    }
+}
+
+// A day of the maximised month: its number at the top (the entries are drawn over the week by MaximisedWeekRow), or the
+// number with a [dot] when there's no room for entries.
 @Composable
 private fun MaximisedDayCell(
     date: LocalDate,
     isSelected: Boolean,
     isToday: Boolean,
     chips: List<DayChip>,
+    dot: Boolean,
+    numberSize: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     val rowHeight = LocalCalendarRowHeight.current
-    val chipStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
-    val chipHeight = with(LocalDensity.current) { 12.sp.toDp() } + 2.dp
-    val numberSize = minOf(MAX_NUMBER_SIZE, rowHeight - 4.dp)
-    val slots = ((rowHeight - 4.dp - numberSize - CHIP_GAP) / (chipHeight + CHIP_GAP)).toInt()
-    val (shown, more) = CalendarChips.fit(chips.size, slots)
     Column(
         modifier
             .height(rowHeight)
@@ -537,7 +597,7 @@ private fun MaximisedDayCell(
         ) {
             if (isToday && !isSelected) TodayRing(colors.primary, Modifier.matchParentSize())
             Text("${date.dayOfMonth}", style = MaterialTheme.typography.bodyMedium, color = if (isSelected) colors.onPrimary else colors.onSurface)
-            if (slots <= 0 && chips.isNotEmpty()) {
+            if (dot && chips.isNotEmpty()) {
                 Box(
                     Modifier
                         .align(Alignment.BottomCenter)
@@ -547,27 +607,20 @@ private fun MaximisedDayCell(
                 )
             }
         }
-        Spacer(Modifier.height(CHIP_GAP))
-        chips.take(shown).forEach { chip ->
-            DayChipLine(chip, chipStyle, chipHeight)
-            Spacer(Modifier.height(CHIP_GAP))
-        }
-        if (more > 0 && slots > 0) {
-            Text("+$more", style = chipStyle, color = colors.onSurfaceVariant, maxLines = 1, modifier = Modifier.height(chipHeight))
-        }
     }
 }
 
-// One entry in a maximised day: an event or bill tinted with its colour, a task outlined with a box in front.
+// One entry in a maximised week (sized by MaximisedWeekRow): an event or bill tinted with its colour, a task outlined
+// with a box in front. A bar has rounded ends only where the entry [opens] and [closes], square where it carries on.
 @Composable
-private fun DayChipLine(chip: DayChip, style: TextStyle, height: Dp) {
+private fun DayChipLine(chip: DayChip, opens: Boolean, closes: Boolean, style: TextStyle) {
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(3.dp)
+    val start = if (opens) 3.dp else 0.dp
+    val end = if (closes) 3.dp else 0.dp
+    val shape = RoundedCornerShape(topStart = start, bottomStart = start, topEnd = end, bottomEnd = end)
     val accent = if (chip.task) colors.secondary else chip.customColor?.let { Color(it) } ?: planColor(chip.colorIndex).color
     Box(
         Modifier
-            .fillMaxWidth()
-            .height(height)
             .alpha(if (chip.faded) 0.45f else 1f)
             .clip(shape)
             .then(if (chip.task) Modifier.border(1.dp, accent, shape) else Modifier.background(accent.copy(alpha = 0.3f)))
