@@ -353,6 +353,34 @@ class CalendarSyncTest {
         assertNotNull(source("Family").lastSynced)
     }
 
+    // Bug hunt 28 P2: the phone's calendars and the contacts' birthdays each follow their own permission: one taken back
+    // keeps its calendars (ticks and all) marked, while the other carries on; the birthdays start ticked only the first time.
+    @Test fun eachPermissionKeepsItsOwnCalendars() = runBlocking {
+        phone.allowed = true; phone.contacts = true
+        sync.refreshPhone()
+        assertTrue(source(ContactBirthdays.NAME).enabled)
+        sync.setPhoneEnabled(source("Family").id, true)
+        assertEquals(setOf("Swimming", "Sam's birthday"), shown().values.map { it.event.title }.toSet())
+
+        phone.allowed = false
+        sync.refreshPhone()
+        assertEquals(setOf("Family", "Work phone", ContactBirthdays.NAME), sources().map { it.name }.toSet())
+        assertTrue("still ticked", source("Family").enabled)
+        assertNotNull(source("Family").lastError)
+        assertEquals(listOf("Sam's birthday"), shown().values.map { it.event.title })
+        phone.allowed = true
+        sync.refreshPhone()
+        assertNull(source("Family").lastError)
+        assertEquals(setOf("Swimming", "Sam's birthday"), shown().values.map { it.event.title }.toSet())
+
+        // Birthdays unticked, then contacts taken back and allowed again: still unticked.
+        sync.setPhoneEnabled(source(ContactBirthdays.NAME).id, false)
+        phone.contacts = false; sync.refreshPhone()
+        phone.contacts = true; sync.refreshPhone()
+        assertFalse(source(ContactBirthdays.NAME).enabled)
+        assertEquals(listOf("Swimming"), shown().values.map { it.event.title })
+    }
+
     @Test fun phoneChangesAreReadAndUnchangedOnesLeaveTheRowsAlone() = runBlocking {
         phone.allowed = true
         sync.refreshPhone()
@@ -410,6 +438,8 @@ class CalendarSyncTest {
 
     private inner class FakePhone : PhoneCalendarReader {
         @Volatile var allowed = false
+        // The contacts' birthdays (ContactBirthdays), allowed on their own.
+        @Volatile var contacts = false
         val calendars = CopyOnWriteArrayList(listOf(PhoneCalendar(11, "Family", "me@gmail.com", "com.google", 0xFF3366CC.toInt()),
             PhoneCalendar(12, "Work phone", "cloud", "bitfire.at.davdroid", null)))
         val events = java.util.concurrent.ConcurrentHashMap(mapOf(
@@ -418,12 +448,18 @@ class CalendarSyncTest {
             12L to listOf(PhoneInstance(12, millis(LocalDate.of(2026, 10, 3), 8), millis(LocalDate.of(2026, 10, 3), 9), false, "Standup", null, null)),
         ))
         val read = CopyOnWriteArrayList<List<Long>>()
-        override fun permitted() = allowed
-        override fun calendars(): List<PhoneCalendar> = if (allowed) calendars.toList() else emptyList()
+        override fun permitted() = allowed || contacts
+        override fun calendarsPermitted() = allowed
+        override fun contactsPermitted() = contacts
+        override fun calendars(): List<PhoneCalendar> = (if (allowed) calendars.toList() else emptyList()) +
+            listOfNotNull(PhoneCalendar(ContactBirthdays.CALENDAR_ID, ContactBirthdays.NAME, "Contacts on this phone", "", null).takeIf { contacts })
         override fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> {
-            if (!allowed) return emptyList()
+            val birthday = LocalDate.of(2026, 10, 4).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+            val birthdays = if (contacts && ContactBirthdays.CALENDAR_ID in calendarIds)
+                listOf(PhoneInstance(ContactBirthdays.CALENDAR_ID, birthday, birthday + 86_400_000, true, "Sam's birthday", null, null)) else emptyList()
+            if (!allowed) return birthdays
             read += calendarIds.sorted()
-            return calendarIds.flatMap { events[it].orEmpty() }.filter { it.begin < until.toEpochMilli() && it.end > from.toEpochMilli() }
+            return calendarIds.flatMap { events[it].orEmpty() }.filter { it.begin < until.toEpochMilli() && it.end > from.toEpochMilli() } + birthdays
         }
     }
 

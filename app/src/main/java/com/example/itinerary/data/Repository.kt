@@ -257,10 +257,14 @@ class Repository(
         }
     }
     // A task's ⋮ "Due tomorrow", with the same Undo bar as an event's move (see undoMove).
-    suspend fun moveTaskToTomorrow(id: String, today: java.time.LocalDate = java.time.LocalDate.now()) = changes.withLock {
+    suspend fun moveTaskToTomorrow(id: String, today: java.time.LocalDate = java.time.LocalDate.now()) = moveTask(id) { it.dueTomorrow(today) }
+    // A task dragged in the full-screen month: due [days] later (earlier when negative), with the same Undo bar.
+    suspend fun moveTaskByDays(id: String, days: Long) =
+        moveTask(id) { it.dueOn((it.dueDate ?: error("This task has no due date")).plusDays(days)) }
+    private suspend fun moveTask(id: String, move: (PlannerTask) -> PlannerTask) = changes.withLock {
         withContext(NonCancellable) {
             val before = taskDao.byId(id) ?: error("This task no longer exists")
-            val after = before.dueTomorrow(today)
+            val after = move(before)
             taskDao.update(after)
             _pendingMoves.value += PendingMove(itemId = 0, title = before.title, fromDate = before.dueDate ?: after.dueDate!!,
                 toDate = after.dueDate!!, task = before to after)
@@ -1224,14 +1228,17 @@ class Repository(
         reminderDao.forItem(itemId).onEach { if (it.snoozedUntil != null) reminderDao.snooze(it.id, null) }.map { it.copy(snoozedUntil = null) }
 
     // Change only the date of the latest saved record; one occurrence of a series stays independent.
-    suspend fun moveToTomorrow(id: Long, today: java.time.LocalDate = java.time.LocalDate.now()) = changes.withLock {
+    suspend fun moveToTomorrow(id: Long, today: java.time.LocalDate = java.time.LocalDate.now()) = moveEvent(id) { today.plusDays(1) }
+    // An event dragged in the full-screen month: [days] later (earlier when negative); a multi-day one keeps its length.
+    suspend fun moveEventByDays(id: Long, days: Long) = moveEvent(id) { it.plusDays(days) }
+    private suspend fun moveEvent(id: Long, target: (java.time.LocalDate) -> java.time.LocalDate) = changes.withLock {
         requirePlannerEvent(id)
         val (move, reminders) = db.withTransaction {
             val current = itemDao.byId(id) ?: error("This event no longer exists")
-            val tomorrow = today.plusDays(1)
-            if (current.date == tomorrow) return@withTransaction null
-            itemDao.moveDate(id, tomorrow)
-            PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = tomorrow) to clearSnoozes(id)
+            val to = target(current.date)
+            if (current.date == to) return@withTransaction null
+            itemDao.moveDate(id, to)
+            PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = to) to clearSnoozes(id)
         } ?: return@withLock
         _pendingMoves.value += move
         afterCommit(reminderIds = reminders.map { it.id }, cancelFirst = reminders.mapTo(hashSetOf()) { it.id })
@@ -1274,6 +1281,30 @@ class Repository(
         db.templateDao().upsert(EventTemplate(old?.id ?: UUID.randomUUID().toString(), clean, content.encode()))
     }
     suspend fun deleteTemplate(template: EventTemplate) = changes.withLock { db.templateDao().delete(template) }
+
+    // Selected events saved as one template (TemplateSet), with their reminders as they are now.
+    suspend fun saveTemplateSet(name: String, eventIds: Collection<Long>) = changes.withLock {
+        val clean = name.trim()
+        require(clean.length in 1..80)
+        requirePlannerEvents(eventIds)
+        val events = eventIds.map { id -> (itemDao.byId(id) ?: error("An event was deleted")) to reminderDao.forItem(id) }
+        val payload = TemplateSet.of(events).encode()
+        val old = db.templateDao().all().find { it.name.equals(clean, ignoreCase = true) }
+        db.templateDao().upsert(EventTemplate(old?.id ?: UUID.randomUUID().toString(), clean, payload))
+    }
+
+    // Adds a set's events from [start], each as a new event with its reminders; returns how many were added. One at a
+    // time, as a new event from the editor is (alarms, sync): a failure part way leaves those already added, and says so.
+    // Bug hunt 28 P4: it finishes even if the form that started it goes (the screen turning), so it is never cut short unseen.
+    suspend fun addTemplateSet(set: TemplateSet, start: java.time.LocalDate): Int = withContext(NonCancellable) {
+        val events = set.from(start)
+        events.forEachIndexed { i, (item, reminders) ->
+            try { saveItemId(item, addedReminders = reminders.map { it.copy(id = 0, itemId = 0, snoozedUntil = null) }) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { throw IllegalStateException(if (i == 0) "Couldn't add the events." else "Added $i of ${events.size} events, then couldn't add the rest.", e) }
+        }
+        events.size
+    }
 
     suspend fun setSkipped(id: Long, skipped: Boolean) = changes.withLock {
         requirePlannerEvent(id)

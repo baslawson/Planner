@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -76,6 +77,9 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
                       visibleTasks: List<SelectableTask> = emptyList()) {
     var confirming by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // The selected events' template being named (null: not saving one).
+    var naming by rememberSaveable { mutableStateOf<String?>(null) }
+    var templateError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val chosen = remember(visible, selection.ids) {
         val ids = selection.ids.toHashSet()
@@ -104,6 +108,19 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
             OutlinedButton(onClick = selection::clear, enabled = !selection.busy) { Text("Cancel") }
             DangerOutlinedButton(onClick = { confirming = true; error = null }, enabled = !selection.busy && count > 0) {
                 Text(if (selection.busy) "Deleting…" else "Delete")
+            }
+            // Selected events (no tasks) can be saved as one template (TemplateSet).
+            Box {
+                var menuOpen by remember { mutableStateOf(false) }
+                MatrixIconButton(onClick = { menuOpen = true }, enabled = !selection.busy) {
+                    Icon(androidx.compose.material.icons.Icons.Filled.MoreVert, contentDescription = "More actions")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Save as template") },
+                        enabled = chosen.isNotEmpty() && chosenTasks.isEmpty() && chosen.size <= com.example.itinerary.data.TemplateSet.MAX_EVENTS &&
+                            chosen.maxOf { it.date }.toEpochDay() - chosen.minOf { it.date }.toEpochDay() <= com.example.itinerary.data.TemplateSet.MAX_OFFSET,
+                        onClick = { menuOpen = false; templateError = null; naming = chosen.first().title.take(80) })
+                }
             }
         }
     }
@@ -157,5 +174,27 @@ fun EventSelectionBar(selection: EventSelection, visible: List<SelectableEvent>,
         }
     } else if (!selection.active && !selection.busy) {
         LaunchedEffect(Unit) { confirming = false }
+    }
+    if (naming != null && chosen.isNotEmpty()) {
+        val repo = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).repository
+        val templates by repo.templates.collectAsState(initial = emptyList())
+        var saving by remember { mutableStateOf(false) }
+        PlannerDialog("Save as template", onDismissRequest = { if (!saving) naming = null },
+            primary = DialogAction("Save template", enabled = !saving && naming.orEmpty().isNotBlank()) {
+                saving = true
+                scope.launch {
+                    try { repo.saveTemplateSet(naming.orEmpty(), chosen.map { it.id }); naming = null; selection.clear() }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { templateError = "Couldn't save this template. Please try again." }
+                    finally { saving = false }
+                }
+            },
+            dismiss = DialogAction("Cancel", enabled = !saving) { naming = null }) {
+            OutlinedTextField(value = naming.orEmpty(), onValueChange = { naming = it.replace('\n', ' ').take(80) }, label = { Text("Template name") })
+            Text("Saves the ${chosen.size} selected event${if (chosen.size == 1) "" else "s"} and how many days apart they are, with their " +
+                "details, checklists and reminders. To use it, start a new event on the first day and choose Use template.")
+            if (templates.any { it.name.equals(naming.orEmpty().trim(), true) }) Text("The template with this name will be replaced.")
+            templateError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
     }
 }

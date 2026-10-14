@@ -705,6 +705,21 @@ private fun ItemEditorForm(
                 enabled = !busy && !readingText && title.isNotBlank() && validBillAmount && validDuration && (billTask || validBuffers) && validRepeat && checklist.all { it.text.isNotBlank() },
                 content = { TemplateContent(currentItem(), shownReminders, repeat,
                     if (repeat == RepeatRule.NONE) 1 else if (!creatingSeries) allEvents.count { it.seriesId == initial.seriesId }.coerceIn(2, 365) else count?.coerceIn(2, 365) ?: 12) }, onApply = ::applyTemplate,
+                // A set of events: added from the date chosen here, and the form closes (TemplateSet).
+                onApplySet = { set: com.example.itinerary.data.TemplateSet, name: String ->
+                    busy = true
+                    scope.launch {
+                        try {
+                            val added = repository.addTemplateSet(set, date)
+                            android.widget.Toast.makeText(context, "Added $added event${if (added == 1) "" else "s"} from $name", android.widget.Toast.LENGTH_SHORT).show()
+                            // Bug hunt 28 P1: as Discard does (the draft, files added here, the open-editor marker), not only closing.
+                            discard()
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { error = e.message ?: "Couldn't add the events." }
+                        finally { busy = false }
+                    }
+                    Unit
+                }.takeIf { isNew && !billTask && !duplicating },
                 trigger = { use, saveTemplate ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         HeadingText(

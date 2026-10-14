@@ -91,7 +91,7 @@ class TasksDataTest {
         backup.restore(backup.stage(Uri.fromFile(file)));assertEquals(before,repo.snapshot())
         repo.restoreDeleted(before.deleted.single().id);assertEquals(3,repo.snapshot().tasks.size)
         val old=ZipFile(file).use { zip -> JSONObject(zip.getInputStream(zip.getEntry("data.json")).bufferedReader().readText()) }
-        assertEquals(com.example.itinerary.data.BackupManager.FORMAT_VERSION,old.getInt("formatVersion"))
+        assertEquals(com.example.itinerary.data.BackupManager.PLAIN_FORMAT_VERSION,old.getInt("formatVersion"))
         old.put("formatVersion",9);old.remove("tasks");old.put("recentlyDeleted",JSONArray())
         val legacy=File(dir,"legacy.zip");writeJson(legacy,old)
         backup.restore(backup.stage(Uri.fromFile(legacy)));assertTrue(repo.snapshot().tasks.isEmpty())

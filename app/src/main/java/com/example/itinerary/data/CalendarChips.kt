@@ -16,7 +16,10 @@ data class DayChip(
     val faded: Boolean = false,
     val from: LocalDate? = null,
     val to: LocalDate? = null,
-)
+) {
+    // Can be dragged to another day: a task, or one of Planner's own events (other calendars' have negative ids).
+    val movable: Boolean get() = task || key.removePrefix("event:").toLongOrNull()?.let { it > 0 } == true
+}
 
 /**
  * A piece of an entry in one week row of the maximised month: columns [start] to [end] (0 to 6, in reading order) on

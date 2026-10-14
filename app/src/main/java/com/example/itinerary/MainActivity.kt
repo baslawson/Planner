@@ -254,6 +254,8 @@ class MainActivity : ComponentActivity() {
 
     // While Planner is on screen, changes to the phone's calendars are read in (see CalendarSync.refreshPhone).
     private var stopWatchingCalendars: (() -> Unit)? = null
+    // What that watch covers (the calendars, the contacts): bug hunt 28 P8, a permission granted since watches again.
+    private var watchingFor: Pair<Boolean, Boolean>? = null
 
     private val appLock get() = (application as ItineraryApp).appLock
 
@@ -282,9 +284,14 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         appLock.onResumed()
-        // Also after the calendar permission was just granted (the permission prompt only pauses the screen).
-        if (stopWatchingCalendars == null) (application as ItineraryApp).let { app ->
-            stopWatchingCalendars = app.phoneCalendars.watch { app.appScope.launch { app.calendarSync.refreshPhone() } }
+        // Also after the calendar or contacts permission was just granted (the permission prompt only pauses the screen).
+        (application as ItineraryApp).let { app ->
+            val permits = app.phoneCalendars.calendarsPermitted() to app.phoneCalendars.contactsPermitted()
+            if (stopWatchingCalendars == null || watchingFor != permits) {
+                stopWatchingCalendars?.invoke()
+                stopWatchingCalendars = app.phoneCalendars.watch { app.appScope.launch { app.calendarSync.refreshPhone() } }
+                watchingFor = permits
+            }
         }
     }
 
@@ -301,6 +308,7 @@ class MainActivity : ComponentActivity() {
         appLock.onStopped(isChangingConfigurations)
         stopWatchingCalendars?.invoke()
         stopWatchingCalendars = null
+        watchingFor = null
         autoSync?.cancel(); autoSync = null
         super.onStop()
     }

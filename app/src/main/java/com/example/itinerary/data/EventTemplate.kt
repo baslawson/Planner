@@ -43,3 +43,45 @@ data class TemplateContent(val item: ItineraryItem, val reminders: List<Reminder
         }.also { it.validate() }
     }
 }
+
+/**
+ * Several events saved as one template (user, 14 Oct: "a weekend away"): each keeps how many days after the first one it
+ * starts ([events]: offset to content) and its details, checklist, amount and reminders. Repeats aren't kept: each is
+ * one event. Stored beside the event templates, told apart by its "set" field; a backup holding one is format 18, which
+ * an older Planner refuses rather than failing on it.
+ */
+data class TemplateSet(val events: List<Pair<Int, TemplateContent>>) {
+    fun validate() {
+        require(events.size in 1..MAX_EVENTS)
+        events.forEach { (offset, content) -> require(offset in 0..MAX_OFFSET && content.repeat == RepeatRule.NONE && content.count == 1); content.validate() }
+    }
+    fun encode(): String {
+        validate()
+        return JSONObject().put("set", org.json.JSONArray(events.map { (offset, content) ->
+            JSONObject().put("offset", offset).put("event", JSONObject(content.encode()))
+        })).toString()
+    }
+    // The events (with their reminders) from [start]: the first on that day, each other as many days on as it was.
+    fun from(start: LocalDate): List<Pair<ItineraryItem, List<Reminder>>> =
+        events.map { (offset, content) -> content.forDate(start.plusDays(offset.toLong())) to content.reminders }
+
+    companion object {
+        const val MAX_EVENTS = 50
+        // A year and a day: a set is days or weeks of plans, not a calendar.
+        const val MAX_OFFSET = 366
+        fun isSet(payload: String): Boolean = runCatching { JSONObject(payload).has("set") }.getOrDefault(false)
+        fun decode(payload: String): TemplateSet = JSONObject(payload).getJSONArray("set").let { list ->
+            TemplateSet((0 until list.length()).map { i ->
+                list.getJSONObject(i).let { it.getInt("offset") to TemplateContent.decode(it.getJSONObject("event").toString()) }
+            })
+        }.also { it.validate() }
+        // From saved events: in date and time order, each one day-counted from the first, without its repeat.
+        fun of(events: List<Pair<ItineraryItem, List<Reminder>>>): TemplateSet {
+            require(events.isNotEmpty())
+            val first = events.minOf { it.first.date }
+            return TemplateSet(events.sortedWith(compareBy({ it.first.date }, { it.first.startTime }, { it.first.id })).map { (item, reminders) ->
+                java.time.temporal.ChronoUnit.DAYS.between(first, item.date).toInt() to TemplateContent(item, reminders, RepeatRule.NONE, 1)
+            })
+        }
+    }
+}

@@ -67,6 +67,22 @@ class TaskRepeatTest {
         assertEquals(undated.reminderAt, dated.reminderAt); assertEquals(undated.snoozedUntil, dated.snoozedUntil)
         assertEquals(late.copy(dueDate = moved.dueDate, reminderAt = moved.reminderAt, snoozedUntil = null), moved)
     }
+    // A drag in the full-screen month: any day, earlier or later, with the reminder moved by as many days.
+    @Test fun dueOnMovesTheDateAndTheReminderByTheSameDays() {
+        val sydney = ZoneId.of("Australia/Sydney")
+        val today = LocalDate.of(2026, 10, 5)
+        fun at(day: LocalDate, hour: Int) = day.atTime(hour, 0).atZone(sydney).toInstant().toEpochMilli()
+        val task = PlannerTask(title = "Report", dueDate = LocalDate.of(2026, 10, 20), reminderAt = at(LocalDate.of(2026, 10, 19), 9))
+        val later = task.dueOn(LocalDate.of(2026, 10, 27), at(today, 8), sydney)
+        assertEquals(LocalDate.of(2026, 10, 27), later.dueDate); assertEquals(at(LocalDate.of(2026, 10, 26), 9), later.reminderAt)
+        val earlier = task.dueOn(LocalDate.of(2026, 10, 10), at(today, 8), sydney)
+        assertEquals(LocalDate.of(2026, 10, 10), earlier.dueDate); assertEquals(at(LocalDate.of(2026, 10, 9), 9), earlier.reminderAt)
+        // Bug hunt 28 P7: dragged back to a day already gone, the reminder still ahead stays (not moved into the past).
+        val back = task.dueOn(today.minusDays(2), at(today, 8), sydney)
+        assertEquals(today.minusDays(2), back.dueDate); assertEquals(task.reminderAt, back.reminderAt)
+        // The same day: nothing changes.
+        assertSame(task, task.dueOn(task.dueDate!!, at(today, 8), sydney))
+    }
     // Review T1: "Due tomorrow" never leaves a reminder in the past (it would never ring) or after the new due date.
     @Test fun dueTomorrowNeverLeavesAPastOrLateReminder() {
         val sydney = ZoneId.of("Australia/Sydney")

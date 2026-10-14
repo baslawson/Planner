@@ -220,18 +220,27 @@ class CalendarSync(
         var changed = false
         db.withTransaction {
             val existing = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE }
-            existing.filter { it.href !in calendars }.forEach { dao.deleteSource(it.id); changed = true }
+            // Bug hunt 28 P2: gone from a list Planner may read: removed. Missing because its own permission was taken back
+            // (the calendars or the contacts, while the other is still allowed): kept, ticks and all, and marked, as when
+            // neither is allowed.
+            existing.filter { it.href !in calendars }.forEach {
+                val allowed = if (calendarId(it.href) == ContactBirthdays.CALENDAR_ID) reader.contactsPermitted() else reader.calendarsPermitted()
+                if (allowed) { dao.deleteSource(it.id); changed = true }
+                else if (it.lastError != PERMISSION_NEEDED) { dao.deleteEvents(it.id); dao.updateSource(it.copy(lastError = PERMISSION_NEEDED, lastSynced = null)); changed = true }
+            }
             val kept = existing.associateBy { it.href }
             calendars.forEach { (href, calendar) ->
                 val old = kept[href]
                 val detail = PhoneEvents.detail(calendar)
                 if (old == null) dao.insertSource(CalendarSource(account = PHONE_ACCOUNT, href = href, name = calendar.name, color = calendar.color,
-                    kind = OutsideCalendars.KIND_PHONE, detail = detail))
+                    kind = OutsideCalendars.KIND_PHONE, detail = detail,
+                    // The birthdays are asked for on their own (Settings → Calendars), so they show as soon as allowed.
+                    enabled = calendar.id == ContactBirthdays.CALENDAR_ID))
                 else if (old.name != calendar.name || old.color != calendar.color || old.detail != detail || old.lastError != null)
                     dao.updateSource(old.copy(name = calendar.name, color = calendar.color, detail = detail, lastError = null))
             }
         }
-        val ticked = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE && it.enabled }
+        val ticked = dao.sources().filter { it.kind == OutsideCalendars.KIND_PHONE && it.enabled && it.href in calendars }
         val today = java.time.Instant.ofEpochMilli(now()).atZone(zone()).toLocalDate()
         val from = today.minusMonths(MONTHS_BACK).withDayOfMonth(1).atStartOfDay(zone()).toInstant()
         val until = today.plusMonths(MONTHS_AHEAD + 1).withDayOfMonth(1).atStartOfDay(zone()).toInstant()

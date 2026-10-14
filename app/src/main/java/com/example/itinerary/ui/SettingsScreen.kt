@@ -239,6 +239,26 @@ fun SettingsScreen(
                             "then stop by themselves (Stop ends one sooner)."
                     } + " Each reminder can choose its own sound.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // The morning summary (MorningSummary): a switch, and its time once it is on.
+                    val morningSummary by settings.morningSummary.collectAsStateWithLifecycle()
+                    val morningAt by settings.morningSummaryAt.collectAsStateWithLifecycle()
+                    var choosingMorningTime by rememberSaveable { mutableStateOf(false) }
+                    Spacer(Modifier.height(8.dp))
+                    SwitchRow("Morning summary", morningSummary, { settings.setMorningSummary(it) })
+                    Text("Once a day, one notification with the day's events, the tasks due and the bills due. " +
+                        "Nothing planned, nothing shown.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (morningSummary) {
+                        StackedButton("Summary at ${morningAt.label(LocalTimeFormat.current, context)}") { choosingMorningTime = true }
+                        // Bug hunt 28 P9: Android drops it without a word while notifications are off.
+                        if (!notifications.enabled) Text("Notifications are off, so the summary won't show. Turn them on above.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (choosingMorningTime) TimePickerDialog(
+                        initial = morningAt,
+                        onDismiss = { choosingMorningTime = false },
+                        onConfirm = { at -> settings.setMorningSummary(true, at); choosingMorningTime = false },
+                    )
                     StackedButton("Send test notification") {
                         if (!sendTestNotification(context)) {
                             Toast.makeText(context, "Notifications are off", Toast.LENGTH_SHORT).show()

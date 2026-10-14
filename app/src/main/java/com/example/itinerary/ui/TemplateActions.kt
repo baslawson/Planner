@@ -11,6 +11,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.ItineraryApp
 import com.example.itinerary.data.EventTemplate
 import com.example.itinerary.data.TemplateContent
+import com.example.itinerary.data.TemplateSet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -20,11 +21,17 @@ import kotlinx.coroutines.launch
 // when it isn't offered, or can't be used now) and "Save as template" (null while it can't be saved).
 fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: () -> TemplateContent,
     onApply: (TemplateContent) -> Unit, canApply: Boolean = true, billTask: Boolean = false,
-    trigger: (@Composable (use: (() -> Unit)?, save: (() -> Unit)?) -> Unit)? = null) {
+    trigger: (@Composable (use: (() -> Unit)?, save: (() -> Unit)?) -> Unit)? = null,
+    // Given, sets of events are offered too, under the event templates (with the set and its name).
+    onApplySet: ((TemplateSet, String) -> Unit)? = null) {
     val repo = (LocalContext.current.applicationContext as ItineraryApp).repository
     val templates by repo.templates.collectAsStateWithLifecycle(initialValue = emptyList())
     val matchingTemplates = remember(templates, billTask) {
         templates.filter { runCatching { (TemplateContent.decode(it.payload).item.category == "Bills") == billTask }.getOrDefault(false) }
+    }
+    val sets = remember(templates, onApplySet != null) {
+        if (onApplySet == null) emptyList()
+        else templates.mapNotNull { t -> if (TemplateSet.isSet(t.payload)) runCatching { t to TemplateSet.decode(t.payload) }.getOrNull() else null }
     }
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
@@ -60,7 +67,7 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
     if (choosing && deleting == null) PlannerDialog(if (billTask) "Bill templates" else "Event templates", onDismissRequest = { choosing = false },
         dismiss = DialogAction("Close") { choosing = false }) {
             Text("Applying replaces details and reminders. Your chosen date and attachments stay.")
-            if (matchingTemplates.isEmpty()) Text("No templates yet. Fill in the details and choose Save as template.")
+            if (matchingTemplates.isEmpty() && sets.isEmpty()) Text("No templates yet. Fill in the details and choose Save as template.")
             matchingTemplates.forEach { template ->
                 Column {
                     Text(template.name, style = MaterialTheme.typography.titleMedium)
@@ -69,6 +76,23 @@ fun TemplateActions(isNew: Boolean, title: String, enabled: Boolean, content: ()
                             try { onApply(TemplateContent.decode(template.payload)); choosing = false }
                             catch (_: Exception) { error = "Couldn't read this template." }
                         }) { Text("Apply ${template.name}") }
+                        DangerOutlinedButton(onClick = { deleting = template }) { Text("Delete") }
+                    }
+                }
+            }
+            if (sets.isNotEmpty()) {
+                Text("Sets of events", style = MaterialTheme.typography.titleSmall)
+                Text("Adds all of a set's events, the first on the date chosen here, and closes this form.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            sets.forEach { (template, set) ->
+                Column {
+                    Text(template.name, style = MaterialTheme.typography.titleMedium)
+                    val days = set.events.maxOf { it.first } + 1
+                    Text("${set.events.size} event${if (set.events.size == 1) "" else "s"}" + if (days > 1) " over $days days" else " on one day",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row {
+                        TextButton(onClick = { choosing = false; onApplySet?.invoke(set, template.name) }) { Text("Add ${template.name}") }
                         DangerOutlinedButton(onClick = { deleting = template }) { Text("Delete") }
                     }
                 }

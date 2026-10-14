@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
@@ -50,6 +51,7 @@ import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.OutsideCalendars
 import com.example.itinerary.data.plannerCopy
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +90,8 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
     // The tasks due that day, under its events (done ones too, crossed out, so ticking one doesn't make it vanish).
     val dayTasks = remember(allTasks, selected) { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, selected) }
+    val dayHoursSettings = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).settings
+    val dayHours by dayHoursSettings.dayHours.collectAsStateWithLifecycle()
     val blockerCounts = remember(allTasks) { taskBlockerCounts(allTasks) }
     // Outside events can't be deleted from Planner, so they can't be selected either.
     val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
@@ -112,6 +116,18 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     // Worked out only while maximised.
     val chipsByDate = remember(allItems, allTasks, maximised) {
         if (maximised) com.example.itinerary.data.CalendarChips.byDate(allItems, allTasks) else emptyMap()
+    }
+    // An entry dragged to another day of the full-screen month, moved with the same Undo bar as "Move to tomorrow".
+    val moveScope = androidx.compose.runtime.rememberCoroutineScope()
+    val moveContext = LocalContext.current
+    val moveEntry: (com.example.itinerary.data.DayChip, Long) -> Unit = { chip, days ->
+        moveScope.launch {
+            try {
+                if (chip.task) vm.moveTaskByDays(chip.key.removePrefix("task:"), days)
+                else vm.moveByDays(chip.key.removePrefix("event:").toLong(), days)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { android.widget.Toast.makeText(moveContext, e.message ?: "Couldn't move it.", android.widget.Toast.LENGTH_LONG).show() }
+        }
     }
 
 
@@ -204,12 +220,25 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         modifier = if (maximised) Modifier.weight(1f) else Modifier,
                         rowHeight = rowHeight,
                         chips = chipsByDate.takeIf { maximised },
+                        onMoveEntry = moveEntry,
                     )
                     if (!maximised) sizeBar()
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
-                    DayHeader(date = selected)
-                    LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
+                    DayHeader(date = selected, hours = dayHours, onHours = dayHoursSettings::setDayHours)
+                    // The day on an hour grid (DayHours) unless events are being selected, which only the list shows.
+                    if (dayHours && !selection.active) DayHours(
+                        day = selected, today = today, events = dayItems, tasks = dayTasks, outside = outsideEvents,
+                        onEvent = { item -> outsideEvents[item.id]?.let { viewingOutside = it } ?: run { editing = item } },
+                        onTask = { editingTaskId = it.id },
+                        onEmptyHour = { at ->
+                            if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = selected, startTime = at, durationMinutes = 60, title = "",
+                                colorIndex = com.example.itinerary.data.PlanColors.next(com.example.itinerary.data.eventsOnDay(allItems, selected)
+                                    .filter { it.customColor == null }.map { it.colorIndex }, com.example.itinerary.data.PlanColors.EVENT_COUNT)))
+                        },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    else LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
                         if (dayItems.isEmpty() && dayTasks.isEmpty()) {
                             item {
                                 Text(
@@ -311,12 +340,21 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 }
 
 @Composable
-private fun DayHeader(date: LocalDate) {
-    HeadingText(
-        date.dayLabel(LocalDateFormat.current),
-        style = MaterialTheme.typography.headlineSmall,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-    )
+// The day's heading, with List | Hours to see the day as a list or on an hour grid (DayHours) when [hours] is given.
+private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        HeadingText(
+            date.dayLabel(LocalDateFormat.current),
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 16.dp),
+        )
+        if (hours != null) Row(Modifier.padding(end = 12.dp).selectableGroup()) {
+            listOf(false to "List", true to "Hours").forEach { (value, label) ->
+                androidx.compose.material3.FilterChip(selected = hours == value, onClick = { onHours(value) }, label = { Text(label) },
+                    modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+    }
 }
 
 @Composable

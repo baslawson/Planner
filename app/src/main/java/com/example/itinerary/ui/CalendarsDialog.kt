@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -73,15 +74,30 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
     var connected by remember { mutableStateOf<Boolean?>(null) }
     var phoneAllowed by remember { mutableStateOf(sync.phonePermitted()) }
     var phoneRefused by remember { mutableStateOf(false) }
+    // The phone's calendars and the contacts' birthdays are asked for separately (phoneAllowed: either).
+    var calendarsAllowed by remember { mutableStateOf(app.phoneCalendars.calendarsPermitted()) }
+    var contactsAllowed by remember { mutableStateOf(app.phoneCalendars.contactsPermitted()) }
+    var contactsRefused by remember { mutableStateOf(false) }
     val askPhone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        phoneAllowed = granted
+        calendarsAllowed = granted
+        phoneAllowed = sync.phonePermitted()
         phoneRefused = !granted
+        app.appScope.launch { sync.refreshPhone() }
+    }
+    val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        contactsAllowed = granted
+        phoneAllowed = sync.phonePermitted()
+        contactsRefused = !granted
         app.appScope.launch { sync.refreshPhone() }
     }
     // Permission may be switched off in Android settings while this is open behind them.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        val now = sync.phonePermitted()
-        if (now != phoneAllowed) { phoneAllowed = now; app.appScope.launch { sync.refreshPhone() } }
+        val calendars = app.phoneCalendars.calendarsPermitted()
+        val contacts = app.phoneCalendars.contactsPermitted()
+        if (calendars != calendarsAllowed || contacts != contactsAllowed) {
+            calendarsAllowed = calendars; contactsAllowed = contacts; phoneAllowed = sync.phonePermitted()
+            app.appScope.launch { sync.refreshPhone() }
+        }
     }
     LaunchedEffect(nextcloudOpen) {
         if (nextcloudOpen) return@LaunchedEffect
@@ -165,14 +181,23 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
         if (taskConflicts.isNotEmpty()) StackedButton("Review ${taskConflicts.size} task conflict${if (taskConflicts.size == 1) "" else "s"}") { reviewingTasks = true }
 
         SettingsHeading("On this phone")
-        if (!phoneAllowed) {
+        if (!calendarsAllowed) {
             Text("Calendars already on this phone: Google, Samsung, Outlook, DAVx⁵ and others. Read-only: Planner asks to read them; it can't change them.")
             if (phoneRefused) {
                 Text("Planner wasn't allowed to read calendars. Allow Calendars in Planner's app settings.", color = MaterialTheme.colorScheme.error)
                 // From the screen, not the app: only a start from MainActivity counts as Planner's own trip for App lock (Q-7).
                 StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(context) }
             } else StackedButton("Show phone calendars") { askPhone.launch(Manifest.permission.READ_CALENDAR) }
-        } else {
+        }
+        if (!contactsAllowed) {
+            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            Text("Your contacts' birthdays, every year, with their age when the year is saved. Read-only: Planner reads only the birthdays.")
+            if (contactsRefused) {
+                Text("Planner wasn't allowed to read contacts. Allow Contacts in Planner's app settings.", color = MaterialTheme.colorScheme.error)
+                StackedButton("Open app settings") { com.example.itinerary.reminders.openAppSettings(context) }
+            } else StackedButton("Show contacts' birthdays") { askContacts.launch(Manifest.permission.READ_CONTACTS) }
+        }
+        if (phoneAllowed) {
             phoneSources.forEach { source ->
                 CalendarRow(source, enabled = !phoneState.running) { ticked ->
                     app.appScope.launch { sync.setPhoneEnabled(source.id, ticked) }

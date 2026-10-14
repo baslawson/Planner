@@ -155,6 +155,49 @@ class MaximisedCalendarUiTest {
         await("its entries listed") { shows("Holiday") }
     }
 
+    // Hold an entry and drag it to another day: it moves there (a multi-day event keeps its length), with Undo; the full
+    // month stays open, as the drag isn't a tap on the day.
+    @Test fun holdingAnEntryAndDraggingItMovesItToAnotherDay() {
+        val courseId = runBlocking {
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy, startTime = LocalTime.of(9, 0), title = "Dentist"))
+            app.repository.saveTask(PlannerTask(id = "tax", title = "Tax return", dueDate = busy.plusDays(1)))
+            app.repository.saveItem(ItineraryItem(tripId = 0, date = busy.plusDays(7), endDate = busy.plusDays(8), startTime = null, title = "Course"))
+            app.repository.snapshot().items.single { it.title == "Course" }.id
+        }
+        ins.targetContext.startActivity(Intent(ins.targetContext, MainActivity::class.java).apply {
+            action = "com.example.itinerary.widget.OPEN_DATE"
+            putExtra("widget_date", start.toString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        })
+        await("Calendar") { find("CALENDAR") != null && find("AGENDA") == null }
+        click("Calendar: full screen")
+        await("maximised") { described("Tuesday 15 April 2036, 1 entry") != null }
+        val density = ins.targetContext.resources.displayMetrics.density
+        // The first entry line of a day: under the 26 dp number, half way down the 14 dp line.
+        fun entry(day: String) = android.graphics.Rect().also { described(day)!!.getBoundsInScreen(it) }.let { it.centerX() to it.top + (37 * density).toInt() }
+        fun cell(day: String) = android.graphics.Rect().also { described(day)!!.getBoundsInScreen(it) }.let { it.centerX() to it.centerY() }
+        fun drag(from: Pair<Int, Int>, to: Pair<Int, Int>) =
+            ins.uiAutomation.executeShellCommand("input draganddrop ${from.first} ${from.second} ${to.first} ${to.second} 2000").close()
+
+        drag(entry("Tuesday 15 April 2036"), cell("Friday 18 April 2036"))
+        await("dentist moved") { described("Friday 18 April 2036, 1 entry: Dentist") != null }
+        assertEquals(busy.plusDays(3), runBlocking { app.repository.snapshot() }.items.single { it.title == "Dentist" }.date)
+        assertTrue("still full screen", app.settings.calendarMaximised.value)
+        await("Undo offered") { shows("Moved Dentist to Friday 18 April") }
+        shot("dragged")
+        click("Undo")
+        await("dentist back") { runBlocking { app.repository.snapshot() }.items.single { it.title == "Dentist" }.date == busy }
+
+        // A task, a day back.
+        drag(entry("Wednesday 16 April 2036"), cell("Monday 14 April 2036"))
+        await("task moved") { runBlocking { app.repository.snapshot() }.tasks.single { it.id == "tax" }.dueDate == busy.minusDays(1) }
+
+        // The course held on its second day and dropped a day on: both its days move one day.
+        drag(entry("Wednesday 23 April 2036"), cell("Thursday 24 April 2036"))
+        await("course moved") { runBlocking { app.repository.snapshot() }.items.single { it.id == courseId }.date == busy.plusDays(8) }
+        assertEquals(busy.plusDays(9), runBlocking { app.repository.snapshot() }.items.single { it.id == courseId }.endDate)
+    }
+
     // The day's list has the tasks due that day under its events: ticking one leaves it there crossed out, and a tap
     // opens the task editor.
     @Test fun tasksDueThatDayAreInTheDaysList() {

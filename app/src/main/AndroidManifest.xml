@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Calendar sync step 3: read-only; asked for only when the user taps "Show phone calendars". -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Only for the contacts' birthdays (Settings → Calendars), asked for when the user taps "Show contacts' birthdays". -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Exact alarms, which alone let a reminder start a ringing alarm (in silent and vibrate mode too). From Android 13,
@@ -115,6 +117,7 @@
 
         <receiver android:name=".reminders.BillPaymentReceiver" android:exported="false" />
         <receiver android:name=".reminders.SnoozeReceiver" android:exported="false" />
+        <receiver android:name=".reminders.MorningSummaryReceiver" android:exported="false" />
 
         <!-- Plays the looping alarm sound; a media-playback foreground service keeps it alive while it rings. -->
         <service

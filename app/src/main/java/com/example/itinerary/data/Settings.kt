@@ -268,6 +268,33 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _showBillsSummary.value = show
     }
 
+    // The morning summary (user, 14 Oct; MorningSummary): off until turned on, then once a day at [morningSummaryAt].
+    // Device-local, like the reminders' alarms it sits beside.
+    private val _morningSummary = MutableStateFlow(prefs.getBoolean(KEY_MORNING_SUMMARY, false))
+    val morningSummary: StateFlow<Boolean> = _morningSummary.asStateFlow()
+    private val _morningSummaryAt = MutableStateFlow(
+        java.time.LocalTime.ofSecondOfDay(prefs.getInt(KEY_MORNING_SUMMARY_MINUTES, 7 * 60 + 30).coerceIn(0, 24 * 60 - 1) * 60L))
+    val morningSummaryAt: StateFlow<java.time.LocalTime> = _morningSummaryAt.asStateFlow()
+
+    fun setMorningSummary(on: Boolean, at: java.time.LocalTime = _morningSummaryAt.value) {
+        prefs.edit { putBoolean(KEY_MORNING_SUMMARY, on); putInt(KEY_MORNING_SUMMARY_MINUTES, at.hour * 60 + at.minute) }
+        _morningSummary.value = on
+        _morningSummaryAt.value = at.withSecond(0).withNano(0)
+    }
+
+    // The Calendar's day as a list (false) or on an hour grid (true; DayHours).
+    private val _dayHours = MutableStateFlow(prefs.getBoolean(KEY_DAY_HOURS, false))
+    val dayHours: StateFlow<Boolean> = _dayHours.asStateFlow()
+    fun setDayHours(hours: Boolean) {
+        prefs.edit { putBoolean(KEY_DAY_HOURS, hours) }
+        _dayHours.value = hours
+    }
+
+    // The last day a summary was shown, so an alarm that fires twice (a time change) doesn't show it twice.
+    var morningSummaryShownOn: String?
+        get() = prefs.getString(KEY_MORNING_SUMMARY_SHOWN, null)
+        set(value) = prefs.edit { putString(KEY_MORNING_SUMMARY_SHOWN, value) }
+
     // Off until chosen. Device-local, like MyBudget itself: a backup restored on another phone doesn't turn it on there.
     private val _sendBillsToBudget = MutableStateFlow(prefs.getBoolean("send_bills_to_budget", false))
     val sendBillsToBudget: StateFlow<Boolean> = _sendBillsToBudget.asStateFlow()
@@ -545,6 +572,10 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_TIME_FORMAT = "time_format"
         const val KEY_CALENDAR_COLLAPSED = "calendar_collapsed"
         const val KEY_CALENDAR_MAXIMISED = "calendar_maximised"
+        const val KEY_MORNING_SUMMARY = "morning_summary"
+        const val KEY_MORNING_SUMMARY_MINUTES = "morning_summary_minutes"
+        const val KEY_MORNING_SUMMARY_SHOWN = "morning_summary_shown"
+        const val KEY_DAY_HOURS = "day_hours"
         const val KEY_HIDDEN_CATEGORIES = "hidden_categories"
         const val KEY_UPCOMING_ON_TOP = "upcoming_on_top"
         const val KEY_UPCOMING_DAYS = "upcoming_days"

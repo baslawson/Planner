@@ -68,6 +68,25 @@ class MultiDayDataTest {
         repo.snapshot().items.single().let { assertEquals(oct3, it.date); assertEquals(oct3.plusDays(4), it.endDate) }
     }
 
+    // A drag in the full-screen month moves by any number of days, either way, with the same Undo; tasks too.
+    @Test fun moveByDaysShiftsBothDatesEitherWayAndTasksToo() = fixture { repo, _, _ ->
+        repo.saveItem(trip())
+        val id = repo.snapshot().items.single().id
+        repo.moveEventByDays(id, 6)
+        repo.snapshot().items.single().let { assertEquals(oct3.plusDays(6), it.date); assertEquals(oct3.plusDays(10), it.endDate) }
+        repo.moveEventByDays(id, -9)
+        repo.snapshot().items.single().let { assertEquals(oct3.minusDays(3), it.date); assertEquals(oct3.plusDays(1), it.endDate) }
+        assertTrue(repo.undoMove(repo.pendingMoves.value.last().token))
+        repo.snapshot().items.single().let { assertEquals(oct3.plusDays(6), it.date) }
+        repo.pendingMoves.value.forEach { repo.finishMove(it.token) }
+
+        repo.saveTask(PlannerTask(id = "qa-move", title = "QA task", dueDate = oct3))
+        repo.moveTaskByDays("qa-move", -2)
+        assertEquals(oct3.minusDays(2), repo.snapshot().tasks.single { it.id == "qa-move" }.dueDate)
+        assertTrue(repo.undoMove(repo.pendingMoves.value.single().token))
+        assertEquals(oct3, repo.snapshot().tasks.single { it.id == "qa-move" }.dueDate)
+    }
+
     @Test fun theDayQueryFindsATripThatStartedDaysEarlier() = fixture { repo, _, _ ->
         repo.saveItem(trip())
         repo.saveItem(ItineraryItem(tripId = 0, date = oct3.minusDays(3), startTime = null, title = "QA long ago"))

@@ -153,7 +153,7 @@ class SixTaskFeaturesDataTest {
         backup.export(Uri.fromFile(file))
         ZipFile(file).use { zip ->
             val root=JSONObject(zip.getInputStream(zip.getEntry("data.json")).bufferedReader().readText())
-            assertEquals(com.example.itinerary.data.BackupManager.FORMAT_VERSION,root.getInt("formatVersion"))
+            assertEquals(com.example.itinerary.data.BackupManager.PLAIN_FORMAT_VERSION,root.getInt("formatVersion"))
         }
         repo.replaceAll(DataSnapshot(emptyList(),emptyList(),emptyList(),emptyList()))
         backup.restore(backup.stage(Uri.fromFile(file)))

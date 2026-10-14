@@ -20,6 +20,9 @@ data class PhoneInstance(val calendarId: Long, val begin: Long, val end: Long, v
 // query the phone can't answer throws (CalendarSync then changes nothing), rather than reading as an empty list.
 interface PhoneCalendarReader {
     fun permitted(): Boolean
+    // Each kind on its own (bug hunt 28 P2): the phone's calendars, and the contacts' birthdays (ContactBirthdays).
+    fun calendarsPermitted(): Boolean = permitted()
+    fun contactsPermitted(): Boolean = permitted()
     fun calendars(): List<PhoneCalendar>
     fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance>
 }

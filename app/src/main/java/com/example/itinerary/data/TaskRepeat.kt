@@ -89,21 +89,26 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
 }
 
 /**
- * "Due tomorrow" from a task's ⋮ menu, like changing the date in the editor: due tomorrow, and a monthly repeat's day
- * starts again from the new date. The reminder moves by the same number of days (as a repeat moves it) when that is
+ * "Due tomorrow" from a task's ⋮ menu (and a drag to [target] in the full-screen month: [dueOn]), like changing the
+ * date in the editor: due on the new day, and a monthly repeat's day starts again from the new date. The reminder moves by the same number of days (as a repeat moves it) when that is
  * still ahead of [now] and not after the new due date; otherwise it stays where it was if that is, and else goes on the
  * new due date at its own clock time. So a dated task's reminder is never left in the past, where it would never ring.
  * An undated task keeps its reminder. A moved reminder ends a snooze.
  */
-fun PlannerTask.dueTomorrow(today: LocalDate, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): PlannerTask {
-    val target = today.plusDays(1)
+fun PlannerTask.dueTomorrow(today: LocalDate, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): PlannerTask =
+    dueOn(today.plusDays(1), now, zone)
+
+fun PlannerTask.dueOn(target: LocalDate, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): PlannerTask {
     if (dueDate == target) return this
     val reminder = reminderAt?.let { at ->
         val due = dueDate ?: return@let at
         val old = Instant.ofEpochMilli(at).atZone(zone)
         listOf(old.plusDays(ChronoUnit.DAYS.between(due, target)), old)
             .firstOrNull { it.toInstant().toEpochMilli() > now && it.toLocalDate() <= target }?.toInstant()?.toEpochMilli()
-            ?: target.atTime(old.toLocalTime()).atZone(zone).toInstant().toEpochMilli()
+            ?: target.atTime(old.toLocalTime()).atZone(zone).toInstant().toEpochMilli().let { moved ->
+                // Bug hunt 28 P7: dragged back to a day already gone, a reminder still ahead stays rather than going into the past.
+                if (moved <= now && at > now) at else moved
+            }
     }
     return copy(dueDate = target, reminderAt = reminder, repeatAnchorDay = 0,
         snoozedUntil = if (reminder == reminderAt) snoozedUntil else null)

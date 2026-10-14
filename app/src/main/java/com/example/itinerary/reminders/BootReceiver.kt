@@ -23,6 +23,8 @@ class BootReceiver : BroadcastReceiver() {
         }
         // Unlocked already (no screen lock, say): BOOT_COMPLETED follows and does it all.
         if (intent.action == Intent.ACTION_LOCKED_BOOT_COMPLETED) return
+        // The morning summary's alarm too: a reboot or an update clears it, and a time change moves when it is due.
+        runCatching { MorningSummary.schedule(context) }
         val app = context.applicationContext as ItineraryApp
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {

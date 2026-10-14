@@ -120,6 +120,8 @@ class ItineraryViewModel(
     ): Long = repo.saveItemId(item, added, removed, addedReminders, removedReminders, options)
 
     suspend fun moveToTomorrow(id: Long) = repo.moveToTomorrow(id)
+    suspend fun moveByDays(id: Long, days: Long) = repo.moveEventByDays(id, days)
+    suspend fun moveTaskByDays(id: String, days: Long) = repo.moveTaskByDays(id, days)
 
     suspend fun deleteItem(item: ItineraryItem, entireSeries: Boolean) {
         repo.deleteWithUndo(item, entireSeries)

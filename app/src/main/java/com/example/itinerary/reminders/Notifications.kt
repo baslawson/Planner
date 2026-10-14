@@ -58,6 +58,11 @@ fun createReminderChannel(context: Context) {
             enableVibration(false)
         },
     )
+    manager.createNotificationChannel(
+        NotificationChannel(MORNING_CHANNEL_ID, "Morning summary", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Once a day, the events, tasks and bills of the day ahead"
+        },
+    )
     // Left over from an update: taken away, so they don't stay in Android's settings with nothing on them.
     OLD_CHIME_CHANNELS.forEach { id -> runCatching { manager.deleteNotificationChannel(id) } }
 }

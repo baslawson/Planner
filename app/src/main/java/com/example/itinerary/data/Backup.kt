@@ -347,7 +347,8 @@ class BackupManager(
         // Optional too (older app versions ignore it, an older backup has none): Hunt 25 E1, see BudgetLink.laterIds.
         put("budgetLaterIds", BudgetLink.encodeLaterIds(BudgetLink.laterIds))
         put("format", FORMAT)
-        put("formatVersion", FORMAT_VERSION)
+        // 17 unless a template is a set of events (18), so an older Planner still reads the rest.
+        put("formatVersion", if (data.templates.any { TemplateSet.isSet(it.payload) }) FORMAT_VERSION else PLAIN_FORMAT_VERSION)
         put("recentlyDeleted", data.deleted.toJson { JSONObject().put("id", it.id).put("deletedAt", it.deletedAt)
             .put("label", it.label).put("payload", JSONObject(it.payload)) })
         put("exportedAt", Instant.now().toString())
@@ -515,7 +516,7 @@ class BackupManager(
         val templatesJson = root.optJSONArray("templates")
         val templates = templatesJson?.objects().orEmpty().map {
             val payload = it.getJSONObject("payload").toString()
-            TemplateContent.decode(payload)
+            if (TemplateSet.isSet(payload)) TemplateSet.decode(payload) else TemplateContent.decode(payload)
             EventTemplate(it.getString("id").also { id -> require(id.isNotBlank()) },
                 it.getString("name").also { name -> require(name.length in 1..80) }, payload)
         }
@@ -649,7 +650,10 @@ class BackupManager(
         private const val FORMAT = "planner-backup"
         // 2: categories are plain text. 3: attachments can be links. Older files are still read; an older app refuses newer ones.
         // 16: events may carry an endDate (multi-day). An older app refuses the file rather than dropping end dates.
-        const val FORMAT_VERSION = 17
+        // 18: a template may be a set of events (TemplateSet); only a file holding one is 18.
+        const val FORMAT_VERSION = 18
+        // What a file without a set of events says, so Planner 0.0.39 and older still restore it.
+        const val PLAIN_FORMAT_VERSION = 17
         private const val DATA_ENTRY = "data.json"
         private const val ATTACHMENTS_DIR = "attachments"
 

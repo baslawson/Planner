@@ -277,7 +277,8 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         if (shown.isEmpty() && nextMove != null) {
             while (app.repository.pendingMoves.value.any { it.token == nextMove.token }) {
                 try {
-                    val result = snackbar.showSnackbar("Moved ${nextMove.title} to tomorrow", actionLabel = "Undo",
+                    val to = if (nextMove.toDate == LocalDate.now().plusDays(1)) "tomorrow" else nextMove.toDate.format(patternFormatter("EEEE d MMMM"))
+                    val result = snackbar.showSnackbar("Moved ${nextMove.title} to $to", actionLabel = "Undo",
                         withDismissAction = true, duration = SnackbarDuration.Long)
                     withContext(NonCancellable) {
                         if (result == SnackbarResult.ActionPerformed) {

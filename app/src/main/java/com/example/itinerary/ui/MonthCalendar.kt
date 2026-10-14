@@ -71,6 +71,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import com.example.itinerary.data.CalendarChips
 import com.example.itinerary.data.DayChip
+import com.example.itinerary.data.WeekLines
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import java.time.temporal.ChronoUnit
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -107,6 +122,8 @@ fun MonthCalendar(
     // Shorter rows let the whole month fit beside the day's events in landscape.
     rowHeight: Dp = 48.dp,
     chips: Map<LocalDate, List<DayChip>>? = null,
+    // Maximised: an entry dragged to another day, and by how many days (see MaximisedMonthPage).
+    onMoveEntry: ((DayChip, Long) -> Unit)? = null,
 ) = CompositionLocalProvider(LocalCalendarRowHeight provides rowHeight) {
     // R18-U2: read again when the language or region changes (the activity handles that itself, so it isn't recreated).
     val locales = androidx.compose.ui.platform.LocalConfiguration.current.locales
@@ -209,6 +226,7 @@ fun MonthCalendar(
                     onMonthChange = onMonthChange,
                     fillHeight = maxHeight,
                     chips = chips,
+                    onMoveEntry = onMoveEntry,
                 )
             }
         } else {
@@ -258,6 +276,7 @@ private fun MonthPager(
     // Maximised: the pager is this tall whatever the month, and each month's weeks share it.
     fillHeight: Dp? = null,
     chips: Map<LocalDate, List<DayChip>>? = null,
+    onMoveEntry: ((DayChip, Long) -> Unit)? = null,
 ) {
     val pagerState = rememberPagerState(initialPage = pageOf(month)) { CalendarMonths.COUNT }
     val currentMonth by rememberUpdatedState(month)
@@ -319,7 +338,8 @@ private fun MonthPager(
         val weeks = remember(page, firstDow) { monthCells(monthOfPage(page), firstDow).chunked(7) }
         val pageRowHeight = fillHeight?.let { it / weeks.size } ?: LocalCalendarRowHeight.current
         CompositionLocalProvider(LocalCalendarRowHeight provides pageRowHeight) {
-            Column {
+            if (chips != null) MaximisedMonthPage(weeks, selected, today, onSelect, chips, onMoveEntry)
+            else Column {
                 weeks.forEach { week ->
                     WeekRow(
                         week = week,
@@ -327,7 +347,6 @@ private fun MonthPager(
                         today = today,
                         datesWithItems = datesWithItems,
                         onSelect = onSelect,
-                        chips = chips,
                     )
                 }
             }
@@ -342,9 +361,7 @@ private fun WeekRow(
     today: LocalDate,
     datesWithItems: Set<LocalDate>,
     onSelect: (LocalDate) -> Unit,
-    chips: Map<LocalDate, List<DayChip>>? = null,
 ) {
-    if (chips != null) return MaximisedWeekRow(week, selected, today, onSelect, chips)
     Row(Modifier.fillMaxWidth()) {
         for (i in 0 until 7) {
             val date = week.getOrNull(i)
@@ -492,25 +509,159 @@ fun CalendarSizeBar(
 private val CHIP_GAP = 2.dp
 private val MAX_NUMBER_SIZE = 26.dp
 
-// A week of the maximised month: the seven day cells, and over them each day's entries, one line each, laid out by
-// CalendarChips.weekLines. An event on more than one day is one bar across its days (user, 14 Oct), cut at the end of the
-// row and carried on in the next. The entries are hidden from TalkBack, which reads them from each day's cell, and a
-// tap on one goes through to the day under it. Too short for even one line (landscape), each day falls back to the dot.
+// The sizes of a maximised day: its row, the number at the top, and the entry lines under it ([slots] of them).
+private data class ChipMetrics(val rowHeight: Dp, val numberSize: Dp, val chipHeight: Dp, val slots: Int) {
+    // Where entry line [line] starts, from the top of the row.
+    fun lineTop(line: Int): Dp = 2.dp + numberSize + CHIP_GAP + (chipHeight + CHIP_GAP) * line
+}
+
 @Composable
-private fun MaximisedWeekRow(
-    week: List<LocalDate?>,
+private fun chipMetrics(): ChipMetrics {
+    val rowHeight = LocalCalendarRowHeight.current
+    val chipHeight = with(LocalDensity.current) { 12.sp.toDp() } + 2.dp
+    val numberSize = minOf(MAX_NUMBER_SIZE, rowHeight - 4.dp)
+    val slots = ((rowHeight - 4.dp - numberSize - CHIP_GAP) / (chipHeight + CHIP_GAP)).toInt()
+    return ChipMetrics(rowHeight, numberSize, chipHeight, slots)
+}
+
+@Composable
+private fun chipStyle() = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
+
+// An entry being dragged: picked up on day [from], the finger now [at] (in the page), over day [target] (null: no day).
+private data class ChipDrag(val chip: DayChip, val from: LocalDate, val at: Offset, val target: LocalDate?)
+
+// A month of the full-screen calendar. Hold an entry to pick it up, drag it to another day and let go to move it there
+// (user, 14 Oct). A multi-day event keeps its length and moves by as many days as the finger did. While dragging, the
+// entry follows the finger and the day under it is outlined; only the month's own days take a drop. A tap still opens
+// the day, and a sideways swipe that starts before the hold still changes the month.
+@Composable
+private fun MaximisedMonthPage(
+    weeks: List<List<LocalDate?>>,
     selected: LocalDate,
     today: LocalDate,
     onSelect: (LocalDate) -> Unit,
     chips: Map<LocalDate, List<DayChip>>,
+    onMoveEntry: ((DayChip, Long) -> Unit)?,
+) {
+    val metrics = chipMetrics()
+    val lines = remember(weeks, chips, metrics.slots) { weeks.map { CalendarChips.weekLines(it, chips, metrics.slots) } }
+    var drag by remember { mutableStateOf<ChipDrag?>(null) }
+    val haptics = LocalHapticFeedback.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val currentOnMove by rememberUpdatedState(onMoveEntry)
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onMoveEntry == null) Modifier else Modifier.pointerInput(weeks, lines, metrics, rtl) {
+                val rowPx = metrics.rowHeight.toPx()
+                // The day cell under a point, as (row, column in reading order).
+                fun cellAt(p: Offset): Pair<Int, Int>? {
+                    val row = (p.y / rowPx).toInt()
+                    val col = (p.x / (size.width / 7f)).toInt().let { if (rtl) 6 - it else it }
+                    return if (p.x < 0 || p.y < 0 || row !in weeks.indices || col !in 0..6) null else row to col
+                }
+                fun dayAt(p: Offset) = cellAt(p)?.let { (row, col) -> weeks[row].getOrNull(col) }
+                fun entryAt(p: Offset): DayChip? {
+                    val (row, col) = cellAt(p) ?: return null
+                    val y = p.y - row * rowPx - metrics.lineTop(0).toPx()
+                    val step = (metrics.chipHeight + CHIP_GAP).toPx()
+                    val line = if (y < 0) return null else (y / step).toInt()
+                    if (y - line * step > metrics.chipHeight.toPx()) return null
+                    // Bug hunt 28 P3: only what Planner can move; other calendars' events (birthdays too) are read-only.
+                    return lines[row].pieces.firstOrNull { it.line == line && col in it.start..it.end }?.chip?.takeIf { it.movable }
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val chip = entryAt(down.position) ?: return@awaitEachGesture
+                    val from = dayAt(down.position) ?: return@awaitEachGesture
+                    // A hold: no lift, no move past the touch slop and nothing else (the pager) taking the touch first.
+                    var stopped = false
+                    val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        while (!stopped) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                            stopped = change == null || !change.pressed || change.isConsumed ||
+                                (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+                        }
+                    } == null && !stopped
+                    if (!held) return@awaitEachGesture
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    drag = ChipDrag(chip, from, down.position, from)
+                    try {
+                        // Taken before the day cells and the pager see it, so the lift isn't a tap and nothing scrolls.
+                        while (true) {
+                            val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                            change.consume()
+                            if (!change.pressed) break
+                            drag = drag?.copy(at = change.position, target = dayAt(change.position))
+                        }
+                        val done = drag
+                        if (done?.target != null && done.target != done.from)
+                            currentOnMove?.invoke(done.chip, ChronoUnit.DAYS.between(done.from, done.target))
+                    } finally {
+                        drag = null
+                    }
+                }
+            }),
+    ) {
+        Column {
+            weeks.forEachIndexed { i, week ->
+                MaximisedWeekRow(week, lines[i], metrics, selected, today, onSelect, chips, lifted = drag?.chip?.key)
+            }
+        }
+        drag?.let { d ->
+            val cell = maxWidth / 7
+            // The day it would go to, outlined.
+            weeks.indexOfFirst { d.target in it }.takeIf { d.target != null && it >= 0 }?.let { row ->
+                val col = weeks[row].indexOf(d.target).let { if (rtl) 6 - it else it }
+                Box(
+                    Modifier
+                        .absoluteOffset(x = cell * col, y = metrics.rowHeight * row)
+                        .size(cell, metrics.rowHeight)
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)),
+                )
+            }
+            // The entry, just above the finger so it stays in sight.
+            val density = LocalDensity.current
+            val width = cell * 1.5f
+            Box(
+                Modifier
+                    .absoluteOffset {
+                        // Bug hunt 28 P10: kept inside the page, which clips; under the finger when there's no room above it.
+                        val w = with(density) { width.toPx() }; val h = with(density) { metrics.chipHeight.toPx() }
+                        val above = d.at.y - h * 3
+                        IntOffset((d.at.x - w / 2).coerceIn(0f, maxOf(0f, constraints.maxWidth - w)).roundToInt(),
+                            (if (above >= 0) above else d.at.y + h * 2).roundToInt())
+                    }
+                    .size(width, metrics.chipHeight)
+                    .shadow(4.dp, RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+                propagateMinConstraints = true,
+            ) {
+                DayChipLine(d.chip, opens = true, closes = true, style = chipStyle())
+            }
+        }
+    }
+}
+
+// A week of the maximised month: the seven day cells, and over them each day's entries, one line each, as
+// CalendarChips.weekLines laid them out ([lines]). An event on more than one day is one bar across its days (user,
+// 14 Oct), cut at the end of the row and carried on in the next. The entries are hidden from TalkBack, which reads them
+// from each day's cell, and a tap on one goes through to the day under it. Too short for even one line (landscape),
+// each day falls back to the dot. The entry being dragged ([lifted]) is faint where it was.
+@Composable
+private fun MaximisedWeekRow(
+    week: List<LocalDate?>,
+    lines: WeekLines,
+    metrics: ChipMetrics,
+    selected: LocalDate,
+    today: LocalDate,
+    onSelect: (LocalDate) -> Unit,
+    chips: Map<LocalDate, List<DayChip>>,
+    lifted: String?,
 ) {
     val colors = MaterialTheme.colorScheme
-    val rowHeight = LocalCalendarRowHeight.current
-    val chipStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
-    val chipHeight = with(LocalDensity.current) { 12.sp.toDp() } + 2.dp
-    val numberSize = minOf(MAX_NUMBER_SIZE, rowHeight - 4.dp)
-    val slots = ((rowHeight - 4.dp - numberSize - CHIP_GAP) / (chipHeight + CHIP_GAP)).toInt()
-    val lines = remember(week, chips, slots) { CalendarChips.weekLines(week, chips, slots) }
+    val chipStyle = chipStyle()
+    val (rowHeight, numberSize, chipHeight, slots) = metrics
     Box(Modifier.fillMaxWidth().height(rowHeight)) {
         Row(Modifier.fillMaxWidth()) {
             for (i in 0 until 7) {
@@ -534,7 +685,7 @@ private fun MaximisedWeekRow(
         val moreCols = lines.more.indices.filter { lines.more[it] > 0 }
         Layout(
             content = {
-                lines.pieces.forEach { DayChipLine(it.chip, it.opens, it.closes, chipStyle) }
+                lines.pieces.forEach { DayChipLine(it.chip, it.opens, it.closes, chipStyle, lifted = it.chip.key == lifted) }
                 moreCols.forEach { col ->
                     Text("+${lines.more[col]}", style = chipStyle, color = colors.onSurfaceVariant, maxLines = 1, textAlign = TextAlign.Center)
                 }
@@ -544,7 +695,7 @@ private fun MaximisedWeekRow(
             val cell = constraints.maxWidth / 7f
             val inset = 1.dp.roundToPx()
             val height = chipHeight.roundToPx()
-            fun lineTop(line: Int) = (2.dp + numberSize + CHIP_GAP + (chipHeight + CHIP_GAP) * line).roundToPx()
+            fun lineTop(line: Int) = metrics.lineTop(line).roundToPx()
             // A piece reaches the edge of its cell where the entry carries on, so the bar runs on without a gap.
             val placed = measurables.mapIndexed { i, m ->
                 val piece = lines.pieces.getOrNull(i)
@@ -611,9 +762,10 @@ private fun MaximisedDayCell(
 }
 
 // One entry in a maximised week (sized by MaximisedWeekRow): an event or bill tinted with its colour, a task outlined
-// with a box in front. A bar has rounded ends only where the entry [opens] and [closes], square where it carries on.
+// with a box in front. A bar has rounded ends only where the entry [opens] and [closes], square where it carries on;
+// faint while it is being dragged elsewhere ([lifted]).
 @Composable
-private fun DayChipLine(chip: DayChip, opens: Boolean, closes: Boolean, style: TextStyle) {
+private fun DayChipLine(chip: DayChip, opens: Boolean, closes: Boolean, style: TextStyle, lifted: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val start = if (opens) 3.dp else 0.dp
     val end = if (closes) 3.dp else 0.dp
@@ -621,7 +773,7 @@ private fun DayChipLine(chip: DayChip, opens: Boolean, closes: Boolean, style: T
     val accent = if (chip.task) colors.secondary else chip.customColor?.let { Color(it) } ?: planColor(chip.colorIndex).color
     Box(
         Modifier
-            .alpha(if (chip.faded) 0.45f else 1f)
+            .alpha((if (chip.faded) 0.45f else 1f) * (if (lifted) 0.3f else 1f))
             .clip(shape)
             .then(if (chip.task) Modifier.border(1.dp, accent, shape) else Modifier.background(accent.copy(alpha = 0.3f)))
             .padding(horizontal = 2.dp),

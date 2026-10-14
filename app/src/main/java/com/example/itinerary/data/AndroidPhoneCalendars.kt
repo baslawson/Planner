@@ -8,19 +8,29 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.CalendarContract
+import android.provider.ContactsContract
 import java.time.Instant
 
 // PhoneCalendarReader on Android's calendar storage. Only reads; every query is refused (and returns nothing) without
-// READ_CALENDAR, which the user grants in Settings → Calendars.
+// READ_CALENDAR, which the user grants in Settings → Calendars. With READ_CONTACTS (granted there too, separately) the
+// contacts' birthdays are one more calendar (ContactBirthdays).
 class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
     private val context = context.applicationContext
 
-    override fun permitted(): Boolean =
+    override fun calendarsPermitted(): Boolean =
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+    override fun contactsPermitted(): Boolean =
+        context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+
+    override fun permitted(): Boolean = calendarsPermitted() || contactsPermitted()
+
+    override fun calendars(): List<PhoneCalendar> =
+        (if (calendarsPermitted()) androidCalendars() else emptyList()) +
+            listOfNotNull(PhoneCalendar(ContactBirthdays.CALENDAR_ID, ContactBirthdays.NAME, "Contacts on this phone", "", null)
+                .takeIf { contactsPermitted() })
 
     // Only calendars the phone's calendar app shows (hidden ones such as switched-off Holidays stay out).
-    override fun calendars(): List<PhoneCalendar> {
-        if (!permitted()) return emptyList()
+    private fun androidCalendars(): List<PhoneCalendar> {
         return context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars.CALENDAR_COLOR),
             "${CalendarContract.Calendars.VISIBLE} = 1", null, null)?.use { row ->
@@ -32,8 +42,26 @@ class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
         } ?: throw IllegalStateException("The phone's calendar storage didn't answer.")
     }
 
-    override fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> {
-        if (!permitted() || calendarIds.isEmpty()) return emptyList()
+    override fun instances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> =
+        androidInstances(calendarIds - ContactBirthdays.CALENDAR_ID, from, until) +
+            if (ContactBirthdays.CALENDAR_ID in calendarIds && contactsPermitted()) ContactBirthdays.instances(birthdays(), from, until) else emptyList()
+
+    // Every contact's birthday, once per contact and date.
+    private fun birthdays(): List<ContactBirthdays.Birthday> {
+        val startDate = ContactsContract.CommonDataKinds.Event.START_DATE
+        return context.contentResolver.query(ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data.CONTACT_ID, ContactsContract.Data.DISPLAY_NAME, startDate),
+            "${ContactsContract.Data.MIMETYPE} = ? AND ${ContactsContract.CommonDataKinds.Event.TYPE} = ?",
+            arrayOf(ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE, ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY.toString()), null)?.use { row ->
+            buildList {
+                while (row.moveToNext()) ContactBirthdays.parse(row.getString(1).orEmpty(), row.getString(2))?.let { add(row.getLong(0) to it) }
+            }.distinct().map { it.second }
+        // H17-S3: as for the calendars, no answer isn't "no birthdays".
+        } ?: throw IllegalStateException("The phone's contacts didn't answer.")
+    }
+
+    private fun androidInstances(calendarIds: Collection<Long>, from: Instant, until: Instant): List<PhoneInstance> {
+        if (!calendarsPermitted() || calendarIds.isEmpty()) return emptyList()
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
             ContentUris.appendId(it, from.toEpochMilli()); ContentUris.appendId(it, until.toEpochMilli())
         }.build()
@@ -53,7 +81,7 @@ class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
         } ?: throw IllegalStateException("The phone's calendar storage didn't answer.")
     }
 
-    // Calls [onChange] (on the main thread, at most once every 2 seconds) when the phone's calendars change, until the
+    // Calls [onChange] (on the main thread, at most once every 2 seconds) when the phone's calendars (or contacts, for their birthdays) change, until the
     // returned function is called. Null without permission: nothing is watched.
     fun watch(onChange: () -> Unit): (() -> Unit)? {
         if (!permitted()) return null
@@ -63,7 +91,8 @@ class AndroidPhoneCalendars(context: Context) : PhoneCalendarReader {
             override fun onChange(selfChange: Boolean) { handler.removeCallbacks(fire); handler.postDelayed(fire, 2000) }
         }
         return runCatching {
-            context.contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
+            if (calendarsPermitted()) context.contentResolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
+            if (contactsPermitted()) context.contentResolver.registerContentObserver(ContactsContract.Contacts.CONTENT_URI, true, observer)
             val stop: () -> Unit = { handler.removeCallbacks(fire); context.contentResolver.unregisterContentObserver(observer) }
             stop
         }.getOrNull()
