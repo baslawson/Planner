@@ -151,7 +151,7 @@ class MonthArrowsUiTest {
     }
 
     // A real upward swipe across the grid (the next month), quick enough to be a fling.
-    // A quick finger move across the grid from [fromX] to [toX] at height [y] (rightwards = the next month).
+    // A quick finger move across the grid from [fromX] to [toX] at height [y] (leftwards = the next month).
     private fun swipeAcross(y: Float, fromX: Float, toX: Float) {
         val down = SystemClock.uptimeMillis()
         fun event(action: Int, t: Long, x: Float) = android.view.MotionEvent.obtain(down, t, action, x, y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
@@ -159,7 +159,7 @@ class MonthArrowsUiTest {
         for (step in 1..8) ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_MOVE, down + step * 12L, fromX + (toX - fromX) * step / 8), true)
         ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_UP, down + 110, toX), true)
     }
-    // AG-1: a swipe right after an arrow's move has landed, while the grid is still changing height, moves on one more
+    // AG-1: a swipe to the next month (leftwards) after an arrow's move has landed, while the grid is still changing height, moves on one more
     // month and the header follows it (it used to stay on the arrow's month for good, or the grid was pulled back).
     @Test fun aSwipeRightAfterAnArrowTapMovesOnAndTheHeaderFollows() {
         openCalendar()
@@ -171,10 +171,12 @@ class MonthArrowsUiTest {
             val arrow = month.plusMonths(1)
             await("header $arrow") { find(arrow.label()) != null }
             val day = Rect().also(visible("15").single()::getBoundsInScreen)
-            swipeAcross(day.exactCenterY(), day.exactCenterX() - day.width(), day.exactCenterX() + 2 * day.width())
+            // Across the middle of the grid, on screen whichever column the 15th is in (an end off the left edge was taken as Back).
+            val width = ins.targetContext.resources.displayMetrics.widthPixels
+            swipeAcross(day.exactCenterY(), width * 0.7f, width * 0.7f - 3 * day.width())
             month = month.plusMonths(2)
             val expected = month
-            await("header $expected after a swipe right after the arrow") { find(expected.label()) != null }
+            await("header $expected after a swipe left after the arrow") { find(expected.label()) != null }
             Thread.sleep(1500)
             assertNotNull("header still $expected", find(expected.label()))
             assertSnapped(expected, " after an arrow then a swipe")

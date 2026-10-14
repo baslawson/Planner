@@ -87,8 +87,8 @@ import java.util.Locale
 /**
  * A plain month grid. The selected day gets a filled circle,
  * today a pulsing ring, and days that already have events a small dot.
- * Swipe sideways on the grid (or use the arrows) to move between months: a finger moving right goes to the next month,
- * moving left to the previous one (the user's choice). The week strip moves a week the same way.
+ * Swipe sideways on the grid (or use the arrows) to move between months: a finger moving left goes to the next month,
+ * moving right to the previous one, as in other Android calendars (user, 14 Oct; it was the other way round before). The week strip moves a week the same way.
  * When [collapsed] it shrinks to the selected day's week, and the arrows move a week at a time.
  * Given [chips] (maximised) the month fills the height it is given, and each day lists its entries in small coloured
  * lines instead of the dot.
@@ -164,7 +164,7 @@ fun MonthCalendar(
             // Just the selected day's week, which can straddle two months.
             val weekStart = selected.with(TemporalAdjusters.previousOrSame(firstDow))
             val week = remember(weekStart) { List(7) { weekStart.plusDays(it.toLong()) } }
-            // A sideways swipe moves a week, as the arrows do: a finger moving right to the next one.
+            // A sideways swipe moves a week, as the arrows do: a finger moving left to the next one.
             val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
             val currentSelected by rememberUpdatedState(selected)
             val currentOnSelect by rememberUpdatedState(onSelect)
@@ -178,8 +178,8 @@ fun MonthCalendar(
                     onDragEnd = {
                         val day = currentSelected
                         val target = when {
-                            travelled > swipe -> day.plusWeeks(1)
-                            travelled < -swipe -> day.minusWeeks(1)
+                            travelled < -swipe -> day.plusWeeks(1)
+                            travelled > swipe -> day.minusWeeks(1)
                             else -> null
                         }
                         if (target != null && CalendarMonths.inRange(YearMonth.from(target))) currentOnSelect(target)
@@ -223,7 +223,7 @@ fun MonthCalendar(
     } }
 }
 
-// Months are pages of a sideways pager laid out right to left, so a finger moving right brings the next month in.
+// Months are pages of a sideways pager, so a finger moving left brings the next month in (mirrored in right-to-left layouts).
 // Page numbers count months from January of the year 1 (see CalendarMonths).
 private val LocalCalendarRowHeight = compositionLocalOf { 48.dp }
 
@@ -310,7 +310,6 @@ private fun MonthPager(
 
     HorizontalPager(
         state = pagerState,
-        reverseLayout = true,
         modifier = Modifier.fillMaxWidth().height(height),
         // One month per swipe, however hard the flick.
         flingBehavior = PagerDefaults.flingBehavior(state = pagerState, pagerSnapDistance = PagerSnapDistance.atMost(1)),

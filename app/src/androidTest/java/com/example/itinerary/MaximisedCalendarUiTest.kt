@@ -154,7 +154,7 @@ class MaximisedCalendarUiTest {
         await("task editor") { find("Edit task") != null }
     }
 
-    // A sideways swipe on the grid changes the month (finger moving right: next, left: previous), and on the week strip
+    // A sideways swipe on the grid changes the month (finger moving left: next, right: previous), and on the week strip
     // the week. Full screen, the size bar sits at the top, clear of the + button.
     @Test fun sidewaysSwipesChangeTheMonthAndTheWeek() {
         ins.targetContext.startActivity(Intent(ins.targetContext, MainActivity::class.java).apply {
@@ -165,17 +165,18 @@ class MaximisedCalendarUiTest {
         await("Calendar") { find("CALENDAR") != null && find("AGENDA") == null }
         if (find("Calendar: month")?.isSelected != true) click("Calendar: month")
         await("April") { shows("April 2036") }
+        // A finger moving left is the next month (and week), as in other Android calendars.
         fun swipe(rightwards: Boolean) {
             val r = android.graphics.Rect().also { nodes().first { n -> n.text?.toString() == "12" }.getBoundsInScreen(it) }
             val (from, to) = if (rightwards) 150 to 900 else 900 to 150
             ins.uiAutomation.executeShellCommand("input swipe $from ${r.centerY()} $to ${r.centerY()} 250").close()
         }
+        swipe(rightwards = false)
+        await("next month after a swipe left") { shows("May 2036") }
         swipe(rightwards = true)
-        await("next month after a swipe right") { shows("May 2036") }
-        swipe(rightwards = false)
-        await("back to April after a swipe left") { shows("April 2036") }
-        swipe(rightwards = false)
-        await("previous month after a swipe left") { shows("March 2036") }
+        await("back to April after a swipe right") { shows("April 2036") }
+        swipe(rightwards = true)
+        await("previous month after a swipe right") { shows("March 2036") }
 
         // Full screen: the bar is above the month title.
         click("Calendar: full screen")
@@ -185,14 +186,14 @@ class MaximisedCalendarUiTest {
         assertTrue("bar above the title ($bar, $title)", bar.bottom <= title.top)
         shot("full-bar-top")
 
-        // The week strip: a swipe right is the next week.
+        // The week strip: a swipe left is the next week.
         click("Calendar: week")
         // The week of 12 April starts on the phone's first day of the week (Sunday 6 or Monday 7 April); the next week ends
         // 13 days after that start.
         val weekStart = LocalDate.of(2036, 4, 12).with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.temporal.WeekFields.of(java.util.Locale.getDefault()).firstDayOfWeek))
         val first = weekStart.dayOfMonth.toString(); val nextLast = weekStart.plusDays(13).dayOfMonth.toString()
         await("week of 12 April") { app.settings.calendarCollapsed.value && shows(first) && !shows(nextLast) }
-        swipe(rightwards = true)
+        swipe(rightwards = false)
         await("a week on") { shows(nextLast) && !shows(first) }
         click("Calendar: month")
     }
