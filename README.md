@@ -26,13 +26,17 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 Screenshots from the app using fictional demo entries. Shown in the Matrix Green theme.
 
-| Agenda | Calendar |
+| Agenda | Full-screen month |
 | :---: | :---: |
-| <img src="docs/images/agenda.png" width="280" alt="Agenda with sample tasks and timed events"> | <img src="docs/images/calendar.png" width="280" alt="Month calendar with sample events"> |
+| <img src="docs/images/agenda.png" width="280" alt="Agenda with sample tasks and timed events"> | <img src="docs/images/calendar.png" width="280" alt="Full-screen month with each day's entries and one bar across a weekend away"> |
 
 | Quick entry | Find free time |
 | :---: | :---: |
 | <img src="docs/images/quick-entry.png" width="280" alt="Offline Quick entry recognizing a date, time and duration from a sentence"> | <img src="docs/images/find-free-time.png" width="280" alt="Find free time showing available gaps between sample events"> |
+
+| Day with hours |
+| :---: |
+| <img src="docs/images/day-hours.png" width="280" alt="A day on an hour grid, with overlapping events side by side and the day's tasks above"> |
 
 ## Download
 
