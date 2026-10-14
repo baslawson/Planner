@@ -92,7 +92,17 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val dayTasks = remember(allTasks, selected) { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, selected) }
     val dayHoursSettings = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).settings
     val dayHours by dayHoursSettings.dayHours.collectAsStateWithLifecycle()
+    // On the hour grid with the calendar at Week size, the whole week shows side by side (user, 15 Oct).
+    val locales = androidx.compose.ui.platform.LocalConfiguration.current.locales
+    val firstDow = remember(locales) { java.time.temporal.WeekFields.of(java.util.Locale.getDefault()).firstDayOfWeek }
+    val hourDays = remember(selected, calendarCollapsed, dayHours, firstDow) {
+        if (calendarCollapsed && dayHours) selected.with(java.time.temporal.TemporalAdjusters.previousOrSame(firstDow)).let { start -> (0L until 7L).map(start::plusDays) }
+        else listOf(selected)
+    }
+    val hourEvents = remember(allItems, hourDays, dayHours) { if (dayHours) hourDays.associateWith { com.example.itinerary.data.eventsOnDay(allItems, it) } else emptyMap() }
+    val hourTasks = remember(allTasks, hourDays, dayHours) { if (dayHours) hourDays.associateWith { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, it) } else emptyMap() }
     val blockerCounts = remember(allTasks) { taskBlockerCounts(allTasks) }
+    val streaks = remember(allTasks) { com.example.itinerary.data.TaskStreaks.streaks(allTasks) }
     // Outside events can't be deleted from Planner, so they can't be selected either.
     val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
     val selectableTasks = remember(dayTasks) { dayTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
@@ -228,14 +238,22 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                     DayHeader(date = selected, hours = dayHours, onHours = dayHoursSettings::setDayHours)
                     // The day on an hour grid (DayHours) unless events are being selected, which only the list shows.
                     if (dayHours && !selection.active) DayHours(
-                        day = selected, today = today, events = dayItems, tasks = dayTasks, outside = outsideEvents,
+                        days = hourDays, selected = selected, today = today, events = hourEvents, tasks = hourTasks, outside = outsideEvents,
                         onEvent = { item -> outsideEvents[item.id]?.let { viewingOutside = it } ?: run { editing = item } },
                         onTask = { editingTaskId = it.id },
-                        onEmptyHour = { at ->
-                            if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = selected, startTime = at, durationMinutes = 60, title = "",
-                                colorIndex = com.example.itinerary.data.PlanColors.next(com.example.itinerary.data.eventsOnDay(allItems, selected)
+                        onEmptyHour = { day, at ->
+                            if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = day, startTime = at, durationMinutes = 60, title = "",
+                                colorIndex = com.example.itinerary.data.PlanColors.next(com.example.itinerary.data.eventsOnDay(allItems, day)
                                     .filter { it.customColor == null }.map { it.colorIndex }, com.example.itinerary.data.PlanColors.EVENT_COUNT)))
                         },
+                        onMove = { item, day, at, length ->
+                            moveScope.launch {
+                                try { vm.moveEventTo(item.id, day, at, length) }
+                                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                catch (e: Exception) { android.widget.Toast.makeText(moveContext, e.message ?: "Couldn't move it.", android.widget.Toast.LENGTH_LONG).show() }
+                            }
+                        },
+                        onDay = vm::select,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     else LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
@@ -270,7 +288,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                             }
                         }
                         items(dayTasks, key = { "task:${it.id}" }) { task ->
-                            TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection) { editingTaskId = task.id }
+                            TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection, streak = streaks[task.id] ?: 0) { editingTaskId = task.id }
                         }
                     } }
                 }

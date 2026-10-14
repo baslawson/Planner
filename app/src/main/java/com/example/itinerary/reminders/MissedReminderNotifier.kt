@@ -187,7 +187,7 @@ fun postMissedReminders(context: Context, missed: List<MissedReminders.Missed>, 
                     val id = m.reminder.id.toInt()
                     val details = reminderContent(context, reminderIntent(context, m.item, m.reminder).extras)?.text
                     val bill = m.item.category == "Bills" && !m.item.paid && !m.item.skipped
-                    manager.notify(id, builder(m.item.title, dueText(m.due), id).setSubText(m.reminder.label).setWhen(m.due).setShowWhen(true)
+                    manager.notify(id, builder(m.item.title, dueText(m.due), id).setSubText(LockedAlarm.Event.offsetLabel(m.item, m.reminder)).setWhen(m.due).setShowWhen(true)
                         .apply { if (details != null) setStyle(NotificationCompat.BigTextStyle().bigText("${dueText(m.due)}\n$details")) }
                         .apply { if (bill) addAction(0, "Mark paid", BillPaymentReceiver.action(context, m.reminder.id, billReminderToken(m.item, m.reminder))) }
                         .build())

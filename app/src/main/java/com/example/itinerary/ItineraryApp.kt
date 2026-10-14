@@ -146,10 +146,15 @@ class ItineraryApp : Application() {
 
     private fun startUnlocked() {
         if (!started.compareAndSet(false, true)) return
-        // The morning summary's alarm follows its setting (and is set again on every start: an alarm doesn't survive a force stop).
+        // The morning and evening summaries' alarms follow their settings (and are set again on every start: an alarm doesn't survive a force stop).
         appScope.launch {
-            kotlinx.coroutines.flow.combine(settings.morningSummary, settings.morningSummaryAt) { on, at -> on to at }
+            kotlinx.coroutines.flow.combine(settings.morningSummary, settings.morningSummaryAt, settings.eveningSummary, settings.eveningSummaryAt) { a, b, c, d -> listOf(a, b, c, d) }
                 .collect { com.example.itinerary.reminders.MorningSummary.schedule(this@ItineraryApp) }
+        }
+        // Birthday reminders come at the morning summary's time, so they follow that too.
+        appScope.launch {
+            kotlinx.coroutines.flow.combine(settings.birthdayReminderDays, settings.morningSummaryAt) { days, at -> days to at }
+                .collect { com.example.itinerary.reminders.BirthdayReminders.schedule(this@ItineraryApp) }
         }
         // A Gemini or OpenAI key saved by an earlier version is deleted, not left behind.
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.example.itinerary.data.RemovedAiData.remove(this@ItineraryApp) } }

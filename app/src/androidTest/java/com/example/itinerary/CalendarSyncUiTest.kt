@@ -152,9 +152,10 @@ END:VCALENDAR&#13;
             click("Calendars")
             await { find("QA Personal") != null && find("QA Team") != null }
             screenshot("calendars-found")
-            assertTrue(outside().first.none { it.enabled })
+            // The Nextcloud calendars start unticked (the contacts' birthdays, a phone calendar, are ticked when first listed).
+            assertTrue(outside().first.none { it.enabled && it.kind == com.example.itinerary.data.OutsideCalendars.KIND_NEXTCLOUD })
             click("QA Personal")
-            await { has("Synced ") && find("Calendars are up to date.") != null }
+            await { outside().first.any { it.name == "QA Personal" && it.lastSynced != null } && find("Calendars are up to date.") != null }
             screenshot("calendars-ticked")
             assertEquals(listOf("QA Synced dentist"), outside().second)
             click("Close")
@@ -165,7 +166,8 @@ END:VCALENDAR&#13;
             click("Settings")
             click("Nextcloud backup")
             click("Disconnect")
-            await { outside().first.isEmpty() && outside().second.isEmpty() }
+            // Nextcloud's calendars go; the phone's (the contacts' birthdays) stay.
+            await { outside().first.none { it.kind == com.example.itinerary.data.OutsideCalendars.KIND_NEXTCLOUD } && outside().second.isEmpty() }
             click("Close")
             click("Save")
             await { find("AGENDA") != null && find("QA Synced dentist") == null }

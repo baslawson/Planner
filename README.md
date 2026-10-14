@@ -10,15 +10,16 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 ## Features
 
-- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it (an event on several days as one bar across them; hold an entry and drag it to another day to move it), the day can be shown as a list or on an hour grid, and the + button can be dragged anywhere.
+- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it (an event on several days as one bar across them; hold an entry and drag it to another day to move it, or hold it at the edge to carry it into the next month), the day or the whole week can be shown on an hour grid (hold an event to drag it to another time or day, or drag its bottom edge to make it longer), and the + button can be dragged anywhere. Any entry can be moved to a chosen day from its ⋮ menu.
 - Offline natural-language Quick entry with editable previews.
-- Turn a task into an event or an event into a task, Undo/Redo while typing in the editors, and templates for one event or a set of events (a weekend away, added again from any day).
-- Reminders that ring through silent and vibrate mode for a length chosen on each one (10 s, 30 s, 1 min or until stopped; or the plain notification sound), also after a restart before the phone is unlocked, recurring entries, calendar file import (.ics, including repeating events) and free-time search, and an optional morning summary of the day ahead.
-- Calendars beside your own: Nextcloud, the calendars on your phone, your contacts' birthdays and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
+- Turn a task into an event or an event into a task, Undo/Redo while typing in the editors, and templates for one event or a set of events (a weekend away, added again from any day). Repeating tasks show their streak ("🔥 5 in a row").
+- Reminders that ring through silent and vibrate mode for a length chosen on each one (10 s, 30 s, 1 min or until stopped; or the plain notification sound), also after a restart before the phone is unlocked, recurring entries, calendar file import (.ics, including repeating events) and free-time search, a "When to leave" reminder for events with travel time, and optional summaries of the day ahead in the morning and of tomorrow in the evening, with Mark done and Mark paid buttons.
+- Calendars beside your own: Nextcloud, the calendars on your phone, your contacts' birthdays (with optional reminders and Message and Call buttons) and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
 - Notes in Markdown with checklists, notebooks, tags, colours, attachments and reminders; optional two-way sync with the Nextcloud Notes app (and so with Quillpad).
 - Document and bill scanning with cropping and on-device text recognition.
 - Optionally send paid bills to [MyBudget](https://github.com/baslawson/mybudget), an envelope budgeting app, which asks for the category and records the expense. MyBudget also sees your upcoming unpaid bills, to plan for them.
 - Matrix Green, High Contrast and Colour-blind friendly themes.
+- Two home-screen widgets: today, and the next seven days.
 - Checks GitHub for new versions once a day (optional) and asks before downloading or installing.
 - Report a bug from the ⋮ menu: it opens a prefilled GitHub issue and shows exactly what will be sent.
 

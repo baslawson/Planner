@@ -25,6 +25,15 @@
     <!-- "Send paid bills to MyBudget" (BudgetLink): Android 11 and later hide other apps unless they are named here. -->
     <queries>
         <package android:name="com.mybudget.app" />
+        <!-- A contact's birthday: Message and Call are offered only when an app can take them. -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
     </queries>
 
     <application
@@ -118,6 +127,7 @@
         <receiver android:name=".reminders.BillPaymentReceiver" android:exported="false" />
         <receiver android:name=".reminders.SnoozeReceiver" android:exported="false" />
         <receiver android:name=".reminders.MorningSummaryReceiver" android:exported="false" />
+        <receiver android:name=".reminders.BirthdayReminderReceiver" android:exported="false" />
 
         <!-- Plays the looping alarm sound; a media-playback foreground service keeps it alive while it rings. -->
         <service
@@ -151,6 +161,19 @@
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_info" />
+        </receiver>
+
+        <!-- The week on the home screen (user, 15 Oct): the next seven days, a line each. -->
+        <receiver android:name=".widget.WeekWidget" android:exported="false" android:label="@string/widget_week">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_week_info" />
         </receiver>
 
         <!-- Lets the camera app write photos into, and viewer apps read files from, our private storage. -->

@@ -495,7 +495,7 @@ class TaskSync(
             val synced = row.ics ?: return server
             if (server.dueDate == task.dueDate) return server
             val due = ServerTasks.dueLine(text) ?: return server
-            return if (due == ServerTasks.dueLine(synced) && ServerTasks.dueUnchanged(synced, row.fingerprint, task, zone)) server.copy(dueDate = task.dueDate) else server
+            return if (due == ServerTasks.dueLine(synced) && ServerTasks.dueUnchanged(synced, row.fingerprint, task, zone)) server.copy(dueDate = task.dueDate).also { it.completedOn = server.completedOn } else server
         }
 
         // See CalendarSync.fetchedBase: the row to send [task]'s update on, and true, when [file] (fetched: the text or

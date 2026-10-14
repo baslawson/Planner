@@ -43,7 +43,8 @@ class BillPaymentReceiver : BroadcastReceiver() {
         // R-7: its own slot. In the reminder's slot, any rescheduling of that reminder (ReminderScheduler.cancel, run for
         // every paid bill whenever Planner opens) removed it within its few seconds.
         private const val UNDO_TAG = "payment-undo"
-        private fun showUndo(context: Context, id: Long, token: String, title: String) {
+        // Also after Mark paid on a summary (MorningSummary), in the bill's own slot.
+        internal fun showUndo(context: Context, id: Long, token: String, title: String) {
             val undo = PendingIntent.getBroadcast(context, id.toInt(), Intent(context, BillPaymentReceiver::class.java)
                 .setAction(UNDO).setData(Uri.parse("planner://undo-payment/$token"))
                 .putExtra(ReminderScheduler.EXTRA_REMINDER_ID, id).putExtra(ReminderScheduler.EXTRA_BILL_TOKEN, token),

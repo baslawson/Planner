@@ -85,7 +85,7 @@ fun PlannerTask.nextOccurrence(today: LocalDate = LocalDate.now(), zone: ZoneId 
             .map { it.atTime(moved.toLocalTime()).atZone(zone).toInstant().toEpochMilli() }.firstOrNull { it > now } ?: movedAt
     }
     return copy(id = UUID.randomUUID().toString(), dueDate = next, done = false, reminderAt = nextReminder, snoozedUntil = null,
-        repeatAnchorDay = anchor, nextTaskId = null, checklist = checklist.map { it.copy(done = false) })
+        repeatAnchorDay = anchor, nextTaskId = null, doneOn = null, checklist = checklist.map { it.copy(done = false) })
 }
 
 /**

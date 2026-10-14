@@ -65,6 +65,10 @@ fun RemindersSection(
     onSound: (Reminder, com.example.itinerary.data.ReminderSound) -> Unit,
     onChange: (Reminder, Int, ReminderUnit) -> Unit,
     billTask: Boolean = false,
+    // The travel buffer before the event (minutes, 0 = none): offered as "When to leave" (user, 15 Oct).
+    leaveMinutes: Int = 0,
+    // The buffer as saved: a reminder at it becomes the new "When to leave" at Save (ItemEditorSheet.followLeave).
+    leaveSavedMinutes: Int = 0,
 ) {
     // Bug hunt 19: kept through a rotation, so a date picked survives while the clock is open.
     var customOpen by rememberSaveable { mutableStateOf(false) }
@@ -86,7 +90,9 @@ fun RemindersSection(
     // The ways to add a reminder, or to change [reminder] to another time.
     fun choices(reminder: Reminder?): List<Pair<String, () -> Unit>> {
         val key = reminder?.changeKey
-        return PRESETS.map { preset -> preset.text to {
+        val leave = if (leaveMinutes > 0 && eventTime != null) listOf(leaveLabel(leaveMinutes) to {
+            if (reminder != null) onChange(reminder, leaveMinutes, ReminderUnit.MINUTES) else onAdd(leaveMinutes, ReminderUnit.MINUTES) }) else emptyList()
+        return leave + PRESETS.map { preset -> preset.text to {
                 if (reminder != null) onChange(reminder, preset.amount, preset.unit) else onAdd(preset.amount, preset.unit) } } +
             ("Custom…" to { changingKey = key; customOpen = true }) +
             ("Pick date and time…" to { changingKey = key; pickedDay = null; pickingDate = true })
@@ -102,7 +108,7 @@ fun RemindersSection(
         chips = choices(null)) {
         reminders.forEach { reminder ->
             val trigger = com.example.itinerary.data.reminderTrigger(eventDate, eventTime, reminder, zone)
-            ReminderRow(reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)}",
+            ReminderRow(if (eventTime != null && reminder.unit != ReminderUnit.DAYS && reminder.offsetMinutes > 0 && (reminder.offsetMinutes == leaveMinutes.toLong() || reminder.offsetMinutes == leaveSavedMinutes.toLong())) "Time to leave · ${reminder.label}" else reminder.label, "${trigger.toLocalDate().dayLabel(LocalDateFormat.current)} · ${trigger.toLocalTime().label(LocalTimeFormat.current, context)}",
                 onRemove = { onRemove(reminder) }, changes = choices(reminder)) {
                 ReminderSoundChoice(reminder.sound, defaultSound) { onSound(reminder, it) }
             }
@@ -304,3 +310,6 @@ private fun CustomReminderDialog(initialAmount: Int, initialUnit: ReminderUnit, 
             }
     }
 }
+
+// The reminder at the end of the travel buffer: "Time to leave (20 min before)".
+internal fun leaveLabel(minutes: Int): String = "Time to leave (${if (minutes % 60 == 0) "${minutes / 60} h" else "$minutes min"} before)"

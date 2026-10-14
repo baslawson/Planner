@@ -72,14 +72,30 @@ fun OutsideEventDialog(info: OutsideInfo, onDismiss: () -> Unit, onCopy: () -> U
     val event = info.event
     val context = LocalContext.current
     val format = LocalTimeFormat.current
+    // A contact's birthday (user, 15 Oct): Message and Call, with the contact's saved number.
+    val birthdayName = if (info.kind == com.example.itinerary.data.OutsideCalendars.KIND_PHONE && info.calendar == com.example.itinerary.data.ContactBirthdays.NAME)
+        com.example.itinerary.data.ContactBirthdays.nameOf(event.title) else null
+    val number = androidx.compose.runtime.produceState<String?>(null, birthdayName) {
+        value = birthdayName?.let { name ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.example.itinerary.data.ContactPhones.numberForBirthday(context, name, event.date) }
+        }
+    }.value
+    fun open(intent: android.content.Intent) = try { context.startActivity(intent) }
+        catch (_: android.content.ActivityNotFoundException) { android.widget.Toast.makeText(context, "No app on this phone can do that.", android.widget.Toast.LENGTH_LONG).show() }
     PlannerDialog(event.title,
         onDismissRequest = onDismiss,
         primary = DialogAction("Copy to Planner", onClick = onCopy),
         dismiss = DialogAction("Close", onClick = onDismiss),
-        extra = listOf(DialogAction("Share") {
-            shareEvent(context, event.title, event.date, event.startTime ?: event.timedStart,
-                event.durationMinutes, event.location, format)
-        }),
+        extra = listOfNotNull(
+            number?.takeIf { com.example.itinerary.data.ContactPhones.canOpen(context, com.example.itinerary.data.ContactPhones.messageIntent(it)) }
+                ?.let { n -> DialogAction("Message") { open(com.example.itinerary.data.ContactPhones.messageIntent(n)) } },
+            number?.takeIf { com.example.itinerary.data.ContactPhones.canOpen(context, com.example.itinerary.data.ContactPhones.callIntent(it)) }
+                ?.let { n -> DialogAction("Call") { open(com.example.itinerary.data.ContactPhones.callIntent(n)) } },
+            DialogAction("Share") {
+                shareEvent(context, event.title, event.date, event.startTime ?: event.timedStart,
+                    event.durationMinutes, event.location, format)
+            },
+        ),
     ) {
         OutsideEventLabel(info)
         Text(event.date.dayLabel(LocalDateFormat.current), style = MaterialTheme.typography.titleSmall)

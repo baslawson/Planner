@@ -26,10 +26,14 @@ sealed interface LockedAlarm {
         companion object {
             /** What [reminderIntent] carries for this reminder, at [trigger]. */
             fun of(item: ItineraryItem, reminder: Reminder, trigger: Long) = Event(reminder.id, trigger, item.title,
-                item.location, item.date.toString(), item.startTime?.toString() ?: "", reminder.label, item.category == "Bills",
+                item.location, item.date.toString(), item.startTime?.toString() ?: "", offsetLabel(item, reminder), item.category == "Bills",
                 reminder.ringUntilDismissed, com.example.itinerary.data.eventReminderToken(item, reminder),
                 if (item.category == "Bills" && !item.paid && !item.skipped) com.example.itinerary.data.billReminderToken(item, reminder) else null,
                 reminder.ringSeconds)
+            // "Time to leave · 20 minutes before" for a reminder at the end of the travel buffer before it (user, 15 Oct).
+            fun offsetLabel(item: ItineraryItem, reminder: Reminder): String =
+                if (item.startTime != null && item.bufferBeforeMinutes > 0 && reminder.unit != com.example.itinerary.data.ReminderUnit.DAYS &&
+                    reminder.offsetMinutes == item.bufferBeforeMinutes.toLong()) "Time to leave · ${reminder.label}" else reminder.label
         }
     }
 

@@ -91,6 +91,11 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import androidx.compose.ui.composed
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import java.time.DayOfWeek
@@ -329,6 +334,12 @@ private fun MonthPager(
         }
     }
 
+    // Full screen: an entry being dragged (the drag belongs to the pager, so it can carry on into another month), and
+    // each page's layout, which the drag reads to find the entry and the day under the finger.
+    var drag by remember { mutableStateOf<ChipDrag?>(null) }
+    val layouts = remember { mutableStateMapOf<Int, PageLayout>() }
+    val dragModifier = if (chips != null && onMoveEntry != null) Modifier.monthDrag(pagerState, layouts, { drag }, { drag = it }, onMoveEntry) else Modifier
+    BoxWithConstraints(Modifier.fillMaxWidth().height(height).then(dragModifier)) {
     HorizontalPager(
         state = pagerState,
         modifier = Modifier.fillMaxWidth().height(height),
@@ -338,7 +349,7 @@ private fun MonthPager(
         val weeks = remember(page, firstDow) { monthCells(monthOfPage(page), firstDow).chunked(7) }
         val pageRowHeight = fillHeight?.let { it / weeks.size } ?: LocalCalendarRowHeight.current
         CompositionLocalProvider(LocalCalendarRowHeight provides pageRowHeight) {
-            if (chips != null) MaximisedMonthPage(weeks, selected, today, onSelect, chips, onMoveEntry)
+            if (chips != null) MaximisedMonthPage(weeks, selected, today, onSelect, chips, lifted = drag?.chip?.key) { layouts[page] = it }
             else Column {
                 weeks.forEach { week ->
                     WeekRow(
@@ -351,6 +362,8 @@ private fun MonthPager(
                 }
             }
         }
+    }
+    drag?.let { d -> layouts[pagerState.currentPage]?.let { layout -> DragOverlay(d, layout) } }
     }
 }
 
@@ -527,13 +540,162 @@ private fun chipMetrics(): ChipMetrics {
 @Composable
 private fun chipStyle() = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
 
-// An entry being dragged: picked up on day [from], the finger now [at] (in the page), over day [target] (null: no day).
-private data class ChipDrag(val chip: DayChip, val from: LocalDate, val at: Offset, val target: LocalDate?)
+// An entry being dragged: picked up on day [from], the finger now [at] (in the pager), over day [target] (null: no day),
+// held at the left or right edge ([edge] -1 / 1, 0 = not) to turn to the month before or after.
+private data class ChipDrag(val chip: DayChip, val from: LocalDate, val at: Offset, val target: LocalDate?, val edge: Int = 0)
 
-// A month of the full-screen calendar. Hold an entry to pick it up, drag it to another day and let go to move it there
-// (user, 14 Oct). A multi-day event keeps its length and moves by as many days as the finger did. While dragging, the
-// entry follows the finger and the day under it is outlined; only the month's own days take a drop. A tap still opens
-// the day, and a sideways swipe that starts before the hold still changes the month.
+// What a page of the full-screen month shows, for the drag: its weeks, their entry lines and its sizes.
+private class PageLayout(val weeks: List<List<LocalDate?>>, val lines: List<WeekLines>, val metrics: ChipMetrics)
+
+// How long a dragged entry is held at the edge before the month turns (user, 15 Oct), and how wide that edge is.
+private const val EDGE_HOLD_MS = 700L
+// Bug hunt 29 G8: narrow, so it isn't half of the first and last day columns.
+private val DRAG_EDGE = 14.dp
+
+/**
+ * Dragging in the full-screen month (user, 14 Oct): hold an entry to pick it up, drag it to another day and let go to
+ * move it there. A multi-day event keeps its length and moves by as many days as the finger did. Held at the left or
+ * right edge for a moment, the month turns (user, 15 Oct), again every [EDGE_HOLD_MS] while it stays there, so it can be
+ * dropped on a day of another month. On the pager rather than a page, so the drag carries on while pages change. A tap
+ * still opens the day, and a sideways swipe that starts before the hold still changes the month.
+ */
+private fun Modifier.monthDrag(
+    pagerState: androidx.compose.foundation.pager.PagerState,
+    layouts: Map<Int, PageLayout>,
+    current: () -> ChipDrag?,
+    set: (ChipDrag?) -> Unit,
+    onMoveEntry: (DayChip, Long) -> Unit,
+): Modifier = composed {
+    val haptics = LocalHapticFeedback.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val currentOnMove by rememberUpdatedState(onMoveEntry)
+    pointerInput(rtl) {
+        // The day cell under a point on [layout]'s page, as (row, column in reading order).
+        fun cellAt(layout: PageLayout, p: Offset): Pair<Int, Int>? {
+            val rowPx = layout.metrics.rowHeight.toPx()
+            val row = (p.y / rowPx).toInt()
+            val col = (p.x / (size.width / 7f)).toInt().let { if (rtl) 6 - it else it }
+            return if (p.x < 0 || p.y < 0 || row !in layout.weeks.indices || col !in 0..6) null else row to col
+        }
+        fun dayAt(layout: PageLayout?, p: Offset) = layout?.let { l -> cellAt(l, p)?.let { (row, col) -> l.weeks[row].getOrNull(col) } }
+        // The page on screen, or none while the pager is moving.
+        fun shown(): PageLayout? = if (pagerState.isScrollInProgress) null else layouts[pagerState.currentPage]
+        fun entryAt(layout: PageLayout, p: Offset): DayChip? {
+            val (row, col) = cellAt(layout, p) ?: return null
+            val metrics = layout.metrics
+            val y = p.y - row * metrics.rowHeight.toPx() - metrics.lineTop(0).toPx()
+            val step = (metrics.chipHeight + CHIP_GAP).toPx()
+            val line = if (y < 0) return null else (y / step).toInt()
+            if (y - line * step > metrics.chipHeight.toPx()) return null
+            // Bug hunt 28 P3: only what Planner can move; other calendars' events (birthdays too) are read-only.
+            return layout.lines[row].pieces.firstOrNull { it.line == line && col in it.start..it.end }?.chip?.takeIf { it.movable }
+        }
+        val edgePx = DRAG_EDGE.toPx()
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val layout = shown() ?: return@awaitEachGesture
+            val chip = entryAt(layout, down.position) ?: return@awaitEachGesture
+            val from = dayAt(layout, down.position) ?: return@awaitEachGesture
+            // A hold: no lift, no move past the touch slop and nothing else (the pager) taking the touch first.
+            var stopped = false
+            val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                while (!stopped) {
+                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    stopped = change == null || !change.pressed || change.isConsumed ||
+                        (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+                }
+            } == null && !stopped
+            if (!held) return@awaitEachGesture
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            set(ChipDrag(chip, from, down.position, from))
+            var at = down.position
+            // Since when the finger has been at the edge it is at now.
+            var edgeSince = 0L
+            try {
+                // Taken before the day cells and the pager see it, so the lift isn't a tap and nothing scrolls.
+                while (true) {
+                    val edge = current()?.edge ?: 0
+                    val wait = if (edge == 0) Long.MAX_VALUE else (EDGE_HOLD_MS - (android.os.SystemClock.uptimeMillis() - edgeSince)).coerceAtLeast(1)
+                    val event = withTimeoutOrNull(wait) { awaitPointerEvent(PointerEventPass.Initial) }
+                    if (event == null) {
+                        // Held at the edge: on to the month after (right edge) or before (left), mirrored right to left.
+                        val page = pagerState.currentPage + edge * (if (rtl) -1 else 1)
+                        if (page in 0 until CalendarMonths.COUNT) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            scope.launch { pagerState.animateScrollToPage(page) }
+                        }
+                        edgeSince = android.os.SystemClock.uptimeMillis()
+                        current()?.let { set(it.copy(target = null)) }
+                        continue
+                    }
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    change.consume()
+                    if (!change.pressed) break
+                    at = change.position
+                    val side = when { at.x < edgePx -> -1; at.x > size.width - edgePx -> 1; else -> 0 }
+                    if (side != edge) edgeSince = android.os.SystemClock.uptimeMillis()
+                    current()?.let { set(it.copy(at = at, target = dayAt(shown(), at), edge = side)) }
+                }
+                // Let go: on the day under the finger, once a turning month has settled.
+                val done = current()
+                if (done != null) scope.launch {
+                    snapshotFlow { pagerState.isScrollInProgress }.first { !it }
+                    val target = dayAt(shown(), at)
+                    if (target != null && target != done.from) currentOnMove(done.chip, ChronoUnit.DAYS.between(done.from, target))
+                }
+            } finally {
+                set(null)
+            }
+        }
+    }
+}
+
+// The dragged entry above the finger, the day it would go to outlined, and a bar at the edge it is held against.
+@Composable
+private fun DragOverlay(d: ChipDrag, layout: PageLayout) = BoxWithConstraints(Modifier.fillMaxSize()) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val metrics = layout.metrics
+    val cell = maxWidth / 7
+    layout.weeks.indexOfFirst { d.target in it }.takeIf { d.target != null && it >= 0 }?.let { row ->
+        val col = layout.weeks[row].indexOf(d.target).let { if (rtl) 6 - it else it }
+        Box(
+            Modifier
+                .absoluteOffset(x = cell * col, y = metrics.rowHeight * row)
+                .size(cell, metrics.rowHeight)
+                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)),
+        )
+    }
+    if (d.edge != 0) Box(
+        Modifier
+            .align(if (d.edge < 0) Alignment.CenterStart else Alignment.CenterEnd)
+            .width(6.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+    )
+    // The entry, just above the finger so it stays in sight.
+    val density = LocalDensity.current
+    val width = cell * 1.5f
+    Box(
+        Modifier
+            .absoluteOffset {
+                // Bug hunt 28 P10: kept inside the page, which clips; under the finger when there's no room above it.
+                val w = with(density) { width.toPx() }; val h = with(density) { metrics.chipHeight.toPx() }
+                val above = d.at.y - h * 3
+                IntOffset((d.at.x - w / 2).coerceIn(0f, maxOf(0f, constraints.maxWidth - w)).roundToInt(),
+                    (if (above >= 0) above else d.at.y + h * 2).roundToInt())
+            }
+            .size(width, metrics.chipHeight)
+            .shadow(4.dp, RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.surface),
+        propagateMinConstraints = true,
+    ) {
+        DayChipLine(d.chip, opens = true, closes = true, style = chipStyle())
+    }
+}
+
+// A month of the full-screen calendar: each day's entries in its cell. The entry being dragged ([lifted]) is faint where
+// it was; the drag itself is the pager's (monthDrag), which reads this page's layout as [onLayout] reports it.
 @Composable
 private fun MaximisedMonthPage(
     weeks: List<List<LocalDate?>>,
@@ -541,104 +703,16 @@ private fun MaximisedMonthPage(
     today: LocalDate,
     onSelect: (LocalDate) -> Unit,
     chips: Map<LocalDate, List<DayChip>>,
-    onMoveEntry: ((DayChip, Long) -> Unit)?,
+    lifted: String?,
+    onLayout: (PageLayout) -> Unit,
 ) {
     val metrics = chipMetrics()
     val lines = remember(weeks, chips, metrics.slots) { weeks.map { CalendarChips.weekLines(it, chips, metrics.slots) } }
-    var drag by remember { mutableStateOf<ChipDrag?>(null) }
-    val haptics = LocalHapticFeedback.current
-    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val currentOnMove by rememberUpdatedState(onMoveEntry)
-    BoxWithConstraints(
-        Modifier
-            .fillMaxWidth()
-            .then(if (onMoveEntry == null) Modifier else Modifier.pointerInput(weeks, lines, metrics, rtl) {
-                val rowPx = metrics.rowHeight.toPx()
-                // The day cell under a point, as (row, column in reading order).
-                fun cellAt(p: Offset): Pair<Int, Int>? {
-                    val row = (p.y / rowPx).toInt()
-                    val col = (p.x / (size.width / 7f)).toInt().let { if (rtl) 6 - it else it }
-                    return if (p.x < 0 || p.y < 0 || row !in weeks.indices || col !in 0..6) null else row to col
-                }
-                fun dayAt(p: Offset) = cellAt(p)?.let { (row, col) -> weeks[row].getOrNull(col) }
-                fun entryAt(p: Offset): DayChip? {
-                    val (row, col) = cellAt(p) ?: return null
-                    val y = p.y - row * rowPx - metrics.lineTop(0).toPx()
-                    val step = (metrics.chipHeight + CHIP_GAP).toPx()
-                    val line = if (y < 0) return null else (y / step).toInt()
-                    if (y - line * step > metrics.chipHeight.toPx()) return null
-                    // Bug hunt 28 P3: only what Planner can move; other calendars' events (birthdays too) are read-only.
-                    return lines[row].pieces.firstOrNull { it.line == line && col in it.start..it.end }?.chip?.takeIf { it.movable }
-                }
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val chip = entryAt(down.position) ?: return@awaitEachGesture
-                    val from = dayAt(down.position) ?: return@awaitEachGesture
-                    // A hold: no lift, no move past the touch slop and nothing else (the pager) taking the touch first.
-                    var stopped = false
-                    val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                        while (!stopped) {
-                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
-                            stopped = change == null || !change.pressed || change.isConsumed ||
-                                (change.position - down.position).getDistance() > viewConfiguration.touchSlop
-                        }
-                    } == null && !stopped
-                    if (!held) return@awaitEachGesture
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    drag = ChipDrag(chip, from, down.position, from)
-                    try {
-                        // Taken before the day cells and the pager see it, so the lift isn't a tap and nothing scrolls.
-                        while (true) {
-                            val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
-                            change.consume()
-                            if (!change.pressed) break
-                            drag = drag?.copy(at = change.position, target = dayAt(change.position))
-                        }
-                        val done = drag
-                        if (done?.target != null && done.target != done.from)
-                            currentOnMove?.invoke(done.chip, ChronoUnit.DAYS.between(done.from, done.target))
-                    } finally {
-                        drag = null
-                    }
-                }
-            }),
-    ) {
-        Column {
-            weeks.forEachIndexed { i, week ->
-                MaximisedWeekRow(week, lines[i], metrics, selected, today, onSelect, chips, lifted = drag?.chip?.key)
-            }
-        }
-        drag?.let { d ->
-            val cell = maxWidth / 7
-            // The day it would go to, outlined.
-            weeks.indexOfFirst { d.target in it }.takeIf { d.target != null && it >= 0 }?.let { row ->
-                val col = weeks[row].indexOf(d.target).let { if (rtl) 6 - it else it }
-                Box(
-                    Modifier
-                        .absoluteOffset(x = cell * col, y = metrics.rowHeight * row)
-                        .size(cell, metrics.rowHeight)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)),
-                )
-            }
-            // The entry, just above the finger so it stays in sight.
-            val density = LocalDensity.current
-            val width = cell * 1.5f
-            Box(
-                Modifier
-                    .absoluteOffset {
-                        // Bug hunt 28 P10: kept inside the page, which clips; under the finger when there's no room above it.
-                        val w = with(density) { width.toPx() }; val h = with(density) { metrics.chipHeight.toPx() }
-                        val above = d.at.y - h * 3
-                        IntOffset((d.at.x - w / 2).coerceIn(0f, maxOf(0f, constraints.maxWidth - w)).roundToInt(),
-                            (if (above >= 0) above else d.at.y + h * 2).roundToInt())
-                    }
-                    .size(width, metrics.chipHeight)
-                    .shadow(4.dp, RoundedCornerShape(3.dp))
-                    .background(MaterialTheme.colorScheme.surface),
-                propagateMinConstraints = true,
-            ) {
-                DayChipLine(d.chip, opens = true, closes = true, style = chipStyle())
-            }
+    val layout = remember(weeks, lines, metrics) { PageLayout(weeks, lines, metrics) }
+    SideEffect { onLayout(layout) }
+    Column(Modifier.fillMaxWidth()) {
+        weeks.forEachIndexed { i, week ->
+            MaximisedWeekRow(week, lines[i], metrics, selected, today, onSelect, chips, lifted = lifted)
         }
     }
 }

@@ -295,6 +295,34 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         get() = prefs.getString(KEY_MORNING_SUMMARY_SHOWN, null)
         set(value) = prefs.edit { putString(KEY_MORNING_SUMMARY_SHOWN, value) }
 
+    // The evening summary (user, 15 Oct; MorningSummary.Kind.EVENING): tomorrow's day, off until turned on, at 8 pm unless chosen.
+    private val _eveningSummary = MutableStateFlow(prefs.getBoolean(KEY_EVENING_SUMMARY, false))
+    val eveningSummary: StateFlow<Boolean> = _eveningSummary.asStateFlow()
+    private val _eveningSummaryAt = MutableStateFlow(
+        java.time.LocalTime.ofSecondOfDay(prefs.getInt(KEY_EVENING_SUMMARY_MINUTES, 20 * 60).coerceIn(0, 24 * 60 - 1) * 60L))
+    val eveningSummaryAt: StateFlow<java.time.LocalTime> = _eveningSummaryAt.asStateFlow()
+
+    fun setEveningSummary(on: Boolean, at: java.time.LocalTime = _eveningSummaryAt.value) {
+        prefs.edit { putBoolean(KEY_EVENING_SUMMARY, on); putInt(KEY_EVENING_SUMMARY_MINUTES, at.hour * 60 + at.minute) }
+        _eveningSummary.value = on
+        _eveningSummaryAt.value = at.withSecond(0).withNano(0)
+    }
+    var eveningSummaryShownOn: String?
+        get() = prefs.getString(KEY_EVENING_SUMMARY_SHOWN, null)
+        set(value) = prefs.edit { putString(KEY_EVENING_SUMMARY_SHOWN, value) }
+
+    // Birthday reminders (user, 15 Oct; BirthdayReminders): days before (0 = on the day, ContactBirthdays.REMIND_OFF = off),
+    // at the morning summary's time. Device-local, like the birthdays themselves.
+    private val _birthdayReminderDays = MutableStateFlow(prefs.getInt(KEY_BIRTHDAY_REMINDER_DAYS, ContactBirthdays.REMIND_OFF))
+    val birthdayReminderDays: StateFlow<Int> = _birthdayReminderDays.asStateFlow()
+    fun setBirthdayReminderDays(days: Int) {
+        prefs.edit { putInt(KEY_BIRTHDAY_REMINDER_DAYS, days) }
+        _birthdayReminderDays.value = days
+    }
+    var birthdayRemindersShownOn: String?
+        get() = prefs.getString(KEY_BIRTHDAY_REMINDERS_SHOWN, null)
+        set(value) = prefs.edit { putString(KEY_BIRTHDAY_REMINDERS_SHOWN, value) }
+
     // Off until chosen. Device-local, like MyBudget itself: a backup restored on another phone doesn't turn it on there.
     private val _sendBillsToBudget = MutableStateFlow(prefs.getBoolean("send_bills_to_budget", false))
     val sendBillsToBudget: StateFlow<Boolean> = _sendBillsToBudget.asStateFlow()
@@ -575,6 +603,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_MORNING_SUMMARY = "morning_summary"
         const val KEY_MORNING_SUMMARY_MINUTES = "morning_summary_minutes"
         const val KEY_MORNING_SUMMARY_SHOWN = "morning_summary_shown"
+        const val KEY_EVENING_SUMMARY = "evening_summary"
+        const val KEY_EVENING_SUMMARY_MINUTES = "evening_summary_minutes"
+        const val KEY_EVENING_SUMMARY_SHOWN = "evening_summary_shown"
+        const val KEY_BIRTHDAY_REMINDER_DAYS = "birthday_reminder_days"
+        const val KEY_BIRTHDAY_REMINDERS_SHOWN = "birthday_reminders_shown"
         const val KEY_DAY_HOURS = "day_hours"
         const val KEY_HIDDEN_CATEGORIES = "hidden_categories"
         const val KEY_UPCOMING_ON_TOP = "upcoming_on_top"

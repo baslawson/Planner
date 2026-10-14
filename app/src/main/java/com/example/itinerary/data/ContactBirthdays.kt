@@ -62,5 +62,40 @@ object ContactBirthdays {
         }.sortedBy { it.begin }
     }
 
+
+    // Birthday reminders (user, 15 Oct): how many days before (0 = on the day); the choices Settings offers, OFF first.
+    const val REMIND_OFF = -1
+    val REMIND_CHOICES = listOf(REMIND_OFF, 0, 1, 3, 7)
+    fun remindLabel(days: Int): String = when (days) {
+        REMIND_OFF -> "Off"
+        0 -> "On the day"
+        1 -> "1 day before"
+        7 -> "1 week before"
+        else -> "$days days before"
+    }
+
+    /** A birthday to remind of: whose, on which day, and the age turned (when the year is known). */
+    data class Upcoming(val contactId: Long, val name: String, val date: LocalDate, val age: Int?)
+
+    /** The birthdays [days] days after [today], to remind of today. */
+    fun dueIn(birthdays: List<Pair<Long, Birthday>>, today: LocalDate, days: Int): List<Upcoming> {
+        if (days < 0) return emptyList()
+        val day = today.plusDays(days.toLong())
+        return birthdays.distinct().mapNotNull { (id, b) ->
+            val date = b.day.atYear(day.year)
+            val age = b.year?.let { day.year - it }
+            if (date != day || (age != null && age < 0)) null else Upcoming(id, b.name, date, age?.takeIf { it > 0 })
+        }.sortedBy { it.name }
+    }
+
+    /** What the reminder says: "Sam's birthday tomorrow (turns 34)". */
+    fun reminderText(b: Upcoming, today: LocalDate): String {
+        val days = java.time.temporal.ChronoUnit.DAYS.between(today, b.date)
+        val whenText = when (days) { 0L -> "today"; 1L -> "tomorrow"; else -> "in $days days" }
+        return "${b.name}'s birthday $whenText" + (b.age?.let { " (turns $it)" } ?: "")
+    }
+
+    /** Whose birthday a "Sam's birthday (34)" event is, or null for another title. */
+    fun nameOf(title: String): String? = Regex("""^(.+)'s birthday(?: \(\d+\))?$""").matchEntire(title)?.groupValues?.get(1)
     private fun midnight(day: LocalDate) = day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 }

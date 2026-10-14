@@ -57,7 +57,7 @@ fun taskBlockerCounts(tasks: List<PlannerTask>): Map<String, Int> {
 // selects or deselects it, and its done box waits. [blockers]: its unfinished prerequisites (taskBlockerCounts).
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolean = true, selection: EventSelection? = null, onEdit: () -> Unit) {
+fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolean = true, selection: EventSelection? = null, streak: Int = 0, onEdit: () -> Unit) {
     val context = LocalContext.current
     val repo = (context.applicationContext as ItineraryApp).repository
     val scope = rememberCoroutineScope()
@@ -97,6 +97,8 @@ fun TaskCard(task: PlannerTask, today: LocalDate, blockers: Int, enabled: Boolea
                     }
                 }
                 if (task.repeat != "NONE") Text("Repeat: ${TaskRepeat.label(task.repeat, task.repeatDays)}", style = MaterialTheme.typography.bodySmall)
+                if (streak > 0) Text(com.example.itinerary.data.TaskStreaks.label(streak), style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { contentDescription = com.example.itinerary.data.TaskStreaks.spoken(streak) })
                 if (task.checklist.isNotEmpty()) Text(checklistProgress(task.checklist), style = MaterialTheme.typography.bodySmall)
                 if (task.attachments.isNotEmpty()) Text("${task.attachments.size} attachment(s)", style = MaterialTheme.typography.bodySmall)
                 val due = task.dueDate
@@ -492,6 +494,9 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                     onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) repeatDays = it }, enabled = !busy,
                     label = { Text("Days after completion (1–3650)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (repeat != TaskRepeat.NONE.name) Text("Completing this task creates the next occurrence. Missed calendar dates are skipped.", style = MaterialTheme.typography.bodySmall)
+                val streak = remember(allTasks) { com.example.itinerary.data.TaskStreaks.streaks(allTasks)[initial.id] ?: 0 }
+                if (!creating && streak > 0) Text(com.example.itinerary.data.TaskStreaks.label(streak), style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.semantics { contentDescription = com.example.itinerary.data.TaskStreaks.spoken(streak) })
                 // Its time blocks in the calendar (Schedule time in ⋮ adds one).
                 if (!creating) TaskTimeBlocks(initial.id)
                 // The same layout as an event's Reminders section; a task has one reminder at a date and time.
@@ -666,6 +671,11 @@ private fun TaskActionsMenu(task: PlannerTask, today: LocalDate) {
     }
     val tomorrow = today.plusDays(1)
     val conversions = LocalConversions.current
+    var pickingDate by remember(task.id) { mutableStateOf(false) }
+    if (pickingDate) SingleDateDialog(task.dueDate ?: today, onDismiss = { pickingDate = false }) { picked ->
+        pickingDate = false
+        if (picked != task.dueDate) act("Couldn't change the date. Please try again.") { repo.moveTaskTo(task.id, picked) }
+    }
     OverlayMenuAnchor(title = "Actions for ${task.title}", button = { open ->
         IconButton(enabled = !busy, onClick = open) {
             Icon(androidx.compose.material.icons.Icons.Default.MoreVert, contentDescription = "Actions for ${task.title}")
@@ -674,6 +684,8 @@ private fun TaskActionsMenu(task: PlannerTask, today: LocalDate) {
         DropdownMenuItem(text = { Text(if (task.dueDate == tomorrow) "Already tomorrow" else "Due tomorrow") },
             enabled = !busy && task.dueDate != tomorrow,
             onClick = { close(); act("Couldn't change the date. Please try again.") { repo.moveTaskToTomorrow(task.id, today) } })
+        // Any day (user, 15 Oct): also what TalkBack has in place of dragging in the full-screen month.
+        DropdownMenuItem(text = { Text("Due on…") }, enabled = !busy, onClick = { close(); pickingDate = true })
         if (conversions != null && TaskEventConversion.canMakeEvent(task))
             DropdownMenuItem(text = { Text("Make it an event") }, enabled = !busy, onClick = { close(); conversions.taskToEvent(task.id) })
         DropdownMenuItem(text = { Text("Share task") }, onClick = { close(); shareTask(context, task.title, task.dueDate, task.notes) })

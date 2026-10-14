@@ -32,6 +32,9 @@ data class PlannerTask(
     @ColumnInfo(defaultValue = "0") val ringUntilDismissed: Boolean = false,
     // The reminder's sound otherwise (ReminderSound): 0 = the Settings default, -1 = notification sound only, 10/30/60 s.
     @ColumnInfo(defaultValue = "0") val ringSeconds: Int = 0,
+    // The day it was ticked done (user, 15 Oct: streaks count only occurrences done by their due day); null while not done,
+    // and for those done before Planner kept it (they count as on time).
+    val doneOn: LocalDate? = null,
 )
 
 /** When the reminder is due now: the snooze if there is one, else [PlannerTask.reminderAt]. Removing the reminder ends the snooze. */
@@ -124,6 +127,7 @@ object TaskCodec {
             .apply { task.snoozedUntil?.let { put("snoozedUntil", it) } }
             .put("repeat", task.repeat).put("repeatDays", task.repeatDays).put("repeatAnchorDay", task.repeatAnchorDay)
             .put("nextTaskId", task.nextTaskId ?: JSONObject.NULL)
+            .apply { task.doneOn?.let { put("doneOn", it.toString()) } }
             .put("prerequisiteIds", JSONArray(task.prerequisiteIds))
             .put("checklist", JSONArray(ChecklistCodec.encode(task.checklist)))
             .put("attachments", DraftCodec.attachments(task.attachments))) }
@@ -136,6 +140,9 @@ object TaskCodec {
             if (value.isNull("reminderAt")) null else value.strictLong("reminderAt") { "Invalid task reminder time" }, repeat = value.optString("repeat", "NONE"), repeatDays = value.optInt("repeatDays", 7),
             repeatAnchorDay = value.optInt("repeatAnchorDay", 0),
             nextTaskId = if (value.isNull("nextTaskId")) null else value.getString("nextTaskId"),
+            // Optional: older backups don't have it (those tasks count as done on time).
+            doneOn = if (!value.has("doneOn") || value.isNull("doneOn") || !value.getBoolean("done")) null
+                else runCatching { LocalDate.parse(value.getString("doneOn")) }.getOrNull(),
             checklist = ChecklistCodec.decode(value.optJSONArray("checklist")?.toString() ?: "[]"),
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
             prerequisiteIds = StringListCodec.decode(value.optJSONArray("prerequisiteIds") ?: JSONArray()),

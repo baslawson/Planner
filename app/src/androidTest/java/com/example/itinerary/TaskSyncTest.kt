@@ -172,12 +172,16 @@ class TaskSyncTest {
         val plants = all().filter { it.title == "QA Water plants" }
         assertEquals(listOf(false, true), plants.map { it.done }.sorted())
         assertTrue(plants.single { !it.done }.dueDate!! > day)
+        // Streaks (bug hunt 29): the day it was done is the one Nextcloud says, not the day it was synced; the next has none.
+        assertEquals(java.time.Instant.parse("2026-10-01T08:00:00Z").atZone(java.time.ZoneId.systemDefault()).toLocalDate(), plants.single { it.done }.doneOn)
+        assertNull(plants.single { !it.done }.doneOn)
         assertEquals(2, listFiles().values.count { it.second.contains("SUMMARY:QA Water plants") })
         // Ticked in Planner: completed on Nextcloud.
         repo.setTaskDone(task("QA Post letter").id, true)
         tasks.send()
         val letter = fileOf("QA Post letter").value.second
         assertTrue(letter.contains("STATUS:COMPLETED") && letter.contains("PERCENT-COMPLETE:100") && letter.contains("COMPLETED:"))
+        assertEquals(LocalDate.now(), task("QA Post letter").doneOn)
         // Unticked there: open again in Planner.
         dav.edit(fileOf("QA Post letter").key) { it.replace("STATUS:COMPLETED", "STATUS:NEEDS-ACTION") }
         syncAgain()

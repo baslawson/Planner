@@ -597,6 +597,37 @@ private fun ItemEditorForm(
             kept.forEach { it.again() }; undoShift(addedReminders, wasAdded, nowAdded); undoShift(removedReminders, wasRemoved, nowRemoved)
         })
     }
+    fun changeReminder(reminder: Reminder, amount: Int, unit: com.example.itinerary.data.ReminderUnit) {
+        // Another time for the reminder, keeping its sound: saved as a new reminder in place of it (Save cancels
+        // the old alarm and sets the new one; a snooze ends). Nothing changes if another one is already at that time.
+        val moved = Reminder(itemId = 0, amount = amount, unit = unit,
+            ringUntilDismissed = reminder.ringUntilDismissed, ringSeconds = reminder.ringSeconds)
+        if (shownReminders.none { it != reminder && it.scheduleKey == moved.scheduleKey } && moved.scheduleKey != reminder.scheduleKey) {
+            addedReminders.remove(reminder)
+            if (reminder.id != 0L && removedReminders.none { it.id == reminder.id }) removedReminders += reminder
+            // Hunt 22 P3: back to a saved reminder's own time (changed away and back): that reminder again, with
+            // its record, snooze and shown notification, not a copy (Save would delete the original).
+            val original = existingReminders.firstOrNull { saved -> saved.scheduleKey == moved.scheduleKey && removedReminders.any { it.id == saved.id } }
+            if (original == null) addedReminders += moved
+            else {
+                removedReminders.removeAll { it.id == original.id }
+                if (original.ringUntilDismissed != moved.ringUntilDismissed || original.ringSeconds != moved.ringSeconds) {
+                    // Its sound as chosen: changed in place, as the Sound choice does.
+                    removedReminders += original
+                    addedReminders += original.copy(ringUntilDismissed = moved.ringUntilDismissed, ringSeconds = moved.ringSeconds)
+                }
+            }
+        }
+    }
+    // "When to leave" (user, 15 Oct): a reminder as long before the start as the travel buffer was follows a changed
+    // buffer. Bug hunt 29 N1: at Save, from the saved event's buffer to the one saved, not at every keystroke on the way.
+    fun followLeave(saving: ItineraryItem) {
+        val from = initial.bufferBeforeMinutes
+        val to = saving.bufferBeforeMinutes
+        if (saving.startTime == null || from <= 0 || to <= 0 || from == to) return
+        shownReminders.filter { it.unit != com.example.itinerary.data.ReminderUnit.DAYS && it.offsetMinutes == from.toLong() }
+            .forEach { changeReminder(it, to, com.example.itinerary.data.ReminderUnit.MINUTES) }
+    }
     fun save(allowDuplicate: Boolean = false, allowStale: Boolean = false) {
         if (busy) return
         if (changedElsewhere && !allowStale) { askingStale = true; return }
@@ -607,6 +638,7 @@ private fun ItemEditorForm(
         error = null
         val copy = duplicating || deletedElsewhere
         val item = currentItem(copy)
+        followLeave(item)
         // S6-4: a copy never points at a file that is gone (a link has none).
         val attachmentsToAdd = if (copy) shownAttachments.filter { it.fileName.isBlank() || store.fileFor(it.fileName).exists() }
             .map { it.copy(id = 0, itemId = 0) } else added.toList()
@@ -1025,28 +1057,10 @@ private fun ItemEditorForm(
                         addedReminders += changed
                     }
                 },
-                onChange = { reminder, amount, unit ->
-                    // Another time for the reminder, keeping its sound: saved as a new reminder in place of it (Save cancels
-                    // the old alarm and sets the new one; a snooze ends). Nothing changes if another one is already at that time.
-                    val moved = Reminder(itemId = 0, amount = amount, unit = unit,
-                        ringUntilDismissed = reminder.ringUntilDismissed, ringSeconds = reminder.ringSeconds)
-                    if (shownReminders.none { it != reminder && it.scheduleKey == moved.scheduleKey } && moved.scheduleKey != reminder.scheduleKey) {
-                        addedReminders.remove(reminder)
-                        if (reminder.id != 0L && removedReminders.none { it.id == reminder.id }) removedReminders += reminder
-                        // Hunt 22 P3: back to a saved reminder's own time (changed away and back): that reminder again, with
-                        // its record, snooze and shown notification, not a copy (Save would delete the original).
-                        val original = existingReminders.firstOrNull { saved -> saved.scheduleKey == moved.scheduleKey && removedReminders.any { it.id == saved.id } }
-                        if (original == null) addedReminders += moved
-                        else {
-                            removedReminders.removeAll { it.id == original.id }
-                            if (original.ringUntilDismissed != moved.ringUntilDismissed || original.ringSeconds != moved.ringSeconds) {
-                                // Its sound as chosen: changed in place, as the Sound choice does.
-                                removedReminders += original
-                                addedReminders += original.copy(ringUntilDismissed = moved.ringUntilDismissed, ringSeconds = moved.ringSeconds)
-                            }
-                        }
-                    }
-                },
+                leaveMinutes = if (billTask || time == null) 0 else before,
+                // Until Save, a reminder at the saved buffer is still the one that will follow it.
+                leaveSavedMinutes = if (billTask || time == null || before <= 0) 0 else initial.bufferBeforeMinutes,
+                onChange = { reminder, amount, unit -> changeReminder(reminder, amount, unit) },
             )
 
             // Details: where, notes and colour; then the parts most events don't need, folded away until they hold something.

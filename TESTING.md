@@ -247,3 +247,38 @@ adb -s emulator-5556 shell am instrument -w -r -e class com.example.itinerary.Re
   -e nextcloudUrl https://10.0.2.2:8443/ -e nextcloudUser qa -e nextcloudPassword "$(cat admin-password.txt)" \
   -e nextcloudCert "$(base64 -w0 server.crt)" io.github.baslawson.planner.uitest.test/com.example.itinerary.PlannerTestRunner
 ```
+
+## On a real phone: what the emulator can't show
+
+Things only a real phone (the Pixel 7 Pro) proves. Install the build to try (from GitHub through Obtainium, or the
+`Planner.apk` in the project folder), go through the list, and note the date and result of each in `NOTES.md`.
+
+Reminders and notifications
+- [ ] A reminder set to ring for 30 s rings with the phone on **silent**, then on **vibrate**, and on the lock screen.
+- [ ] "Until I stop it" keeps ringing until Stop; Snooze brings it back at the chosen time.
+- [ ] After a restart, before unlocking, a reminder due then still rings.
+- [ ] The morning summary arrives within about 10 minutes of its time; Mark done / Mark paid on it work, and it then
+      shows what is left.
+- [ ] Tomorrow's summary arrives in the evening with tomorrow's entries.
+- [ ] A "When to leave" reminder (an event with a travel buffer) says "Time to leave".
+
+Contacts and sharing
+- [ ] Settings › Calendars › Show contacts' birthdays: real contacts' birthdays show, with ages where the year is saved.
+- [ ] Birthday reminders (1 day before): the notification comes at the morning summary's time; Message opens the
+      messaging app and Call the phone app, each with the number filled in.
+- [ ] Share a photo from Google Photos, and two files from Files, to Planner: both arrive, and "Add to existing…" works.
+
+Calendar by hand
+- [ ] Hours: hold an event and drag it to another time; drag the bar at its bottom to make it longer. Undo puts it back.
+- [ ] Week + Hours: the seven days side by side; drag an event to another day.
+- [ ] Full month: hold an entry, drag it to the right edge and hold: the month turns; drop it on a day there.
+- [ ] ⋮ › Move to… on an event and Due on… on a task pick any day.
+- [ ] A repeating task done on time a few times shows "🔥 N in a row".
+
+Home screen
+- [ ] The Today widget and the Week widget both show today's entries and update after a change in the app; a tap on
+      a day in the Week widget opens that day.
+
+Sync (your own server, only if you want to)
+- [ ] An event edited in Planner shows in Nextcloud's calendar in the browser, and the other way round.
+- [ ] A note edited in Planner shows in Nextcloud Notes (plain editor) and the other way round.

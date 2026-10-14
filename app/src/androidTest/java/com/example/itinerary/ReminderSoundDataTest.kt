@@ -46,7 +46,7 @@ class ReminderSoundDataTest {
                 raw.execSQL("DELETE FROM room_master_table"); raw.version = 35
             }
             db = Room.databaseBuilder(base, AppDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
-            assertEquals(36, db.openHelper.readableDatabase.version)
+            assertEquals(ALL_MIGRATIONS.last().endVersion, db.openHelper.readableDatabase.version)
             val reminders = db.reminderDao().all()
             assertEquals(listOf(ReminderSound.UNTIL_STOPPED, ReminderSound.DEFAULT), reminders.sortedBy { it.amount }.map { it.sound })
             assertEquals(task, db.taskDao().all().single()); assertEquals(note, db.noteDao().all().single())

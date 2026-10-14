@@ -206,6 +206,17 @@ fun CalendarsDialog(nextcloudOpen: Boolean, onConnect: () -> Unit, onDismiss: ()
             phoneState.message?.let {
                 Text(it, color = if (phoneState.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // Birthday reminders (user, 15 Oct; BirthdayReminders), with the contacts' birthdays.
+            if (contactsAllowed) {
+                val remindDays by app.settings.birthdayReminderDays.collectAsStateWithLifecycle()
+                SettingsDropdown("Birthday reminders", com.example.itinerary.data.ContactBirthdays.remindLabel(remindDays),
+                    com.example.itinerary.data.ContactBirthdays.REMIND_CHOICES, onSelect = app.settings::setBirthdayReminderDays) {
+                    Text(com.example.itinerary.data.ContactBirthdays.remindLabel(it))
+                }
+                if (remindDays != com.example.itinerary.data.ContactBirthdays.REMIND_OFF) Text(
+                    "At the morning summary's time, with buttons to send a message or call.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text("Read-only. Updates when Planner opens, when you tap Sync now and whenever these calendars change while Planner is open. " +
                 "Only calendars shown in your phone's calendar app are listed, and they aren't included in backups.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -45,7 +45,12 @@ data class PendingMove(
     val toDate: java.time.LocalDate,
     // A task's move (itemId 0): the task before and after, so Undo puts it back while it is still as moved.
     val task: Pair<PlannerTask, PlannerTask>? = null,
+    // An event dragged on the hour grid: its start and length before and after (null for a move by days).
+    val times: Pair<EventTimes, EventTimes>? = null,
 )
+
+/** An event's start and length, as the hour grid moves them. */
+data class EventTimes(val start: java.time.LocalTime, val durationMinutes: Int?)
 
 class Repository(
     private val db: AppDatabase,
@@ -242,12 +247,12 @@ class Repository(
             if (create) {
                 // Retrying a save after activity/process recreation must not create another task.
                 // A new task (or a duplicate of a snoozed one) starts unsnoozed.
-                if (existing == null) taskDao.insert(clean.copy(snoozedUntil = null))
-                else check(existing == clean.copy(snoozedUntil = null)) { "This task was already saved and changed" }
+                if (existing == null) taskDao.insert(clean.copy(snoozedUntil = null, doneOn = clean.doneOn.takeIf { clean.done }))
+                else check(existing == clean.copy(snoozedUntil = null, doneOn = clean.doneOn.takeIf { clean.done })) { "This task was already saved and changed" }
             } else {
                 check(existing != null) { "This task no longer exists" }
                 // A snooze (possibly made while the editor was open) lasts until the reminder time itself is changed.
-                taskDao.update(clean.copy(done = existing.done, nextTaskId = existing.nextTaskId,
+                taskDao.update(clean.copy(done = existing.done, nextTaskId = existing.nextTaskId, doneOn = existing.doneOn,
                     snoozedUntil = if (existing.reminderAt == clean.reminderAt) existing.snoozedUntil else null))
             }
             val saved = taskDao.byId(task.id)
@@ -261,6 +266,8 @@ class Repository(
     // A task dragged in the full-screen month: due [days] later (earlier when negative), with the same Undo bar.
     suspend fun moveTaskByDays(id: String, days: Long) =
         moveTask(id) { it.dueOn((it.dueDate ?: error("This task has no due date")).plusDays(days)) }
+    // A task's ⋮ "Move to…" (user, 15 Oct): due on [date], also one with no due date yet.
+    suspend fun moveTaskTo(id: String, date: java.time.LocalDate) = moveTask(id) { it.dueOn(date) }
     private suspend fun moveTask(id: String, move: (PlannerTask) -> PlannerTask) = changes.withLock {
         withContext(NonCancellable) {
             val before = taskDao.byId(id) ?: error("This task no longer exists")
@@ -283,7 +290,9 @@ class Repository(
             // Keep the successor receipt even after reopening/deleting the next occurrence.
             val next = if (done && task.nextTaskId == null) task.nextOccurrence() else null
             if (next != null) taskDao.insert(next)
-            taskDao.update(task.copy(done = done, nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (done) null else task.snoozedUntil))
+            // The day it was done, for streaks (TaskStreaks); unticked, it has none.
+            taskDao.update(task.copy(done = done, nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (done) null else task.snoozedUntil,
+                doneOn = if (done) java.time.LocalDate.now() else null))
             listOfNotNull(id, next?.id)
         }
         afterCommit(taskIds = changed)
@@ -566,7 +575,9 @@ class Repository(
                 Tasks.validate(clean)
                 val next = if (clean.done && !task.done && task.nextTaskId == null) clean.nextOccurrence() else null
                 if (next != null) taskDao.insert(next)
-                val saved = clean.copy(nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (clean.done) null else task.snoozedUntil)
+                // Done there: on the day Nextcloud says (ServerTasks.apply), else today; still done: as it was; not done: none.
+                val doneOn = when { !clean.done -> null; task.done -> task.doneOn; else -> clean.doneOn ?: java.time.LocalDate.now() }
+                val saved = clean.copy(nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (clean.done) null else task.snoozedUntil, doneOn = doneOn)
                 taskDao.update(saved)
                 listOfNotNull(id, next?.id) to (if (saved.activeReminderAt != task.activeReminderAt) setOf(id) else emptySet())
             }
@@ -1231,6 +1242,8 @@ class Repository(
     suspend fun moveToTomorrow(id: Long, today: java.time.LocalDate = java.time.LocalDate.now()) = moveEvent(id) { today.plusDays(1) }
     // An event dragged in the full-screen month: [days] later (earlier when negative); a multi-day one keeps its length.
     suspend fun moveEventByDays(id: Long, days: Long) = moveEvent(id) { it.plusDays(days) }
+    // ⋮ "Move to…" (user, 15 Oct): to [date]; a multi-day event keeps its length.
+    suspend fun moveEventTo(id: Long, date: java.time.LocalDate) = moveEvent(id) { date }
     private suspend fun moveEvent(id: Long, target: (java.time.LocalDate) -> java.time.LocalDate) = changes.withLock {
         requirePlannerEvent(id)
         val (move, reminders) = db.withTransaction {
@@ -1239,6 +1252,26 @@ class Repository(
             if (current.date == to) return@withTransaction null
             itemDao.moveDate(id, to)
             PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = to) to clearSnoozes(id)
+        } ?: return@withLock
+        _pendingMoves.value += move
+        afterCommit(reminderIds = reminders.map { it.id }, cancelFirst = reminders.mapTo(hashSetOf()) { it.id })
+    }
+
+    /**
+     * An event dragged on the hour grid (user, 15 Oct): to [date] at [start], lasting [durationMinutes]. Only this record
+     * changes (one occurrence of a series stays on its own, as with a move by days), with the same Undo bar.
+     */
+    suspend fun moveEventTo(id: Long, date: java.time.LocalDate, start: java.time.LocalTime, durationMinutes: Int?) = changes.withLock {
+        requirePlannerEvent(id)
+        require(durationMinutes == null || durationMinutes in 1..1440)
+        val (move, reminders) = db.withTransaction {
+            val current = itemDao.byId(id) ?: error("This event no longer exists")
+            val from = current.startTime
+            require(from != null && current.endDate == null) { "Only an event with a time can be moved to another time." }
+            if (current.date == date && from == start && current.durationMinutes == durationMinutes) return@withTransaction null
+            itemDao.upsert(current.copy(date = date, startTime = start, durationMinutes = durationMinutes))
+            PendingMove(itemId = id, title = current.title, fromDate = current.date, toDate = date,
+                times = EventTimes(from, current.durationMinutes) to EventTimes(start, durationMinutes)) to clearSnoozes(id)
         } ?: return@withLock
         _pendingMoves.value += move
         afterCommit(reminderIds = reminders.map { it.id }, cancelFirst = reminders.mapTo(hashSetOf()) { it.id })
@@ -1259,7 +1292,16 @@ class Repository(
         }
         val (restored, reminders) = db.withTransaction {
             val current = itemDao.byId(move.itemId)
+            val times = move.times
             if (current == null || current.date != move.toDate) false to emptyList<Reminder>()
+            // A time move is undone only while the event still has the time it was moved to.
+            else if (times != null) {
+                if (current.startTime != times.second.start || current.durationMinutes != times.second.durationMinutes) false to emptyList()
+                else {
+                    itemDao.upsert(current.copy(date = move.fromDate, startTime = times.first.start, durationMinutes = times.first.durationMinutes))
+                    true to clearSnoozes(current.id)
+                }
+            }
             else { itemDao.moveDate(current.id, move.fromDate); true to clearSnoozes(current.id) }
         }
         _pendingMoves.value = _pendingMoves.value.filterNot { it.token == token }

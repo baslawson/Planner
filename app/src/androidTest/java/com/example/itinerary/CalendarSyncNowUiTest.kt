@@ -76,7 +76,8 @@ class CalendarSyncNowUiTest {
             click("Settings")
             click("Calendars")
             await { find("Sync now") != null }
-            assertFalse("Nothing is claimed before a sync", starts("Synced"))
+            // Sync now's own line (a calendar's row may already say "Synced …", as the contacts' birthdays do).
+            assertFalse("Nothing is claimed before a sync", starts("Synced just now") || starts("Synced at "))
             click("Sync now")
             await { starts("Synced just now · ") }
             screenshot("done")

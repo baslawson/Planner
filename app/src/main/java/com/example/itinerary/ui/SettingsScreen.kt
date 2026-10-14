@@ -259,6 +259,23 @@ fun SettingsScreen(
                         onDismiss = { choosingMorningTime = false },
                         onConfirm = { at -> settings.setMorningSummary(true, at); choosingMorningTime = false },
                     )
+                    // The evening summary: the same for tomorrow (user, 15 Oct).
+                    val eveningSummary by settings.eveningSummary.collectAsStateWithLifecycle()
+                    val eveningAt by settings.eveningSummaryAt.collectAsStateWithLifecycle()
+                    var choosingEveningTime by rememberSaveable { mutableStateOf(false) }
+                    SwitchRow("Tomorrow's summary", eveningSummary, { settings.setEveningSummary(it) })
+                    Text("In the evening, the same for tomorrow: its events, the tasks due and the bills due.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (eveningSummary) {
+                        StackedButton("Tomorrow's summary at ${eveningAt.label(LocalTimeFormat.current, context)}") { choosingEveningTime = true }
+                        if (!notifications.enabled) Text("Notifications are off, so the summary won't show. Turn them on above.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (choosingEveningTime) TimePickerDialog(
+                        initial = eveningAt,
+                        onDismiss = { choosingEveningTime = false },
+                        onConfirm = { at -> settings.setEveningSummary(true, at); choosingEveningTime = false },
+                    )
                     StackedButton("Send test notification") {
                         if (!sendTestNotification(context)) {
                             Toast.makeText(context, "Notifications are off", Toast.LENGTH_SHORT).show()

@@ -130,6 +130,7 @@ fun AgendaScreen(
     val datedTasks = remember(shownTasks) { shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate!! } }
     val anytimeTasks = remember(shownTasks) { shownTasks.filter { it.dueDate == null } }
     val blockerCounts = remember(tasks) { taskBlockerCounts(tasks) }
+    val streaks = remember(tasks) { com.example.itinerary.data.TaskStreaks.streaks(tasks) }
     val eventsByDate = remember(days) { days.associateBy { it.date } }
     val dates = remember(eventsByDate, datedTasks, billsByDate) { (eventsByDate.keys + datedTasks.keys + billsByDate.keys).sorted() }
 
@@ -308,7 +309,7 @@ fun AgendaScreen(
                                 }
                             }
                             if (anytimeExpanded) items(anytimeTasks, key = { "task-${it.id}" }) { task ->
-                                TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection) { editingTaskId = task.id }
+                                TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection, streak = streaks[task.id] ?: 0) { editingTaskId = task.id }
                             }
                         }
                         if (showEmpty) item(key = "empty") {
@@ -328,7 +329,7 @@ fun AgendaScreen(
                                 BillTaskCard(bill, today, selection) { editingBillId = bill.id }
                             }
                             items(datedTasks[date].orEmpty(), key = { "task-${it.id}" }, contentType = { "task" }) { task ->
-                                TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection) { editingTaskId = task.id }
+                                TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection, streak = streaks[task.id] ?: 0) { editingTaskId = task.id }
                             }
                             // An event under way (a trip, or one from yesterday past midnight) can appear twice (its first
                             // day and Today), so its Today card needs its own key.

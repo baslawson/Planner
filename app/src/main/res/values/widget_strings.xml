@@ -4,4 +4,7 @@
     <string name="widget_empty">Nothing planned today.</string>
     <string name="widget_open">Open today’s calendar</string>
     <string name="widget_description">Today’s events and due tasks. Complete tasks from your home screen.</string>
+    <string name="widget_week">Planner · Week</string>
+    <string name="widget_week_refresh">Refresh the week</string>
+    <string name="widget_week_description">The next seven days, a line for each day. Tap a day to open it.</string>
 </resources>

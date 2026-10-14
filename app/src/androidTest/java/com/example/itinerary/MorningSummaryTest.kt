@@ -34,11 +34,11 @@ class MorningSummaryTest {
         app.settings.morningSummaryShownOn = null
 
         app.settings.setMorningSummary(false)
-        MorningSummary.show(app)
+        MorningSummary.show(app, MorningSummary.Kind.MORNING)
         assertNull("off: nothing", summary())
 
         app.settings.setMorningSummary(true, LocalTime.of(7, 30))
-        MorningSummary.show(app)
+        MorningSummary.show(app, MorningSummary.Kind.MORNING)
         val shown = summary()
         assertNotNull("on: shown", shown)
         val extras = shown!!.notification.extras
@@ -49,7 +49,7 @@ class MorningSummaryTest {
 
         // Once a day: dismissed and shown again the same day, it doesn't come back.
         manager.cancel("morning-summary", 0)
-        MorningSummary.show(app)
+        MorningSummary.show(app, MorningSummary.Kind.MORNING)
         assertNull(summary())
     }
 }

@@ -122,6 +122,7 @@ class ItineraryViewModel(
     suspend fun moveToTomorrow(id: Long) = repo.moveToTomorrow(id)
     suspend fun moveByDays(id: Long, days: Long) = repo.moveEventByDays(id, days)
     suspend fun moveTaskByDays(id: String, days: Long) = repo.moveTaskByDays(id, days)
+    suspend fun moveEventTo(id: Long, date: java.time.LocalDate, start: java.time.LocalTime, durationMinutes: Int?) = repo.moveEventTo(id, date, start, durationMinutes)
 
     suspend fun deleteItem(item: ItineraryItem, entireSeries: Boolean) {
         repo.deleteWithUndo(item, entireSeries)

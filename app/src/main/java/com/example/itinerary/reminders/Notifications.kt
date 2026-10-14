@@ -63,6 +63,16 @@ fun createReminderChannel(context: Context) {
             description = "Once a day, the events, tasks and bills of the day ahead"
         },
     )
+    manager.createNotificationChannel(
+        NotificationChannel(EVENING_CHANNEL_ID, "Evening summary", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Once a day, the events, tasks and bills of tomorrow"
+        },
+    )
+    manager.createNotificationChannel(
+        NotificationChannel(BIRTHDAY_CHANNEL_ID, "Birthdays", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Your contacts' birthdays, as many days ahead as chosen in Calendars"
+        },
+    )
     // Left over from an update: taken away, so they don't stay in Android's settings with nothing on them.
     OLD_CHIME_CHANNELS.forEach { id -> runCatching { manager.deleteNotificationChannel(id) } }
 }

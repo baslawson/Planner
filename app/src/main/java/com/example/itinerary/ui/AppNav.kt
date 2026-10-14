@@ -277,8 +277,7 @@ fun AppNav(sharedText: String? = null, sharedSubject: String? = null, onSharedOp
         if (shown.isEmpty() && nextMove != null) {
             while (app.repository.pendingMoves.value.any { it.token == nextMove.token }) {
                 try {
-                    val to = if (nextMove.toDate == LocalDate.now().plusDays(1)) "tomorrow" else nextMove.toDate.format(patternFormatter("EEEE d MMMM"))
-                    val result = snackbar.showSnackbar("Moved ${nextMove.title} to $to", actionLabel = "Undo",
+                    val result = snackbar.showSnackbar(moveMessage(nextMove, LocalDate.now(), app.settings.timeFormat.value.is24Hour(app)), actionLabel = "Undo",
                         withDismissAction = true, duration = SnackbarDuration.Long)
                     withContext(NonCancellable) {
                         if (result == SnackbarResult.ActionPerformed) {
@@ -570,4 +569,18 @@ internal fun deletedMessage(events: Int, tasks: Int, notes: Int = 0): String {
         else -> "item"
     }
     return if (count == 1) "${noun.replaceFirstChar { it.uppercase() }} deleted" else "$count ${noun}s deleted"
+}
+
+// The Undo bar after a move: "Moved Gym to tomorrow", "Moved Gym to Friday 16 October", and after a drag on the hour
+// grid "Moved Gym to 10:30" (same day), "Moved Gym to Friday 16 October, 10:30" or "Gym now ends at 11:30" (only longer
+// or shorter).
+internal fun moveMessage(move: com.example.itinerary.data.PendingMove, today: LocalDate, is24Hour: Boolean): String {
+    val day = if (move.toDate == today.plusDays(1)) "tomorrow" else move.toDate.format(patternFormatter("EEEE d MMMM"))
+    val (before, after) = move.times ?: return "Moved ${move.title} to $day"
+    if (move.fromDate == move.toDate && before.start == after.start) {
+        val end = after.durationMinutes?.let { after.start.plusMinutes(it.toLong()).label(is24Hour) }
+        if (end != null) return "${move.title} now ends at $end"
+    }
+    val at = after.start.label(is24Hour)
+    return if (move.fromDate == move.toDate) "Moved ${move.title} to $at" else "Moved ${move.title} to $day, $at"
 }

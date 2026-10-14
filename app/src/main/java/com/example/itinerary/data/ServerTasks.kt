@@ -12,7 +12,11 @@ import java.time.format.DateTimeFormatter
 // prerequisites and the repeat rule (each occurrence of a repeating Planner task is its own task on Nextcloud).
 object ServerTasks {
     // What a task file says, as far as Planner holds it.
-    data class Fields(val title: String, val notes: String, val dueDate: LocalDate?, val priority: TaskPriority, val done: Boolean)
+    data class Fields(val title: String, val notes: String, val dueDate: LocalDate?, val priority: TaskPriority, val done: Boolean) {
+        // The day it was completed there (COMPLETED), for streaks; outside equals and the fingerprint, so it changes nothing
+        // that sync compares.
+        var completedOn: LocalDate? = null
+    }
 
     // [fields] null when Planner can't hold the task exactly: a repeating one ([repeating]), several tasks in one file, a
     // cancelled or unreadable one, one due outside the years a calendar file can hold, or one with a longer title or notes
@@ -40,7 +44,8 @@ object ServerTasks {
         val priority = when (one("PRIORITY")?.value?.trim()?.toIntOrNull() ?: 0) { in 1..4 -> TaskPriority.HIGH; in 6..9 -> TaskPriority.LOW; else -> TaskPriority.NORMAL }
         // STATUS decides when there is one; otherwise a completion time or 100% means done.
         val done = if (status != null) status == "COMPLETED" else one("COMPLETED") != null || one("PERCENT-COMPLETE")?.value?.trim() == "100"
-        Parsed(uid, Fields(title.ifEmpty { "(No title)" }, notes, due, priority, done))
+        val completedOn = if (!done) null else one("COMPLETED")?.let { runCatching { Ics.time(it, zone, strictGap = false, Ics::zone).withZoneSameInstant(zone).toLocalDate() }.getOrNull() }
+        Parsed(uid, Fields(title.ifEmpty { "(No title)" }, notes, due, priority, done).also { it.completedOn = completedOn })
     }.getOrElse { Parsed(null, null) }
 
     // Planner holds a due date, not a moment. A due date-time in a zone (TZID) or floating counts on its own calendar day
@@ -58,6 +63,7 @@ object ServerTasks {
     // moved due date starts a repeating task's month day afresh (as the editor and "Due tomorrow" do).
     fun apply(task: PlannerTask, server: Fields): PlannerTask =
         task.copy(title = server.title, notes = server.notes, dueDate = server.dueDate, priority = server.priority, done = server.done,
+            doneOn = when { !server.done -> null; task.done -> task.doneOn; else -> server.completedOn },
             repeatAnchorDay = if (server.dueDate != task.dueDate) 0 else task.repeatAnchorDay)
 
     // What Planner syncs for [task], as a short fingerprint: a change in any synced field changes it.

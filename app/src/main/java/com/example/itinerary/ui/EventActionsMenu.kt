@@ -18,6 +18,7 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
     var history by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var makingTask by remember { mutableStateOf(false) }
+    var pickingDate by remember { mutableStateOf(false) }
     val conversions = LocalConversions.current
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -80,10 +81,25 @@ fun EventActionsMenu(eventId: Long, title: String, date: LocalDate, today: Local
                     }
                 }
             })
+        // Any day (user, 15 Oct): also what TalkBack has in place of dragging in the full-screen month.
+        DropdownMenuItem(text = { Text(if (billId != null) "Due on…" else "Move to…") }, enabled = !busy, onClick = { close(); pickingDate = true })
         // Last and red, as on a task's ⋮. Through the same Undo bar and dialog as the event editor's Delete.
         DropdownMenuItem(text = { Text(if (billId != null) "Delete bill" else "Delete event", color = MaterialTheme.colorScheme.error) },
             enabled = !busy, onClick = { close(); if (deleteAsks(billId != null, repeating)) deleting = true else delete(false) })
     })
+    if (pickingDate) SingleDateDialog(date, onDismiss = { pickingDate = false }) { picked ->
+        pickingDate = false
+        if (picked != date) {
+            busy = true
+            scope.launch {
+                withContext(NonCancellable) {
+                    try { (context.applicationContext as com.example.itinerary.ItineraryApp).repository.moveEventTo(eventId, picked) }
+                    catch (e: Exception) { Toast.makeText(context, e.message ?: "Couldn't change the date. Please try again.", Toast.LENGTH_LONG).show() }
+                    finally { busy = false }
+                }
+            }
+        }
+    }
     if (history && billId != null) BillHistoryDialog(billId) { history = false }
     if (makingTask) MakeTaskSeriesChoice(onChoose = { whole -> makingTask = false; conversions?.eventToTask(eventId, whole) },
         onDismiss = { makingTask = false })

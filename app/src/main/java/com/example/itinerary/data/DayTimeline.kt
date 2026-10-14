@@ -15,7 +15,28 @@ object DayTimeline {
     const val MIN_MINUTES = 30
     private const val DAY = 24 * 60
 
+    // Drags on the grid move and stretch events in steps of this many minutes.
+    const val STEP = 15
+
     private fun timed(item: ItineraryItem) = item.startTime != null && item.endDate == null
+
+    /** Whether [item]'s block on [day] can be dragged: a Planner event with a time that starts that day. */
+    fun movable(item: ItineraryItem, day: LocalDate): Boolean =
+        timed(item) && item.date == day && !OutsideCalendars.isOutside(item.id)
+
+    private fun snap(minutes: Float): Int = Math.round(minutes / STEP) * STEP
+
+    /** Where a block starting at [startMinute] lands when dragged [deltaMinutes]: on a 15-minute step, within the day. */
+    fun movedStart(startMinute: Int, deltaMinutes: Float): Int = snap(startMinute + deltaMinutes).coerceIn(0, DAY - STEP)
+
+    /**
+     * How long an event lasts when its bottom edge is dragged [deltaMinutes]: the end on a 15-minute step, at least 15
+     * minutes, at most a day. One with no length starts from the half hour its block shows.
+     */
+    fun resized(startMinute: Int, durationMinutes: Int?, deltaMinutes: Float): Int {
+        val end = snap(startMinute + (durationMinutes ?: MIN_MINUTES) + deltaMinutes)
+        return (end - startMinute).coerceIn(STEP, DAY)
+    }
 
     /** The day's events that go above the grid: all-day ones and those on several days. */
     fun allDay(events: List<ItineraryItem>): List<ItineraryItem> = events.filterNot(::timed)

@@ -37,6 +37,20 @@ class MorningSummaryTest {
         assertEquals("and 5 more", busy.lines.last())
     }
 
+    @Test fun theEveningSummaryIsTomorrowsAndTheButtonsKnowWhatIsListed() {
+        val tomorrow = today.plusDays(1)
+        val tax = PlannerTask(title = "Tax return", dueDate = today.minusDays(1))
+        val plants = PlannerTask(title = "Water plants", dueDate = tomorrow)
+        val rent = event("Rent", date = tomorrow, category = "Bills").copy(id = 9)
+        val summary = MorningSummary.content(listOf(event("Dentist", LocalTime.of(9, 0), date = tomorrow), rent), listOf(tax, plants), tomorrow, tomorrow = true,
+        ) { "%d:%02d".format(it.hour, it.minute) }!!
+        // Only the tasks due that day: today's overdue ones were the morning's.
+        assertEquals("Tomorrow: 1 event, 1 task, 1 bill due", summary.title)
+        assertEquals(listOf("9:00  Dentist", "☐ Water plants", "Bill due: Rent"), summary.lines)
+        assertEquals(listOf(plants.id), summary.taskIds)
+        assertEquals(listOf(9L), summary.billIds)
+    }
+
     @Test fun theNextSummaryIsTodayWhileItsTimeIsAheadElseTomorrow() {
         val at = LocalTime.of(7, 30)
         assertEquals(today.atTime(at), MorningSummary.nextAt(today.atTime(6, 0), at, shownToday = false))

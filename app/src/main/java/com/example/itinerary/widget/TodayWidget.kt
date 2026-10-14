@@ -72,6 +72,8 @@ class TodayWidget : AppWidgetProvider() {
         private val lock = Mutex()
 
         fun requestUpdate(context: Context) {
+            // The week widget shows the same entries, so it follows (user, 15 Oct).
+            WeekWidget.requestUpdate(context)
             // No work or process wake-up when the user has not placed any widgets.
             val manager = AppWidgetManager.getInstance(context)
             if (manager.getAppWidgetIds(ComponentName(context, TodayWidget::class.java)).isNotEmpty()) {
@@ -88,7 +90,7 @@ class TodayWidget : AppWidgetProvider() {
         private fun refreshIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(context, 4801,
             Intent(context, TodayWidget::class.java).setAction(REFRESH), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        private fun openIntent(context: Context, date: LocalDate? = null): PendingIntent {
+        internal fun openIntent(context: Context, date: LocalDate? = null): PendingIntent {
             val intent = Intent(context, MainActivity::class.java)
                 .setAction(if (date == null) OPEN_TODAY else OPEN_DATE)
                 .setData(Uri.parse("planner-widget://${date ?: "today"}"))
