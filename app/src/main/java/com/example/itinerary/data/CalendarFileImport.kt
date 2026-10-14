@@ -186,7 +186,18 @@ object CalendarFileImport {
         val removed = props.filter { it.name == "EXDATE" }.flatMap { values(it, ownZone, zoneFor) } +
             moved
         val removedInstants = removed.mapTo(hashSetOf()) { it.toInstant() }
-        starts.removeAll { it.toInstant() in removedInstants }
+        // Hunt 27: some apps write an exclusion as a whole day (EXDATE;VALUE=DATE on a timed series: never its 09:00), or as
+        // a time on an all-day series (…T000000Z: UTC midnight, not the phone's). Those take out the occurrence on that day.
+        // A RECURRENCE-ID at midnight on a series that isn't at midnight is taken as such a day too.
+        val removedDays = HashSet<LocalDate>()
+        props.filter { it.name == "EXDATE" }.forEach { p ->
+            p.value.split(',').filter { it.isNotBlank() }.forEach { value ->
+                val part = Ics.Property(p.name, p.params, value.trim())
+                if (Ics.isDate(part)) removedDays += Ics.date(part) else if (allDay) removedDays += strictTime(part, ownZone, zoneFor).toLocalDate()
+            }
+        }
+        moved.forEach { if (allDay || it.toLocalTime() == LocalTime.MIDNIGHT && firstLocal.toLocalTime() != LocalTime.MIDNIGHT) removedDays += it.toLocalDate() }
+        starts.removeAll { it.toInstant() in removedInstants || it.toLocalDate() in removedDays }
         if (starts.isEmpty()) return null
         val timings = starts.sorted().map { occurrence ->
             if (allDay) Ics.allDay(occurrence.toLocalDate(), days) else {

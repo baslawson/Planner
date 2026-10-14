@@ -101,7 +101,8 @@ class ViewSwitchUiTest {
     @Test fun retainsScrollAndRefreshesDataWithExplicitDateOverride() {
         seed()
         openCalendar()
-        if (find("Collapse") != null) click("Collapse")
+        // A selected tab isn't clickable (tapping it would do nothing), so only when it isn't the size already.
+        if (find("Calendar: week")?.isSelected != true) click("Calendar: week")
         Thread.sleep(900)
         await { find(prefix + "0") != null }
         var attempts = 0

@@ -9,8 +9,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,15 +24,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerSnapDistance
-import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +47,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
@@ -54,7 +57,19 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import com.example.itinerary.data.CalendarChips
+import com.example.itinerary.data.DayChip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -72,8 +87,11 @@ import java.util.Locale
 /**
  * A plain month grid. The selected day gets a filled circle,
  * today a pulsing ring, and days that already have events a small dot.
- * Swipe up or down on the grid (or use the arrows) to move between months.
+ * Swipe sideways on the grid (or use the arrows) to move between months: a finger moving right goes to the next month,
+ * moving left to the previous one (the user's choice). The week strip moves a week the same way.
  * When [collapsed] it shrinks to the selected day's week, and the arrows move a week at a time.
+ * Given [chips] (maximised) the month fills the height it is given, and each day lists its entries in small coloured
+ * lines instead of the dot.
  */
 @Composable
 fun MonthCalendar(
@@ -86,6 +104,7 @@ fun MonthCalendar(
     modifier: Modifier = Modifier,
     // Shorter rows let the whole month fit beside the day's events in landscape.
     rowHeight: Dp = 48.dp,
+    chips: Map<LocalDate, List<DayChip>>? = null,
 ) = CompositionLocalProvider(LocalCalendarRowHeight provides rowHeight) {
     // R18-U2: read again when the language or region changes (the activity handles that itself, so it isn't recreated).
     val locales = androidx.compose.ui.platform.LocalConfiguration.current.locales
@@ -145,13 +164,51 @@ fun MonthCalendar(
             // Just the selected day's week, which can straddle two months.
             val weekStart = selected.with(TemporalAdjusters.previousOrSame(firstDow))
             val week = remember(weekStart) { List(7) { weekStart.plusDays(it.toLong()) } }
-            WeekRow(
-                week = week,
-                selected = selected,
-                today = today,
-                datesWithItems = datesWithItems,
-                onSelect = onSelect,
-            )
+            // A sideways swipe moves a week, as the arrows do: a finger moving right to the next one.
+            val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
+            val currentSelected by rememberUpdatedState(selected)
+            val currentOnSelect by rememberUpdatedState(onSelect)
+            // Right-to-left (Hunt 27): the month pager turns round there, so the week strip does too.
+            val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+            Box(Modifier.pointerInput(swipe, rtl) {
+                var travelled = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { travelled = 0f },
+                    onHorizontalDrag = { change, amount -> change.consume(); travelled += if (rtl) -amount else amount },
+                    onDragEnd = {
+                        val day = currentSelected
+                        val target = when {
+                            travelled > swipe -> day.plusWeeks(1)
+                            travelled < -swipe -> day.minusWeeks(1)
+                            else -> null
+                        }
+                        if (target != null && CalendarMonths.inRange(YearMonth.from(target))) currentOnSelect(target)
+                    },
+                )
+            }) {
+                WeekRow(
+                    week = week,
+                    selected = selected,
+                    today = today,
+                    datesWithItems = datesWithItems,
+                    onSelect = onSelect,
+                )
+            }
+        } else if (chips != null) {
+            // Maximised: the weeks share whatever height is left under the weekday names.
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                MonthPager(
+                    month = CalendarMonths.clamp(month),
+                    firstDow = firstDow,
+                    selected = selected,
+                    today = today,
+                    datesWithItems = datesWithItems,
+                    onSelect = onSelect,
+                    onMonthChange = onMonthChange,
+                    fillHeight = maxHeight,
+                    chips = chips,
+                )
+            }
         } else {
             MonthPager(
                 month = CalendarMonths.clamp(month),
@@ -166,7 +223,7 @@ fun MonthCalendar(
     } }
 }
 
-// Months are pages of a vertical pager: swipe up for the next month, down for the previous one.
+// Months are pages of a sideways pager laid out right to left, so a finger moving right brings the next month in.
 // Page numbers count months from January of the year 1 (see CalendarMonths).
 private val LocalCalendarRowHeight = compositionLocalOf { 48.dp }
 
@@ -196,6 +253,9 @@ private fun MonthPager(
     datesWithItems: Set<LocalDate>,
     onSelect: (LocalDate) -> Unit,
     onMonthChange: (YearMonth) -> Unit,
+    // Maximised: the pager is this tall whatever the month, and each month's weeks share it.
+    fillHeight: Dp? = null,
+    chips: Map<LocalDate, List<DayChip>>? = null,
 ) {
     val pagerState = rememberPagerState(initialPage = pageOf(month)) { CalendarMonths.COUNT }
     val currentMonth by rememberUpdatedState(month)
@@ -219,8 +279,10 @@ private fun MonthPager(
     // The pager is as tall as the current month needs (4 to 6 weeks), so short months don't leave a gap. It follows the
     // settled page, so it changes once a move has landed, not during it: pages that change size under an animation
     // make it stop short (between a 5-week and a 6-week month the grid stayed ~10 dp too high or too low).
-    val fullHeight = LocalCalendarRowHeight.current * weeksIn(month, firstDow)
-    val height by animateDpAsState(LocalCalendarRowHeight.current * weeksIn(monthOfPage(pagerState.settledPage), firstDow), label = "monthHeight")
+    val fullHeight = fillHeight ?: (LocalCalendarRowHeight.current * weeksIn(month, firstDow))
+    val monthHeight by animateDpAsState(LocalCalendarRowHeight.current * weeksIn(monthOfPage(pagerState.settledPage), firstDow), label = "monthHeight")
+    val height = fillHeight ?: monthHeight
+    val currentHeight by rememberUpdatedState(height)
 
     // ...and when the month is changed some other way (arrows, Today) the pager follows, and ends snapped on it.
     // (Keyed on the height too, so a new row height — landscape — can't leave it waiting for one it never reaches.)
@@ -235,7 +297,7 @@ private fun MonthPager(
                 // counts, as for a swipe during the animation): waiting on would never end when the swipe heads for a
                 // month of another height, and finishing would pull the grid back. A time limit guards the wait too.
                 val swiped = withTimeoutOrNull(2_000) {
-                    snapshotFlow { pagerState.isScrollInProgress to (height == fullHeight) }.first { (scrolling, settled) -> scrolling || settled }.first
+                    snapshotFlow { pagerState.isScrollInProgress to (currentHeight == fullHeight) }.first { (scrolling, settled) -> scrolling || settled }.first
                 } ?: false
                 if (!swiped && (pagerState.currentPage != target || pagerState.currentPageOffsetFraction != 0f))
                     pagerState.animateScrollToPage(target)
@@ -246,22 +308,27 @@ private fun MonthPager(
         }
     }
 
-    VerticalPager(
+    HorizontalPager(
         state = pagerState,
+        reverseLayout = true,
         modifier = Modifier.fillMaxWidth().height(height),
         // One month per swipe, however hard the flick.
         flingBehavior = PagerDefaults.flingBehavior(state = pagerState, pagerSnapDistance = PagerSnapDistance.atMost(1)),
     ) { page ->
         val weeks = remember(page, firstDow) { monthCells(monthOfPage(page), firstDow).chunked(7) }
-        Column {
-            weeks.forEach { week ->
-                WeekRow(
-                    week = week,
-                    selected = selected,
-                    today = today,
-                    datesWithItems = datesWithItems,
-                    onSelect = onSelect,
-                )
+        val pageRowHeight = fillHeight?.let { it / weeks.size } ?: LocalCalendarRowHeight.current
+        CompositionLocalProvider(LocalCalendarRowHeight provides pageRowHeight) {
+            Column {
+                weeks.forEach { week ->
+                    WeekRow(
+                        week = week,
+                        selected = selected,
+                        today = today,
+                        datesWithItems = datesWithItems,
+                        onSelect = onSelect,
+                        chips = chips,
+                    )
+                }
             }
         }
     }
@@ -274,12 +341,22 @@ private fun WeekRow(
     today: LocalDate,
     datesWithItems: Set<LocalDate>,
     onSelect: (LocalDate) -> Unit,
+    chips: Map<LocalDate, List<DayChip>>? = null,
 ) {
     Row(Modifier.fillMaxWidth()) {
         for (i in 0 until 7) {
             val date = week.getOrNull(i)
             if (date == null) {
                 Spacer(Modifier.weight(1f).height(LocalCalendarRowHeight.current))
+            } else if (chips != null) {
+                MaximisedDayCell(
+                    date = date,
+                    isSelected = date == selected,
+                    isToday = date == today,
+                    chips = chips[date].orEmpty(),
+                    onClick = { onSelect(date) },
+                    modifier = Modifier.weight(1f),
+                )
             } else {
                 DayCell(
                     date = date,
@@ -294,55 +371,85 @@ private fun WeekRow(
     }
 }
 
-// Sits on the line under the calendar: a labelled teal pill that collapses it to a week or opens the full month.
-// The whole strip is tappable, which makes it an easy target. A saffron "Go to today" pill sits at the right end
-// while there is somewhere to jump back from. The two pills are measured before they are placed, so large text
-// cannot make them overlap: the teal pill stays centred while there is room, slides left to make room when there
-// isn't, and if even that is not enough the "Go to today" pill drops to its own row below, still on the right.
+/** How much of the Calendar screen the calendar takes: one week, the month above the day's list, or the whole screen. */
+enum class CalendarSize(val label: String, val description: String) {
+    WEEK("Week", "Calendar: week"),
+    MONTH("Month", "Calendar: month"),
+    FULL("Full", "Calendar: full screen");
+
+    val smaller: CalendarSize get() = entries[(ordinal - 1).coerceAtLeast(0)]
+    val bigger: CalendarSize get() = entries[(ordinal + 1).coerceAtMost(entries.lastIndex)]
+}
+
+// Sits on the line under the calendar: a Week | Month | Full switch, the current size filled in, and a "Today" pill at
+// the right end while there is somewhere to jump back from. A swipe down on the bar makes the calendar one size
+// bigger, a swipe up one size smaller. The two parts are measured before they are placed, so large text cannot make
+// them overlap: the switch stays centred while there is room, slides left to make room when there isn't, and if even
+// that is not enough "Today" drops to its own row below, still on the right.
 @Composable
-fun CalendarToggleBar(
-    collapsed: Boolean,
+fun CalendarSizeBar(
+    size: CalendarSize,
+    onSize: (CalendarSize) -> Unit,
     showToday: Boolean,
     onToday: () -> Unit,
-    onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    val swipe = with(LocalDensity.current) { 24.dp.toPx() }
+    val currentSize by rememberUpdatedState(size)
+    val currentOnSize by rememberUpdatedState(onSize)
     Layout(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
-                role = Role.Button,
-                onClickLabel = if (collapsed) "Show full month" else "Show week only",
-                onClick = onToggle,
-            )
+            .pointerInput(swipe) {
+                var travelled = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { travelled = 0f },
+                    onVerticalDrag = { change, amount -> change.consume(); travelled += amount },
+                    onDragEnd = {
+                        when {
+                            travelled > swipe -> currentOnSize(currentSize.bigger)
+                            travelled < -swipe -> currentOnSize(currentSize.smaller)
+                        }
+                    },
+                )
+            }
             .padding(vertical = 8.dp),
         content = {
             HorizontalDivider(color = colors.outlineVariant)
             Row(
                 Modifier
                     .clip(RoundedCornerShape(50))
+                    .border(1.dp, colors.primary, RoundedCornerShape(50))
                     .background(colors.primaryContainer)
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .selectableGroup(),
             ) {
-                Icon(
-                    if (collapsed) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
-                    contentDescription = null,
-                    tint = colors.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    if (collapsed) "Full month" else "Collapse",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onPrimaryContainer,
-                )
+                CalendarSize.entries.forEach { option ->
+                    val chosen = option == size
+                    Text(
+                        option.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (chosen) colors.onPrimary else colors.onPrimaryContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (chosen) colors.primary else Color.Transparent)
+                            .selectable(selected = chosen, role = Role.Tab, onClick = { onSize(option) })
+                            .semantics {
+                                contentDescription = option.description
+                                // On each tab (Hunt 27): the bar itself is never focused by TalkBack.
+                                customActions = listOf(
+                                    CustomAccessibilityAction("Bigger calendar") { currentOnSize(currentSize.bigger); true },
+                                    CustomAccessibilityAction("Smaller calendar") { currentOnSize(currentSize.smaller); true },
+                                )
+                            }
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                    )
+                }
             }
             if (showToday) {
                 Text(
-                    "Go to today",
+                    "Today",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = colors.onSecondaryContainer,
@@ -350,7 +457,8 @@ fun CalendarToggleBar(
                         .clip(RoundedCornerShape(50))
                         .background(colors.secondaryContainer)
                         .clickable(role = Role.Button, onClickLabel = "Go to today", onClick = onToday)
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .semantics { contentDescription = "Go to today" }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
         },
@@ -382,9 +490,99 @@ fun CalendarToggleBar(
 
         layout(width, height) {
             divider.place(0, (lineHeight - divider.height) / 2)
-            toggle.place(toggleX, (lineHeight - toggle.height) / 2)
+            toggle.place(toggleX.coerceAtLeast(0), (lineHeight - toggle.height) / 2)
             today?.place(todayX, if (wrapped) lineHeight + gap else (lineHeight - today.height) / 2)
         }
+    }
+}
+
+private val CHIP_GAP = 2.dp
+private val MAX_NUMBER_SIZE = 26.dp
+
+// A day of the maximised month: its number at the top, then as many of its entries as fit, one line each, and "+N"
+// for the rest. Too short for even one line (landscape), it falls back to the dot.
+@Composable
+private fun MaximisedDayCell(
+    date: LocalDate,
+    isSelected: Boolean,
+    isToday: Boolean,
+    chips: List<DayChip>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val rowHeight = LocalCalendarRowHeight.current
+    val chipStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Normal)
+    val chipHeight = with(LocalDensity.current) { 12.sp.toDp() } + 2.dp
+    val numberSize = minOf(MAX_NUMBER_SIZE, rowHeight - 4.dp)
+    val slots = ((rowHeight - 4.dp - numberSize - CHIP_GAP) / (chipHeight + CHIP_GAP)).toInt()
+    val (shown, more) = CalendarChips.fit(chips.size, slots)
+    Column(
+        modifier
+            .height(rowHeight)
+            .semantics {
+                contentDescription = dayCellDescription(date, isToday, chips.isNotEmpty(), locale, chips.map { it.title })
+                selected = isSelected
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 1.dp, vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(numberSize)
+                .clip(CircleShape)
+                .background(if (isSelected) colors.primary else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isToday && !isSelected) TodayRing(colors.primary, Modifier.matchParentSize())
+            Text("${date.dayOfMonth}", style = MaterialTheme.typography.bodyMedium, color = if (isSelected) colors.onPrimary else colors.onSurface)
+            if (slots <= 0 && chips.isNotEmpty()) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 1.dp)
+                        .size(4.dp)
+                        .background(if (isSelected) colors.onPrimary else colors.primary, CircleShape),
+                )
+            }
+        }
+        Spacer(Modifier.height(CHIP_GAP))
+        chips.take(shown).forEach { chip ->
+            DayChipLine(chip, chipStyle, chipHeight)
+            Spacer(Modifier.height(CHIP_GAP))
+        }
+        if (more > 0 && slots > 0) {
+            Text("+$more", style = chipStyle, color = colors.onSurfaceVariant, maxLines = 1, modifier = Modifier.height(chipHeight))
+        }
+    }
+}
+
+// One entry in a maximised day: an event or bill tinted with its colour, a task outlined with a box in front.
+@Composable
+private fun DayChipLine(chip: DayChip, style: TextStyle, height: Dp) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(3.dp)
+    val accent = if (chip.task) colors.secondary else chip.customColor?.let { Color(it) } ?: planColor(chip.colorIndex).color
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .alpha(if (chip.faded) 0.45f else 1f)
+            .clip(shape)
+            .then(if (chip.task) Modifier.border(1.dp, accent, shape) else Modifier.background(accent.copy(alpha = 0.3f)))
+            .padding(horizontal = 2.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            (if (chip.task) "☐ " else "") + chip.title,
+            style = style,
+            color = colors.onSurface,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+        )
     }
 }
 
@@ -438,10 +636,13 @@ private fun DayCell(
 }
 
 // What TalkBack reads for a day of the month grid, e.g. "Monday 5 October 2026, today, has entries" (the dot is events,
-// bills or tasks alike).
-internal fun dayCellDescription(date: LocalDate, isToday: Boolean, hasItems: Boolean, locale: Locale = Locale.getDefault()): String =
+// bills or tasks alike). Maximised, the day names its [entries]: "..., 2 entries: Dentist, Pay rent".
+internal fun dayCellDescription(date: LocalDate, isToday: Boolean, hasItems: Boolean, locale: Locale = Locale.getDefault(),
+                                entries: List<String>? = null): String =
     listOfNotNull(date.format(patternFormatter("EEEE d MMMM yyyy", locale)),
-        "today".takeIf { isToday }, "has entries".takeIf { hasItems }).joinToString(", ")
+        "today".takeIf { isToday },
+        if (!entries.isNullOrEmpty()) "${entries.size} ${if (entries.size == 1) "entry" else "entries"}: ${entries.joinToString(", ")}"
+        else "has entries".takeIf { hasItems }).joinToString(", ")
 
 // Today's ring fades between full strength and faint so it catches the eye. The alpha is read only while drawing,
 // so the pulse redraws this ring each frame without recomposing the calendar. It runs faint -> full because, with

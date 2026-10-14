@@ -72,6 +72,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.itinerary.data.AddButton
+import com.example.itinerary.data.AddButtonPlace
+import com.example.itinerary.data.AddMenuOrder
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 
 private val AddButtonSize = 84.dp
 
@@ -147,9 +172,66 @@ fun AddButtonSettingsSection(seeThroughPercent: Int, onChange: (Int) -> Unit) {
             AddButtonSample(seeThroughPercent = seeThroughPercent)
         }
     }
+    Spacer(Modifier.height(12.dp))
+    Text(
+        "Drag the + button to move it anywhere. In its menu, long press a row and drag it to change the order.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val settings = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).settings
+    StackedButton("Reset the + button", settings::resetAddButton)
 }
 
-// Compact action rows stacked above Agenda's +/close button.
+// The + button, dragged anywhere on the screen (a tap still opens its menu): [place] says where, and [onMoved] keeps a
+// new place once it is let go. It stays inside the system bars with 16 dp to spare. TalkBack can move it with actions.
+// [content] draws the button with the modifier that places it, told whether its menu should open downwards.
+@Composable
+private fun BoxScope.MovableAddButton(
+    place: AddButtonPlace,
+    onMoved: (AddButtonPlace) -> Unit,
+    onReset: () -> Unit,
+    content: @Composable (opensDown: Boolean, modifier: Modifier) -> Unit,
+) {
+    BoxWithConstraints(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.systemBars).padding(16.dp),
+        // Measured from the left in every layout direction (Hunt 27): the drag adds the finger's own movement.
+        contentAlignment = androidx.compose.ui.AbsoluteAlignment.TopLeft) {
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val size = with(LocalDensity.current) { AddButtonSize.roundToPx() }
+        // The button's top-left corner while a finger moves it; null when it rests at [place].
+        var dragged by remember { mutableStateOf<Offset?>(null) }
+        val resting = place.offset(width, height, size).let { (x, y) -> Offset(x.toFloat(), y.toFloat()) }
+        val shown = dragged ?: resting
+        val currentResting by rememberUpdatedState(resting)
+        val currentOnMoved by rememberUpdatedState(onMoved)
+        fun clamp(o: Offset) = Offset(o.x.coerceIn(0f, (width - size).coerceAtLeast(0).toFloat()), o.y.coerceIn(0f, (height - size).coerceAtLeast(0).toFloat()))
+        fun nudge(dx: Float, dy: Float): Boolean { onMoved(AddButtonPlace.of(place.x + dx, place.y + dy)); return true }
+        val opensDown = (dragged?.let { AddButtonPlace.fromOffset(it.x, it.y, width, height, size) } ?: place).opensDown
+        content(opensDown, Modifier
+            .absoluteOffset { IntOffset(shown.x.roundToInt(), shown.y.roundToInt()) }
+            .pointerInput(width, height, size) {
+                detectDragGestures(
+                    onDragStart = { dragged = currentResting },
+                    onDrag = { change, amount -> change.consume(); dragged = clamp((dragged ?: currentResting) + amount) },
+                    onDragEnd = { dragged?.let { currentOnMoved(AddButtonPlace.fromOffset(it.x, it.y, width, height, size)) }; dragged = null },
+                    onDragCancel = { dragged = null },
+                )
+            }
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Move button up") { nudge(0f, -0.1f) },
+                    CustomAccessibilityAction("Move button down") { nudge(0f, 0.1f) },
+                    CustomAccessibilityAction("Move button left") { nudge(-0.1f, 0f) },
+                    CustomAccessibilityAction("Move button right") { nudge(0.1f, 0f) },
+                    CustomAccessibilityAction("Put button back") { onReset(); true },
+                )
+            })
+    }
+}
+
+// The +/close button with its menu of action rows. The menu opens above the button, or below it when [opensDown] (the
+// button is in the top half), with the ✕ where the button was. The rows follow [order] top to bottom; a long press on a
+// row and a drag moves it, and [onOrderChange] keeps the new order.
 @Composable
 fun AgendaActionsButton(
     seeThroughPercent: Int,
@@ -160,24 +242,45 @@ fun AgendaActionsButton(
     onAddTask: () -> Unit = {},
     onAddNote: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    opensDown: Boolean = false,
+    order: List<String> = AddMenuOrder.DEFAULT,
+    onOrderChange: (List<String>) -> Unit = {},
 ) {
     val configuration = LocalConfiguration.current
     val menuWidth = (configuration.screenWidthDp - 32).coerceIn(0, 320).dp
     // Hunt 20: from Android 15 the screen height includes the status and navigation bars; the menu stays clear of them.
     val systemBars = androidx.compose.foundation.layout.WindowInsets.systemBars.asPaddingValues()
     val gap = with(LocalDensity.current) { 12.dp.roundToPx() }
-    val position = remember(gap) {
+    // How far the menu was pushed sideways to stay on screen (the button near an edge): the ✕ is moved back by as much,
+    // so it sits exactly where the + was.
+    var closeShift by remember { mutableIntStateOf(0) }
+    // The room from the button to the window's far edge (Hunt 27): the menu is kept within it, so it is never pushed back
+    // over the button and the ✕ stays where the + was. Worked out from where the button sits while the menu is closed:
+    // set while the popup opens (in its placing, then read while composing or laying out) it rebuilt the menu just as it
+    // opened, and a tap could miss it.
+    var anchorTop by remember { mutableIntStateOf(0) }
+    var anchorBottom by remember { mutableIntStateOf(0) }
+    val windowHeight = androidx.compose.ui.platform.LocalView.current.rootView.height
+    val room = (if (opensDown) windowHeight - anchorTop - gap else anchorBottom - gap).takeIf { windowHeight > 0 && anchorBottom > 0 }
+    val position = remember(gap, opensDown) {
         object : PopupPositionProvider {
             override fun calculatePosition(anchorBounds: androidx.compose.ui.unit.IntRect,
                 windowSize: androidx.compose.ui.unit.IntSize, layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-                popupContentSize: androidx.compose.ui.unit.IntSize): IntOffset = IntOffset(
-                (anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2)
-                    .coerceIn(gap, (windowSize.width - popupContentSize.width - gap).coerceAtLeast(gap)),
-                (anchorBounds.bottom - popupContentSize.height).coerceAtLeast(gap),
-            )
+                popupContentSize: androidx.compose.ui.unit.IntSize): IntOffset {
+                val centred = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
+                val x = centred.coerceIn(gap, (windowSize.width - popupContentSize.width - gap).coerceAtLeast(gap))
+                closeShift = centred - x
+                return IntOffset(x,
+                    if (opensDown) anchorBounds.top.coerceAtMost(windowSize.height - popupContentSize.height - gap).coerceAtLeast(gap)
+                    else (anchorBounds.bottom - popupContentSize.height).coerceAtLeast(gap),
+                )
+            }
         }
     }
-    Box(modifier) {
+    Box(modifier.onGloballyPositioned { coordinates ->
+        val top = coordinates.positionInWindow().y.roundToInt()
+        anchorTop = top; anchorBottom = top + coordinates.size.height
+    }) {
         if (open) {
             // Keep the popup anchor in place; the popup draws the close button exactly once.
             Spacer(Modifier.size(AddButtonSize))
@@ -186,31 +289,125 @@ fun AgendaActionsButton(
         }
         if (open) Popup(popupPositionProvider = position, onDismissRequest = { onOpenChange(false) },
             properties = PopupProperties(focusable = true)) {
-            // Bug hunt 19: scrolls when taller than the window (landscape, large text), starting at the bottom, by the button.
-            Column(
-                Modifier.width(menuWidth).heightIn(max = (configuration.screenHeightDp.dp - systemBars.calculateTopPadding() - systemBars.calculateBottomPadding() - 24.dp).coerceAtLeast(0.dp))
-                    .verticalScroll(rememberScrollState(), reverseScrolling = true),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AgendaActionRow("Add task", R.drawable.action_task) { onOpenChange(false); onAddTask() }
-                AgendaActionRow("Add event", R.drawable.shortcut_event) { onOpenChange(false); onAddEvent() }
-                AgendaActionRow("Quick entry", R.drawable.action_quick_entry) { onOpenChange(false); onQuickEntry() }
-                // Bug notes 3: a new note, on the Notes screen (which has its own + for notes).
-                if (onAddNote != null) AgendaActionRow("Add note", R.drawable.action_note) { onOpenChange(false); onAddNote() }
+            val close: @Composable () -> Unit = {
                 AddButtonSample(seeThroughPercent = seeThroughPercent, open = true,
-                    onClick = { onOpenChange(false) }, modifier = Modifier.size(AddButtonSize))
+                    onClick = { onOpenChange(false) },
+                    modifier = Modifier.absoluteOffset { IntOffset(closeShift, 0) }.size(AddButtonSize))
+            }
+            // Bug hunt 19: scrolls when taller than the window (landscape, large text), starting by the button.
+            Column(
+                Modifier.width(menuWidth).heightIn(max = (configuration.screenHeightDp.dp - systemBars.calculateTopPadding() - systemBars.calculateBottomPadding() - 24.dp)
+                    .let { screen -> room?.let { r -> minOf(screen, with(LocalDensity.current) { r.coerceAtLeast(0).toDp() }) } ?: screen }.coerceAtLeast(0.dp))
+                    .verticalScroll(rememberScrollState(), reverseScrolling = !opensDown),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(MENU_GAP),
+            ) {
+                if (opensDown) close()
+                // Bug notes 3: "Add note" opens a new note on the Notes screen (which has its own + for notes).
+                val rows = order.filter { it != AddMenuOrder.NOTE || onAddNote != null }
+                // The order counts from the button outwards (the last row is next to it), so a menu opening downwards is
+                // mirrored: Quick entry stays next to the button either way. A row not shown here keeps its place.
+                ReorderableRows(AddMenuOrder.onScreen(rows, opensDown), onOrderChange = { shown ->
+                    val saved = AddMenuOrder.onScreen(shown, opensDown)
+                    onOrderChange(saved.toMutableList().also { merged -> order.forEachIndexed { i, r -> if (r !in merged) merged.add(i.coerceAtMost(merged.size), r) } })
+                }) { row, rowModifier, wasDragged ->
+                    fun act(action: () -> Unit) { if (!wasDragged()) { onOpenChange(false); action() } }
+                    when (row) {
+                        AddMenuOrder.TASK -> AgendaActionRow("Add task", R.drawable.action_task, rowModifier) { act(onAddTask) }
+                        AddMenuOrder.EVENT -> AgendaActionRow("Add event", R.drawable.shortcut_event, rowModifier) { act(onAddEvent) }
+                        AddMenuOrder.NOTE -> AgendaActionRow("Add note", R.drawable.action_note, rowModifier) { act { onAddNote?.invoke() } }
+                        AddMenuOrder.QUICK -> AgendaActionRow("Quick entry", R.drawable.action_quick_entry, rowModifier) { act(onQuickEntry) }
+                    }
+                }
+                if (!opensDown) close()
             }
         }
     }
 }
 
+private val MENU_GAP = 12.dp
+
+// The menu's rows, each moved by a long press and a drag: the row follows the finger and swaps places with a neighbour
+// once it is past that neighbour's middle; letting go keeps the order. TalkBack has Move up / Move down on each row.
+// [row] draws one with the modifier that does this; its wasDragged() says a long press just ended, so the tap that
+// comes with lifting the finger doesn't also run the row's action.
 @Composable
-private fun AgendaActionRow(label: String, icon: Int, onClick: () -> Unit) {
+private fun ReorderableRows(
+    order: List<String>,
+    onOrderChange: (List<String>) -> Unit,
+    row: @Composable (row: String, modifier: Modifier, wasDragged: () -> Boolean) -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    val gapPx = with(LocalDensity.current) { MENU_GAP.toPx() }
+    var working by remember(order) { mutableStateOf(order) }
+    var dragging by remember { mutableStateOf<String?>(null) }
+    var offset by remember { mutableFloatStateOf(0f) }
+    var longPressed by remember { mutableStateOf(false) }
+    val heights = remember { mutableMapOf<String, Int>() }
+    val currentOnOrderChange by rememberUpdatedState(onOrderChange)
+    fun moveBy(id: String, steps: Int): Boolean {
+        val from = working.indexOf(id)
+        val to = from + steps
+        if (from < 0 || to !in working.indices) return false
+        working = AddMenuOrder.move(working, from, to)
+        currentOnOrderChange(working)
+        return true
+    }
+    working.forEach { id ->
+        key(id) {
+            val isDragged = dragging == id
+            row(id, Modifier
+                .onSizeChanged { heights[id] = it.height }
+                .zIndex(if (isDragged) 1f else 0f)
+                .graphicsLayer {
+                    translationY = if (isDragged) offset else 0f
+                    if (isDragged) { scaleX = 1.03f; scaleY = 1.03f; shadowElevation = 12f }
+                }
+                // Keyed on the order too (Hunt 27): after a drag or a TalkBack move is kept, the next drag works on the new order.
+                .pointerInput(id, order) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            longPressed = true
+                            dragging = id
+                            offset = 0f
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            offset += amount.y
+                            val i = working.indexOf(id)
+                            if (offset > 0 && i < working.lastIndex) {
+                                val step = (heights[working[i + 1]] ?: 0) + gapPx
+                                if (offset > step / 2) { working = AddMenuOrder.move(working, i, i + 1); offset -= step }
+                            } else if (offset < 0 && i > 0) {
+                                val step = (heights[working[i - 1]] ?: 0) + gapPx
+                                if (-offset > step / 2) { working = AddMenuOrder.move(working, i, i - 1); offset += step }
+                            }
+                        },
+                        onDragEnd = {
+                            if (working != order) currentOnOrderChange(working)
+                            dragging = null; offset = 0f; longPressed = false
+                        },
+                        onDragCancel = { working = order; dragging = null; offset = 0f; longPressed = false },
+                    )
+                }
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction("Move up") { moveBy(id, -1) },
+                        CustomAccessibilityAction("Move down") { moveBy(id, 1) },
+                    )
+                },
+                { longPressed })
+        }
+    }
+}
+
+@Composable
+private fun AgendaActionRow(label: String, icon: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val foreground = MaterialTheme.colorScheme.primary
     Surface(onClick = onClick, border = BorderStroke(com.example.itinerary.ui.theme.controlBorderWidth(), foreground),
         shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = foreground, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
+        contentColor = foreground, modifier = modifier.fillMaxWidth().heightIn(min = 64.dp)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -267,6 +464,7 @@ fun BoxScope.AddMenuHost(
         restore = { text -> text.takeIf { it.isNotEmpty() }?.let { com.example.itinerary.data.TaskCodec.decode(org.json.JSONArray(it)).single() } },
     )) { mutableStateOf<PlannerTask?>(null) }
     val repository = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).repository
+    val settings = (LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp).settings
 
     fun addEvent(bill: Boolean = false, scan: Boolean = false) {
         if (state.adding != null) return
@@ -288,16 +486,23 @@ fun BoxScope.AddMenuHost(
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     onClickLabel = "Close add menu") { menuOpen = false })
         }
-        AgendaActionsButton(
-            seeThroughPercent = seeThroughPercent,
-            open = menuOpen,
-            onOpenChange = { menuOpen = it },
-            onAddEvent = { addEvent() },
-            onQuickEntry = { quickEntry = true },
-            onAddTask = { choosingTaskType = true },
-            onAddNote = onAddNote,
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
-        )
+        val place by settings.addButtonPlace.collectAsState()
+        val order by settings.addMenuOrder.collectAsState()
+        MovableAddButton(place, onMoved = settings::setAddButtonPlace, onReset = settings::resetAddButton) { opensDown, placed ->
+            AgendaActionsButton(
+                seeThroughPercent = seeThroughPercent,
+                open = menuOpen,
+                onOpenChange = { menuOpen = it },
+                onAddEvent = { addEvent() },
+                onQuickEntry = { quickEntry = true },
+                onAddTask = { choosingTaskType = true },
+                onAddNote = onAddNote,
+                modifier = placed,
+                opensDown = opensDown,
+                order = order,
+                onOrderChange = settings::setAddMenuOrder,
+            )
+        }
     }
 
     fun quickEvent(suggestion: QuickEntrySuggestion) = ItineraryItem(

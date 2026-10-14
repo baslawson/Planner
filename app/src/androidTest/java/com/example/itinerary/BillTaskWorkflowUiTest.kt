@@ -195,7 +195,8 @@ class BillTaskWorkflowUiTest {
         app.repository.saveItem(ItineraryItem(tripId=0,date=LocalDate.now(),startTime=null,title=calendarTitle,category="Bills",billAmountMinor=5000))
         click("Switch to Calendar view")
         await { find("CALENDAR") != null }
-        if (find("Collapse") != null) click("Collapse")
+        // A selected tab isn't clickable (tapping it would do nothing), so only when it isn't the size already.
+        if (find("Calendar: week")?.isSelected != true) click("Calendar: week")
         reveal { find(calendarTitle) != null }; click(calendarTitle)
         await { find("Edit bill task") != null }; click("Close")
     }

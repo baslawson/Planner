@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,9 +33,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +62,12 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val selected by vm.selected.collectAsStateWithLifecycle()
     val month by vm.month.collectAsStateWithLifecycle()
     val calendarCollapsed by vm.calendarCollapsed.collectAsStateWithLifecycle()
+    val calendarMaximised by vm.calendarMaximised.collectAsStateWithLifecycle()
+    // Maximised: the month fills the screen and each day shows its entries; the day's list is hidden.
+    val maximised = calendarMaximised && !calendarCollapsed
+    val loadedTasks by vm.tasks.collectAsStateWithLifecycle()
+    val allTasks = loadedTasks.orEmpty()
+    var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     val allAttachments by vm.attachments.collectAsStateWithLifecycle()
     val allReminders by vm.reminders.collectAsStateWithLifecycle()
     val categoryCounts by vm.categoryCounts.collectAsStateWithLifecycle()
@@ -77,12 +86,20 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val attachmentsByItem = remember(allAttachments) { allAttachments.groupBy { it.itemId } }
     val remindersByItem = remember(allReminders) { allReminders.groupBy { it.itemId } }
     val dayItems = remember(allItems, selected) { com.example.itinerary.data.eventsOnDay(allItems, selected) }
+    // The tasks due that day, under its events (done ones too, crossed out, so ticking one doesn't make it vanish).
+    val dayTasks = remember(allTasks, selected) { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, selected) }
+    val blockerCounts = remember(allTasks) { taskBlockerCounts(allTasks) }
     // Outside events can't be deleted from Planner, so they can't be selected either.
     val selectable = remember(dayItems) { dayItems.filterNot { OutsideCalendars.isOutside(it.id) }.map { SelectableEvent(it.id, it.title, it.date, bill = it.category == "Bills") } }
-    // Not before the list it prunes against is read (L5-2, A6-5).
-    val selection = rememberEventSelection(selectable, prune = loadedItems != null)
-    val datesWithItems = remember(allItems) {
+    val selectableTasks = remember(dayTasks) { dayTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
+    // Not before the lists it prunes against are read (L5-2, A6-5).
+    val selection = rememberEventSelection(selectable, prune = loadedItems != null && loadedTasks != null, visibleTasks = selectableTasks)
+    // Full size hides the day's list (Hunt 27): a selection made there would act on rows that can't be seen.
+    LaunchedEffect(maximised) { if (maximised) selection.clear() }
+    val datesWithItems = remember(allItems, allTasks) {
         buildSet {
+            // A task due that day gets the dot too, while it isn't done.
+            allTasks.forEach { task -> if (!task.done) task.dueDate?.let(::add) }
             allItems.forEach { event ->
                 add(event.date)
                 // Every day of a multi-day event gets a dot.
@@ -91,6 +108,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                     event.date.atTime(event.startTime).plusMinutes(event.durationMinutes.toLong()) > event.date.plusDays(1).atStartOfDay()) add(event.date.plusDays(1))
             }
         }
+    }
+    // Worked out only while maximised.
+    val chipsByDate = remember(allItems, allTasks, maximised) {
+        if (maximised) com.example.itinerary.data.CalendarChips.byDate(allItems, allTasks) else emptyMap()
     }
 
 
@@ -109,7 +130,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 
     OverlayMenuScreen(overlayMenu) {
         Scaffold(
-            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents) },
+            bottomBar = { EventSelectionBar(selection, selectable, vm::deleteEvents, selectableTasks) },
             topBar = {
                 TopAppBar(
                     navigationIcon = {
@@ -143,41 +164,53 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
         ) { inner ->
             // The calendar and day header stay put; only the event list scrolls. On a screen wider than it is tall
             // (landscape) the month sits beside the day's events: stacked, the grid filled the screen and the events
-            // could not be reached, since swipes over the grid change the month.
+            // could not be reached below it.
             BoxWithConstraints(Modifier.fillMaxSize().padding(inner)) {
                 val sideBySide = maxWidth > maxHeight
                 // Rows short enough for a whole month beside the list (title, weekdays and the toggle take ~150dp).
                 val rowHeight = if (sideBySide) ((maxHeight - 150.dp) / 6).coerceIn(36.dp, 48.dp) else 48.dp
-                val calendar: @Composable () -> Unit = {
-                    MonthCalendar(
-                        month = month,
-                        selected = selected,
-                        datesWithItems = datesWithItems,
-                        collapsed = calendarCollapsed,
-                        onSelect = vm::select,
-                        onMonthChange = vm::showMonth,
-                        rowHeight = rowHeight,
-                    )
-                    // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
-                    val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
-                    CalendarToggleBar(
-                        collapsed = calendarCollapsed,
+                // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
+                val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
+                val sizeBar: @Composable () -> Unit = {
+                    CalendarSizeBar(
+                        size = when { calendarCollapsed -> CalendarSize.WEEK; maximised -> CalendarSize.FULL; else -> CalendarSize.MONTH },
+                        onSize = { size ->
+                            // Opening the month from the week should land on the month of the day being viewed.
+                            if (calendarCollapsed && size != CalendarSize.WEEK) vm.showMonth(YearMonth.from(selected))
+                            vm.setCalendarCollapsed(size == CalendarSize.WEEK)
+                            vm.setCalendarMaximised(size == CalendarSize.FULL)
+                        },
                         showToday = showToday,
                         onToday = {
                             vm.select(LocalDate.now())
                             vm.showMonth(YearMonth.now())
                         },
-                        onToggle = {
-                            // Opening the full month should land on the month of the day being viewed.
-                            if (calendarCollapsed) vm.showMonth(YearMonth.from(selected))
-                            vm.setCalendarCollapsed(!calendarCollapsed)
-                        },
                     )
+                }
+                val calendar: @Composable ColumnScope.() -> Unit = {
+                    // Full screen, the bar sits at the top, where the + button (bottom centre unless moved) can't cover it.
+                    if (maximised) sizeBar()
+                    MonthCalendar(
+                        month = month,
+                        selected = selected,
+                        datesWithItems = datesWithItems,
+                        collapsed = calendarCollapsed,
+                        onSelect = { day ->
+                            vm.select(day)
+                            // Maximised, a tap opens that day: back to the month with the day's list under it.
+                            if (maximised) vm.setCalendarMaximised(false)
+                        },
+                        onMonthChange = vm::showMonth,
+                        modifier = if (maximised) Modifier.weight(1f) else Modifier,
+                        rowHeight = rowHeight,
+                        chips = chipsByDate.takeIf { maximised },
+                    )
+                    if (!maximised) sizeBar()
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
                     DayHeader(date = selected)
                     LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
-                        if (dayItems.isEmpty()) {
+                        if (dayItems.isEmpty() && dayTasks.isEmpty()) {
                             item {
                                 Text(
                                     "Nothing planned for this day. Tap + to add something.",
@@ -207,9 +240,15 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                                 }
                             }
                         }
+                        items(dayTasks, key = { "task:${it.id}" }) { task ->
+                            TaskCard(task, today, blockerCounts[task.id] ?: 0, selection = selection) { editingTaskId = task.id }
+                        }
                     } }
                 }
-                if (sideBySide) Row(Modifier.fillMaxSize()) {
+                if (maximised) Column(Modifier.fillMaxSize()) {
+                    // The whole height: the + button can be dragged off whatever it covers.
+                    calendar()
+                } else if (sideBySide) Row(Modifier.fillMaxSize()) {
                     ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxHeight()) { calendar() }
                     Column(Modifier.weight(1f).fillMaxHeight()) { dayList() }
                 } else Column(Modifier.fillMaxSize()) {
@@ -232,10 +271,15 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             planningTools = planningTools,
             saveEvent = vm::saveItem,
             onEventSaved = ::follow,
-            // An event is shown by following it to its day (above); the calendar has no tasks, so a task is said below.
+            // An event is shown by following it to its day (above); a task, which may be due another day or none, is said below.
             onQuickAdded = { if (it.task) addedBar(it) },
             onAddNote = onAddNote,
         )
+    }
+
+    editingTaskId?.let { id ->
+        val task = rememberEditedTask(id, allTasks.find { it.id == id })
+        if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
     }
 
     viewingOutside?.let { info ->
@@ -352,3 +396,4 @@ private fun ItemRow(item: ItineraryItem, selection: EventSelection, attachmentCo
             onShare = { shareEvent(context, item.title, item.date, item.startTime, item.durationMinutes, item.location, format) })
     }
 }
+

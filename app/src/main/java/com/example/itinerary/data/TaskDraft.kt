@@ -62,3 +62,27 @@ class TaskDraftStore(context: Context) {
         fun editorClosed() = open.closed()
     }
 }
+
+/**
+ * Hunt 27: what a task was when its draft began, kept in the draft as "base" (only what Save would write over, as
+ * EditorRules.taskChangedElsewhere compares it), so a draft resumed later can tell a change made meanwhile.
+ */
+object TaskDraftBase {
+    fun encode(task: PlannerTask): JSONObject = JSONObject().put("title", task.title).put("notes", task.notes)
+        .put("dueDate", task.dueDate?.toString() ?: JSONObject.NULL).put("priority", task.priority.name)
+        .put("reminderAt", task.reminderAt ?: JSONObject.NULL).put("ringUntilDismissed", task.ringUntilDismissed)
+        .put("ringSeconds", task.ringSeconds).put("repeat", task.repeat).put("repeatDays", task.repeatDays)
+        .put("checklist", ChecklistCodec.encode(task.checklist)).put("attachments", DraftCodec.attachments(task.attachments))
+
+    /** [current] as [json] says it was (its other fields as they are now). */
+    fun decode(current: PlannerTask, json: JSONObject): PlannerTask = current.copy(
+        title = json.getString("title"), notes = json.getString("notes"),
+        dueDate = if (json.isNull("dueDate")) null else java.time.LocalDate.parse(json.getString("dueDate")),
+        priority = TaskPriority.valueOf(json.getString("priority")),
+        reminderAt = if (json.isNull("reminderAt")) null else json.getLong("reminderAt"),
+        ringUntilDismissed = json.getBoolean("ringUntilDismissed"), ringSeconds = json.getInt("ringSeconds"),
+        repeat = json.getString("repeat"), repeatDays = json.getInt("repeatDays"),
+        checklist = ChecklistCodec.decode(json.getString("checklist")),
+        attachments = DraftCodec.attachments(json.optJSONArray("attachments")),
+    )
+}

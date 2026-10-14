@@ -62,7 +62,8 @@ class MonthArrowsUiTest {
         })
         await("Calendar") { find("CALENDAR") != null && find("AGENDA") == null }
         Thread.sleep(900)
-        if (find("Full month") != null) click("Full month")
+        // A selected tab isn't clickable (tapping it would do nothing), so only when it isn't the size already.
+        if (find("Calendar: month")?.isSelected != true) click("Calendar: month")
         await("full month") { find("Next month") != null }
         Thread.sleep(900)
     }
@@ -150,12 +151,13 @@ class MonthArrowsUiTest {
     }
 
     // A real upward swipe across the grid (the next month), quick enough to be a fling.
-    private fun swipeUp(x: Float, fromY: Float, toY: Float) {
+    // A quick finger move across the grid from [fromX] to [toX] at height [y] (rightwards = the next month).
+    private fun swipeAcross(y: Float, fromX: Float, toX: Float) {
         val down = SystemClock.uptimeMillis()
-        fun event(action: Int, t: Long, y: Float) = android.view.MotionEvent.obtain(down, t, action, x, y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
-        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_DOWN, down, fromY), true)
-        for (step in 1..8) ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_MOVE, down + step * 12L, fromY + (toY - fromY) * step / 8), true)
-        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_UP, down + 110, toY), true)
+        fun event(action: Int, t: Long, x: Float) = android.view.MotionEvent.obtain(down, t, action, x, y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_DOWN, down, fromX), true)
+        for (step in 1..8) ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_MOVE, down + step * 12L, fromX + (toX - fromX) * step / 8), true)
+        ins.uiAutomation.injectInputEvent(event(android.view.MotionEvent.ACTION_UP, down + 110, toX), true)
     }
     // AG-1: a swipe right after an arrow's move has landed, while the grid is still changing height, moves on one more
     // month and the header follows it (it used to stay on the arrow's month for good, or the grid was pulled back).
@@ -169,7 +171,7 @@ class MonthArrowsUiTest {
             val arrow = month.plusMonths(1)
             await("header $arrow") { find(arrow.label()) != null }
             val day = Rect().also(visible("15").single()::getBoundsInScreen)
-            swipeUp(day.exactCenterX(), day.exactCenterY() + day.height(), day.exactCenterY() - 2 * day.height())
+            swipeAcross(day.exactCenterY(), day.exactCenterX() - day.width(), day.exactCenterX() + 2 * day.width())
             month = month.plusMonths(2)
             val expected = month
             await("header $expected after a swipe right after the arrow") { find(expected.label()) != null }

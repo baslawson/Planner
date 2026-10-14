@@ -139,7 +139,10 @@ fun AgendaScreen(
             .map { SelectableEvent(it.event.id, it.event.title, it.event.date) } +
             shownBills.map { SelectableEvent(it.id, it.title, it.date, bill = true) }
     }
-    val selectableTasks = remember(shownTasks) { shownTasks.map { SelectableTask(it.id, it.title, it.dueDate) } }
+    // Hunt 27: tasks in a collapsed "Anytime tasks" section are out of sight, so Select all (and Delete) leaves them alone.
+    val selectableTasks = remember(shownTasks, anytimeExpanded) {
+        shownTasks.filter { anytimeExpanded || it.dueDate != null }.map { SelectableTask(it.id, it.title, it.dueDate) }
+    }
     // Not before the events and tasks are read: a selection restored after Android closed Planner would be emptied
     // (L5-2, A6-5).
     val selection = rememberEventSelection(selectable, prune = loadedEvents != null && loadedTasks != null, visibleTasks = selectableTasks)

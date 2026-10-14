@@ -46,6 +46,8 @@ class BudgetOutbox(context: Context) {
     private companion object {
         const val KEY = "messages"
         const val KEY_IN_FLIGHT = "in_flight"
-        const val MAX = 100
+        // Hunt 27: was 100, which dropped the oldest unsent payments after a busy stretch with MyBudget not opened; each
+        // message is a short line, so a thousand stay small.
+        const val MAX = 1000
     }
 }

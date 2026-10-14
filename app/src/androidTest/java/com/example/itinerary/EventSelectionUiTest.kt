@@ -172,9 +172,9 @@ class EventSelectionUiTest {
         // Some selected → select all fills the rest.
         longTouch("QA all one");click("QA all task");await { find("2 selected")!=null };assertFalse(selectAllChecked())
         click("Select all");await { find("4 selected")!=null };click("Cancel");await { find("Add menu")!=null }
-        // The calendar selects only the chosen day's events.
+        // The calendar selects only the chosen day's events and the tasks due that day (not "QA all later").
         click("QA all one");await { find("CALENDAR")!=null }
-        longTouch("QA all two");click("Select all");await { find("2 selected")!=null };screenshot("calendar-all")
+        longTouch("QA all two");click("Select all");await { find("3 selected")!=null };screenshot("calendar-all")
         click("Cancel")
         assertEquals(before,data())
     }

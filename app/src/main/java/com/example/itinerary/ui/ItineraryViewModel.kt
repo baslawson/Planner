@@ -37,6 +37,10 @@ class ItineraryViewModel(
 
     fun setCalendarCollapsed(collapsed: Boolean) = settings.setCalendarCollapsed(collapsed)
 
+    val calendarMaximised: StateFlow<Boolean> = settings.calendarMaximised
+
+    fun setCalendarMaximised(maximised: Boolean) = settings.setCalendarMaximised(maximised)
+
     // How see-through the big + button is, in percent.
     val addButtonSeeThrough: StateFlow<Int> = settings.addButtonSeeThrough
 
@@ -47,6 +51,11 @@ class ItineraryViewModel(
     val items: StateFlow<List<ItineraryItem>?> = combine(repo.allItems, outside) { own, other ->
         if (other.isEmpty()) own else own + other.values.map { it.event.toItem(it.color) }
     }.stateInWhileVisible(viewModelScope, null)
+
+    // Tasks: a task shows on the day it's due, in the day's list and the maximised month grid. Null until read once, as
+    // [items] (a restored selection waits for it).
+    val tasks: StateFlow<List<com.example.itinerary.data.PlannerTask>?> = repo.tasks
+        .stateInWhileVisible(viewModelScope, null)
 
     val attachments: StateFlow<List<Attachment>> = repo.allAttachments
         .stateInWhileVisible(viewModelScope, emptyList())

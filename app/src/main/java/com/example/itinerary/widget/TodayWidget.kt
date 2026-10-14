@@ -39,6 +39,9 @@ class TodayWidget : AppWidgetProvider() {
                 // A6-6: a Done that fails (the task was deleted, or now waits on another) still refreshes the widget, so
                 // it stops showing that row as it was; its message shows after.
                 val done = if (intent.action != COMPLETE_TASK) null else runCatching {
+                    // Hunt 27: a long restore or sync holds the data; waiting on it with no end would freeze the widget (and
+                    // Android ends a broadcast after about 10 s), so it waits a few seconds and says so instead.
+                    check((context.applicationContext as ItineraryApp).repository.freeWithin(WAIT_MS)) { "Planner is busy. Try again in a moment." }
                     intent.getStringExtra("task_id")?.let { (context.applicationContext as ItineraryApp).repository.setTaskDone(it, true) }
                 }
                 updateAll(context)
@@ -53,7 +56,8 @@ class TodayWidget : AppWidgetProvider() {
     }
 
     companion object {
-        const val COMPLETE_TASK = "com.example.itinerary.widget.COMPLETE_TASK"
+        private const val WAIT_MS = 6_000L
+        const val COMPLETE_TASK ="com.example.itinerary.widget.COMPLETE_TASK"
         const val OPEN_TASK = "com.example.itinerary.widget.OPEN_TASK"
         const val REFRESH = "com.example.itinerary.widget.REFRESH"
         const val OPEN_TODAY = "com.example.itinerary.widget.OPEN_TODAY"
@@ -180,8 +184,11 @@ class TodayWidget : AppWidgetProvider() {
                 val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220)
                 manager.updateAppWidget(id, renderDay(context, events, today, app.settings.timeFormat.value, height, tasks, blocked))
             }
-            // Inexact, non-waking midnight refresh plus the platform's periodic update. No new alarm permission.
-            alarm.set(AlarmManager.RTC, today.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(), refreshIntent(context))
+            // Non-waking midnight refresh plus the platform's periodic update. No new alarm permission. Hunt 27: a 10-minute
+            // window (the shortest Android allows without that permission), not a plain inexact alarm, which can come up to an
+            // hour late; a DATE_CHANGED broadcast no longer reaches a manifest receiver.
+            alarm.setWindow(AlarmManager.RTC, today.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                10 * 60_000L, refreshIntent(context))
         }
     }
 }

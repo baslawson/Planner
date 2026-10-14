@@ -52,7 +52,20 @@ object ShareTargets {
         if (added.isEmpty() || notes.contains(added)) return notes
         if (notes.length >= max) return notes // already full (an item from before the limits): left as it is
         val joined = if (notes.isBlank()) added else notes.trimEnd() + "\n\n" + added
-        return if (joined.length <= max) joined else joined.take(max)
+        if (joined.length <= max) return joined
+        // Hunt 27: never cut between the two halves of an emoji (a surrogate pair).
+        val end = if (Character.isHighSurrogate(joined[max - 1])) max - 1 else max
+        return joined.take(end)
+    }
+
+    /** How much of a share's [text] [withText] keeps: all of it, part (cut to fit), or none (the notes are full). */
+    enum class TextFit { ALL, PART, NONE }
+    fun textFit(notes: String, text: String?, max: Int): TextFit {
+        val added = text?.trim().orEmpty()
+        if (added.isEmpty() || notes.contains(added)) return TextFit.ALL
+        if (notes.length >= max) return TextFit.NONE
+        val joined = if (notes.isBlank()) added else notes.trimEnd() + "\n\n" + added
+        return if (joined.length <= max) TextFit.ALL else TextFit.PART
     }
 
     /** [have] with [files] after it (a file it already has isn't added twice); refused past [max] files. */

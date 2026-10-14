@@ -843,22 +843,32 @@ class Repository(
         Triple(itemDao.all(), taskDao.all(), noteDao.all())
 
     // A share added to an item that exists: [files] (already in the attachment store) after its own, [text] after its notes
-    // (ShareTargets). An event or bill gets them on the one occurrence picked, as its editor would add them. Returns its title.
-    suspend fun addShareTo(target: ShareTargets.Target, files: List<Attachment>, text: String?): String = when (target.kind) {
-        ShareTargets.Kind.EVENT, ShareTargets.Kind.BILL -> {
-            val item = itemDao.byId(target.id.toLong()) ?: throw IllegalStateException("That event is no longer here.")
-            val have = attachmentDao.forItem(item.id)
-            val added = ShareTargets.withFiles(have, files).drop(have.size)
-            saveItemId(item.copy(notes = ShareTargets.withText(item.notes, text, EventText.MAX_NOTES)),
-                added = added.map { it.copy(id = 0, itemId = item.id) })
-            item.title
+    // (ShareTargets). An event or bill gets them on the one occurrence picked, as its editor would add them. Returns its title
+    // and how much of the text fitted (Hunt 27: so the message can say when it was cut or left out).
+    suspend fun addShareTo(target: ShareTargets.Target, files: List<Attachment>, text: String?): Pair<String, ShareTargets.TextFit> {
+        var fit = ShareTargets.TextFit.ALL
+        fun withText(notes: String, max: Int): String { fit = ShareTargets.textFit(notes, text, max); return ShareTargets.withText(notes, text, max) }
+        val title = when (target.kind) {
+            ShareTargets.Kind.EVENT, ShareTargets.Kind.BILL -> {
+                // Hunt 27: read and saved under one lock, so a sync pull or another window's save in between isn't overwritten.
+                changes.withLock {
+                    val item = itemDao.byId(target.id.toLong()) ?: throw IllegalStateException("That event is no longer here.")
+                    val have = attachmentDao.forItem(item.id)
+                    val added = ShareTargets.withFiles(have, files).drop(have.size)
+                    saveItemIdLocked(item.copy(notes = withText(item.notes, EventText.MAX_NOTES)),
+                        added = added.map { it.copy(id = 0, itemId = item.id) })
+                    item.title
+                }
+            }
+            // Hunt 27: cut to the task's own limit (it was unlimited, and a long email then failed the save).
+            ShareTargets.Kind.TASK -> saveTaskIf(target.id) {
+                it.copy(attachments = ShareTargets.withFiles(it.attachments, files), notes = withText(it.notes, Tasks.MAX_NOTES))
+            }?.title ?: throw IllegalStateException("That task is no longer here.")
+            ShareTargets.Kind.NOTE -> updateNote(target.id) {
+                it.copy(attachments = ShareTargets.withFiles(it.attachments, files), content = withText(it.content, Notes.MAX_CONTENT))
+            }?.let { target.title } ?: throw IllegalStateException("That note is no longer here.")
         }
-        ShareTargets.Kind.TASK -> saveTaskIf(target.id) {
-            it.copy(attachments = ShareTargets.withFiles(it.attachments, files), notes = ShareTargets.withText(it.notes, text, Int.MAX_VALUE))
-        }?.title ?: throw IllegalStateException("That task is no longer here.")
-        ShareTargets.Kind.NOTE -> updateNote(target.id) {
-            it.copy(attachments = ShareTargets.withFiles(it.attachments, files), content = ShareTargets.withText(it.content, text, Notes.MAX_CONTENT))
-        }?.let { target.title } ?: throw IllegalStateException("That note is no longer here.")
+        return title to fit
     }
 
     // Two-way sync: [change] made to event [id] as it is at that moment and saved, with no other change in between (a
@@ -1349,8 +1359,12 @@ class Repository(
         val reminder = reminderDao.byId(id) ?: return@withLock false
         val item = itemDao.byId(reminder.itemId) ?: return@withLock false
         if (item.paid || item.skipped || expectedToken != null && eventReminderToken(item, reminder) != expectedToken) return@withLock false
-        reminderDao.snooze(id, until)
-        afterCommit(reminderIds = listOf(id), cancelFirst = setOf(id), notify = false)
+        // Hunt 27: as for tasks and notes, the snooze and its alarm go together even if the caller is cancelled (a rotation
+        // of the Snooze window) in between.
+        withContext(NonCancellable) {
+            reminderDao.snooze(id, until)
+            afterCommit(reminderIds = listOf(id), cancelFirst = setOf(id), notify = false)
+        }
         true
     }
 

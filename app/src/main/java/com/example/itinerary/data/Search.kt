@@ -289,6 +289,11 @@ object Search {
                     if (year != null) dates += month(MONTHS.getValue(token), year) else loneMonths += MonthOrWord(token, month(MONTHS.getValue(token), null))
                     i += if (year != null) 2 else 1
                 }
+                // Hunt 27: "dec 2026", "sept 2026" as "december 2026". Alone, a short name ("may", "mar") stays a word.
+                token in MONTH_ABBREVIATIONS && yearAt(tokens, i + 1) != null -> {
+                    dates += month(MONTH_ABBREVIATIONS.getValue(token), yearAt(tokens, i + 1))
+                    i += 2
+                }
                 else -> {
                     if (token !in STOP_WORDS) words += token
                     i++

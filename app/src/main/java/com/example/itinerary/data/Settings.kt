@@ -315,6 +315,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val _calendarCollapsed = MutableStateFlow(prefs.getBoolean(KEY_CALENDAR_COLLAPSED, false))
     val calendarCollapsed: StateFlow<Boolean> = _calendarCollapsed.asStateFlow()
 
+    // Whether the month fills the Calendar screen, each day showing its entries (the day's list hidden). Only with the
+    // full month: a week strip is never maximised. Kept on this phone only, not in backups.
+    private val _calendarMaximised = MutableStateFlow(prefs.getBoolean(KEY_CALENDAR_MAXIMISED, false))
+    val calendarMaximised: StateFlow<Boolean> = _calendarMaximised.asStateFlow()
+
     // Built-in categories the user has removed. They stay out of the category chips until they are added again.
     private val _hiddenCategories = MutableStateFlow(
         prefs.getStringSet(KEY_HIDDEN_CATEGORIES, emptySet()).orEmpty().toSet(),
@@ -360,6 +365,35 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         val clean = percent.coerceIn(AddButton.MIN_SEE_THROUGH, AddButton.MAX_SEE_THROUGH)
         prefs.edit { putInt(KEY_ADD_BUTTON_SEE_THROUGH, clean) }
         _addButtonSeeThrough.value = clean
+    }
+
+    // Where the big + button was dragged to (one place for Agenda and Calendar) and the order of its menu. Kept on this
+    // phone only, not in backups: a place suits one screen size.
+    private val _addButtonPlace = MutableStateFlow(
+        AddButtonPlace.of(prefs.getFloat(KEY_ADD_BUTTON_X, AddButtonPlace.DEFAULT_X), prefs.getFloat(KEY_ADD_BUTTON_Y, AddButtonPlace.DEFAULT_Y)),
+    )
+    val addButtonPlace: StateFlow<AddButtonPlace> = _addButtonPlace.asStateFlow()
+
+    fun setAddButtonPlace(place: AddButtonPlace) {
+        val clean = AddButtonPlace.of(place.x, place.y)
+        prefs.edit { putFloat(KEY_ADD_BUTTON_X, clean.x); putFloat(KEY_ADD_BUTTON_Y, clean.y) }
+        _addButtonPlace.value = clean
+    }
+
+    private val _addMenuOrder = MutableStateFlow(AddMenuOrder.decode(prefs.getString(KEY_ADD_MENU_ORDER, null)))
+    val addMenuOrder: StateFlow<List<String>> = _addMenuOrder.asStateFlow()
+
+    fun setAddMenuOrder(order: List<String>) {
+        val clean = AddMenuOrder.decode(AddMenuOrder.encode(order))
+        prefs.edit { putString(KEY_ADD_MENU_ORDER, AddMenuOrder.encode(clean)) }
+        _addMenuOrder.value = clean
+    }
+
+    /** Settings › "Reset the + button": back to bottom centre with the menu in its first order. */
+    fun resetAddButton() {
+        prefs.edit { remove(KEY_ADD_BUTTON_X); remove(KEY_ADD_BUTTON_Y); remove(KEY_ADD_MENU_ORDER) }
+        _addButtonPlace.value = AddButtonPlace()
+        _addMenuOrder.value = AddMenuOrder.DEFAULT
     }
 
     private val _headingColor = MutableStateFlow(prefs.getInt(KEY_HEADING_COLOR, HeadingColor.DEFAULT_ARGB) or OPAQUE)
@@ -447,6 +481,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _calendarCollapsed.value = collapsed
     }
 
+    fun setCalendarMaximised(maximised: Boolean) {
+        prefs.edit { putBoolean(KEY_CALENDAR_MAXIMISED, maximised) }
+        _calendarMaximised.value = maximised
+    }
+
     fun setTimeFormat(format: TimeFormat) {
         prefs.edit { putString(KEY_TIME_FORMAT, format.name) }
         _timeFormat.value = format
@@ -505,10 +544,14 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_THEME = "theme_mode"
         const val KEY_TIME_FORMAT = "time_format"
         const val KEY_CALENDAR_COLLAPSED = "calendar_collapsed"
+        const val KEY_CALENDAR_MAXIMISED = "calendar_maximised"
         const val KEY_HIDDEN_CATEGORIES = "hidden_categories"
         const val KEY_UPCOMING_ON_TOP = "upcoming_on_top"
         const val KEY_UPCOMING_DAYS = "upcoming_days"
         const val KEY_ADD_BUTTON_SEE_THROUGH = "add_button_see_through"
+        const val KEY_ADD_BUTTON_X = "add_button_x"
+        const val KEY_ADD_BUTTON_Y = "add_button_y"
+        const val KEY_ADD_MENU_ORDER = "add_menu_order"
         const val KEY_HEADING_COLOR = "heading_color"
         const val KEY_SCROLL_BAR_COLOR = "scroll_bar_color"
         const val KEY_SCROLL_BAR_SEE_THROUGH = "scroll_bar_see_through"

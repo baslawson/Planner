@@ -79,7 +79,8 @@ class HuntFiveUiTest {
     }
     private fun fullMonth() {
         Thread.sleep(700)
-        if (find("Full month") != null) click("Full month")
+        // A selected tab isn't clickable (tapping it would do nothing), so only when it isn't the size already.
+        if (find("Calendar: month")?.isSelected != true) click("Calendar: month")
         await { find("Next month") != null }
     }
 

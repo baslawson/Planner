@@ -68,7 +68,7 @@ class CleanStart : RunListener() {
         }
         with(app.settings) {
             setAgendaTypes(AgendaType.entries.toSet()); setAgendaRange(AgendaRange.UPCOMING)
-            setShowBillsSummary(true); setBillsExpanded(true); setCalendarCollapsed(false)
+            setShowBillsSummary(true); setBillsExpanded(true); setCalendarCollapsed(false); setCalendarMaximised(false); resetAddButton()
             setHiddenCategories(emptySet()); setSavedSearches(emptyList())
             lastViewCalendar = false; lastCalendarDate = null; lastCalendarMonth = null
             // Not the new-install default (10 s): the tests that deliver a reminder were written for its plain notification,

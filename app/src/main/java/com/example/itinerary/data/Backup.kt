@@ -92,14 +92,17 @@ class BackupManager(
             // R18-D1: only the snapshot is read under the repository lock; the files are read from the store after it,
             // pinned so cleanup leaves them until the zip is written (no copy into the cache either, which needed as much
             // free space again as the attachments take).
-            repo.withPinnedFiles({ all ->
+            // Hunt 27: with no calendar or task sync pass under way (as for a restore), so the records of what was sent,
+            // read while the zip is written, belong to the very events and tasks in it (a pull in between would give an
+            // old event the new etag, and a restore would then send the old words over the newer ones).
+            syncPaused { repo.withPinnedFiles({ all ->
                 // H17-D3: a Recently deleted bundle that can't be read is left out of the backup, not the whole backup.
                 val readable = readEachDeleted(all.deleted, { DeletedCodec.decode(it.payload) }) { entry, e ->
                     Log.w("BackupManager", "Left unreadable Recently deleted entry ${entry.id} out of the backup", e)
                 }
                 val data = all.copy(deleted = all.deleted.filterIndexed { i, _ -> readable[i] != null })
                 data to data.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct()
-            }) { snapshot -> writeZip(uri, snapshot) }
+            }) { snapshot -> writeZip(uri, snapshot) } }
         } catch (e: Throwable) {
             // H17-D2: any failure leaves no half-written (or empty) file behind that looks like a good backup.
             runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
@@ -115,6 +118,13 @@ class BackupManager(
         }
     }
 
+    // Calendar sync's lock outside task sync's, outside the repository's: the order a restore takes them in.
+    private suspend fun <T> syncPaused(block: suspend () -> T): T {
+        val calendarSync = calendars; val taskSync = tasks
+        val inner: suspend () -> T = { if (taskSync != null) taskSync.paused(block) else block() }
+        return if (calendarSync != null) calendarSync.paused(inner) else inner()
+    }
+
     private suspend fun writeZip(uri: Uri, snapshot: DataSnapshot) {
         val files = snapshot.storedAttachments.filter { it.url == null }.map { it.fileName }.distinct()
             .filterTo(HashSet()) { store.fileFor(it).exists() }
@@ -127,7 +137,8 @@ class BackupManager(
             .toByteArray(Charsets.UTF_8)
         // H17-D1: stage() refuses a data.json over this, so a backup that couldn't be restored is never written.
         if (json.size > MAX_DATA_BYTES) throw tooLargeToRestore()
-        val out = context.contentResolver.openOutputStream(uri) ?: error("Could not open $uri")
+        // Hunt 27: "wt", so a provider that keeps a file's old length on "w" leaves no old bytes after the zip.
+        val out = context.contentResolver.openOutputStream(uri, "wt") ?: error("Could not open $uri")
         ZipOutputStream(out.buffered()).use { zip ->
             zip.putNextEntry(ZipEntry(DATA_ENTRY))
             zip.write(json)
@@ -263,7 +274,7 @@ class BackupManager(
                     step { val send = staged.send; if (send != null) calendars?.restoreSendLocked(send.first, send.second) else calendars?.forgetSentLocked() }
                     // After the calendars, whose restore rebuilds the list rows.
                     step { val send = staged.taskSend; if (send != null) tasks?.restoreLocked(send.first, send.second) else tasks?.forgetLocked() }
-                    // Backups don't keep the notes' links (replaceAll has cleared them): the next pass links by content.
+                    // Backups don't keep the notes' links (replaceAll has cleared them): the next pass pairs them by title (the newer wins; words it doesn't hold are kept as a copy).
                     step { notes?.forgetLocked() }
                     // Hunt 24 E5: the restored bills keep the ids MyBudget knows them by.
                     // Hunt 25 E1: ids from here on go on from its highest, which the phone it came from may have used too.
@@ -570,7 +581,9 @@ class BackupManager(
             val payload = it.getJSONObject("payload").toString()
             DeletedCodec.decode(payload)
             DeletedEntry(it.getString("id").also { id -> require(id.isNotBlank()) },
-                it.getLong("deletedAt").also { time -> require(time > 0 && time <= System.currentTimeMillis() + 86400000L) },
+                // Hunt 27: a time ahead of this phone's clock (the phone it came from ran fast) is taken as now, not a reason
+                // to refuse the whole backup.
+                it.getLong("deletedAt").also { time -> require(time > 0) }.coerceAtMost(System.currentTimeMillis()),
                 it.getString("label"), payload)
         }
         require(deleted.map { it.id }.distinct().size == deleted.size)

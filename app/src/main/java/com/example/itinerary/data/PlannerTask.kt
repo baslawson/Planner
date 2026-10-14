@@ -56,6 +56,7 @@ interface TaskDao {
 }
 
 object Tasks {
+    const val MAX_NOTES = 20_000
     val order: Comparator<PlannerTask> = compareBy<PlannerTask> { it.done }
         .thenByDescending { it.priority.rank }.thenBy { Search.normalize(it.title) }.thenBy { it.id }
 
@@ -89,7 +90,7 @@ object Tasks {
     fun validate(task: PlannerTask) {
         require(task.id.isNotBlank() && task.id.length <= 100)
         require(task.title.isNotBlank() && task.title.length <= 500)
-        require(task.notes.length <= 20_000)
+        require(task.notes.length <= MAX_NOTES)
         require(TaskRepeat.valid(task.repeat))
         require(task.repeatDays in 1..3650 && task.repeatAnchorDay in 0..31)
         require(task.nextTaskId == null || task.nextTaskId.isNotBlank() && task.nextTaskId.length <= 100 && task.nextTaskId != task.id)

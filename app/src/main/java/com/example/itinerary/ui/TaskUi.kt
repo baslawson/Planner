@@ -297,7 +297,11 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
         }
     }
     val attachmentStore = app.attachmentStore
-    val snapshot = JSONObject().put("id", initial.id).put("title", title).put("notes", notes)
+    // Hunt 27: the task as it was when this draft began, kept in the draft. A draft resumed later (after Android closed
+    // Planner) is checked against it, not against the task as stored now, so a change made meanwhile (a sync pull, a share
+    // added to it) shows the "changed elsewhere" banner instead of being written over without a word.
+    val baseline = remember { draft?.optJSONObject("base")?.let { runCatching { TaskDraftBase.decode(initial, it) }.getOrNull() } ?: initial }
+    val snapshot = JSONObject().put("id", initial.id).put("base", TaskDraftBase.encode(baseline)).put("title", title).put("notes", notes)
         .put("date", date.orEmpty()).put("priority", priority).put("reminderAt", reminderAt ?: JSONObject.NULL)
         .put("ringUntilDismissed", ringUntilDismissed).put("ringSeconds", ringSeconds)
         .put("prerequisiteIds", JSONArray(prerequisiteIds))
@@ -341,7 +345,7 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     val stored by remember { if (creating) kotlinx.coroutines.flow.flowOf(initial) else repo.observeTask(initial.id) }
         .collectAsStateWithLifecycle(initialValue = initial)
     val settled = !creating && !finished && !busy
-    val changedElsewhere = settled && EditorRules.taskChangedElsewhere(initial, stored)
+    val changedElsewhere = settled && EditorRules.taskChangedElsewhere(baseline, stored)
     val deletedElsewhere = settled && stored == null
     var askingStale by remember { mutableStateOf(false) }
     var closeAfterStale by remember { mutableStateOf(false) }

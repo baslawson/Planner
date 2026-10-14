@@ -253,7 +253,7 @@ class NoteSync(
         if (!on) lock.withLock { rows.deleteAll(); _state.value = State() }
     }
 
-    // After a backup is restored (its notes have new history) or the login changes: the next pass links by content.
+    // After a backup is restored (its notes have new history) or the login changes: the next pass pairs the notes by title (the newer wins; words it doesn't hold are kept as a copy).
     suspend fun forget() = lock.withLock { forgetLocked() }
 
     // SY-1 (as TaskSync.paused): runs [block] with no pass under way, and none starting until it's done. A pass works from
@@ -432,6 +432,13 @@ class NoteSync(
         if (!prefs.getBoolean(KEY_RELINKED, false)) { rows.deleteAll(); prefs.edit().putBoolean(KEY_RELINKED, true).apply() }
         val linked = rows.all()
         val local = store.all().associateBy { it.id }
+        // Hunt 27: Nextcloud listing none (or few) of the notes linked to it — another Notes folder chosen there, or a list
+        // that came back empty for a moment — is not taken as all of them deleted there: this pass stops before anything
+        // goes to Recently deleted.
+        val missing = linked.count { it.remoteId !in remote }
+        if (list.isEmpty() && linked.size >= 2 || missing >= MASS_GONE_MIN && missing * 2 > linked.size)
+            throw NotesApiException("Nextcloud Notes no longer lists $missing of the notes synced with it, so nothing was deleted. " +
+                "If you changed its notes folder, change it back, or turn Notes sync off and on again to start afresh.")
 
         suspend fun put(note: PlannerNote, expected: PlannerNote?) = store.put(note, expected).also { if (it) wrote[0] = true }
         suspend fun archive(id: String, expected: PlannerNote) = store.archive(id, expected).also { if (it) wrote[0] = true }
@@ -473,6 +480,21 @@ class NoteSync(
                 !mineChanged -> false
                 kotlin.math.abs(here - theirs.modified) <= 1 -> if (same) { link(mine, theirs); return } else true
                 else -> here > theirs.modified
+            }
+            // Hunt 27: paired by title only (a first sync, or after a restore), the newer still wins (E, user 9 Oct), but when
+            // the other side's words aren't all in it (perhaps two different notes that share a title) they are kept as a
+            // note of their own first (it goes up next pass): the phone's as "(my copy)", Nextcloud's as "(Nextcloud copy)".
+            if (row == null && !theirs.readonly) {
+                val winner = if (phoneWins) mine.content else theirs.content
+                val loser = (if (phoneWins) theirs.content else mine.content).replace("\r\n", "\n").trim()
+                if (loser.isNotEmpty() && !winner.replace("\r\n", "\n").contains(loser)) {
+                    val copy = if (phoneWins) NoteMapping.apply(PlannerNote(), theirs).let {
+                        it.copy(id = java.util.UUID.randomUUID().toString(), title = (Notes.label(it) + " (Nextcloud copy)").take(Notes.MAX_TITLE))
+                    } else mine.copy(id = java.util.UUID.randomUUID().toString(), title = (Notes.label(mine) + " (my copy)").take(Notes.MAX_TITLE),
+                        reminderAt = null, snoozedUntil = null, ringUntilDismissed = false, ringSeconds = 0)
+                    if (!put(copy, null)) return
+                    ownCopies++
+                }
             }
             when {
                 !phoneWins -> take(mine, theirs)
@@ -541,8 +563,14 @@ class NoteSync(
         }
 
         // Nextcloud's notes not linked are new here; Planner's not linked go up as new ones there.
+        // Hunt 27: unless one is a note of Planner's already (same words and title): sent up by a pass whose answer never
+        // came back (a timeout after Nextcloud saved it), it is linked again, not brought in as a second copy (with the
+        // phone's then sent up as a third).
+        val free = store.all().filter { it.id !in linkedLocal && it.id !in pending }.toMutableList()
         for (theirs in list) {
             if (theirs.id in linkedRemote) continue
+            val twin = NoteMapping.twin(free, theirs)
+            if (twin != null) { free.remove(twin); linkedRemote += theirs.id; linkedLocal += twin.id; link(twin, theirs); continue }
             each { if (NoteMapping.fits(theirs)) take(null, theirs) else skipped++ }
         }
         val nowLinked = rows.all().mapTo(HashSet()) { it.noteId }
@@ -560,6 +588,8 @@ class NoteSync(
         private const val KEY_LAST = "last_synced"
         // Set once the links made before Quillpad's logic were cleared (E), so notes are paired by title again once.
         internal const val KEY_RELINKED = "relinked_by_title"
+        // Hunt 27: this many linked notes missing from the list (and over half of them) stops a pass before it deletes any.
+        internal const val MASS_GONE_MIN = 5
         fun prefs(context: Context): android.content.SharedPreferences = context.getSharedPreferences("note_sync", Context.MODE_PRIVATE)
     }
 }

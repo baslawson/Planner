@@ -19,6 +19,13 @@ import java.util.UUID
 // Owns the files behind attachments. Everything is copied into app-private storage so an
 // attachment keeps working after the original is moved or deleted.
 class AttachmentStore(private val context: Context) {
+    private companion object {
+        const val MAX_NAME = 255
+        const val MAX_IMPORT_BYTES = 500L * 1024 * 1024
+        const val MIN_FREE_BYTES = 100L * 1024 * 1024
+        const val SPACE_CHECK_EVERY = 4L * 1024 * 1024
+    }
+
     // For ML Kit, started on first use (DocumentText.index).
     internal val appContext: Context get() = context.applicationContext
 
@@ -74,7 +81,9 @@ class AttachmentStore(private val context: Context) {
             return withContext(Dispatchers.IO) {
                 val resolver = context.contentResolver
                 val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                    ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "Attachment"
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+                    // Hunt 27: a provider's name is kept as the attachment's name: no longer than a name needs to be.
+                    ?.take(MAX_NAME)?.ifBlank { null } ?: "Attachment"
                 val mime = resolver.getType(uri) ?: "application/octet-stream"
                 currentCoroutineContext().ensureActive()
                 val ext = name.substringAfterLast('.', "")
@@ -86,10 +95,20 @@ class AttachmentStore(private val context: Context) {
                 input.use { source ->
                     destination.outputStream().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        // Hunt 27: a share can't fill the phone: one file stops at MAX_IMPORT_BYTES, or once less than
+                        // MIN_FREE_BYTES would be left (the partial copy is removed and the file reported as unreadable).
+                        var copied = 0L
+                        var nextSpaceCheck = 0L
                         while (true) {
                             currentCoroutineContext().ensureActive()
                             val count = source.read(buffer)
                             if (count < 0) break
+                            copied += count
+                            if (copied > MAX_IMPORT_BYTES) throw java.io.IOException("Too big to add")
+                            if (copied >= nextSpaceCheck) {
+                                if ((destination.parentFile?.usableSpace ?: Long.MAX_VALUE) < MIN_FREE_BYTES) throw java.io.IOException("No room to add it")
+                                nextSpaceCheck = copied + SPACE_CHECK_EVERY
+                            }
                             output.write(buffer, 0, count)
                         }
                     }

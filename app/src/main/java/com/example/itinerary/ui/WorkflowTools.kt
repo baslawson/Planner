@@ -241,7 +241,10 @@ fun SharedTextReview(text: String, subject: String?, onClosed: () -> Unit, onNot
     fun choose(value: String) { if (!checking) { checking = true; checkScope.launch { try { chooseChecked(value) } finally { checking = false } } } }
     val dateFormat = LocalDateFormat.current
     val is24Hour = LocalTimeFormat.current.is24Hour(LocalContext.current)
-    if (destination.isEmpty() && toExisting) ShareToExisting(files, if (filesId != null) staged?.caption else text, onBack = { toExisting = false },
+    // Hunt 27: a text share adds the message as a new item would have it (an email's headers down to who sent it, without a
+    // quoted earlier message or a signature), not the raw text.
+    if (destination.isEmpty() && toExisting) ShareToExisting(files,
+        if (filesId != null) staged?.caption else content.getOrNull()?.notes ?: text, onBack = { toExisting = false },
         onAdded = { target, message ->
             android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()
             onAddedTo(target); onDismiss()

@@ -55,7 +55,7 @@ fun ShareToExisting(files: List<Attachment>, text: String?, onBack: () -> Unit, 
         busy = true; error = null
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { app.repository.addShareTo(target, files, text) } }
-                .onSuccess { title -> onAdded(target, addedMessage(files, text, title)) }
+                .onSuccess { (title, fit) -> onAdded(target, addedMessage(files, text, title, fit)) }
                 .onFailure { error = it.message ?: "Couldn't add them there. Try again." }
             busy = false
         }
@@ -92,13 +92,20 @@ fun ShareToExisting(files: List<Attachment>, text: String?, onBack: () -> Unit, 
     }
 }
 
-/** "Added 2 photos to Dentist." / "Added the text to Dentist." */
-fun addedMessage(files: List<Attachment>, text: String?, title: String): String {
+/** "Added 2 photos to Dentist." / "Added the text to Dentist." (Hunt 27: and says when the text was cut or left out.) */
+fun addedMessage(files: List<Attachment>, text: String?, title: String,
+    fit: com.example.itinerary.data.ShareTargets.TextFit = com.example.itinerary.data.ShareTargets.TextFit.ALL): String {
+    val name = title.ifBlank { "it" }
+    if (files.isEmpty() && fit == com.example.itinerary.data.ShareTargets.TextFit.NONE) return "Nothing added: the notes of $name are full."
     val photos = files.isNotEmpty() && files.all { it.mimeType.startsWith("image/") }
     val what = when {
         files.isEmpty() -> "the text"
         files.size == 1 -> if (photos) "the photo" else "the file"
         else -> "${files.size} " + if (photos) "photos" else "files"
     }
-    return "Added $what to ${title.ifBlank { "it" }}."
+    return "Added $what to $name." + when (fit) {
+        com.example.itinerary.data.ShareTargets.TextFit.ALL -> ""
+        com.example.itinerary.data.ShareTargets.TextFit.PART -> " The text was too long to fit, so only its start was added."
+        com.example.itinerary.data.ShareTargets.TextFit.NONE -> " The text wasn't added: the notes there are full."
+    }
 }

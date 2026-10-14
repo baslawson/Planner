@@ -98,7 +98,9 @@ object EditorRules {
         stored != null && stored.id == baseline.id && (stored.title != baseline.title || stored.notes != baseline.notes ||
             stored.dueDate != baseline.dueDate || stored.priority != baseline.priority || stored.reminderAt != baseline.reminderAt ||
             stored.ringUntilDismissed != baseline.ringUntilDismissed || stored.ringSeconds != baseline.ringSeconds ||
-            stored.repeat != baseline.repeat || stored.repeatDays != baseline.repeatDays || stored.checklist != baseline.checklist)
+            stored.repeat != baseline.repeat || stored.repeatDays != baseline.repeatDays || stored.checklist != baseline.checklist ||
+            // Hunt 27: and its files (a share added one meanwhile; Save would drop it and release the file).
+            stored.attachments.map { it.fileName } != baseline.attachments.map { it.fileName })
 
     fun taskChangedElsewhereBanner(): String = "This task was changed elsewhere"
 
