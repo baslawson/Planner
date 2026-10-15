@@ -38,18 +38,20 @@ object UpNext {
     }
 
     /**
-     * Of the events with a time starting after [now] and within a day of it (not skipped, not a bill), the one to act on
-     * first: by when to leave where there's a travel buffer, so a later event with a long journey comes before a nearer
-     * one without (bug hunt 30).
+     * Of the events with a time starting after [now] whose moment to act (leave, or start) is within a day of it (not
+     * skipped, not a bill), the one to act on first: by when to leave where there's a travel buffer, so a later event
+     * with a long journey comes before a nearer one without (bug hunt 30).
      */
     fun next(events: List<ItineraryItem>, now: LocalDateTime): Next? = events.asSequence()
         .filter { it.startTime != null && !it.skipped && it.category != "Bills" }
         .map { it to it.date.atTime(it.startTime!!) }
-        .filter { (_, start) -> start > now && start <= now.plusDays(1) }
+        .filter { (_, start) -> start > now }
         .map { (event, start) ->
             val leave = start.minusMinutes(event.bufferBeforeMinutes.toLong()).takeIf { event.bufferBeforeMinutes > 0 && it > now }
             Next(event, start, leave)
         }
+        // Bug hunt 31: within a day by when to act, so a flight tomorrow with a long journey counts once leaving is near.
+        .filter { it.countdownTo <= now.plusDays(1) }
         .minWithOrNull(compareBy<Next> { it.countdownTo }.thenBy { it.start }.thenBy { it.event.title })
 
     /** Within this long of leaving, the title says "Leave soon"; before that, "Leave at 6:00" (bug hunt 30). */
@@ -70,7 +72,7 @@ object UpNext {
         val alarms = context.getSystemService(AlarmManager::class.java)
         if (!app.settings.upNext.value) { manager.cancel(TAG, 0); alarms?.cancel(pendingIntent(context)); return@withLock }
         val today = LocalDate.now()
-        val events = listOf(today, today.plusDays(1)).flatMap { day ->
+        val events = listOf(today, today.plusDays(1), today.plusDays(2)).flatMap { day ->
             widgetEventsOnDay(app.repository.widgetEvents(day) + app.calendarSync.widgetItems(day), day)
         }.distinctBy { it.id to it.date }
         val now = LocalDateTime.now()
@@ -85,9 +87,13 @@ object UpNext {
         val event = next.event
         val soon = leaveSoon(next, now)
         // Before "Leave soon", it's on again when that starts (bug hunt 30); otherwise when the countdown is over.
-        val again = next.leaveAt?.minusMinutes(SOON_MINUTES)?.takeIf { !soon } ?: next.countdownTo
+        // Bug hunt 31: also at midnight (so "tomorrow" doesn't stay after it), and at least every 6 hours (a later event
+        // whose leaving time comes sooner, if nothing changed meanwhile).
+        val again = listOf(next.leaveAt?.minusMinutes(SOON_MINUTES)?.takeIf { !soon } ?: next.countdownTo,
+            today.plusDays(1).atStartOfDay(), now.plusHours(6)).min()
         // Swiped away (Android 14 lets ongoing ones go): stays away until the next one (bug hunt 30).
-        val key = "${event.id}|${event.title}|${next.start}"
+        // With the travel buffer (bug hunt 31): one added or changed brings it back.
+        val key = "${event.id}|${event.title}|${next.start}|${event.bufferBeforeMinutes}"
         if (dismissed(context) == key) { manager.cancel(TAG, 0); schedule(context, again); return@withLock }
         fun dayWord(at: LocalDateTime) = if (at.toLocalDate() != today) " tomorrow" else ""
         val text = buildList {

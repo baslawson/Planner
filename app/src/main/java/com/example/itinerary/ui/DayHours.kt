@@ -105,7 +105,7 @@ fun DayHours(
     modifier: Modifier = Modifier,
     onDay: (LocalDate) -> Unit = {},
     // Free time shaded on the grid (user, 15 Oct; the "Free" chip): each day's free windows, as Find free time works them out.
-    free: Map<LocalDate, List<com.example.itinerary.data.FreeWindow>> = emptyMap(),
+    free: () -> Map<LocalDate, List<com.example.itinerary.data.FreeWindow>> = { emptyMap() },
 ) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -218,8 +218,7 @@ fun DayHours(
                             creating?.let { c ->
                                 // Bug hunt 30 A1: a hold let go where it started (the drag detector takes the lift, so the
                                 // tap never comes) is the tap's 1-hour event at that hour.
-                                if (kotlin.math.abs(c.dy) >= hourPx / 8) currentOnEmptyHour(days[c.column], LocalTime.of(c.from(hourPx) / 60, c.from(hourPx) % 60), c.length(hourPx))
-                                else currentOnEmptyHour(days[c.column], LocalTime.of((c.touch / 60).toInt().coerceIn(0, 23), 0), 60)
+                                currentOnEmptyHour(days[c.column], LocalTime.of(c.from(hourPx) / 60, c.from(hourPx) % 60), c.length(hourPx))
                             }
                             creating = null
                         },
@@ -239,7 +238,7 @@ fun DayHours(
                 }
                 // Free time, under the events: a band for each free window (taps go through to the hour under it).
                 days.forEachIndexed { dayIndex, day ->
-                    free[day].orEmpty().forEach { window ->
+                    free()[day].orEmpty().forEach { window ->
                         val from = window.start.toLocalTime().let { it.hour * 60 + it.minute }
                         val to = if (window.end.toLocalDate() > day) 24 * 60 else window.end.toLocalTime().let { it.hour * 60 + it.minute }
                         val minutes = to - from
@@ -429,9 +428,14 @@ fun DayHours(
 // the day) and is now [dy] further down. Drawn down, its end follows the finger, on a 15-minute step, at least 15 minutes
 // on; drawn up (bug hunt 30 A5), its start follows the finger and it ends at the end of the 15 minutes first held.
 private data class NewDraw(val column: Int, val start: Int, val touch: Float, val dy: Float = 0f) {
+    // Not moved yet (less than an eighth of an hour): the tap's 1-hour event at the hour held, shown as it would be made
+    // (bug hunt 31: the preview showed the 15 minutes held while letting go made the hour).
+    private fun held(hourPx: Float): Boolean = kotlin.math.abs(dy) < hourPx / 8
+    private fun hour(): Int = (touch / 60).toInt().coerceIn(0, 23) * 60
     private fun finger(hourPx: Float): Int = (Math.round((touch + dy * 60 / hourPx) / DayTimeline.STEP) * DayTimeline.STEP).coerceIn(0, 24 * 60)
-    fun from(hourPx: Float): Int = minOf(start, finger(hourPx))
+    fun from(hourPx: Float): Int = if (held(hourPx)) hour() else minOf(start, finger(hourPx))
     fun length(hourPx: Float): Int {
+        if (held(hourPx)) return 60
         val end = finger(hourPx)
         return if (end > start) (end - start).coerceIn(DayTimeline.STEP, 24 * 60 - start)
             else (start + DayTimeline.STEP - end).coerceAtMost(24 * 60 - end)

@@ -138,7 +138,10 @@ class MoreOct15Test {
         val hour = (56 * density).toInt()
         val x = bounds(described(", Dentist")!!).centerX()
         // 11:20, held and let go in place.
-        hold(x, nine + hour * 2 + hour / 3, x, nine + hour * 2 + hour / 3)
+        // Bug hunt 31: while held in place, the preview is the hour that letting go makes.
+        send(MotionEvent.ACTION_DOWN, x, nine + hour * 2 + hour / 3); Thread.sleep(900)
+        Thread.sleep(300); shot("held-preview")
+        send(MotionEvent.ACTION_UP, x, nine + hour * 2 + hour / 3)
         val held = saveNewAs("Held")
         assertEquals(LocalTime.of(11, 0), held.startTime)
         assertEquals(60, held.durationMinutes)
@@ -213,6 +216,12 @@ class MoreOct15Test {
         UpNext.refresh(app)
         Thread.sleep(1500)
         assertTrue("stays away", manager.activeNotifications.none { it.tag == "up-next" })
+        // Bug hunt 31: turned off and on again, it shows again.
+        app.settings.setUpNext(false)
+        app.settings.setUpNext(true)
+        await("back after on again") { ins.targetContext.getSharedPreferences("up_next", 0).getString("dismissed", null) == null }
+        UpNext.refresh(app)
+        await("shown again") { manager.activeNotifications.any { it.tag == "up-next" } }
         UpNext.setDismissed(app, null)
         app.settings.setUpNext(false)
         UpNext.refresh(app)

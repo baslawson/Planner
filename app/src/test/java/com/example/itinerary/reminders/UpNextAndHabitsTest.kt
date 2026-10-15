@@ -49,6 +49,15 @@ class UpNextAndHabitsTest {
         assertEquals(true, UpNext.leaveSoon(early, day.plusDays(1).atTime(5, 0)))
     }
 
+    // Bug hunt 31: within a day by when to leave, not by the start: a flight in 25 h with a 4-hour journey (leave in
+    // 21 h) comes before an event in 23 h.
+    @Test fun upNextCountsTheDayFromWhenToLeave() {
+        val now = day.atTime(9, 0)
+        val events = listOf(event("Meeting", day.plusDays(1), 8), event("Flight", day.plusDays(1), 10, buffer = 240))
+        assertEquals("Flight", UpNext.next(events, now)!!.event.title)
+        assertNull(UpNext.next(listOf(event("Flight", day.plusDays(1), 10, buffer = 30)), now))
+    }
+
     // Bug hunt 30 B3: an occurrence ticked off then unticked leaves its next one; the habit shows once.
     @Test fun habitShowsOnceAfterUnticking() {
         val a = PlannerTask(id = "a", title = "Gym", dueDate = day, repeat = "WEEKLY", nextTaskId = "b")

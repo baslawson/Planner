@@ -107,15 +107,17 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     // hour, travel buffers counted, all-day events not blocking (they aren't on the grid), only time still ahead.
     val dayHoursFree by dayHoursSettings.dayHoursFree.collectAsStateWithLifecycle()
     // Bug hunt 30 A3: worked out again each minute while shown, so time that has gone (and yesterday's) isn't free.
-    var freeNow by remember { mutableStateOf(java.time.LocalDateTime.now().withSecond(0).withNano(0)) }
+    // Bug hunt 31: the tick is read only inside the grid (through hourFree's derived state), so only the free-time search
+    // runs again each minute, not this whole screen and its busy lists.
+    val freeNow = remember { mutableStateOf(java.time.LocalDateTime.now().withSecond(0).withNano(0)) }
     if (dayHours && dayHoursFree) LaunchedEffect(Unit) {
-        freeNow = java.time.LocalDateTime.now().withSecond(0).withNano(0)
+        freeNow.value = java.time.LocalDateTime.now().withSecond(0).withNano(0)
         while (true) {
             kotlinx.coroutines.delay(60_000L - System.currentTimeMillis() % 60_000L)
-            freeNow = java.time.LocalDateTime.now().withSecond(0).withNano(0)
+            freeNow.value = java.time.LocalDateTime.now().withSecond(0).withNano(0)
         }
     }
-    val hourFree = remember(allItems, hourDays, dayHours, dayHoursFree, freeNow, outsideEvents) {
+    val hourBusy = remember(allItems, hourDays, dayHours, dayHoursFree, outsideEvents) {
         if (!dayHours || !dayHoursFree) emptyMap() else hourDays.associateWith { day ->
             val near = (com.example.itinerary.data.eventsOnDay(allItems, day) + com.example.itinerary.data.eventsOnDay(allItems, day.minusDays(1))).distinctBy { it.id }
             val busy = near.map { item ->
@@ -127,8 +129,15 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                 else item.copy(skipped = false, category = if (item.category == "Bills") "" else item.category,
                     durationMinutes = maxOf(item.durationMinutes ?: 0, com.example.itinerary.data.DayTimeline.MIN_MINUTES))
             }
-            com.example.itinerary.data.FreeTime.find(busy, day, day, java.time.LocalTime.of(8, 0), java.time.LocalTime.of(20, 0), 30,
-                weekdaysOnly = false, blockAllDay = false, unknownMinutes = 30, now = freeNow)
+            busy
+        }
+    }
+    val hourFree = remember(hourBusy) {
+        androidx.compose.runtime.derivedStateOf {
+            hourBusy.mapValues { (day, busy) ->
+                com.example.itinerary.data.FreeTime.find(busy, day, day, java.time.LocalTime.of(8, 0), java.time.LocalTime.of(20, 0), 30,
+                    weekdaysOnly = false, blockAllDay = false, unknownMinutes = 30, now = freeNow.value)
+            }
         }
     }
     val hourTasks = remember(allTasks, hourDays, dayHours) { if (dayHours) hourDays.associateWith { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, it) } else emptyMap() }
@@ -273,7 +282,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         days = hourDays, selected = selected, today = today, events = hourEvents, tasks = hourTasks, outside = outsideEvents,
                         onEvent = { item -> outsideEvents[item.id]?.let { viewingOutside = it } ?: run { editing = item } },
                         onTask = { editingTaskId = it.id },
-                        free = hourFree,
+                        free = { hourFree.value },
                         onEmptyHour = { day, at, minutes ->
                             if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = day, startTime = at, durationMinutes = minutes, title = "",
                                 colorIndex = com.example.itinerary.data.PlanColors.next(com.example.itinerary.data.eventsOnDay(allItems, day)
