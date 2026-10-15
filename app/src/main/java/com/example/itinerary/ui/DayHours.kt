@@ -99,10 +99,13 @@ fun DayHours(
     outside: Map<Long, OutsideInfo>,
     onEvent: (ItineraryItem) -> Unit,
     onTask: (PlannerTask) -> Unit,
-    onEmptyHour: (LocalDate, LocalTime) -> Unit,
+    // A new event on that day at that time, lasting that many minutes (a tap: the hour, 60; a hold and drag: what was drawn).
+    onEmptyHour: (LocalDate, LocalTime, Int) -> Unit,
     onMove: (ItineraryItem, LocalDate, LocalTime, Int?) -> Unit,
     modifier: Modifier = Modifier,
     onDay: (LocalDate) -> Unit = {},
+    // Free time shaded on the grid (user, 15 Oct; the "Free" chip): each day's free windows, as Find free time works them out.
+    free: Map<LocalDate, List<com.example.itinerary.data.FreeWindow>> = emptyMap(),
 ) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -140,6 +143,8 @@ fun DayHours(
         var viewport by remember { mutableIntStateOf(0) }
         // The event being dragged, and how far; its block is drawn where it would land.
         var drag by remember { mutableStateOf<GridDrag?>(null) }
+        // A new event being drawn on an empty spot (drag to create).
+        var creating by remember { mutableStateOf<NewDraw?>(null) }
         // -1 / 1 while a drag is held near the top / bottom edge, which scrolls the grid (and the drag with it).
         var edge by remember { mutableFloatStateOf(0f) }
         LaunchedEffect(days.first(), days.size) {
@@ -156,6 +161,7 @@ fun DayHours(
                 val step = edge * hourPx / 12
                 val moved = scroll.scrollBy(step)
                 drag = drag?.let { it.copy(dy = it.dy + moved) }
+                creating = creating?.let { it.copy(dy = it.dy + moved) }
             }
         }
         // Right to left, the columns run the other way: a drag rightwards goes back a day.
@@ -184,12 +190,41 @@ fun DayHours(
                 val columnPx = with(density) { columnWidth.toPx() }
                 // The hours, and an empty spot to tap for a new event at that hour (on that day, in the week).
                 // Bug hunt 29 G3: keyed on the column width too (a rotation or a resized window changes it).
+                fun columnAt(x: Float, width: Int) = (((if (rtl) width - x else x) - with(density) { GUTTER.toPx() }) / columnPx).toInt().coerceIn(0, days.lastIndex)
                 Column(Modifier.fillMaxWidth().pointerInput(days, columnPx, rtl) {
                     detectTapGestures { at ->
-                        val x = if (rtl) size.width - at.x else at.x
-                        val column = ((x - GUTTER.toPx()) / columnPx).toInt().coerceIn(0, days.lastIndex)
-                        currentOnEmptyHour(days[column], LocalTime.of((at.y / hourPx).toInt().coerceIn(0, 23), 0))
+                        currentOnEmptyHour(days[columnAt(at.x, size.width)], LocalTime.of((at.y / hourPx).toInt().coerceIn(0, 23), 0), 60)
                     }
+                }.pointerInput(days, columnPx, rtl) {
+                    // Drag to create (user, 15 Oct): hold an empty spot and drag down (or up) to draw the new event, in
+                    // 15-minute steps; let go and it opens as a new event of that length. Held near the top or bottom,
+                    // the grid scrolls on (bug hunt 30 A5).
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { at ->
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val start = (DayTimeline.movedStart(0, at.y * 60 / hourPx - DayTimeline.STEP / 2f))
+                            creating = NewDraw(columnAt(at.x, size.width), start, at.y * 60 / hourPx)
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            creating = creating?.let { it.copy(dy = it.dy + amount.y) }
+                            val y = change.position.y - scroll.value
+                            val travelled = creating?.let { kotlin.math.abs(it.dy) } ?: 0f
+                            edge = if (travelled < edgePx / 2) 0f
+                                else when { y < edgePx && amount.y < 0f -> -1f; y > viewport - edgePx && amount.y > 0f -> 1f; else -> if (y < edgePx || y > viewport - edgePx) edge else 0f }
+                        },
+                        onDragEnd = {
+                            edge = 0f
+                            creating?.let { c ->
+                                // Bug hunt 30 A1: a hold let go where it started (the drag detector takes the lift, so the
+                                // tap never comes) is the tap's 1-hour event at that hour.
+                                if (kotlin.math.abs(c.dy) >= hourPx / 8) currentOnEmptyHour(days[c.column], LocalTime.of(c.from(hourPx) / 60, c.from(hourPx) % 60), c.length(hourPx))
+                                else currentOnEmptyHour(days[c.column], LocalTime.of((c.touch / 60).toInt().coerceIn(0, 23), 0), 60)
+                            }
+                            creating = null
+                        },
+                        onDragCancel = { edge = 0f; creating = null },
+                    )
                 }) {
                     for (hour in 0 until 24) {
                         Row(Modifier.fillMaxWidth().height(HOUR_HEIGHT)) {
@@ -201,6 +236,27 @@ fun DayHours(
                 }
                 if (week) for (column in 1 until days.size) {
                     Box(Modifier.offset(x = GUTTER + columnWidth * column).width(1.dp).height(HOUR_HEIGHT * 24).background(colors.outlineVariant))
+                }
+                // Free time, under the events: a band for each free window (taps go through to the hour under it).
+                days.forEachIndexed { dayIndex, day ->
+                    free[day].orEmpty().forEach { window ->
+                        val from = window.start.toLocalTime().let { it.hour * 60 + it.minute }
+                        val to = if (window.end.toLocalDate() > day) 24 * 60 else window.end.toLocalTime().let { it.hour * 60 + it.minute }
+                        val minutes = to - from
+                        if (minutes > 0) Box(
+                            Modifier
+                                .offset(x = GUTTER + columnWidth * dayIndex, y = HOUR_HEIGHT * (from / 60f))
+                                .width(columnWidth - 2.dp)
+                                .height(HOUR_HEIGHT * (minutes / 60f))
+                                .background(colors.tertiary.copy(alpha = 0.10f))
+                                .border(1.dp, colors.tertiary.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                                // Bug hunt 30 A6: one node, read once (not also its "Free · 2 h").
+                                .clearAndSetSemantics { contentDescription = "Free from ${time(from)} to ${time(to % (24 * 60))}" }
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                        ) {
+                            if (!week) Text("Free · ${durationLabel(minutes)}", style = MaterialTheme.typography.labelSmall, color = colors.tertiary, maxLines = 1)
+                        }
+                    }
                 }
                 days.forEachIndexed { dayIndex, day ->
                     // Bug hunt 29 G4: each block keeps its own state (and gesture) when others are added before it.
@@ -280,7 +336,9 @@ fun DayHours(
                                 .padding(horizontal = if (week) 3.dp else 6.dp, vertical = 2.dp),
                         ) {
                             Column {
-                                Text(item.title.ifBlank { "Untitled" }, style = if (week) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
+                                Text(item.title.ifBlank { "Untitled" }, // Narrow week columns break long words with a hyphen ("Den-tist"), not anywhere (user, 15 Oct).
+                                    style = if (week) MaterialTheme.typography.labelSmall.copy(hyphens = androidx.compose.ui.text.style.Hyphens.Auto,
+                                        lineBreak = androidx.compose.ui.text.style.LineBreak.Paragraph) else MaterialTheme.typography.labelLarge,
                                     maxLines = if (height > 40.dp) (if (week) 3 else 2) else 1, overflow = TextOverflow.Ellipsis)
                                 if (height > 44.dp && !week) Text(range, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1)
                             }
@@ -310,6 +368,25 @@ fun DayHours(
                             }
                         }
                     } }
+                }
+                // The new event being drawn, with its times.
+                creating?.let { c ->
+                    val length = c.length(hourPx)
+                    val from = c.from(hourPx)
+                    Box(
+                        Modifier
+                            .offset(x = GUTTER + columnWidth * c.column, y = HOUR_HEIGHT * (from / 60f))
+                            .width(columnWidth - 2.dp)
+                            .height(HOUR_HEIGHT * (length / 60f) - 2.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.primary.copy(alpha = 0.25f))
+                            .border(2.dp, colors.primary, RoundedCornerShape(6.dp))
+                            .clearAndSetSemantics { }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    ) {
+                        Text((if (week) "" else "New event · ") + "${time(from)} to ${time((from + length) % (24 * 60))}",
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                    }
                 }
                 // Where the dragged event would land, with its new times.
                 drag?.let { current ->
@@ -348,6 +425,19 @@ fun DayHours(
 }
 
 // [start]: the event's own start (minutes into the day), which a move or stretch counts from.
+// A new event being drawn: in [column], from [start] (minutes into the day); the finger went down at [touch] (minutes into
+// the day) and is now [dy] further down. Drawn down, its end follows the finger, on a 15-minute step, at least 15 minutes
+// on; drawn up (bug hunt 30 A5), its start follows the finger and it ends at the end of the 15 minutes first held.
+private data class NewDraw(val column: Int, val start: Int, val touch: Float, val dy: Float = 0f) {
+    private fun finger(hourPx: Float): Int = (Math.round((touch + dy * 60 / hourPx) / DayTimeline.STEP) * DayTimeline.STEP).coerceIn(0, 24 * 60)
+    fun from(hourPx: Float): Int = minOf(start, finger(hourPx))
+    fun length(hourPx: Float): Int {
+        val end = finger(hourPx)
+        return if (end > start) (end - start).coerceIn(DayTimeline.STEP, 24 * 60 - start)
+            else (start + DayTimeline.STEP - end).coerceAtMost(24 * 60 - end)
+    }
+}
+
 private data class GridDrag(val block: DayTimeline.Block, val dayIndex: Int, val resize: Boolean, val start: Int, val dx: Float = 0f, val dy: Float = 0f)
 
 // The week's heading row: each day's weekday and date (a tap picks it), then its all-day events and tasks, two at most.

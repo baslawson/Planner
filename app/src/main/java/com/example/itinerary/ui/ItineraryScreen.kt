@@ -44,11 +44,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.itinerary.data.ItineraryItem
 import com.example.itinerary.data.OutsideCalendars
+import com.example.itinerary.data.busyItem
 import com.example.itinerary.data.plannerCopy
 import java.time.LocalDate
 import kotlinx.coroutines.launch
@@ -100,6 +103,34 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
         else listOf(selected)
     }
     val hourEvents = remember(allItems, hourDays, dayHours) { if (dayHours) hourDays.associateWith { com.example.itinerary.data.eventsOnDay(allItems, it) } else emptyMap() }
+    // Free time on the grid (the Free chip): as Find free time would find it with its defaults, but from 8 to 8 and from half an
+    // hour, travel buffers counted, all-day events not blocking (they aren't on the grid), only time still ahead.
+    val dayHoursFree by dayHoursSettings.dayHoursFree.collectAsStateWithLifecycle()
+    // Bug hunt 30 A3: worked out again each minute while shown, so time that has gone (and yesterday's) isn't free.
+    var freeNow by remember { mutableStateOf(java.time.LocalDateTime.now().withSecond(0).withNano(0)) }
+    if (dayHours && dayHoursFree) LaunchedEffect(Unit) {
+        freeNow = java.time.LocalDateTime.now().withSecond(0).withNano(0)
+        while (true) {
+            kotlinx.coroutines.delay(60_000L - System.currentTimeMillis() % 60_000L)
+            freeNow = java.time.LocalDateTime.now().withSecond(0).withNano(0)
+        }
+    }
+    val hourFree = remember(allItems, hourDays, dayHours, dayHoursFree, freeNow, outsideEvents) {
+        if (!dayHours || !dayHoursFree) emptyMap() else hourDays.associateWith { day ->
+            val near = (com.example.itinerary.data.eventsOnDay(allItems, day) + com.example.itinerary.data.eventsOnDay(allItems, day.minusDays(1))).distinctBy { it.id }
+            val busy = near.map { item ->
+                // A2: an outside timed event over a day (kept as all-day) is busy for its real times, as in Find free time.
+                outsideEvents[item.id]?.let { it.event.busyItem(it.color) } ?: item
+            }.map { item ->
+                // A4: whatever the grid draws as a block isn't free under it (bills, skipped ones, and at least its 30 minutes).
+                if (item.startTime == null) item
+                else item.copy(skipped = false, category = if (item.category == "Bills") "" else item.category,
+                    durationMinutes = maxOf(item.durationMinutes ?: 0, com.example.itinerary.data.DayTimeline.MIN_MINUTES))
+            }
+            com.example.itinerary.data.FreeTime.find(busy, day, day, java.time.LocalTime.of(8, 0), java.time.LocalTime.of(20, 0), 30,
+                weekdaysOnly = false, blockAllDay = false, unknownMinutes = 30, now = freeNow)
+        }
+    }
     val hourTasks = remember(allTasks, hourDays, dayHours) { if (dayHours) hourDays.associateWith { com.example.itinerary.data.CalendarChips.tasksOnDay(allTasks, it) } else emptyMap() }
     val blockerCounts = remember(allTasks) { taskBlockerCounts(allTasks) }
     val streaks = remember(allTasks) { com.example.itinerary.data.TaskStreaks.streaks(allTasks) }
@@ -235,16 +266,20 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                     if (!maximised) sizeBar()
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
-                    DayHeader(date = selected, hours = dayHours, onHours = dayHoursSettings::setDayHours)
+                    DayHeader(date = selected, hours = dayHours, onHours = dayHoursSettings::setDayHours,
+                        free = dayHoursFree.takeIf { dayHours }, onFree = dayHoursSettings::setDayHoursFree)
                     // The day on an hour grid (DayHours) unless events are being selected, which only the list shows.
                     if (dayHours && !selection.active) DayHours(
                         days = hourDays, selected = selected, today = today, events = hourEvents, tasks = hourTasks, outside = outsideEvents,
                         onEvent = { item -> outsideEvents[item.id]?.let { viewingOutside = it } ?: run { editing = item } },
                         onTask = { editingTaskId = it.id },
-                        onEmptyHour = { day, at ->
-                            if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = day, startTime = at, durationMinutes = 60, title = "",
+                        free = hourFree,
+                        onEmptyHour = { day, at, minutes ->
+                            if (newEvent.adding == null) newEvent.start(ItineraryItem(tripId = 0L, date = day, startTime = at, durationMinutes = minutes, title = "",
                                 colorIndex = com.example.itinerary.data.PlanColors.next(com.example.itinerary.data.eventsOnDay(allItems, day)
                                     .filter { it.customColor == null }.map { it.colorIndex }, com.example.itinerary.data.PlanColors.EVENT_COUNT)))
+                            // Bug hunt 30 A5: not dropped without a word when a new event is already open.
+                            else android.widget.Toast.makeText(moveContext, "Save or close the new event first.", android.widget.Toast.LENGTH_SHORT).show()
                         },
                         onMove = { item, day, at, length ->
                             moveScope.launch {
@@ -296,8 +331,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                     // The whole height: the + button can be dragged off whatever it covers.
                     calendar()
                 } else if (sideBySide) Row(Modifier.fillMaxSize()) {
+                    // The week on the hour grid gets two thirds of a landscape screen (user, 15 Oct), so its columns have room.
+                    val weekGrid = dayHours && calendarCollapsed && !selection.active
                     ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxHeight()) { calendar() }
-                    Column(Modifier.weight(1f).fillMaxHeight()) { dayList() }
+                    Column(Modifier.weight(if (weekGrid) 2f else 1f).fillMaxHeight()) { dayList() }
                 } else Column(Modifier.fillMaxSize()) {
                     calendar()
                     dayList()
@@ -359,17 +396,40 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 
 @Composable
 // The day's heading, with List | Hours to see the day as a list or on an hour grid (DayHours) when [hours] is given.
-private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+// [free]: the Free chip (shades free time on the hour grid), shown only with Hours on; null hides it.
+private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}, free: Boolean? = null, onFree: (Boolean) -> Unit = {}) {
+    // Bug hunt 30 A7: the chips go under the date when both don't fit side by side (a narrow phone, large text).
+    androidx.compose.ui.layout.Layout(content = {
         HeadingText(
             date.dayLabel(LocalDateFormat.current),
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.weight(1f).padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
-        if (hours != null) Row(Modifier.padding(end = 12.dp).selectableGroup()) {
-            listOf(false to "List", true to "Hours").forEach { (value, label) ->
-                androidx.compose.material3.FilterChip(selected = hours == value, onClick = { onHours(value) }, label = { Text(label) },
-                    modifier = Modifier.padding(start = 4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (hours != null) Row(Modifier.padding(end = if (free != null) 4.dp else 12.dp).selectableGroup()) {
+                listOf(false to "List", true to "Hours").forEach { (value, label) ->
+                    androidx.compose.material3.FilterChip(selected = hours == value, onClick = { onHours(value) }, label = { Text(label) },
+                        modifier = Modifier.padding(start = 4.dp))
+                }
+            }
+            if (free != null) androidx.compose.material3.FilterChip(selected = free, onClick = { onFree(!free) }, label = { Text("Free") },
+                modifier = Modifier.padding(end = 12.dp).semantics { contentDescription = "Show free time" })
+        }
+    }) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val chips = measurables[1].measure(loose)
+        val side = measurables[0].maxIntrinsicWidth(constraints.maxHeight) + chips.width <= constraints.maxWidth
+        val heading = measurables[0].measure(loose.copy(minWidth = if (side) constraints.maxWidth - chips.width else constraints.maxWidth,
+            maxWidth = if (side) constraints.maxWidth - chips.width else constraints.maxWidth))
+        val tuck = if (side) 0 else 12.dp.roundToPx()
+        val height = if (side) maxOf(heading.height, chips.height) else heading.height + chips.height - tuck
+        layout(constraints.maxWidth, height) {
+            if (side) {
+                heading.placeRelative(0, (height - heading.height) / 2)
+                chips.placeRelative(constraints.maxWidth - chips.width, (height - chips.height) / 2)
+            } else {
+                heading.placeRelative(0, 0)
+                chips.placeRelative(constraints.maxWidth - chips.width, heading.height - tuck)
             }
         }
     }

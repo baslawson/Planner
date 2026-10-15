@@ -276,6 +276,14 @@ fun SettingsScreen(
                         onDismiss = { choosingEveningTime = false },
                         onConfirm = { at -> settings.setEveningSummary(true, at); choosingEveningTime = false },
                     )
+                    // Up next (UpNext): the next event with a countdown, in a notification that stays.
+                    val upNext by settings.upNext.collectAsStateWithLifecycle()
+                    SwitchRow("Up next", upNext, { settings.setUpNext(it) })
+                    Text("A quiet notification that stays, with your next event and a countdown to it (or to when to leave, " +
+                        "for an event with travel time before it).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (upNext && !notifications.enabled) Text("Notifications are off, so it won't show. Turn them on above.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     StackedButton("Send test notification") {
                         if (!sendTestNotification(context)) {
                             Toast.makeText(context, "Notifications are off", Toast.LENGTH_SHORT).show()

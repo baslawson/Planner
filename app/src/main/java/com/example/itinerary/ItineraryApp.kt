@@ -43,7 +43,7 @@ class ItineraryApp : Application() {
     val repository: Repository by lazy {
         Repository(database, attachmentStore, reminderScheduler,
             // S6-5: what a sync pull wrote is no change to send (see SyncWrite).
-            onChanged = { local -> com.example.itinerary.widget.TodayWidget.requestUpdate(this); if (local) sendChanges() },
+            onChanged = { local -> dataChanged(); if (local) sendChanges() },
             onDeletionFinished = { sendChanges() }, shareScope = appScope,
             onBudgetMessages = { if (settings.sendBillsToBudget.value) budgetOutbox.add(it) })
     }
@@ -77,13 +77,19 @@ class ItineraryApp : Application() {
     // Work that must finish even when the screen that started it closes or rotates (calendar sync).
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
+    // Planner's data or the other calendars changed: the widgets and Up next show it.
+    private fun dataChanged() {
+        com.example.itinerary.widget.TodayWidget.requestUpdate(this)
+        com.example.itinerary.reminders.UpNext.request(this)
+    }
+
     val phoneCalendars: com.example.itinerary.data.AndroidPhoneCalendars by lazy { com.example.itinerary.data.AndroidPhoneCalendars(this) }
 
     // Other calendars shown read-only beside Planner's own events (Nextcloud on the backup login, the phone's, links), and
     // two-way sync with one Nextcloud calendar.
     val calendarSync: CalendarSync by lazy {
         CalendarSync(database, NextcloudAccountStore(this), client = com.example.itinerary.data.NextcloudClient(http),
-            linkClient = com.example.itinerary.data.CalendarLinkClient(http), onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) },
+            linkClient = com.example.itinerary.data.CalendarLinkClient(http), onChanged = { dataChanged() },
             phone = phoneCalendars, scope = appScope, planner = repository.asPlannerStore(),
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.items }.mapTo(HashSet()) { it.id } })
             .also { it.tasks = taskSync }
@@ -94,7 +100,7 @@ class ItineraryApp : Application() {
         com.example.itinerary.data.TaskSync(database, NextcloudAccountStore(this), client = { calendarSync.client },
             store = repository.asTaskStore(), scope = appScope,
             pendingDeleted = { repository.pendingDeletions.value.flatMap { it.tasks }.mapTo(HashSet()) { it.id } },
-            onChanged = { com.example.itinerary.widget.TodayWidget.requestUpdate(this) })
+            onChanged = { dataChanged() })
     }
 
     // Two-way sync of notes with the Nextcloud Notes app, on the same login; off until switched on in Notes.
@@ -106,7 +112,7 @@ class ItineraryApp : Application() {
 
     // Messages for MyBudget not answered yet (see BudgetOutbox).
     val budgetOutbox by lazy { com.example.itinerary.data.BudgetOutbox(this) }
-    val settings: SettingsRepository by lazy { SettingsRepository(this) { com.example.itinerary.widget.TodayWidget.requestUpdate(this) } }
+    val settings: SettingsRepository by lazy { SettingsRepository(this) { dataChanged() } }
 
     val backup: BackupManager by lazy { BackupManager(this, repository, attachmentStore, settings, calendarSync, taskSync, noteSync) }
 
@@ -151,6 +157,8 @@ class ItineraryApp : Application() {
             kotlinx.coroutines.flow.combine(settings.morningSummary, settings.morningSummaryAt, settings.eveningSummary, settings.eveningSummaryAt) { a, b, c, d -> listOf(a, b, c, d) }
                 .collect { com.example.itinerary.reminders.MorningSummary.schedule(this@ItineraryApp) }
         }
+        // Up next follows its switch (and is worked out again on every start).
+        appScope.launch { settings.upNext.collect { com.example.itinerary.reminders.UpNext.request(this@ItineraryApp) } }
         // Birthday reminders come at the morning summary's time, so they follow that too.
         appScope.launch {
             kotlinx.coroutines.flow.combine(settings.birthdayReminderDays, settings.morningSummaryAt) { days, at -> days to at }

@@ -290,6 +290,22 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _dayHours.value = hours
     }
 
+    // Free time shaded on the hour grid (user, 15 Oct; the "Free" chip by List | Hours). Off until chosen.
+    private val _dayHoursFree = MutableStateFlow(prefs.getBoolean(KEY_DAY_HOURS_FREE, false))
+    val dayHoursFree: StateFlow<Boolean> = _dayHoursFree.asStateFlow()
+    fun setDayHoursFree(on: Boolean) {
+        prefs.edit { putBoolean(KEY_DAY_HOURS_FREE, on) }
+        _dayHoursFree.value = on
+    }
+
+    // "Up next" (user, 15 Oct; UpNext): the next event with a countdown in a notification that stays. Off until chosen.
+    private val _upNext = MutableStateFlow(prefs.getBoolean(KEY_UP_NEXT, false))
+    val upNext: StateFlow<Boolean> = _upNext.asStateFlow()
+    fun setUpNext(on: Boolean) {
+        prefs.edit { putBoolean(KEY_UP_NEXT, on) }
+        _upNext.value = on
+    }
+
     // The last day a summary was shown, so an alarm that fires twice (a time change) doesn't show it twice.
     var morningSummaryShownOn: String?
         get() = prefs.getString(KEY_MORNING_SUMMARY_SHOWN, null)
@@ -609,6 +625,8 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_BIRTHDAY_REMINDER_DAYS = "birthday_reminder_days"
         const val KEY_BIRTHDAY_REMINDERS_SHOWN = "birthday_reminders_shown"
         const val KEY_DAY_HOURS = "day_hours"
+        const val KEY_DAY_HOURS_FREE = "day_hours_free"
+        const val KEY_UP_NEXT = "up_next"
         const val KEY_HIDDEN_CATEGORIES = "hidden_categories"
         const val KEY_UPCOMING_ON_TOP = "upcoming_on_top"
         const val KEY_UPCOMING_DAYS = "upcoming_days"

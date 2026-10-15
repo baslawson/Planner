@@ -73,6 +73,11 @@ fun createReminderChannel(context: Context) {
             description = "Your contacts' birthdays, as many days ahead as chosen in Calendars"
         },
     )
+    manager.createNotificationChannel(
+        NotificationChannel(UP_NEXT_CHANNEL_ID, "Up next", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "The next event, with a countdown, in a notification that stays"
+        },
+    )
     // Left over from an update: taken away, so they don't stay in Android's settings with nothing on them.
     OLD_CHIME_CHANNELS.forEach { id -> runCatching { manager.deleteNotificationChannel(id) } }
 }

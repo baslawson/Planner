@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -116,11 +117,17 @@ fun OverlayMenuAnchor(title: String, items: @Composable ColumnScope.(close: () -
 fun MoreOptionsButton(planningTools: PlanningToolsState, onThemes: () -> Unit, onSettings: () -> Unit, onNotes: () -> Unit) {
     var reporting by rememberSaveable { mutableStateOf(false) }
     if (reporting) ReportBugDialog { reporting = false }
+    var habits by rememberSaveable { mutableStateOf(false) }
+    if (habits) HabitsDialog { habits = false }
     OverlayMenuAnchor(title = "More options", items = { close ->
         DropdownMenuItem(text = { Text("Notes") },
             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
             onClick = { close(); onNotes() })
         PlanningToolMenuItems(planningTools) { close() }
+        // Repeating tasks and their streaks (user, 15 Oct).
+        DropdownMenuItem(text = { Text("Habits") },
+            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+            onClick = { close(); habits = true })
         DropdownMenuItem(text = { Text("Themes") },
             leadingIcon = { Icon(painterResource(R.drawable.action_palette), contentDescription = null) },
             onClick = { close(); onThemes() })

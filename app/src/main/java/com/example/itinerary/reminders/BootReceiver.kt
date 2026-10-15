@@ -26,6 +26,7 @@ class BootReceiver : BroadcastReceiver() {
         // The summaries' and birthday reminders' alarms too: a reboot or an update clears them, and a time change moves when they are due.
         runCatching { MorningSummary.schedule(context) }
         runCatching { BirthdayReminders.schedule(context) }
+        runCatching { UpNext.request(context) }
         val app = context.applicationContext as ItineraryApp
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {

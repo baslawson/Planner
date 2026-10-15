@@ -128,6 +128,7 @@
         <receiver android:name=".reminders.SnoozeReceiver" android:exported="false" />
         <receiver android:name=".reminders.MorningSummaryReceiver" android:exported="false" />
         <receiver android:name=".reminders.BirthdayReminderReceiver" android:exported="false" />
+        <receiver android:name=".reminders.UpNextReceiver" android:exported="false" />
 
         <!-- Plays the looping alarm sound; a media-playback foreground service keeps it alive while it rings. -->
         <service
