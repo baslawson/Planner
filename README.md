@@ -10,10 +10,10 @@ Enjoying Planner? Buy me a coffee to help support its development. Thank you!
 
 ## Features
 
-- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it (an event on several days as one bar across them; hold an entry and drag it to another day to move it, or hold it at the edge to carry it into the next month), the day or the whole week can be shown on an hour grid (hold an event to drag it to another time or day, or drag its bottom edge to make it longer), and the + button can be dragged anywhere. Any entry can be moved to a chosen day from its ⋮ menu.
+- Agenda and calendar views for events, tasks and bills; the month can fill the screen with each day's entries shown in it (an event on several days as one bar across them; hold an entry and drag it to another day to move it, or hold it at the edge to carry it into the next month), the day or the whole week can be shown on an hour grid (hold an event to drag it to another time or day, or drag its bottom edge to make it longer; hold an empty spot and drag to draw a new event; the Free chip shades the free time between 8:00 and 20:00), and the + button can be dragged anywhere. Any entry can be moved to a chosen day from its ⋮ menu.
 - Offline natural-language Quick entry with editable previews.
-- Turn a task into an event or an event into a task, Undo/Redo while typing in the editors, and templates for one event or a set of events (a weekend away, added again from any day). Repeating tasks show their streak ("🔥 5 in a row").
-- Reminders that ring through silent and vibrate mode for a length chosen on each one (10 s, 30 s, 1 min or until stopped; or the plain notification sound), also after a restart before the phone is unlocked, recurring entries, calendar file import (.ics, including repeating events) and free-time search, a "When to leave" reminder for events with travel time, and optional summaries of the day ahead in the morning and of tomorrow in the evening, with Mark done and Mark paid buttons.
+- Turn a task into an event or an event into a task, Undo/Redo while typing in the editors, and templates for one event or a set of events (a weekend away, added again from any day). Repeating tasks show their streak ("🔥 5 in a row"), and a Habits page shows how often each was done on time.
+- Reminders that ring through silent and vibrate mode for a length chosen on each one (10 s, 30 s, 1 min or until stopped; or the plain notification sound), also after a restart before the phone is unlocked, recurring entries, calendar file import (.ics, including repeating events) and free-time search, a "When to leave" reminder for events with travel time, optional summaries of the day ahead in the morning and of tomorrow in the evening, with Mark done and Mark paid buttons, and an optional "Up next" notification counting down to the next event (or to when to leave for it).
 - Calendars beside your own: Nextcloud, the calendars on your phone, your contacts' birthdays (with optional reminders and Message and Call buttons) and calendar links, shown read-only; one Nextcloud calendar can be kept in sync both ways, automatically while Planner is open.
 - Notes in Markdown with checklists, notebooks, tags, colours, attachments and reminders; optional two-way sync with the Nextcloud Notes app (and so with Quillpad).
 - Document and bill scanning with cropping and on-device text recognition.
@@ -45,7 +45,7 @@ Screenshots from the app using fictional demo entries. Shown in the Matrix Green
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/Planner"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Release tags match the app's version (tag `v0.0.41` is version 0.0.41), so Obtainium can tell when an update is available.
+Release tags match the app's version (tag `v0.0.42` is version 0.0.42), so Obtainium can tell when an update is available.
 
 From 0.0.2 the app ID is `io.github.baslawson.planner` and releases are signed with a dedicated release key. Earlier builds (`com.example.itinerary`) are a separate app: export a backup from the old app, restore it in the new one, then uninstall the old one.
 
