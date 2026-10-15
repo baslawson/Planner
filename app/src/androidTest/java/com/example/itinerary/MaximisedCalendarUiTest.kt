@@ -119,6 +119,22 @@ class MaximisedCalendarUiTest {
         await("month again") { find("Calendar: month")?.isSelected == true }
         assertFalse(app.settings.calendarCollapsed.value)
         assertFalse(app.settings.calendarMaximised.value)
+
+        // The arrows at the left end do what the swipe does, and are greyed out at the smallest and biggest size.
+        // The button itself carries the label (IconButton merges its icon), so its own enabled state is the one read.
+        fun arrow(label: String) = nodes().firstOrNull { it.contentDescription?.toString() == label }
+        click("Smaller calendar")
+        await("arrow to week") { app.settings.calendarCollapsed.value && find("Calendar: week")?.isSelected == true }
+        await("up greyed at week") { arrow("Smaller calendar")?.isEnabled == false && arrow("Bigger calendar")?.isEnabled == true }
+        click("Bigger calendar")
+        await("arrow to month") { !app.settings.calendarCollapsed.value && find("Calendar: month")?.isSelected == true }
+        click("Bigger calendar")
+        await("arrow to full") { app.settings.calendarMaximised.value && find("Calendar: full screen")?.isSelected == true }
+        await("down greyed at full") { arrow("Bigger calendar")?.isEnabled == false && arrow("Smaller calendar")?.isEnabled == true }
+        shot("arrows-full")
+        click("Smaller calendar")
+        await("arrow back to month") { !app.settings.calendarMaximised.value && find("Calendar: month")?.isSelected == true }
+        shot("arrows-month")
     }
 
     // An event on several days is one bar per week row (drawn over the cells, hidden from TalkBack): each day it covers

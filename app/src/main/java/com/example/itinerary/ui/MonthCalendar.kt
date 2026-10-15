@@ -32,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -405,11 +407,12 @@ enum class CalendarSize(val label: String, val description: String) {
     val bigger: CalendarSize get() = entries[(ordinal + 1).coerceAtMost(entries.lastIndex)]
 }
 
-// Sits on the line under the calendar: a Week | Month | Full switch, the current size filled in, and a "Today" pill at
-// the right end while there is somewhere to jump back from. A swipe down on the bar makes the calendar one size
-// bigger, a swipe up one size smaller. The two parts are measured before they are placed, so large text cannot make
-// them overlap: the switch stays centred while there is room, slides left to make room when there isn't, and if even
-// that is not enough "Today" drops to its own row below, still on the right.
+// Sits on the line under the calendar: ▲ ▼ arrows at the start, a Week | Month | Full switch, the current size filled
+// in, and a "Today" pill at the end while there is somewhere to jump back from (mirrored right to left). The arrows,
+// like a swipe up or down on the bar, make the calendar one size smaller or bigger. The three parts are measured before
+// they are placed, so large text cannot make them overlap: the switch stays centred while there is room, slides towards
+// the arrows to make room for "Today" when there isn't, and if even that is not enough "Today" drops to its own row
+// below, still at the end; if the switch can't go beside the arrows at all, it has its own row under them.
 @Composable
 fun CalendarSizeBar(
     size: CalendarSize,
@@ -437,10 +440,18 @@ fun CalendarSizeBar(
                         }
                     },
                 )
-            }
-            .padding(vertical = 8.dp),
+            },
         content = {
             HorizontalDivider(color = colors.outlineVariant)
+            // The swipe, seen: up one size smaller, down one size bigger, greyed out at Week and at Full.
+            Row {
+                IconButton(onClick = { onSize(size.smaller) }, enabled = size != size.smaller) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Smaller calendar")
+                }
+                IconButton(onClick = { onSize(size.bigger) }, enabled = size != size.bigger) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Bigger calendar")
+                }
+            }
             Row(
                 Modifier
                     .clip(RoundedCornerShape(50))
@@ -489,33 +500,50 @@ fun CalendarSizeBar(
     ) { measurables, constraints ->
         val width = constraints.maxWidth
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
-        val toggle = measurables[1].measure(loose)
-        val today = measurables.getOrNull(2)?.measure(loose)
+        val arrows = measurables[1].measure(loose)
+        val toggle = measurables[2].measure(loose)
+        val today = measurables.getOrNull(3)?.measure(loose)
         val edge = 16.dp.roundToPx()
         val gap = 8.dp.roundToPx()
+        val pad = 8.dp.roundToPx()
+        // The arrows sit at the left end (their buttons have their own inner space); the switch never goes left of them.
+        val leftmost = 4.dp.roundToPx() + arrows.width + gap
 
-        var toggleX = (width - toggle.width) / 2
+        // At the biggest text the switch can be too wide to go beside the arrows: it then has its own row under them,
+        // centred, and "Today" stays on the arrows' row at the right.
+        if (leftmost + toggle.width > width - 4.dp.roundToPx()) {
+            val lineHeight = maxOf(arrows.height, if (today != null) today.height + 2 * pad else 0)
+            val divider = measurables[0].measure(Constraints.fixedWidth(width))
+            return@Layout layout(width, lineHeight + toggle.height + pad) {
+                divider.place(0, (lineHeight - divider.height) / 2)
+                arrows.placeRelative(4.dp.roundToPx(), (lineHeight - arrows.height) / 2)
+                today?.placeRelative((width - edge - today.width).coerceAtLeast(leftmost), (lineHeight - today.height) / 2)
+                toggle.placeRelative(((width - toggle.width) / 2).coerceAtLeast(0), lineHeight)
+            }
+        }
+        var toggleX = maxOf((width - toggle.width) / 2, leftmost)
         var todayX = 0
         var wrapped = false
         if (today != null) {
             todayX = width - edge - today.width
             if (toggleX + toggle.width + gap > todayX) {
                 toggleX = todayX - gap - toggle.width
-                if (toggleX < edge) {
+                if (toggleX < leftmost) {
                     wrapped = true
-                    toggleX = (width - toggle.width) / 2
+                    toggleX = maxOf((width - toggle.width) / 2, leftmost)
                     todayX = todayX.coerceAtLeast(0)
                 }
             }
         }
-        val lineHeight = maxOf(toggle.height, if (today != null && !wrapped) today.height else 0)
-        val height = if (today != null && wrapped) lineHeight + gap + today.height else lineHeight
+        val lineHeight = maxOf(arrows.height, toggle.height + 2 * pad, if (today != null && !wrapped) today.height + 2 * pad else 0)
+        val height = if (today != null && wrapped) lineHeight + today.height + pad else lineHeight
         val divider = measurables[0].measure(Constraints.fixedWidth(width))
 
         layout(width, height) {
             divider.place(0, (lineHeight - divider.height) / 2)
-            toggle.place(toggleX.coerceAtLeast(0), (lineHeight - toggle.height) / 2)
-            today?.place(todayX, if (wrapped) lineHeight + gap else (lineHeight - today.height) / 2)
+            arrows.placeRelative(4.dp.roundToPx(), (lineHeight - arrows.height) / 2)
+            toggle.placeRelative(toggleX.coerceAtLeast(0), (lineHeight - toggle.height) / 2)
+            today?.placeRelative(todayX, if (wrapped) lineHeight else (lineHeight - today.height) / 2)
         }
     }
 }
