@@ -121,8 +121,8 @@ class MaximisedCalendarUiTest {
         assertFalse(app.settings.calendarMaximised.value)
 
         // The arrows at the left end do what the swipe does, and are greyed out at the smallest and biggest size.
-        // The button itself carries the label (IconButton merges its icon), so its own enabled state is the one read.
-        fun arrow(label: String) = nodes().firstOrNull { it.contentDescription?.toString() == label }
+        // The label is on the icon; the button around it (its parent, greyed out or not) holds the enabled state.
+        fun arrow(label: String) = nodes().firstOrNull { it.contentDescription?.toString() == label }?.parent
         click("Smaller calendar")
         await("arrow to week") { app.settings.calendarCollapsed.value && find("Calendar: week")?.isSelected == true }
         await("up greyed at week") { arrow("Smaller calendar")?.isEnabled == false && arrow("Bigger calendar")?.isEnabled == true }
