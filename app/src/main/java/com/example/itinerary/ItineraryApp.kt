@@ -158,15 +158,7 @@ class ItineraryApp : Application() {
                 .collect { com.example.itinerary.reminders.MorningSummary.schedule(this@ItineraryApp) }
         }
         // Up next follows its switch (and is worked out again on every start).
-        appScope.launch {
-            var was: Boolean? = null
-            settings.upNext.collect { on ->
-                // Turned on again (bug hunt 31): one swiped away before shows again.
-                if (on && was == false) com.example.itinerary.reminders.UpNext.setDismissed(this@ItineraryApp, null)
-                was = on
-                com.example.itinerary.reminders.UpNext.request(this@ItineraryApp)
-            }
-        }
+        appScope.launch { settings.upNext.collect { com.example.itinerary.reminders.UpNext.request(this@ItineraryApp) } }
         // Birthday reminders come at the morning summary's time, so they follow that too.
         appScope.launch {
             kotlinx.coroutines.flow.combine(settings.birthdayReminderDays, settings.morningSummaryAt) { days, at -> days to at }

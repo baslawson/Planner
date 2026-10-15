@@ -57,6 +57,13 @@ object UpNext {
     /** Within this long of leaving, the title says "Leave soon"; before that, "Leave at 6:00" (bug hunt 30). */
     const val SOON_MINUTES = 60L
 
+    /** "", " tomorrow", or (bug hunt 32: with a long travel buffer the event can be two days on) its weekday. */
+    fun dayWord(at: LocalDateTime, today: LocalDate): String = when (at.toLocalDate()) {
+        today -> ""
+        today.plusDays(1) -> " tomorrow"
+        else -> " " + at.format(java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale.getDefault()))
+    }
+
     /** True when leaving time is close enough to say "Leave soon". */
     fun leaveSoon(next: Next, now: LocalDateTime): Boolean = next.leaveAt != null && !next.leaveAt.isAfter(now.plusMinutes(SOON_MINUTES))
 
@@ -95,7 +102,7 @@ object UpNext {
         // With the travel buffer (bug hunt 31): one added or changed brings it back.
         val key = "${event.id}|${event.title}|${next.start}|${event.bufferBeforeMinutes}"
         if (dismissed(context) == key) { manager.cancel(TAG, 0); schedule(context, again); return@withLock }
-        fun dayWord(at: LocalDateTime) = if (at.toLocalDate() != today) " tomorrow" else ""
+        fun dayWord(at: LocalDateTime) = dayWord(at, today)
         val text = buildList {
             add(next.start.toLocalTime().label(format, context) + dayWord(next.start))
             if (event.location.isNotBlank()) add(event.location)

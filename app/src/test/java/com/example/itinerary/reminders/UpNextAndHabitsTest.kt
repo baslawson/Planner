@@ -56,6 +56,10 @@ class UpNextAndHabitsTest {
         val events = listOf(event("Meeting", day.plusDays(1), 8), event("Flight", day.plusDays(1), 10, buffer = 240))
         assertEquals("Flight", UpNext.next(events, now)!!.event.title)
         assertNull(UpNext.next(listOf(event("Flight", day.plusDays(1), 10, buffer = 30)), now))
+        // Bug hunt 32: two days on (a long buffer), its weekday, not "tomorrow".
+        assertEquals(" tomorrow", UpNext.dayWord(day.plusDays(1).atTime(8, 0), day))
+        assertEquals(" Saturday", UpNext.dayWord(LocalDate.of(2026, 10, 17).atTime(8, 0), day))
+        assertEquals("", UpNext.dayWord(day.atTime(23, 0), day))
     }
 
     // Bug hunt 30 B3: an occurrence ticked off then unticked leaves its next one; the habit shows once.

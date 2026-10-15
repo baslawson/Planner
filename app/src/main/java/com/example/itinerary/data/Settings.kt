@@ -302,6 +302,9 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val _upNext = MutableStateFlow(prefs.getBoolean(KEY_UP_NEXT, false))
     val upNext: StateFlow<Boolean> = _upNext.asStateFlow()
     fun setUpNext(on: Boolean) {
+        // Turned on (bug hunt 32): one swiped away before shows again. Here, not in a collector of the flow, which can
+        // miss an off and on in quick succession.
+        if (on && !_upNext.value) com.example.itinerary.reminders.UpNext.setDismissed(appContext, null)
         prefs.edit { putBoolean(KEY_UP_NEXT, on) }
         _upNext.value = on
     }
