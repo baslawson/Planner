@@ -171,7 +171,8 @@ fun MonthCalendar(
             }
         }
 
-        Row(Modifier.fillMaxWidth()) {
+        // Bug hunt 35: the weekday heads don't grow past 1.5×, where they broke inside the word ("Su / n").
+        LimitTextScale(1.5f) { Row(Modifier.fillMaxWidth()) {
             for (i in 0 until 7) {
                 val dow = firstDow.plus(i.toLong())
                 Text(
@@ -182,7 +183,7 @@ fun MonthCalendar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
+        } }
 
         if (collapsed) {
             // Just the selected day's week, which can straddle two months.

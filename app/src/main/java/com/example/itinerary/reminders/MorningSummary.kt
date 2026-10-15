@@ -86,6 +86,15 @@ object MorningSummary {
     fun nextAt(now: LocalDateTime, at: LocalTime, shownToday: Boolean): LocalDateTime =
         if (!shownToday && now.toLocalTime() < at) now.toLocalDate().atTime(at) else now.toLocalDate().plusDays(1).atTime(at)
 
+    /**
+     * Bug hunt 35: today's summary not shown yet although its time has passed (its alarm held back while the phone dozed,
+     * and Planner started meanwhile, or the clock changed): it still comes, in a minute, within [CATCH_UP_HOURS] of its time,
+     * rather than the alarm being moved to tomorrow.
+     */
+    fun catchUp(now: LocalDateTime, at: LocalTime, shownToday: Boolean): Boolean =
+        !shownToday && now.toLocalTime() >= at && now.toLocalTime() < at.plusHours(CATCH_UP_HOURS).let { if (it < at) LocalTime.MAX else it }
+    private const val CATCH_UP_HOURS = 3L
+
     private class Setting(val on: Boolean, val at: LocalTime, val shownOn: String?)
     private fun setting(context: Context, kind: Kind): Setting {
         val settings = (context.applicationContext as ItineraryApp).settings
@@ -117,7 +126,9 @@ object MorningSummary {
         val setting = setting(context, kind)
         if (!setting.on) { alarms.cancel(pendingIntent(context, kind)); return }
         val zone = ZoneId.systemDefault()
-        val next = nextAt(LocalDateTime.now(zone), setting.at, setting.shownOn == LocalDate.now(zone).toString())
+        val now = LocalDateTime.now(zone)
+        val shownToday = setting.shownOn == now.toLocalDate().toString()
+        val next = if (catchUp(now, setting.at, shownToday)) now.plusMinutes(1) else nextAt(now, setting.at, shownToday)
         runCatching { alarms.setWindow(AlarmManager.RTC_WAKEUP, next.atZone(zone).toInstant().toEpochMilli(), WINDOW_MS, pendingIntent(context, kind, next.toLocalDate())) }
             .onFailure { android.util.Log.w("MorningSummary", "Couldn't set the ${kind.name.lowercase()} summary's alarm", it) }
     }
@@ -170,7 +181,8 @@ object MorningSummary {
             .setStyle(NotificationCompat.InboxStyle().also { style -> content.lines.forEach(style::addLine) })
             .setContentIntent(open)
             .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
+            // Bug hunt 35: only an update after a button is quiet; a new day's summary alerts even if yesterday's is still shown.
+            .setOnlyAlertOnce(update)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .addAction(0, "Open", open)
             .apply {

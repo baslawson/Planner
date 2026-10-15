@@ -66,6 +66,16 @@ object Markdown {
     data class Run(val text: String, val bold: Boolean = false, val italic: Boolean = false, val strike: Boolean = false,
                    val code: Boolean = false, val url: String? = null)
 
+    // The index of the ) closing a link address that starts at [from], or -1.
+    private fun closingParen(s: String, from: Int): Int {
+        var depth = 0
+        for (j in from until s.length) when (s[j]) {
+            '(' -> depth++
+            ')' -> if (depth == 0) return j else depth--
+        }
+        return -1
+    }
+
     fun inline(text: String): List<Run> {
         val runs = mutableListOf<Run>()
         fun walk(s: String, bold: Boolean, italic: Boolean, strike: Boolean) {
@@ -81,7 +91,8 @@ object Markdown {
                 }
                 if (c == '[') {
                     val close = s.indexOf("](", i + 1)
-                    val end = if (close > i) s.indexOf(')', close + 2) else -1
+                    // Bug hunt 35: the ) that closes the address, counting any ( ) inside it ("…/wiki/Foo_(bar)").
+                    val end = if (close > i) closingParen(s, close + 2) else -1
                     val url = if (end > close) s.substring(close + 2, end).trim() else ""
                     if (close > i + 1 && end > close && (url.startsWith("https://") || url.startsWith("http://") || url.startsWith("mailto:"))) {
                         flush(); runs += Run(s.substring(i + 1, close), bold, italic, strike, url = url); i = end + 1; continue

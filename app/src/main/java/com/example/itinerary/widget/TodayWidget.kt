@@ -183,7 +183,9 @@ class TodayWidget : AppWidgetProvider() {
             val blocked = app.repository.widgetBlockedTasks(tasks)
             ids.forEach { id ->
                 val options = manager.getAppWidgetOptions(id)
-                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220)
+                // Bug hunt 35: the portrait height in portrait (MIN is the landscape one), as WeekWidget (hunt 29 N6).
+                val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                val height = options.getInt(if (landscape) AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 220)
                 manager.updateAppWidget(id, renderDay(context, events, today, app.settings.timeFormat.value, height, tasks, blocked))
             }
             // Non-waking midnight refresh plus the platform's periodic update. No new alarm permission. Hunt 27: a 10-minute

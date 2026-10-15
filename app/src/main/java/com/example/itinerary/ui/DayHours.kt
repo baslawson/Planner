@@ -104,7 +104,7 @@ fun DayHours(
     onMove: (ItineraryItem, LocalDate, LocalTime, Int?) -> Unit,
     modifier: Modifier = Modifier,
     onDay: (LocalDate) -> Unit = {},
-    // Free time shaded on the grid (user, 15 Oct; the "Free" chip): each day's free windows, as Find free time works them out.
+    // Free time shaded on the grid (user, 15 Oct; the "Free time" chip): each day's free windows, as Find free time works them out.
     free: () -> Map<LocalDate, List<com.example.itinerary.data.FreeWindow>> = { emptyMap() },
 ) {
     val colors = MaterialTheme.colorScheme
@@ -147,7 +147,9 @@ fun DayHours(
         var creating by remember { mutableStateOf<NewDraw?>(null) }
         // -1 / 1 while a drag is held near the top / bottom edge, which scrolls the grid (and the drag with it).
         var edge by remember { mutableFloatStateOf(0f) }
-        LaunchedEffect(days.first(), days.size) {
+        // Bug hunt 35: also once the events have come (on a cold start they arrive after the first draw, which had none and
+        // went to 07:00).
+        LaunchedEffect(days.first(), days.size, blocks.any { it.isNotEmpty() }) {
             val hour = when {
                 today in days -> LocalTime.now().hour - 1
                 blocks.any { it.isNotEmpty() } -> blocks.flatten().minOf { it.startMinute } / 60
@@ -226,9 +228,20 @@ fun DayHours(
                     )
                 }) {
                     for (hour in 0 until 24) {
-                        Row(Modifier.fillMaxWidth().height(HOUR_HEIGHT)) {
+                        // Bug hunt 35: TalkBack can start an event at an hour too (the taps and drags above are touch only):
+                        // the hour itself in the day view, an action for each day in the week.
+                        Row(Modifier.fillMaxWidth().height(HOUR_HEIGHT).semantics(mergeDescendants = true) {
+                            val at = LocalTime.of(hour, 0)
+                            if (days.size == 1) onClick(label = "New event at ${time(hour * 60)}") { currentOnEmptyHour(days[0], at, 60); true }
+                            else customActions = days.map { d ->
+                                CustomAccessibilityAction("New event ${d.format(patternFormatter("EEEE"))} at ${time(hour * 60)}") { currentOnEmptyHour(d, at, 60); true }
+                            }
+                        }) {
+                            // Bug hunt 35: the gutter is narrow, so its times don't grow past 1.3× (they broke mid-number, "7:0 / 0").
+                            LimitTextScale(1.3f) {
                             Text(time(hour * 60), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
                                 modifier = Modifier.width(GUTTER).padding(start = 8.dp, top = 2.dp))
+                            }
                             Column(Modifier.fillMaxHeight()) { HorizontalDivider(color = colors.outlineVariant) }
                         }
                     }
@@ -272,7 +285,11 @@ fun DayHours(
                         val height = HOUR_HEIGHT * ((block.endMinute - block.startMinute) / 60f)
                         val width = columnWidth / block.columns
                         val accent = color(item)
-                        val range = "${time(block.startMinute)} to ${time(block.endMinute)}"
+                        // Bug hunt 35: the event's own times on its own day (a block is drawn at least 30 minutes tall, and
+                        // late ones from 23:30), and no end when it has no length.
+                        val range = if (item.date == day && item.startTime != null)
+                            item.durationMinutes?.let { "${time(realStart)} to ${time((realStart + it) % (24 * 60))}" } ?: time(realStart)
+                        else "${time(block.startMinute)} to ${time(block.endMinute)}"
                         fun nudge(minutes: Int, resize: Boolean) = run {
                             if (resize) currentOnMove(item, item.date, item.startTime!!, DayTimeline.resized(realStart, item.durationMinutes, minutes.toFloat()))
                             else DayTimeline.movedStart(realStart, minutes.toFloat()).let { start ->
@@ -414,8 +431,16 @@ fun DayHours(
                 }
                 val nowColumn = days.indexOf(today)
                 if (nowColumn >= 0) {
-                    val now = LocalTime.now()
-                    Box(Modifier.offset(x = GUTTER - 4.dp + columnWidth * nowColumn, y = HOUR_HEIGHT * ((now.hour * 60 + now.minute) / 60f))
+                    // Bug hunt 35: it moves on each minute by itself (it waited for something else to redraw the grid); read
+                    // only where the line is placed, so nothing else is redrawn.
+                    val nowMinute = remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            kotlinx.coroutines.delay((60 - LocalTime.now().second) * 1000L)
+                            nowMinute.intValue = LocalTime.now().let { it.hour * 60 + it.minute }
+                        }
+                    }
+                    Box(Modifier.offset { androidx.compose.ui.unit.IntOffset((GUTTER - 4.dp + columnWidth * nowColumn).roundToPx(), (HOUR_HEIGHT * (nowMinute.intValue / 60f)).roundToPx()) }
                         .width(columnWidth + 4.dp).height(2.dp).background(colors.error))
                 }
             }

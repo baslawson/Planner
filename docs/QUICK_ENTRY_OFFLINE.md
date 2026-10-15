@@ -6,7 +6,7 @@ Enter one entry at a time; Add another keeps Quick entry open for the next.
 Examples of everyday wording:
 
 - `Dentist day after tomorrow 3pm`
-- `Call plumber in two days` or `a week from today`
+- `Call plumber in two days`, `a week from today`, `a week from tomorrow` or `2 weeks from Monday`
 - `Dentist tomorrow 3pm notify me 10 minutes before`
 - `Dinner tomorrow 6pm remind me half an hour before`
 - `Dentist Friday—actually Saturday at 3pm`
@@ -58,6 +58,8 @@ More flexible offline wording:
 - `Call tomorrow 15h30 for a quarter of an hour`
 - `Meeting Friday at 3pm—actually 4pm`
 - `Tea half past 3`, `Meeting quarter to 5pm`, `Train 5 past 7pm`, `Call ten to 12pm`, `Meeting at 3 o'clock`
+- `Tea at four`, `Tea at seven thirty`, `Tea four thirty pm`, `Movie half past twelve` — an hour in words. After at, only
+  before the end or another when, and not capitalised (`at Four Seasons`, `Party at Seven Tuesday` are places).
 - `Lunch midday`, `Party 8pm til midnight`, `Meeting around 3pm` (also about, approx, `~3pm`, `3pm-ish`, `7ish`)
 - `Call 3 in the afternoon`, `Movie 8 tonight`
 - `Call 3p tomorrow`, `3:30p`, `Meeting 15.30 Friday` — these short forms count as times only right beside a date or
@@ -67,7 +69,9 @@ More flexible offline wording:
 
 Durations accept number words one through twelve. In spoken times, only words go before "to" (`quarter to 5`),
 because `4 to 5pm` is a range. Clock spellings also work in explicit ranges;
-ambiguous ranges still need AM/PM clarification. Adjacent clock times joined by “actually” use the final
+ambiguous ranges still need AM/PM clarification. An end before the start in the same half of the day (`3pm to 2pm`),
+or one that would last over 16 hours,
+needs correcting; overnight ranges such as `10pm-6am` run into the next day. Adjacent clock times joined by “actually” use the final
 time; unfinished corrections and conflicting ranges require editing. All recognised details use the
 existing preview. Quotes and Keep in title still protect literal text.
 
@@ -128,7 +132,10 @@ Several times, parts of the day, working hours and other time zones:
   zone, daylight saving included. Recognised places: Sydney, Canberra, NSW, Melbourne, Vic, Brisbane, Queensland,
   QLD, Adelaide, Perth, WA, Darwin, Hobart, Tasmania, Tas, Auckland, Wellington, NZ, New Zealand, London, UK, Paris,
   Berlin, New York, NYC, NY, Los Angeles, LA, San Francisco, Tokyo, Japan, Singapore, Hong Kong, Bali, Dubai, India,
-  Delhi, Mumbai. Like AEST/AEDT/ACST/ACDT/AWST/UTC/GMT, they only count right after a time; `Webinar Sydney time`
+  Delhi, Mumbai. Also PST/PDT, CET/CEST, BST, NZST/NZDT/NZT, JST, SGT and HKT, each as its place's zone with
+  daylight saving (so PST in July is Pacific time); EST/EDT, CST, IST, PT and ET are not read, as each can mean more than
+  one thing (in Australia, EST is often Sydney time).
+  Like AEST/AEDT/ACST/ACDT/AWST/UTC/GMT, they only count right after a time; `Webinar Sydney time`
   keeps the words in the title. A repeat whose day would move is refused, and the time of a repeat is converted
   once, for its first date.
 

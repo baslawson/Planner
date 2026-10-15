@@ -79,6 +79,8 @@ object BirthdayReminders {
             .setContentText(if (number != null) "Send a message or call." else "No phone number saved for them.")
             .setContentIntent(activity(contact, 0))
             .setAutoCancel(true)
+            // Bug hunt 35: its words ("tomorrow") are today's, so it goes at midnight; the next day's reminders come anew.
+            .setTimeoutAfter(java.time.Duration.between(java.time.ZonedDateTime.now(), today.plusDays(1).atStartOfDay(java.time.ZoneId.systemDefault())).toMillis().coerceAtLeast(60_000))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
         if (number != null) {
             if (ContactPhones.canOpen(context, ContactPhones.messageIntent(number))) builder.addAction(0, "Message", activity(ContactPhones.messageIntent(number), 1))

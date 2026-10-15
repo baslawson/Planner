@@ -115,6 +115,9 @@ object QuickEntry {
     // "a week today", "a week tomorrow", "tomorrow week": a week after today or tomorrow.
     private val weekFrom = "a\\s+week\\s+(?:today|from\\s+today|$tomorrowWords)|(?:$tomorrowWords)\\s+week(?!\\s+after)"
     private val wordDateMatches = rx("\\b(?:$wordDates|$weekFrom)\\b")
+    // Bug hunt 33: "a week from tomorrow", "3 days from Monday": counted from that day (it read only the day before). Not
+    // after for or every, where the count is a length or a repeat: "Trip for 5 days from Monday", "every 2 weeks from Monday".
+    private val countFromDay = "(?<!\\bfor\\s)(?<!\\bevery\\s)$relativeCount\\s+$relativeUnit\\s+from\\s+(?:$tomorrowWords|(?:next\\s+)?(?:$weekdays))"
     // Day numbers in words: "October first", "the first of October", "the twenty-first".
     private val ordinalWordList = listOf("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
         "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth") +
@@ -146,7 +149,7 @@ object QuickEntry {
     private val bareOrdinalDate = rx("^$bareOrdinalValue$")
     private const val onOrdinal = "(?:on|by|due(?:\\s+(?:on|by))?)\\s+\\d{1,2}(?:st|nd|rd|th)(?=\\s*(?:$|,|at\\b|@|from\\b|for\\b|\\d))"
     // Every way of writing one date; also what may follow "until" on a repeat.
-    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now))|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+(?:the\\s+)?$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
+    private val datePhrases = "$wordDates|$weekFrom|$pastDates|(?:in\\s+$relativeCount\\s+$relativeUnit(?:['’]s?\\s+time)?|$relativeCount\\s+$relativeUnit\\s+from\\s+(?:today|now)|$countFromDay)|(?:the\\s+)?day\\s+after\\s+tomorrow|(?:later\\s+)?today|$tomorrowWords|$ordinalDates|(?:(?:next|nxt|this\\s+coming|this|coming)\\s+)?(?:$weekdays)|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|(?:the\\s+)?$dayNumber\\s+(?:of\\s+)?(?:$months)(?:\\s+\\d{4})?|(?:$months)\\s+(?:the\\s+)?$notClockHour$dayNumber(?:,?\\s+\\d{4})?|the\\s+\\d{1,2}(?:st|nd|rd|th)|$bareOrdinal"
     // "before Friday" is a deadline: the date is Friday, "before" leaves the title.
     private val dates = rx("\\b(?:(?:(?<!-)(?:on|by|before|due(?:\\s+(?:on|by))?)\\s+)?(?:$datePhrases)|$onOrdinal)\\b")
     // A four-digit number after a month-name date ("3 Oct 1500", "Oct 3, 1930", "3-7 Oct 0800"): group 2 is its year only
@@ -182,11 +185,20 @@ object QuickEntry {
     // "Kids aged five to six" stays a title.
     private const val hourWords = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
     private const val spokenWords = "(?:(?:$spokenAmount)\\s+past|(?:quarter|five|ten|twenty(?:[-\\s]five)?)\\s+to)\\s+(?:$hourWords)(?:\\s*$meridiem)?|(?:$hourWords)\\s*o['’]?\\s?clock(?:\\s*$meridiem)?"
+    // Bug hunt 33: an hour in words, with minutes in words: "four", "four thirty", "seven pm". After "at" only before the
+    // end or another when ("Tea at four tomorrow"; "at Four Seasons" stays a place), anywhere with am/pm ("Tea four thirty
+    // pm"); "half past twelve" and "quarter to nine" anywhere, as those words say it is a time.
+    private const val wordMinutes = "fifteen|thirty|forty[-\\s]five"
+    private const val wordClock = "(?:$hourWords)(?:\\s+(?:$wordMinutes))?"
+    // After "at", a capitalised hour word is a name ("Party at Seven Tuesday") unless am/pm follows.
+    private const val lowerWordClock = "(?-i:$hourWords)(?:\\s+(?:$wordMinutes))?"
+    private const val afterWordClock = "(?=\\s*(?:$|[,.!?;@~]|(?:today|tonight|tomorrow|tmrw?|on|this|next|every|each|for|with|and|until|till|in|at|$weekdays|$months|morning|afternoon|arvo|evening|night|daily|weekly|weekdays|weekends|remind|notify|sharp)\\b))"
+    private const val wordTimes = "$atWord$lowerWordClock(?:\\s*$meridiem)?(?![\\w'’])$afterWordClock|\\b$wordClock\\s*$meridiem(?![\\w])|\\b(?:half|quarter)\\s+(?:past|to)\\s+(?:$hourWords)(?:\\s*$meridiem)?(?![\\w])"
     // "around 3pm", "about 3pm", "~3pm", "3pm-ish", "7ish": approximately is still the time.
     private const val approx = "(?:(?:around|about|approx(?:imately)?|roughly|circa)\\s+|~\\s*)"
     // 3p, 3:30p and 15.30 are times only where they read like one; see readsAsTime.
     private const val shortClock = "\\d{1,2}(?::\\d{2})?[ap]|\\d{1,2}\\.[0-5]\\d"
-    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:h]|\\.\\d)(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])")
+    private val times = rx("(?:$atWord|\\bby\\s+|\\bbefore\\s+|\\b|(?<!\\S)(?=~))(?:(?:at\\s+)?$approx)?(?:$spokenTime|$clockAmPm|$hhmm(?:\\s*$hoursSuffix)?|$noonOrMidnight|\\d{1,2}(?:[:.]\\d{2})?\\s*$meridiem|\\d{1,2}[:h]\\d{2}|$shortClock|\\d{1,2}(?=-?ish))(?:\\s*-?ish|\\s+sharp)?(?![\\w])|$atWord\\d{1,2}\\b(?![:h]|\\.\\d)(?:\\s+sharp\\b)?|(?:$atWord|\\b(?:by|around|about)\\s+)(?:$spokenWords)(?![\\w])|$wordTimes")
     private val shortClocks = rx("(?<![\\w.:/])($shortClock)(?![\\w.])")
     private const val amount = "(?:-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)|$countWords)"
     private const val hours = "(?:hours?|hrs?|h)"
@@ -255,8 +267,16 @@ object QuickEntry {
     private val endOfDay = rx("\\b(?:(?:by|at|before|due(?:\\s+by)?)\\s+)?(?:eod|cob|close\\s+of\\s+business|end\\s+of\\s+(?:the\\s+)?(?:business\\s+)?day)\\b")
     // A time zone right after a time: converted to the phone's time zone. "Sydney time", "UK time": that place's zone,
     // daylight saving included.
-    private val zoneOffsets = mapOf("AEST" to ZoneOffset.ofHours(10), "AEDT" to ZoneOffset.ofHours(11), "ACST" to ZoneOffset.ofHoursMinutes(9, 30),
-        "ACDT" to ZoneOffset.ofHoursMinutes(10, 30), "AWST" to ZoneOffset.ofHours(8), "UTC" to ZoneOffset.UTC, "GMT" to ZoneOffset.UTC)
+    private val zoneOffsets: Map<String, ZoneId> = mapOf("AEST" to ZoneOffset.ofHours(10), "AEDT" to ZoneOffset.ofHours(11), "ACST" to ZoneOffset.ofHoursMinutes(9, 30),
+        "ACDT" to ZoneOffset.ofHoursMinutes(10, 30), "AWST" to ZoneOffset.ofHours(8), "UTC" to ZoneOffset.UTC, "GMT" to ZoneOffset.UTC) +
+        // Bug hunt 33: common overseas ones (they stayed in the title, the time unconverted). As people use them, "PST" in
+        // July means Pacific time, so these are the places' zones, daylight saving included. CST, IST, PT and ET are left
+        // out: each names more than one zone, or is also a word ("Gym 6am PT"). So are EST and EDT (bug hunt 34): in
+        // Australia "7pm EST" is usually Sydney time, not New York's.
+        mapOf("PST" to "America/Los_Angeles", "PDT" to "America/Los_Angeles",
+            "CET" to "Europe/Paris", "CEST" to "Europe/Paris", "BST" to "Europe/London", "NZST" to "Pacific/Auckland",
+            "NZDT" to "Pacific/Auckland", "NZT" to "Pacific/Auckland", "JST" to "Asia/Tokyo", "SGT" to "Asia/Singapore",
+            "HKT" to "Asia/Hong_Kong").mapValues { ZoneId.of(it.value) }
     private val placeZones = mapOf(
         "Australia/Sydney" to listOf("sydney", "canberra", "nsw"), "Australia/Melbourne" to listOf("melbourne", "vic"),
         "Australia/Brisbane" to listOf("brisbane", "queensland", "qld"), "Australia/Adelaide" to listOf("adelaide"),
@@ -267,7 +287,7 @@ object QuickEntry {
         "Asia/Singapore" to listOf("singapore"), "Asia/Hong_Kong" to listOf("hong kong"), "Asia/Makassar" to listOf("bali"),
         "Asia/Dubai" to listOf("dubai"), "Asia/Kolkata" to listOf("india", "delhi", "mumbai"),
     ).flatMap { (zone, names) -> names.map { it to ZoneId.of(zone) } }.toMap()
-    private val timeZones = rx("(?<![\\w])(aest|aedt|acst|acdt|awst|utc|gmt|(?:${placeZones.keys.sortedByDescending { it.length }.joinToString("|") { it.replace(" ", "\\s+") }})\\s+time)(?![\\w+-])")
+    private val timeZones = rx("(?<![\\w])(${zoneOffsets.keys.joinToString("|") { it.lowercase(Locale.ROOT) }}|(?:${placeZones.keys.sortedByDescending { it.length }.joinToString("|") { it.replace(" ", "\\s+") }})\\s+time)(?![\\w+-])")
     // "all afternoon": a block of that part of the day.
     private val allPeriod = rx("\\ball\\s+(?:the\\s+)?(morning|afternoon|arvo|evening)\\b")
     private val periodBlocks = mapOf("morning" to (LocalTime.of(9, 0) to 180), "afternoon" to (LocalTime.of(13, 0) to 240),
@@ -300,7 +320,8 @@ object QuickEntry {
     // "weekly on Tuesdays", "fortnightly on Friday": the rule with its weekday.
     private val ruleOnWeekday = rx("\\b(weekly|fortnightly|bi-?weekly|every\\s+(?:week|fortnight|other\\s+week))\\s+on\\s+(?:the\\s+)?($pluralWeekdays|$weekdays)\\b")
     // "every month on the last day", "the last day of every month": monthly on the 31st, so shorter months get their last day.
-    private val lastDayMonthly = rx("\\b(?:(?:every\\s+month|monthly)\\s+on\\s+the\\s+last\\s+day|(?:on\\s+)?the\\s+last\\s+day\\s+of\\s+(?:every|each)\\s+month)\\b")
+    // Bug hunt 33: "the" may be left out ("Rent last day of every month" started today, with "last day of" in the title).
+    private val lastDayMonthly = rx("\\b(?:(?:every\\s+month|monthly)\\s+on\\s+(?:the\\s+)?last\\s+day|(?:on\\s+)?(?:the\\s+)?last\\s+day\\s+of\\s+(?:every|each)\\s+month)\\b")
     // Repeats Planner can't hold in one rule: said plainly rather than half-read.
     private val tooManyPerPeriod = rx("\\bhourly\\b|\\bevery\\s+(?:\\d+\\s+|few\\s+)?(?:hours?|hrs?|minutes?|mins?)\\b|\\b(?:twice|two\\s+times|three\\s+times)\\s+(?:(?:a|an|per|each)\\s+)?(?:day|week|fortnight|month|year|daily|weekly|monthly|yearly)\\b|\\b(?:$weekOfMonth)\\s+and\\s+(?:the\\s+)?(?:$weekOfMonth)\\s+(?:$weekdays)\\b")
     // A length written first: "2hr meeting at 3pm", "30min call 2pm" (only when a clock time is there too).
@@ -589,7 +610,7 @@ object QuickEntry {
                 sequenceOf(repeats, monthlyWeekdays, weekdayLists).any { r -> r.find(remaining, start)?.range?.first == start }) {
                 consume(marker.range, QuickPhraseKind.REPEAT); continue
             }
-            if (rx("^(?:\\d|~|noon\\b|midd?ay\\b|mid-day\\b|midnight\\b|(?:$spokenTime)|(?:$spokenWords)|$approx\\d|(?:the\\s+)?(?:end|last\\s+day)\\s+of\\s+(?:the\\s+)?month\\b)").containsMatchIn(tail)) continue
+            if (rx("^(?:\\d|~|noon\\b|midd?ay\\b|mid-day\\b|midnight\\b|(?:$spokenTime)|(?:$spokenWords)|$lowerWordClock(?![\\w'’])$afterWordClock|$wordClock\\s*$meridiem(?![\\w])|$approx\\d|(?:the\\s+)?(?:end|last\\s+day)\\s+of\\s+(?:the\\s+)?month\\b)").containsMatchIn(tail)) continue
             val end = sequenceOf(dates, ranges, times, durations, relativeTimes, numericDate, unfinished, repeats, monthDayRepeat, reminders, reminderClocks, nightBefore, noReminder, endOfDay, nights, repeatCounts, allDay, schedulingWords).flatMap { it.findAll(remaining, start) }
                 .filter { it.range.first > start }.map { it.range.first }.plus(phrases.filter { it.kind == QuickPhraseKind.TIME && it.start > start }.map { it.start }).minOrNull() ?: text.length
             val value = withoutFormatChars(text.substring(start, end)).trim().trimEnd(',').replace("\"", "")
@@ -1343,6 +1364,11 @@ object QuickEntry {
             var length = Math.floorMod(end.toSecondOfDay() / 60 - start.toSecondOfDay() / 60, 1440)
             // "12:30-1:30", "11:30-1:30": without am/pm, the end is the first one after the start (not 13 hours on).
             if (hasMeridiem.none { it } && endpoints.all { twelveHour.matches(it) } && length > 720) length -= 720
+            // Bug hunt 33: an end before the start in the same half of the day ("3pm to 2pm", "9am-8am", "15:00-14:00") is
+            // a slip rather than nearly a whole day. Overnight ("10pm-6am", "9pm to midnight") still runs into the next day.
+            // Bug hunt 34: also any that would run over 16 hours ("noon to 11am").
+            else if (end < start && end != LocalTime.MIDNIGHT && ((start.hour < 12) == (end.hour < 12) || length > 960))
+                return error("The end time is before the start time. Correct one of them.")
             if (length == 0) return error("The start and end times are the same. Use a duration if you mean 24 hours.")
             if (duration != null && duration != length) return error("The time range and duration disagree. Correct one or remove it.")
             time = start; duration = length
@@ -1383,6 +1409,20 @@ object QuickEntry {
                         nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.let { it in scheduleVocabulary } == true }
             }
         var ts = times.findAll(remaining).toList() + listOfNotNull(bareHour)
+        // Bug hunt 33: "Pills 8am and 8 daily", "at 8 and 20": a bare hour joined to a time is one of the times (read with
+        // the others below, or asked about), not title text. Only before the end or another when: "3pm and 4 people".
+        if (ts.isNotEmpty() && rs.isEmpty() && bareHour == null) {
+            val bare = rx("(?<![\\w.:/£€¥$#])\\d{1,2}(?::[0-5]\\d)?(?![\\w:/]|\\.\\d)").findAll(remaining).toList()
+            while (ts.size < 3) {
+                val last = ts.last()
+                val next = bare.firstOrNull { it.range.first > last.range.last && timeJoin.matches(remaining.substring(last.range.last + 1, it.range.first)) } ?: break
+                val after = remaining.substring(next.range.last + 1)
+                val word = nextWord.find(after)?.groupValues?.get(1)?.lowercase(Locale.ROOT)
+                if (!(after.isBlank() || re("^\\s*[,.!?;]").containsMatchIn(after) || word in scheduleVocabulary ||
+                        word in setOf("daily", "weekly", "weekdays", "weekends"))) break
+                ts = ts + next
+            }
+        }
         fun clockText(value: String) = spokenToClock(value.lowercase(Locale.ROOT).replace(re("\\s+"), " ")
             .replace(re("^(?:(?:at|by|before|around|about|approx(?:imately)?|roughly|circa)\\s+|[@~]\\s*)+"), "")
             .replace(re("\\s*-?ish$|\\s+sharp$"), "").trim()).let { r -> if (re("\\d{1,2}\\.\\d{2}").matches(r)) r.replace('.', ':') else r }
@@ -1391,7 +1431,9 @@ object QuickEntry {
         var nextDayTimes = 0
         if (ts.size in 2..3 && rs.isEmpty() && bareHour == null && timePrompt == null &&
             ts.zipWithNext().all { (a, b) -> timeJoin.matches(remaining.substring(a.range.last + 1, b.range.first)) }) {
-            val read = ts.map { m -> clockText(m.value).takeUnless { re("([1-9]|1[0-2])(?::[0-5]\\d)?").matches(it) }?.let(::readTime) }
+            // A bare 24-hour hour ("at 8 and 20") is that hour; a bare 1–12 one is asked about.
+            val read = ts.map { m -> clockText(m.value).let { c -> c.toIntOrNull()?.takeIf { it == 0 || it in 13..23 }?.let { LocalTime.of(it, 0) }
+                ?: c.takeUnless { re("([1-9]|1[0-2])(?::[0-5]\\d)?").matches(it) }?.let(::readTime) } }
             if (read.any { it == null }) {
                 phrases += ts.map { QuickEntryPhrase(it.range.first, it.range.last + 1, QuickPhraseKind.TIME) }
                 return error("Add am or pm to each time, for example 8am and 8pm.")
@@ -1581,7 +1623,9 @@ object QuickEntry {
 
     /** Whether [words] say only when:"tomorrow", "in 2 hours", "on Friday at 3pm", "next week" (refused later). */
     private fun readsAsWhen(words: String): Boolean =
-        sequenceOf(dates, numericDate, ranges, times, relativeTimes, unsupported, wordDateMatches, holidays, endOfDay, nowWords, allDay,
+        // Bug hunt 33: unsupported first, so "tomorrow morning" goes whole ("Remind me tomorrow morning to buy milk" was
+        // titled "To buy milk" once "tomorrow" alone had gone).
+        sequenceOf(unsupported, dates, numericDate, ranges, times, relativeTimes, wordDateMatches, holidays, endOfDay, nowWords, allDay,
             everyPeriod, monthlyWeekdays, monthDayRepeat, weekdayLists, repeats)
             .fold(words) { left, phrase -> phrase.replace(left, " ") }
             .let { rx("[\\s,]*(?:\\b(?:at|on|in|by|from|and|then|the)\\b[\\s,]*)*").matches(it) }
@@ -1701,6 +1745,9 @@ object QuickEntry {
     private fun spokenToClock(input: String): String {
         // Hour words become numbers: "quarter past seven" → quarter past 7, "nine o'clock" → 9 o'clock.
         val raw = re("(?<=^|past |to )($hourWords)\\b").replace(input) { (hourWords.split('|').indexOf(it.value) + 1).toString() }
+            // Bug hunt 33: "4 thirty pm" → 4:30 pm.
+            .replace(re("^(\\d{1,2}) (fifteen|thirty|forty[- ]five)\\b")) { m ->
+                m.groupValues[1] + when (m.groupValues[2]) { "fifteen" -> ":15"; "thirty" -> ":30"; else -> ":45" } }
         re("^(\\d{1,2}) ?o['’]? ?clock ?(.*)$").matchEntire(raw)?.let { return it.groupValues[1] + it.groupValues[2] }
         val spoken = re("^(half|quarter|five|ten|twenty(?:[- ]five)?|\\d{1,2}) (past|to) (\\d{1,2}) ?(.*)$").matchEntire(raw) ?: return raw
         val (amount, direction, hourText, suffix) = spoken.destructured
@@ -1813,6 +1860,8 @@ object QuickEntry {
             // "October first", "the twenty-first": the words become a number.
             rx("\\b(?:$ordinalWords)\\b").containsMatchIn(d) -> parseDate(rx("\\b(?:$ordinalWords)\\b").replace(d) {
                 (ordinalWordList.indexOf(it.value.lowercase(Locale.ROOT).replace(re("\\s+"), "-")) + 1).toString() + "th" }, today)!!
+            rx("^(?:$countFromDay)$").matches(d) ->
+                parseDate("in " + d.substringBefore(" from "), parseDate(d.substringAfter(" from "), today)!!)!!
             d.startsWith("in ") || d.endsWith(" from today") || d.endsWith(" from now") -> {
                 val parts = d.removePrefix("in ").removeSuffix(" from today").removeSuffix(" from now").split(' ')
                 val words = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")

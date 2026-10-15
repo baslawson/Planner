@@ -221,7 +221,9 @@ object Notes {
                 is NoteFilter.Notebook -> !note.archived && note.notebook == filter.name
                 is NoteFilter.Tag -> !note.archived && filter.name in note.tags
                 NoteFilter.Archive -> note.archived
-            } && (needle.isEmpty() || (fields[note.id] ?: searchFields(note)).contain(needle))
+            } && (needle.isEmpty() || (fields[note.id] ?: searchFields(note)).let { f ->
+                // Bug hunt 35: each word somewhere, as the main Search does ("milk eggs" finds "Eggs and milk").
+                needle.split(' ').filter { it.isNotBlank() }.all(f::contain) })
         }.sortedWith(order(sort))
     }
 

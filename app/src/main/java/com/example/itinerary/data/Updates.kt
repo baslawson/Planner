@@ -181,12 +181,17 @@ class Updates(
                 return
             }
             prefs.edit().putLong(KEY_LAST, now()).apply()
-            if (release == null || !AppVersion.newer(release.version, installed) ||
+            // Bug hunt 35: a latest release without Planner.apk yet (its files still uploading) says nothing new, and keeps
+            // a download already made rather than deleting it.
+            if (release == null) { _state.value = ready ?: State.UpToDate(now()); return }
+            if (!AppVersion.newer(release.version, installed) ||
                 (!fromSettings && prefs.getString(KEY_SKIPPED, null) == release.version)) {
                 _state.value = State.UpToDate(now()); cleanUp(); return
             }
             if (ready != null && !AppVersion.newer(release.version, ready.release.version)) { _state.value = ready; return }
             _state.value = State.Available(release)
+            // Bug hunt 35: an older download goes once a newer release is found, so it isn't offered again after a restart.
+            if (ready != null) cleanUp()
         } finally { lock.unlock() }
         (_state.value as? State.Available)?.let { if (_autoDownload.value) download(it.release, asked = false) }
     }

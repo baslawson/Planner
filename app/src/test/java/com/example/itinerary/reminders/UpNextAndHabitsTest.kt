@@ -79,7 +79,7 @@ class UpNextAndHabitsTest {
             gym("d", mon.plusWeeks(3), -1, "e"), gym("e", mon.plusWeeks(4), null, null),
             PlannerTask(id = "p", title = "Pills", dueDate = day, repeat = "DAILY"),
             PlannerTask(id = "x", title = "One-off", dueDate = day))
-        val habits = Habits.of(tasks)
+        val habits = Habits.of(tasks, mon.plusWeeks(4))
         assertEquals(listOf("Gym", "Pills"), habits.map { it.task.title })
         val gym = habits.first()
         assertEquals(listOf(Habits.Mark.ON_TIME, Habits.Mark.LATE, Habits.Mark.ON_TIME, Habits.Mark.ON_TIME, Habits.Mark.TO_DO), gym.recent)

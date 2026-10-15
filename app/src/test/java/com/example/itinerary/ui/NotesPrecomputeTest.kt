@@ -30,8 +30,9 @@ class NotesPrecomputeTest {
                 is NoteFilter.Notebook -> !note.archived && note.notebook == filter.name
                 is NoteFilter.Tag -> !note.archived && filter.name in note.tags
                 NoteFilter.Archive -> note.archived
-            } && (needle.isEmpty() || listOf(note.title, note.content, note.notebook).any { Search.normalize(it).contains(needle) } ||
-                note.tags.any { Search.normalize(it).contains(needle) })
+            } && (needle.isEmpty() || needle.split(' ').filter { it.isNotBlank() }.all { word -> // bug hunt 35: each word
+                listOf(note.title, note.content, note.notebook).any { Search.normalize(it).contains(word) } ||
+                    note.tags.any { Search.normalize(it).contains(word) } })
         }.sortedWith(Notes.order(sort))
     }
 

@@ -166,19 +166,23 @@ class MoreOct15Test {
         click("Hours")
         await("the grid") { described(", Call") != null }
         assertNull("off: no bands", described("Free from"))
-        click("Show free time")
+        click("Free time")
         // 8:00–9:30 (the buffer), 11:00–13:00, 15:00–16:00, 16:30–20:00; read from the top of the grid down (only what is on screen is read).
         await("free bands") { described("Free from") != null }
         val seen = sortedSetOf<String>()
-        val grid = bounds(described("Free from")!!)
-        repeat(3) { shell("input swipe ${grid.centerX()} ${grid.top + 50} ${grid.centerX()} ${grid.top + 900} 300"); Thread.sleep(400) }
-        repeat(6) { nodes().mapNotNull { it.contentDescription?.toString() }.filter { it.startsWith("Free from") }.forEach { seen += it }
-            shell("input swipe ${grid.centerX()} ${grid.top + 600} ${grid.centerX()} ${grid.top + 200} 300"); Thread.sleep(400) }
+        // Swiped from just under List | Hours (bug hunt 35: the grid now goes to the first event once loaded, so the first band
+        // can be above the screen): to the top, then down a bit at a time.
+        val top = bounds(find("Hours")!!).bottom + 100
+        val bottom = ins.targetContext.resources.displayMetrics.heightPixels - 150
+        val x = ins.targetContext.resources.displayMetrics.widthPixels / 2
+        repeat(6) { shell("input swipe $x $top $x $bottom 300"); Thread.sleep(400) }
+        repeat(10) { nodes().mapNotNull { it.contentDescription?.toString() }.filter { it.startsWith("Free from") }.forEach { seen += it }
+            shell("input swipe $x ${bottom - 50} $x ${bottom - 450} 300"); Thread.sleep(400) }
         val bands = seen.toList()
         assertEquals(listOf("Free from 08:00 to 09:30", "Free from 11:00 to 13:00", "Free from 15:00 to 16:00", "Free from 16:30 to 20:00"), bands.map { it.replace(Regex("""(\d)(\d):"""), "$1$2:") }.sorted())
         assertTrue(app.settings.dayHoursFree.value)
         shot("free")
-        click("Show free time")
+        click("Free time")
         await("bands gone") { described("Free from") == null }
     }
 
@@ -231,7 +235,8 @@ class MoreOct15Test {
     // ⋮ › Habits: a repeating task with its streak and marks.
     @Test fun habitsPage() {
         runBlocking {
-            val mon = LocalDate.of(2026, 9, 7)
+            // Bug hunt 35: the open one is due today (one already overdue has no streak left).
+            val mon = LocalDate.now().minusWeeks(4)
             val ids = (0..4).map { "habit-$it" }
             ids.forEachIndexed { i, id ->
                 app.repository.saveTask(PlannerTask(id = id, title = "QA gym", dueDate = mon.plusWeeks(i.toLong()), repeat = "WEEKLY",

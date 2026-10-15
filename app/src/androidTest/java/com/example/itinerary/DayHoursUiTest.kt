@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.example.itinerary.data.*
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.*
 import org.junit.Test
 import java.time.LocalDate
@@ -29,7 +30,8 @@ class DayHoursUiTest {
     private fun described(suffix: String) = nodes().firstOrNull { it.contentDescription?.toString()?.endsWith(suffix) == true }
     private fun shows(text: String) = nodes().any { it.text?.toString() == text }
     // A chip's on state is on the clickable node around its text, as selected or checked.
-    private fun on(label: String): Boolean { var n = find(label); while (n != null && !n.isClickable) n = n.parent; return n?.isSelected == true || n?.isChecked == true }
+    // The node or one around it chosen (a chosen tab in List | Hours is not clickable, so look at each in turn).
+    private fun on(label: String): Boolean = generateSequence(find(label)) { it.parent }.any { it.isSelected || it.isChecked }
     private fun await(what: String, check: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + 20_000
         while (SystemClock.uptimeMillis() < deadline) { if (check()) return; Thread.sleep(50) }
@@ -46,6 +48,8 @@ class DayHoursUiTest {
         ins.uiAutomation.takeScreenshot()?.let { b -> java.io.File(dir, "$name.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; b.recycle() }
     }
 
+    // Before too: another class (MoreOct15Test.freeTimeOnTheGrid) can leave Hours on.
+    @Before fun listFirst() { app.settings.setDayHours(false) }
     @After fun tearDown() { app.settings.setDayHours(false) }
 
     @Test fun theDayOnAnHourGrid() {

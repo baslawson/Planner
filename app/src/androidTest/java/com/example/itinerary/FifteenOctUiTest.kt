@@ -198,7 +198,7 @@ class FifteenOctUiTest {
         await("Undo bar") { showsStarting("Moved Dentist to Friday 18 April") }
     }
 
-    // Streaks (bug hunt 29, "a"): the day a task is ticked is kept, cleared when unticked, not passed on to the next
+    // Streaks (bug hunt 29, "a"): the day a task is ticked is kept (bug hunt 35: also through an untick), not passed on to the next
     // occurrence, and survives an editor save.
     @Test fun theDayATaskIsDoneIsKept() = runBlocking {
         val task = PlannerTask(title = "QA gym", dueDate = day, repeat = "WEEKLY")
@@ -210,8 +210,11 @@ class FifteenOctUiTest {
         assertNull("the next one isn't done", next.doneOn)
         app.repository.saveTask(done.copy(title = "QA gym (edited)", doneOn = null), create = false)
         assertEquals("an editor save keeps it", LocalDate.now(), app.repository.snapshot().tasks.single { it.id == task.id }.doneOn)
+        // Bug hunt 35: kept while unticked, and used again on a re-tick (unticked by mistake, ticked days later: still on time).
         app.repository.setTaskDone(task.id, false)
-        assertNull(app.repository.snapshot().tasks.single { it.id == task.id }.doneOn)
+        app.repository.snapshot().tasks.single { it.id == task.id }.let { assertFalse(it.done); assertEquals(LocalDate.now(), it.doneOn) }
+        app.repository.setTaskDone(task.id, true)
+        assertEquals(LocalDate.now(), app.repository.snapshot().tasks.single { it.id == task.id }.doneOn)
     }
 
     @Test fun theDoneDayGoesThroughABackupAndOlderFilesHaveNone() {

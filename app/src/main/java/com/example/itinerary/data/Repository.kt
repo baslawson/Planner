@@ -290,9 +290,10 @@ class Repository(
             // Keep the successor receipt even after reopening/deleting the next occurrence.
             val next = if (done && task.nextTaskId == null) task.nextOccurrence() else null
             if (next != null) taskDao.insert(next)
-            // The day it was done, for streaks (TaskStreaks); unticked, it has none.
+            // The day it was done, for streaks (TaskStreaks). Bug hunt 35: kept while unticked (nothing reads it then) and used
+            // again on a re-tick, so unticking by mistake and ticking again days later doesn't turn an on-time one late.
             taskDao.update(task.copy(done = done, nextTaskId = next?.id ?: task.nextTaskId, snoozedUntil = if (done) null else task.snoozedUntil,
-                doneOn = if (done) java.time.LocalDate.now() else null))
+                doneOn = if (done) task.doneOn ?: java.time.LocalDate.now() else task.doneOn))
             listOfNotNull(id, next?.id)
         }
         afterCommit(taskIds = changed)
@@ -710,12 +711,21 @@ class Repository(
                 val restored = note.copy(id = if (noteDao.byId(note.id) == null) note.id else UUID.randomUUID().toString())
                 noteDao.insert(restored); restoredNotes += restored.id
             }
-            val planIds = tripDao.all().mapTo(hashSetOf()) { it.id }
-            data.trips.filter { it.id !in planIds }.forEach { tripDao.upsert(it) }
+            // Bug hunt 35: a plan whose id now belongs to another plan (ids start again from the highest live one after a
+            // backup is restored) comes back as a new plan, and its events with it, rather than inside the other one.
+            val livePlans = tripDao.all().associateBy { it.id }
+            val planIds = data.trips.associate { trip ->
+                val live = livePlans[trip.id]
+                trip.id to when {
+                    live == null -> { tripDao.upsert(trip); trip.id }
+                    live.name == trip.name || live.startDate == trip.startDate && live.endDate == trip.endDate -> trip.id
+                    else -> tripDao.upsert(trip.copy(id = 0))
+                }
+            }
             val itemIds = itemDao.all().mapTo(hashSetOf()) { it.id }
             val attachmentIds = attachmentDao.all().mapTo(hashSetOf()) { it.id }
             val alarmIds = reminderDao.all().mapTo(hashSetOf()) { it.id }
-            val ids = data.items.sortedBy { it.id in itemIds }.associate { old -> old.id to itemDao.upsert(old.copy(id = if (old.id in itemIds) 0 else old.id)) }
+            val ids = data.items.sortedBy { it.id in itemIds }.associate { old -> old.id to itemDao.upsert(old.copy(id = if (old.id in itemIds) 0 else old.id, tripId = planIds[old.tripId] ?: old.tripId)) }
             data.attachments.sortedBy { it.id in attachmentIds }.forEach { attachmentDao.insert(it.copy(id = if (it.id in attachmentIds) 0 else it.id, itemId = ids.getValue(it.itemId))) }
             val restored = data.reminders.sortedBy { it.id in alarmIds }.map { reminderDao.insert(it.copy(id = if (it.id in alarmIds) 0 else it.id, itemId = ids.getValue(it.itemId))) }
             deletedDao.delete(id)

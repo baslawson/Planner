@@ -75,7 +75,7 @@ class FifteenOctFeaturesTest {
         val tasks = listOf(PlannerTask(id = "a", title = "Gym", repeat = "WEEKLY", done = true, doneOn = mon.minusDays(3), nextTaskId = "b"),
             PlannerTask(id = "b", title = "Gym", dueDate = mon, repeat = "WEEKLY", done = true, nextTaskId = "c"),
             PlannerTask(id = "c", title = "Gym", dueDate = mon.plusWeeks(1), repeat = "WEEKLY", nextTaskId = null))
-        assertEquals(2, TaskStreaks.streaks(tasks)["c"])
+        assertEquals(2, TaskStreaks.streaks(tasks, mon.plusWeeks(1))["c"])
     }
 
     @Test fun aLongHistoryIsCountedOnceAlongItsChain() {
@@ -86,7 +86,7 @@ class FifteenOctFeaturesTest {
                 doneOn = if (i < 3649) start.plusDays(i.toLong()) else null, nextTaskId = if (i < 3649) "t${i + 1}" else null)
         }
         val began = System.nanoTime()
-        assertEquals(3649, TaskStreaks.streaks(tasks)["t3649"])
+        assertEquals(3649, TaskStreaks.streaks(tasks, start.plusDays(3649))["t3649"])
         assertTrue("took ${(System.nanoTime() - began) / 1_000_000} ms", System.nanoTime() - began < 2_000_000_000L)
     }
 

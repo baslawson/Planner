@@ -14,10 +14,10 @@ object Habits {
     const val SHOWN = 10
     private const val MAX_BACK = 1000
 
-    fun of(tasks: List<PlannerTask>): List<Habit> {
+    fun of(tasks: List<PlannerTask>, today: java.time.LocalDate = java.time.LocalDate.now()): List<Habit> {
         val before = HashMap<String, PlannerTask>()
         tasks.forEach { t -> t.nextTaskId?.let { before[it] = t } }
-        val streaks = TaskStreaks.streaks(tasks)
+        val streaks = TaskStreaks.streaks(tasks, today)
         val ids = tasks.mapTo(HashSet()) { it.id }
         // Only the latest of each chain: one ticked off and unticked again still has its next one (bug hunt 30).
         return tasks.filter { it.repeat != "NONE" && !it.done && (it.nextTaskId == null || it.nextTaskId !in ids) }.map { task ->

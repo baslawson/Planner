@@ -1,5 +1,6 @@
 package com.example.itinerary.data
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URI
 
 // Web links kept as attachments. Only http and https addresses are accepted, so a link can never be something that
@@ -20,11 +21,13 @@ object Links {
         val uri = runCatching { URI(withScheme) }.getOrNull() ?: return null
         val scheme = uri.scheme?.lowercase() ?: return null
         if (scheme != "http" && scheme != "https") return null
-        if (uri.host.isNullOrBlank()) return null
+        // Bug hunt 35: java.net.URI has no host for an international or underscore name ("bücher.de", "my_site.example.com");
+        // OkHttp reads those.
+        if (uri.host.isNullOrBlank() && withScheme.toHttpUrlOrNull()?.host.isNullOrBlank()) return null
         return withScheme
     }
 
     // The name shown for a link when the user doesn't give one: the site, without a leading "www.".
     fun defaultName(url: String): String =
-        runCatching { URI(url).host }.getOrNull()?.removePrefix("www.")?.takeIf { it.isNotBlank() } ?: url
+        runCatching { URI(url).let { it.host ?: it.authority?.substringAfterLast('@')?.substringBefore(':') } }.getOrNull()?.removePrefix("www.")?.takeIf { it.isNotBlank() } ?: url
 }

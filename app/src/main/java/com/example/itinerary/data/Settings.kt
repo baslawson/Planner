@@ -290,7 +290,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _dayHours.value = hours
     }
 
-    // Free time shaded on the hour grid (user, 15 Oct; the "Free" chip by List | Hours). Off until chosen.
+    // Free time shaded on the hour grid (user, 15 Oct; the "Free time" chip by List | Hours). Off until chosen.
     private val _dayHoursFree = MutableStateFlow(prefs.getBoolean(KEY_DAY_HOURS_FREE, false))
     val dayHoursFree: StateFlow<Boolean> = _dayHoursFree.asStateFlow()
     fun setDayHoursFree(on: Boolean) {

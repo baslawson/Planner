@@ -16,7 +16,7 @@ object TaskStreaks {
     const val SHOWN_FROM = 2
 
     /** The streak of each repeating task that has one of at least [SHOWN_FROM], by task id. */
-    fun streaks(tasks: List<PlannerTask>): Map<String, Int> {
+    fun streaks(tasks: List<PlannerTask>, today: java.time.LocalDate = java.time.LocalDate.now()): Map<String, Int> {
         if (tasks.none { it.repeat != "NONE" }) return emptyMap()
         val before = HashMap<String, PlannerTask>()
         tasks.forEach { task -> task.nextTaskId?.let { before[it] = task } }
@@ -40,7 +40,9 @@ object TaskStreaks {
             return runs.getValue(task.id)
         }
         return tasks.filter { it.repeat != "NONE" }.mapNotNull { task ->
-            val count = if (task.done) run(task) else before[task.id]?.let(::run) ?: 0
+            // Bug hunt 35: an open one already past its due day can only be done late now, so the run is over.
+            val overdue = !task.done && task.dueDate?.let { it < today } == true
+            val count = if (task.done) run(task) else if (overdue) 0 else before[task.id]?.let(::run) ?: 0
             if (count >= SHOWN_FROM) task.id to count else null
         }.toMap()
     }

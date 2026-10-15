@@ -4,6 +4,13 @@ import com.example.itinerary.ui.MatrixIconButton as IconButton
 import com.example.itinerary.data.billTaskSummary
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -405,7 +413,7 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 
 @Composable
 // The day's heading, with List | Hours to see the day as a list or on an hour grid (DayHours) when [hours] is given.
-// [free]: the Free chip (shades free time on the hour grid), shown only with Hours on; null hides it.
+// [free]: the "Free time" chip (shades free time on the hour grid), shown only with Hours on; null hides it.
 private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}, free: Boolean? = null, onFree: (Boolean) -> Unit = {}) {
     // Bug hunt 30 A7: the chips go under the date when both don't fit side by side (a narrow phone, large text).
     androidx.compose.ui.layout.Layout(content = {
@@ -414,15 +422,70 @@ private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (hours != null) Row(Modifier.padding(end = if (free != null) 4.dp else 12.dp).selectableGroup()) {
-                listOf(false to "List", true to "Hours").forEach { (value, label) ->
-                    androidx.compose.material3.FilterChip(selected = hours == value, onClick = { onHours(value) }, label = { Text(label) },
-                        modifier = Modifier.padding(start = 4.dp))
+        // Bug hunt 34: with large text on a narrow phone, "Free time" goes onto a line of its own rather than off the screen.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(end = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            val colors = MaterialTheme.colorScheme
+            // User, 15 Oct ("confusing"): List | Hours looks like Week | Month | Full above it, the chosen one filled in;
+            // the chips before looked as if the outlined, unchosen one was on.
+            if (hours != null) {
+                // Bug hunt 34: the bar is drawn as small as Week | Month | Full, but a tap up to 48dp tall counts, as on
+                // the chips it replaced: above or below a tab picks the tab on that side.
+                var listWidth by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+                val currentOnHours by androidx.compose.runtime.rememberUpdatedState(onHours)
+                // Bug hunt 35: right to left, List is the right-hand tab.
+                val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+                Box(
+                    Modifier
+                        .align(Alignment.CenterVertically)
+                        .heightIn(min = 48.dp)
+                        .pointerInput(rtl) { detectTapGestures { currentOnHours(if (rtl) it.x < size.width - listWidth else it.x >= listWidth) } },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .border(1.dp, colors.primary, RoundedCornerShape(50))
+                            .background(colors.primaryContainer)
+                            .selectableGroup(),
+                    ) {
+                        listOf(false to "List", true to "Hours").forEach { (value, label) ->
+                            val chosen = hours == value
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (chosen) colors.onPrimary else colors.onPrimaryContainer,
+                                modifier = Modifier
+                                    .then(if (value) Modifier else Modifier.onSizeChanged { listWidth = it.width })
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (chosen) colors.primary else androidx.compose.ui.graphics.Color.Transparent)
+                                    .selectable(selected = chosen, role = androidx.compose.ui.semantics.Role.Tab, onClick = { onHours(value) })
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
-            if (free != null) androidx.compose.material3.FilterChip(selected = free, onClick = { onFree(!free) }, label = { Text("Free") },
-                modifier = Modifier.padding(end = 12.dp).semantics { contentDescription = "Show free time" })
+            // An on/off switch, so a box that is ticked or empty, and its name says what it shows.
+            if (free != null) androidx.compose.material3.FilterChip(selected = free, onClick = { onFree(!free) }, label = { Text("Free time") },
+                leadingIcon = {
+                    Box(
+                        Modifier
+                            .size(18.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .then(if (free) Modifier.background(colors.primary) else Modifier.border(2.dp, colors.onSurfaceVariant, RoundedCornerShape(3.dp))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (free) Icon(androidx.compose.material.icons.Icons.Default.Check, contentDescription = null,
+                            tint = colors.onPrimary, modifier = Modifier.size(14.dp))
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterVertically))
         }
     }) { measurables, constraints ->
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
