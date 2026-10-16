@@ -37,9 +37,10 @@ interface SentNoteDao {
     @Query("DELETE FROM sent_notes") suspend fun deleteAll()
 }
 
-/** A note as the Nextcloud Notes app has it. [modified] is in seconds, as the API gives it. */
+/** A note as the Nextcloud Notes app has it. [modified] is in seconds, as the API gives it. [error]: one the Notes app
+ *  couldn't read (its content is then "Error: <ExceptionClass>"); it is still listed. */
 data class RemoteNote(val id: Long, val etag: String?, val title: String, val content: String, val category: String,
-                      val favorite: Boolean, val modified: Long = 0, val readonly: Boolean = false)
+                      val favorite: Boolean, val modified: Long = 0, val readonly: Boolean = false, val error: Boolean = false)
 
 class NotesApiException(message: String, val code: Int = 0) : Exception(message)
 
@@ -124,7 +125,8 @@ class NotesApi(client: OkHttpClient) {
         .apply { if (modified > 0) put("modified", modified) }.toString().toRequestBody(json)
 
     private fun parse(o: JSONObject) = RemoteNote(o.getLong("id"), o.optString("etag").ifBlank { null }, o.optString("title"),
-        o.optString("content"), o.optString("category"), o.optBoolean("favorite"), o.optLong("modified"), o.optBoolean("readonly"))
+        o.optString("content"), o.optString("category"), o.optBoolean("favorite"), o.optLong("modified"), o.optBoolean("readonly"),
+        o.optBoolean("error"))
 }
 
 /** How Planner's note and Nextcloud's map onto each other. */
@@ -245,6 +247,9 @@ class NoteSync(
     // be asked about cheaply (no list ETag) waits longer each time. [checked]: what was out of step after the last one.
     private val backoff = SyncBackoff()
     @Volatile private var checked: Map<String, List<String>?>? = null
+    // Bug hunt 37 N1: the Nextcloud notes the last pass found unreadable there (listed with "error"): an edit to one is
+    // left for a pass, which leaves both sides alone until Nextcloud can read it again, not sent straight away.
+    @Volatile private var unreadable: Set<Long> = emptySet()
 
     // Turning it on syncs at once; off leaves the notes as they are on both sides, and forgets the links.
     suspend fun setEnabled(on: Boolean) {
@@ -314,6 +319,7 @@ class NoteSync(
                 for (mine in local) {
                     val row = links[mine.id] ?: continue
                     if (NoteMapping.fields(mine) == NoteMapping.fields(row)) continue
+                    if (row.remoteId in unreadable) { all = false; continue }
                     val result = withContext(Dispatchers.IO) {
                         try { api.update(account, row.remoteId, row.etag, NoteMapping.remoteTitle(mine), mine.content, mine.notebook, mine.pinned, mine.modified / 1000) }
                         catch (e: NotesApiException) { if (e.code in 400..499 && e.code != 401) null else throw e }
@@ -420,6 +426,7 @@ class NoteSync(
         val (list, tag) = api.listTagged(account)
         // What Nextcloud's list was as this pass read it (a pass that writes changes it, so the next check passes once more).
         listTag = tag?.let { key to it }
+        unreadable = list.filter { it.error }.mapTo(hashSetOf()) { it.id }
         val remote = list.associateBy { it.id }
         val pending = pendingDeleted()
         var ownCopies = 0
@@ -468,7 +475,9 @@ class NoteSync(
         // the two clocks say (Quillpad's times alone let a phone clock running behind Nextcloud's lose a newer edit).
         // Changed on both within the same second: the phone's goes up (the two would otherwise stay different).
         suspend fun settle(mine: PlannerNote, theirs: RemoteNote, row: SentNote?) {
-            if (!NoteMapping.fits(theirs)) { skipped++; return }
+            // Bug hunt 37 N1: a note the Notes app can't read lists "Error: …" as its words: never taken, sent over, linked
+            // or copied; both sides stay as they are until Nextcloud can read it again.
+            if (theirs.error || !NoteMapping.fits(theirs)) { skipped++; return }
             val here = mine.modified / 1000
             val mineChanged = row == null || NoteMapping.fields(mine) != NoteMapping.fields(row)
             val theirsChanged = row == null || theirs.etag != row.etag
@@ -543,6 +552,8 @@ class NoteSync(
                     mine == null -> {
                         if (row.noteId in pending) return@each
                         if (theirs == null) { rows.delete(row.noteId); return@each }
+                        // Bug hunt 37 N1: unreadable there: not deleted on the strength of what can't be read; link kept.
+                        if (theirs.error) { skipped++; return@each }
                         // A shared read-only note is left there, its link kept so it isn't brought in again; changed there
                         // since, it comes in again as a new note.
                         if (theirs.readonly) {
@@ -569,6 +580,8 @@ class NoteSync(
         val free = store.all().filter { it.id !in linkedLocal && it.id !in pending }.toMutableList()
         for (theirs in list) {
             if (theirs.id in linkedRemote) continue
+            // Bug hunt 37 N1: unreadable there (still listed): not brought in as a note of "Error: …", nor linked.
+            if (theirs.error) { skipped++; continue }
             val twin = NoteMapping.twin(free, theirs)
             if (twin != null) { free.remove(twin); linkedRemote += theirs.id; linkedLocal += twin.id; link(twin, theirs); continue }
             each { if (NoteMapping.fits(theirs)) take(null, theirs) else skipped++ }

@@ -93,7 +93,8 @@ class PaymentSummaryUiTest {
         repeat(6) { swipe(back = true) }
         // The first Reverse is the newest payment that counts (AUD 200.00 on 1 Sep): AUD 250.00 paid, the latest now 20 Aug.
         reveal { has("AUD 250.00 of AUD 700.00 paid · AUD 450.00 remaining") }
-        assertTrue(has("Last payment: AUD 150.00 on "))
+        // The line under it may still be below the screen's edge: brought into view too, not just looked for.
+        reveal { has("Last payment: AUD 150.00 on ") }
         screenshot("reversed")
     }
 }

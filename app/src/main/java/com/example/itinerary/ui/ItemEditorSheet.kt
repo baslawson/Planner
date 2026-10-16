@@ -830,6 +830,7 @@ private fun ItemEditorForm(
                 val past = pastTitles.firstOrNull { it.title == t }
                 val kept = listOf(UndoKept({ category }) { category = it }, UndoKept({ billAmountText }) { billAmountText = it },
                     UndoKept({ billCurrency }) { billCurrency = it })
+                val was = title to location
                 // S8: within the editor's limits, as if typed.
                 title = t.take(EventText.MAX_TITLE)
                 if (past != null) {
@@ -844,7 +845,10 @@ private fun ItemEditorForm(
                     }
                 }
                 kept.forEach { it.applied() }
-                if (kept.any { it.changed }) undo.around(undo = { kept.forEach { it.back() } }, redo = { kept.forEach { it.again() } })
+                // Bug hunt 37 E3: a step even when only the title and place change, so they are one Undo back to before the
+                // pick, not the place alone and then the title merged into the typing before it.
+                if (kept.any { it.changed } || was != (title to location))
+                    undo.around(undo = { kept.forEach { it.back() } }, redo = { kept.forEach { it.again() } })
             }
             SuggestField(
                 value = title,
@@ -1145,6 +1149,8 @@ private fun ItemEditorForm(
                     onSuggestBill = if (initial.linkedTaskId != null && !duplicating) null else { attachment -> billSuggestion = attachment },
                     store = store,
                     onTakePhoto = {
+                        // Bug hunt 37 E1: a second quick tap would replace the first photo's file, losing it (as the task editor).
+                        if (pendingPhoto != null) return@AttachmentsSection
                         val file = store.newPhotoFile()
                         pendingPhoto = file
                         try {
@@ -1267,7 +1273,14 @@ private fun ItemEditorForm(
     (billSuggestion ?: scannedBillSuggestion?.takeIf { billReviewRequested })?.let { attachment ->
         BillSuggestionDialog(attachment, title, billAmountText, billCurrency, bpayBillerCode,
             onDismiss = { billSuggestion = null; billReviewFiles = emptyList(); billReviewRequested = false }, onApply = { suggestedTitle, suggestedDate, suggestedAmount, suggestedCurrency, suggestedBpay ->
-                undo.together()
+                // Bug hunt 37 E2: one Undo puts back all Apply changed (date, amount, currency, BPAY, category, the added
+                // reminder), not only the title: the same way as a template (ER-2, EX-1).
+                val kept = listOf(UndoKept({ date }) { date = it }, UndoKept({ billAmountText }) { billAmountText = it },
+                    UndoKept({ billCurrency }) { billCurrency = it }, UndoKept({ paid }) { paid = it },
+                    UndoKept({ bpayBillerCode }) { bpayBillerCode = it }, UndoKept({ bpayReference }) { bpayReference = it },
+                    UndoKept({ category }) { category = it })
+                val wasTitle = title
+                val wasAdded = addedReminders.toList()
                 suggestedTitle?.let { title = it }
                 suggestedDate?.let { date = it }
                 suggestedAmount?.let {
@@ -1284,6 +1297,13 @@ private fun ItemEditorForm(
                     else if (error == null) error = "BPAY is for AUD bills only, so the scanned BPAY numbers weren't used."
                 }
                 selectCategory("Bills")
+                kept.forEach { it.applied() }
+                val nowAdded = addedReminders.toList()
+                if (kept.any { it.changed } || title != wasTitle || nowAdded != wasAdded) undo.around(undo = {
+                    kept.forEach { it.back() }; undoShift(addedReminders, nowAdded, wasAdded)
+                }, redo = {
+                    kept.forEach { it.again() }; undoShift(addedReminders, wasAdded, nowAdded)
+                })
                 billSuggestion = null
                 billReviewFiles = emptyList()
                 billReviewRequested = false

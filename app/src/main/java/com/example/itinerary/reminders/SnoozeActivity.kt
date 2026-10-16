@@ -52,11 +52,14 @@ class SnoozeActivity : ComponentActivity() {
                                 lifecycleScope.launch {
                                     try {
                                         val repo = (application as ItineraryApp).repository
-                                        val saved = if (taskId != null) repo.actOnTaskReminder(taskId, trigger, choice.until())
-                                            else if (noteId != null) repo.actOnNoteReminder(noteId, trigger, choice.until())
-                                            else repo.snoozeReminder(id, choice.until(), token)
+                                        // Bug hunt 37 R4: one moment for the time and what is said of it.
+                                        val now = java.time.ZonedDateTime.now()
+                                        val until = choice.until(now)
+                                        val saved = if (taskId != null) repo.actOnTaskReminder(taskId, trigger, until)
+                                            else if (noteId != null) repo.actOnNoteReminder(noteId, trigger, until)
+                                            else repo.snoozeReminder(id, until, token)
                                         Toast.makeText(this@SnoozeActivity,
-                                            if (saved) "Snoozed: ${choice.label}" else "This reminder is no longer active", Toast.LENGTH_SHORT).show()
+                                            if (saved) "Snoozed: ${choice.label(now)}" else "This reminder is no longer active", Toast.LENGTH_SHORT).show()
                                         finish()
                                     } catch (_: Exception) {
                                         busy = false

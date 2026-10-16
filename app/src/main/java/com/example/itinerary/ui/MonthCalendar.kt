@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -402,29 +403,30 @@ enum class CalendarSize(val label: String, val description: String) {
     WEEK("Week", "Calendar: week"),
     MONTH("Month", "Calendar: month"),
     FULL("Full", "Calendar: full screen");
-
-    val smaller: CalendarSize get() = entries[(ordinal - 1).coerceAtLeast(0)]
-    val bigger: CalendarSize get() = entries[(ordinal + 1).coerceAtMost(entries.lastIndex)]
 }
 
-// Sits on the line under the calendar: ▲ ▼ arrows at the start, a Week | Month | Full switch, the current size filled
-// in, and a "Today" pill at the end while there is somewhere to jump back from (mirrored right to left). The arrows,
-// like a swipe up or down on the bar, make the calendar one size smaller or bigger. The three parts are measured before
-// they are placed, so large text cannot make them overlap: the switch stays centred while there is room, slides towards
-// the arrows to make room for "Today" when there isn't, and if even that is not enough "Today" drops to its own row
-// below, still at the end; if the switch can't go beside the arrows at all, it has its own row under them.
+// Sits on the line under the calendar: one arrow at the start, a Week | Month | Full switch, the current size filled
+// in, and a "Today" pill at the end while there is somewhere to jump back from (mirrored right to left). The arrow,
+// like a swipe up or down on the bar, only folds the calendar away (▲) or brings it back (▼) at the size chosen
+// (user, 16 Oct: the arrows don't switch Week, Month and Full); picking a size while it is folded away brings it back too.
+// The three parts are measured before they are placed, so large text cannot make them overlap: the switch stays centred
+// while there is room, slides towards the arrow to make room for "Today" when there isn't, and if even that is not
+// enough "Today" drops to its own row below, still at the end; if the switch can't go beside the arrow at all, it has
+// its own row under it.
 @Composable
 fun CalendarSizeBar(
     size: CalendarSize,
     onSize: (CalendarSize) -> Unit,
+    hidden: Boolean,
+    onHidden: (Boolean) -> Unit,
     showToday: Boolean,
     onToday: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     val swipe = with(LocalDensity.current) { 24.dp.toPx() }
-    val currentSize by rememberUpdatedState(size)
-    val currentOnSize by rememberUpdatedState(onSize)
+    val currentHidden by rememberUpdatedState(hidden)
+    val currentOnHidden by rememberUpdatedState(onHidden)
     Layout(
         modifier = modifier
             .fillMaxWidth()
@@ -435,22 +437,18 @@ fun CalendarSizeBar(
                     onVerticalDrag = { change, amount -> change.consume(); travelled += amount },
                     onDragEnd = {
                         when {
-                            travelled > swipe -> currentOnSize(currentSize.bigger)
-                            travelled < -swipe -> currentOnSize(currentSize.smaller)
+                            travelled > swipe && currentHidden -> currentOnHidden(false)
+                            travelled < -swipe && !currentHidden -> currentOnHidden(true)
                         }
                     },
                 )
             },
         content = {
             HorizontalDivider(color = colors.outlineVariant)
-            // The swipe, seen: up one size smaller, down one size bigger, greyed out at Week and at Full.
-            Row {
-                IconButton(onClick = { onSize(size.smaller) }, enabled = size != size.smaller) {
-                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Smaller calendar")
-                }
-                IconButton(onClick = { onSize(size.bigger) }, enabled = size != size.bigger) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Bigger calendar")
-                }
+            // The swipe, seen: ▲ folds the calendar away, ▼ brings it back.
+            IconButton(onClick = { onHidden(!hidden) }) {
+                if (hidden) Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Show calendar")
+                else Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Hide calendar")
             }
             Row(
                 Modifier
@@ -474,8 +472,8 @@ fun CalendarSizeBar(
                                 contentDescription = option.description
                                 // On each tab (Hunt 27): the bar itself is never focused by TalkBack.
                                 customActions = listOf(
-                                    CustomAccessibilityAction("Bigger calendar") { currentOnSize(currentSize.bigger); true },
-                                    CustomAccessibilityAction("Smaller calendar") { currentOnSize(currentSize.smaller); true },
+                                    if (hidden) CustomAccessibilityAction("Show calendar") { currentOnHidden(false); true }
+                                    else CustomAccessibilityAction("Hide calendar") { currentOnHidden(true); true },
                                 )
                             }
                             .padding(horizontal = 14.dp, vertical = 6.dp),
@@ -506,10 +504,10 @@ fun CalendarSizeBar(
         val edge = 16.dp.roundToPx()
         val gap = 8.dp.roundToPx()
         val pad = 8.dp.roundToPx()
-        // The arrows sit at the left end (their buttons have their own inner space); the switch never goes left of them.
+        // The arrow sits at the left end (its button has its own inner space); the switch never goes left of it.
         val leftmost = 4.dp.roundToPx() + arrows.width + gap
 
-        // At the biggest text the switch can be too wide to go beside the arrows: it then has its own row under them,
+        // At the biggest text the switch can be too wide to go beside the arrow: it then has its own row under it,
         // centred, and "Today" stays on the arrows' row at the right.
         if (leftmost + toggle.width > width - 4.dp.roundToPx()) {
             val lineHeight = maxOf(arrows.height, if (today != null) today.height + 2 * pad else 0)
@@ -697,7 +695,8 @@ private fun DragOverlay(d: ChipDrag, layout: PageLayout) = BoxWithConstraints(Mo
     }
     if (d.edge != 0) Box(
         Modifier
-            .align(if (d.edge < 0) Alignment.CenterStart else Alignment.CenterEnd)
+            // Bug hunt 37 C1: the edge is the physical one under the finger, so the bar keeps to it right to left too.
+            .align(if (d.edge < 0) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight)
             .width(6.dp)
             .fillMaxHeight()
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),

@@ -33,6 +33,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,7 +47,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -53,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,8 +81,10 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
     val month by vm.month.collectAsStateWithLifecycle()
     val calendarCollapsed by vm.calendarCollapsed.collectAsStateWithLifecycle()
     val calendarMaximised by vm.calendarMaximised.collectAsStateWithLifecycle()
+    // Folded away by the ▲ arrow: only the bar under the calendar shows, and the day takes the room (Full included).
+    val calendarHidden by vm.calendarHidden.collectAsStateWithLifecycle()
     // Maximised: the month fills the screen and each day shows its entries; the day's list is hidden.
-    val maximised = calendarMaximised && !calendarCollapsed
+    val maximised = calendarMaximised && !calendarCollapsed && !calendarHidden
     val loadedTasks by vm.tasks.collectAsStateWithLifecycle()
     val allTasks = loadedTasks.orEmpty()
     var editingTaskId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -241,18 +248,31 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
             // could not be reached below it.
             BoxWithConstraints(Modifier.fillMaxSize().padding(inner)) {
                 val sideBySide = maxWidth > maxHeight
+                // Bug hunt 37 C4: the hour grid's and the list's scroll, kept here above the portrait and landscape layouts
+                // so turning the phone keeps their place; each starts afresh when it comes back on screen, as before.
+                val gridShown = !maximised && dayHours && !selection.active
+                val hoursScroll = androidx.compose.runtime.key(gridShown) { rememberDayHoursScroll() }
+                val listState = androidx.compose.runtime.key(!maximised && !gridShown) { androidx.compose.foundation.lazy.rememberLazyListState() }
                 // Rows short enough for a whole month beside the list (title, weekdays and the toggle take ~150dp).
                 val rowHeight = if (sideBySide) ((maxHeight - 150.dp) / 6).coerceIn(36.dp, 48.dp) else 48.dp
                 // Offer the shortcut when the day (or, with the full month open, the month) isn't today's.
-                val showToday = (selected != today) || (!calendarCollapsed && month != YearMonth.from(today))
+                val showToday = (selected != today) || (!calendarCollapsed && !calendarHidden && month != YearMonth.from(today))
                 val sizeBar: @Composable () -> Unit = {
                     CalendarSizeBar(
-                        size = when { calendarCollapsed -> CalendarSize.WEEK; maximised -> CalendarSize.FULL; else -> CalendarSize.MONTH },
+                        size = when { calendarCollapsed -> CalendarSize.WEEK; calendarMaximised -> CalendarSize.FULL; else -> CalendarSize.MONTH },
                         onSize = { size ->
-                            // Opening the month from the week should land on the month of the day being viewed.
-                            if (calendarCollapsed && size != CalendarSize.WEEK) vm.showMonth(YearMonth.from(selected))
+                            // Opening the month from the week (or a folded-away calendar) should land on the month of
+                            // the day being viewed.
+                            if ((calendarCollapsed || calendarHidden) && size != CalendarSize.WEEK) vm.showMonth(YearMonth.from(selected))
                             vm.setCalendarCollapsed(size == CalendarSize.WEEK)
                             vm.setCalendarMaximised(size == CalendarSize.FULL)
+                            vm.setCalendarHidden(false)
+                        },
+                        hidden = calendarHidden,
+                        onHidden = { hide ->
+                            // Brought back on the month of the day being viewed, as above.
+                            if (!hide && !calendarCollapsed) vm.showMonth(YearMonth.from(selected))
+                            vm.setCalendarHidden(hide)
                         },
                         showToday = showToday,
                         onToday = {
@@ -261,7 +281,9 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         },
                     )
                 }
-                val calendar: @Composable ColumnScope.() -> Unit = {
+                val calendar: @Composable ColumnScope.() -> Unit = calendar@{
+                    // Folded away: only the bar, with ▼ to bring the calendar back.
+                    if (calendarHidden) { sizeBar(); return@calendar }
                     // Full screen, the bar sits at the top, where the + button (bottom centre unless moved) can't cover it.
                     if (maximised) sizeBar()
                     MonthCalendar(
@@ -283,8 +305,12 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                     if (!maximised) sizeBar()
                 }
                 val dayList: @Composable ColumnScope.() -> Unit = {
+                    val step = if (dayHours && !selection.active) hourDays.size.toLong() else 1L
                     DayHeader(date = selected, hours = dayHours, onHours = dayHoursSettings::setDayHours,
-                        free = dayHoursFree.takeIf { dayHours }, onFree = dayHoursSettings::setDayHoursFree)
+                        free = dayHoursFree.takeIf { dayHours }, onFree = dayHoursSettings::setDayHoursFree,
+                        // With the calendar folded away nothing else changes the day: ‹ › a day (a week on the week grid).
+                        onStep = if (calendarHidden) { forward -> vm.select(selected.plusDays(if (forward) step else -step)) } else null,
+                        stepDays = step)
                     // The day on an hour grid (DayHours) unless events are being selected, which only the list shows.
                     if (dayHours && !selection.active) DayHours(
                         days = hourDays, selected = selected, today = today, events = hourEvents, tasks = hourTasks, outside = outsideEvents,
@@ -307,8 +333,9 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         },
                         onDay = vm::select,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
+                        hoursScroll = hoursScroll,
                     )
-                    else LazyScrollHints(Modifier.weight(1f).fillMaxWidth()) { state -> LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(bottom = 144.dp)) {
+                    else LazyScrollHints(listState, Modifier.weight(1f).fillMaxWidth()) { LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 144.dp)) {
                         if (dayItems.isEmpty() && dayTasks.isEmpty()) {
                             item {
                                 Text(
@@ -344,17 +371,23 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
                         }
                     } }
                 }
+                // Bug hunt 37 C4: the calendar and the day's list move between the layouts below rather than being made
+                // again, so turning the phone keeps all they hold (a drag under way, the month shown, scroll places).
+                val currentCalendar by rememberUpdatedState(calendar)
+                val currentDayList by rememberUpdatedState(dayList)
+                val movingCalendar = remember { movableContentWithReceiverOf<ColumnScope> { currentCalendar() } }
+                val movingDayList = remember { movableContentWithReceiverOf<ColumnScope> { currentDayList() } }
                 if (maximised) Column(Modifier.fillMaxSize()) {
                     // The whole height: the + button can be dragged off whatever it covers.
-                    calendar()
-                } else if (sideBySide) Row(Modifier.fillMaxSize()) {
+                    movingCalendar()
+                } else if (sideBySide && !calendarHidden) Row(Modifier.fillMaxSize()) {
                     // The week on the hour grid gets two thirds of a landscape screen (user, 15 Oct), so its columns have room.
                     val weekGrid = dayHours && calendarCollapsed && !selection.active
-                    ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxHeight()) { calendar() }
-                    Column(Modifier.weight(if (weekGrid) 2f else 1f).fillMaxHeight()) { dayList() }
+                    ScrollHints(rememberScrollState(), Modifier.weight(1f).fillMaxHeight()) { movingCalendar() }
+                    Column(Modifier.weight(if (weekGrid) 2f else 1f).fillMaxHeight()) { movingDayList() }
                 } else Column(Modifier.fillMaxSize()) {
-                    calendar()
-                    dayList()
+                    movingCalendar()
+                    movingDayList()
                 }
             }
         }
@@ -414,14 +447,35 @@ fun ItineraryScreen(vm: ItineraryViewModel, onAgenda: () -> Unit, onOpenSearch: 
 @Composable
 // The day's heading, with List | Hours to see the day as a list or on an hour grid (DayHours) when [hours] is given.
 // [free]: the "Free time" chip (shades free time on the hour grid), shown only with Hours on; null hides it.
-private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}, free: Boolean? = null, onFree: (Boolean) -> Unit = {}) {
+// [onStep] (calendar folded away): ‹ › at the end of the date's line, false back and true on by [stepDays] days.
+private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean) -> Unit = {}, free: Boolean? = null, onFree: (Boolean) -> Unit = {},
+                      onStep: ((Boolean) -> Unit)? = null, stepDays: Long = 1) {
     // Bug hunt 30 A7: the chips go under the date when both don't fit side by side (a narrow phone, large text).
     androidx.compose.ui.layout.Layout(content = {
-        HeadingText(
+        if (onStep == null) HeadingText(
             date.dayLabel(LocalDateFormat.current),
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        ) else Row(Modifier.padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            val week = stepDays == 7L
+            // Bug hunt 38 H4: the date where it always sits, the arrows at the end. H1: read out when ‹ › change it.
+            HeadingText(
+                date.dayLabel(LocalDateFormat.current),
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+                    .padding(start = 20.dp, top = 16.dp, bottom = 16.dp),
+            )
+            IconButton(onClick = { onStep(false) }, enabled = CalendarMonths.inRange(YearMonth.from(date.minusDays(stepDays)))) {
+                Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = if (week) "Previous week" else "Previous day")
+            }
+            IconButton(onClick = { onStep(true) }, enabled = CalendarMonths.inRange(YearMonth.from(date.plusDays(stepDays)))) {
+                Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = if (week) "Next week" else "Next day")
+            }
+        }
         // Bug hunt 34: with large text on a narrow phone, "Free time" goes onto a line of its own rather than off the screen.
         @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
         androidx.compose.foundation.layout.FlowRow(
@@ -494,7 +548,10 @@ private fun DayHeader(date: LocalDate, hours: Boolean? = null, onHours: (Boolean
         val heading = measurables[0].measure(loose.copy(minWidth = if (side) constraints.maxWidth - chips.width else constraints.maxWidth,
             maxWidth = if (side) constraints.maxWidth - chips.width else constraints.maxWidth))
         val tuck = if (side) 0 else 12.dp.roundToPx()
-        val height = if (side) maxOf(heading.height, chips.height) else heading.height + chips.height - tuck
+        // Never below nothing: squeezed to no height (the month at large text takes the whole screen), the tuck alone
+        // would make it negative and crash.
+        val height = (if (side) maxOf(heading.height, chips.height) else heading.height + chips.height - tuck)
+            .coerceIn(0, constraints.maxHeight)
         layout(constraints.maxWidth, height) {
             if (side) {
                 heading.placeRelative(0, (height - heading.height) / 2)

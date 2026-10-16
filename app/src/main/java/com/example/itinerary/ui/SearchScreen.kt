@@ -275,9 +275,15 @@ fun SearchScreen(
     }
     editingBillId?.let { id -> BillTaskEditor(id) { editingBillId = null } }
     editingEventId?.let { id -> StoredEventEditor(id, { editingEventId = null }) }
-    editingTaskId?.let { id -> rememberEditedTask(id, tasks.find { it.id == id })?.let { task ->
-        key(id) { TaskEditor(task, creating = false) { editingTaskId = null } }
-    } }
+    editingTaskId?.let { id ->
+        // Bug hunt 37 E6: the stored tasks, null until read (the search's list starts empty), so a task gone after Planner
+        // was closed is said to be, as for a widget task, and the id cleared, not left to reopen it if the task came back.
+        val app = LocalContext.current.applicationContext as com.example.itinerary.ItineraryApp
+        val stored by app.repository.tasks.collectAsStateWithLifecycle(initialValue = null)
+        val task = rememberEditedTask(id, (stored ?: tasks).find { it.id == id })
+        if (task != null) key(id) { TaskEditor(task, creating = false) { editingTaskId = null } }
+        else if (stored != null) TaskUnavailableDialog { editingTaskId = null }
+    }
 }
 
 @Composable

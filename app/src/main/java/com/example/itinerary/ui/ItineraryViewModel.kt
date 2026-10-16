@@ -41,6 +41,10 @@ class ItineraryViewModel(
 
     fun setCalendarMaximised(maximised: Boolean) = settings.setCalendarMaximised(maximised)
 
+    val calendarHidden: StateFlow<Boolean> = settings.calendarHidden
+
+    fun setCalendarHidden(hidden: Boolean) = settings.setCalendarHidden(hidden)
+
     // How see-through the big + button is, in percent.
     val addButtonSeeThrough: StateFlow<Int> = settings.addButtonSeeThrough
 

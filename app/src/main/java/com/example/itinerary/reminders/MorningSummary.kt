@@ -95,6 +95,23 @@ object MorningSummary {
         !shownToday && now.toLocalTime() >= at && now.toLocalTime() < at.plusHours(CATCH_UP_HOURS).let { if (it < at) LocalTime.MAX else it }
     private const val CATCH_UP_HOURS = 3L
 
+    /**
+     * When [kind]'s alarm goes next and the day it is set for ([EXTRA_DAY]), with its summary last shown for [shownOn].
+     * Bug hunt 37 R1: an evening summary held past midnight (Doze) and not shown yet still comes, in a minute, for
+     * yesterday, within [CATCH_UP_HOURS] of yesterday's time, rather than tonight's alarm replacing it unseen. The
+     * morning's catches up only the same day (yesterday's morning is no use now).
+     */
+    internal fun nextAlarm(kind: Kind, now: LocalDateTime, at: LocalTime, shownOn: String?): Pair<LocalDateTime, LocalDate> {
+        val today = now.toLocalDate()
+        val shownToday = shownOn == today.toString()
+        if (catchUp(now, at, shownToday)) return now.plusMinutes(1) to today
+        val yesterday = today.minusDays(1)
+        val last = yesterday.atTime(at)
+        if (kind == Kind.EVENING && !shownToday && shownOn != yesterday.toString() && now >= last && now < last.plusHours(CATCH_UP_HOURS))
+            return now.plusMinutes(1) to yesterday
+        return nextAt(now, at, shownToday).let { it to it.toLocalDate() }
+    }
+
     private class Setting(val on: Boolean, val at: LocalTime, val shownOn: String?)
     private fun setting(context: Context, kind: Kind): Setting {
         val settings = (context.applicationContext as ItineraryApp).settings
@@ -127,9 +144,8 @@ object MorningSummary {
         if (!setting.on) { alarms.cancel(pendingIntent(context, kind)); return }
         val zone = ZoneId.systemDefault()
         val now = LocalDateTime.now(zone)
-        val shownToday = setting.shownOn == now.toLocalDate().toString()
-        val next = if (catchUp(now, setting.at, shownToday)) now.plusMinutes(1) else nextAt(now, setting.at, shownToday)
-        runCatching { alarms.setWindow(AlarmManager.RTC_WAKEUP, next.atZone(zone).toInstant().toEpochMilli(), WINDOW_MS, pendingIntent(context, kind, next.toLocalDate())) }
+        val (next, day) = nextAlarm(kind, now, setting.at, setting.shownOn)
+        runCatching { alarms.setWindow(AlarmManager.RTC_WAKEUP, next.atZone(zone).toInstant().toEpochMilli(), WINDOW_MS, pendingIntent(context, kind, day)) }
             .onFailure { android.util.Log.w("MorningSummary", "Couldn't set the ${kind.name.lowercase()} summary's alarm", it) }
     }
 

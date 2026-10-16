@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -106,6 +107,8 @@ fun DayHours(
     onDay: (LocalDate) -> Unit = {},
     // Free time shaded on the grid (user, 15 Oct; the "Free time" chip): each day's free windows, as Find free time works them out.
     free: () -> Map<LocalDate, List<com.example.itinerary.data.FreeWindow>> = { emptyMap() },
+    // Bug hunt 37 C4: given by the screen, so turning the phone (another layout) keeps where the grid was.
+    hoursScroll: DayHoursScroll = rememberDayHoursScroll(),
 ) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -136,7 +139,7 @@ fun DayHours(
         val currentOnEmptyHour by rememberUpdatedState(onEmptyHour)
         val currentOnMove by rememberUpdatedState(onMove)
         val haptics = LocalHapticFeedback.current
-        val scroll = rememberScrollState()
+        val scroll = hoursScroll.scroll
         val density = LocalDensity.current
         val hourPx = with(density) { HOUR_HEIGHT.toPx() }
         val edgePx = with(density) { EDGE.toPx() }
@@ -149,13 +152,14 @@ fun DayHours(
         var edge by remember { mutableFloatStateOf(0f) }
         // Bug hunt 35: also once the events have come (on a cold start they arrive after the first draw, which had none and
         // went to 07:00).
-        LaunchedEffect(days.first(), days.size, blocks.any { it.isNotEmpty() }) {
-            val hour = when {
-                today in days -> LocalTime.now().hour - 1
-                blocks.any { it.isNotEmpty() } -> blocks.flatten().minOf { it.startMinute } / 60
-                else -> 7
-            }.coerceIn(0, 23)
-            scroll.scrollTo((hour * hourPx).toInt())
+        // Bug hunt 37 C3: but only once for the days shown (deleting the last event, or its Undo, jumped the grid), and
+        // once more only if that first scroll came before the events.
+        LaunchedEffect(days, blocks.any { it.isNotEmpty() }) {
+            val loaded = blocks.any { it.isNotEmpty() }
+            if (hoursScroll.scrolledFor == days && (hoursScroll.settled || !loaded)) return@LaunchedEffect
+            scroll.scrollTo((gridStartHour(days, today, LocalTime.now().hour, blocks) * hourPx).toInt())
+            hoursScroll.scrolledFor = days
+            hoursScroll.settled = loaded || today in days
         }
         LaunchedEffect(edge != 0f) {
             while (edge != 0f) {
@@ -192,12 +196,13 @@ fun DayHours(
                 val columnPx = with(density) { columnWidth.toPx() }
                 // The hours, and an empty spot to tap for a new event at that hour (on that day, in the week).
                 // Bug hunt 29 G3: keyed on the column width too (a rotation or a resized window changes it).
-                fun columnAt(x: Float, width: Int) = (((if (rtl) width - x else x) - with(density) { GUTTER.toPx() }) / columnPx).toInt().coerceIn(0, days.lastIndex)
-                Column(Modifier.fillMaxWidth().pointerInput(days, columnPx, rtl) {
+                // Bug hunt 37 C2: a tap or drag on the hour labels is on the chosen day, not the week's first.
+                fun columnAt(x: Float, width: Int) = gridColumnAt(x, width, with(density) { GUTTER.toPx() }, columnPx, days.size, rtl, days.indexOf(selected))
+                Column(Modifier.fillMaxWidth().pointerInput(days, selected, columnPx, rtl) {
                     detectTapGestures { at ->
                         currentOnEmptyHour(days[columnAt(at.x, size.width)], LocalTime.of((at.y / hourPx).toInt().coerceIn(0, 23), 0), 60)
                     }
-                }.pointerInput(days, columnPx, rtl) {
+                }.pointerInput(days, selected, columnPx, rtl) {
                     // Drag to create (user, 15 Oct): hold an empty spot and drag down (or up) to draw the new event, in
                     // 15-minute steps; let go and it opens as a new event of that length. Held near the top or bottom,
                     // the grid scrolls on (bug hunt 30 A5).
@@ -528,4 +533,39 @@ private fun StripChip(title: String, accent: Color, task: Boolean, done: Boolean
         Text((if (task) (if (done) "☑ " else "☐ ") else "") + title, style = MaterialTheme.typography.labelLarge, maxLines = 1,
             overflow = TextOverflow.Ellipsis)
     }
+}
+
+/**
+ * Bug hunt 37 C3/C4: the hour grid's scroll, and the days it has already scrolled itself to the start of, kept by the
+ * screen above its portrait and landscape layouts so turning the phone neither loses the place nor scrolls again.
+ */
+class DayHoursScroll(val scroll: ScrollState) {
+    // The days the grid last scrolled itself for, and whether that was the last time (the events had come, or it's today's hour).
+    internal var scrolledFor: List<LocalDate>? = null
+    internal var settled = false
+}
+
+@Composable
+fun rememberDayHoursScroll(): DayHoursScroll {
+    val scroll = rememberScrollState()
+    return remember(scroll) { DayHoursScroll(scroll) }
+}
+
+/**
+ * Bug hunt 37 C3: the hour the grid opens at: today an hour before now, else the first event that starts on its day (not
+ * the morning end of one from the evening before), else 7 am.
+ */
+internal fun gridStartHour(days: List<LocalDate>, today: LocalDate, nowHour: Int, blocks: List<List<DayTimeline.Block>>): Int = when {
+    today in days -> nowHour - 1
+    else -> days.indices.flatMap { i -> blocks[i].filter { !it.item.date.isBefore(days[i]) } }.minOfOrNull { it.startMinute }?.div(60) ?: 7
+}.coerceIn(0, 23)
+
+/**
+ * Bug hunt 37 C2: the day column under [x] on a grid [width] wide, the hour labels [gutterPx] wide at its start (on the
+ * right, right to left). On the labels themselves, column [fallback] (the chosen day), or the first when it isn't shown.
+ */
+internal fun gridColumnAt(x: Float, width: Int, gutterPx: Float, columnPx: Float, columns: Int, rtl: Boolean, fallback: Int): Int {
+    val fromStart = if (rtl) width - x else x
+    if (fromStart < gutterPx) return fallback.coerceIn(0, columns - 1)
+    return ((fromStart - gutterPx) / columnPx).toInt().coerceIn(0, columns - 1)
 }

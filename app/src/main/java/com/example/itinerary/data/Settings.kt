@@ -112,6 +112,8 @@ data class SettingsSnapshot(
     val scrollBarSeeThrough: Int = ScrollBar.DEFAULT_SEE_THROUGH,
     // How often calendars sync in the background, in hours; 0 = off (see BackgroundSync).
     val calendarBackgroundHours: Int = BackgroundSync.OFF,
+    // The Calendar screen's calendar folded away by the ▲ arrow under it; Week | Month | Full is kept as it was.
+    val calendarHidden: Boolean = false,
 )
 
 // Calendar sync in the background (Settings → Calendars): off, or every so many hours. Android picks the exact moment.
@@ -394,6 +396,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
     private val _calendarMaximised = MutableStateFlow(prefs.getBoolean(KEY_CALENDAR_MAXIMISED, false))
     val calendarMaximised: StateFlow<Boolean> = _calendarMaximised.asStateFlow()
 
+    // Whether the calendar is folded away by the ▲ arrow under it (user, 16 Oct): only its bar shows and the day takes
+    // the room. Week | Month | Full stays as it was, so ▼ brings the calendar back at that size.
+    private val _calendarHidden = MutableStateFlow(prefs.getBoolean(KEY_CALENDAR_HIDDEN, false))
+    val calendarHidden: StateFlow<Boolean> = _calendarHidden.asStateFlow()
+
     // Built-in categories the user has removed. They stay out of the category chips until they are added again.
     private val _hiddenCategories = MutableStateFlow(
         prefs.getStringSet(KEY_HIDDEN_CATEGORIES, emptySet()).orEmpty().toSet(),
@@ -560,6 +567,11 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _calendarMaximised.value = maximised
     }
 
+    fun setCalendarHidden(hidden: Boolean) {
+        prefs.edit { putBoolean(KEY_CALENDAR_HIDDEN, hidden) }
+        _calendarHidden.value = hidden
+    }
+
     fun setTimeFormat(format: TimeFormat) {
         prefs.edit { putString(KEY_TIME_FORMAT, format.name) }
         _timeFormat.value = format
@@ -584,6 +596,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         _scrollBarColor.value,
         _scrollBarSeeThrough.value,
         _calendarBackgroundHours.value,
+        _calendarHidden.value,
     )
 
     fun applySnapshot(settings: SettingsSnapshot) {
@@ -592,6 +605,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         setThemeMode(settings.themeMode)
         setTimeFormat(settings.timeFormat)
         setCalendarCollapsed(settings.calendarCollapsed)
+        setCalendarHidden(settings.calendarHidden)
         setHiddenCategories(settings.hiddenCategories)
         setUpcomingOnTop(settings.upcomingOnTop)
         setUpcomingDays(settings.upcomingDays)
@@ -619,6 +633,7 @@ class SettingsRepository(context: Context, private val onChanged: () -> Unit = {
         const val KEY_TIME_FORMAT = "time_format"
         const val KEY_CALENDAR_COLLAPSED = "calendar_collapsed"
         const val KEY_CALENDAR_MAXIMISED = "calendar_maximised"
+        const val KEY_CALENDAR_HIDDEN = "calendar_hidden"
         const val KEY_MORNING_SUMMARY = "morning_summary"
         const val KEY_MORNING_SUMMARY_MINUTES = "morning_summary_minutes"
         const val KEY_MORNING_SUMMARY_SHOWN = "morning_summary_shown"

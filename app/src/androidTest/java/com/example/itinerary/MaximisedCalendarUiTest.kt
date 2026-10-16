@@ -55,6 +55,21 @@ class MaximisedCalendarUiTest {
         await(label) { find(label) != null }
         clickNode(find(label), label)
     }
+    // The day's list scrolled down until [text] shows (large text puts the entries below the screen). The list is the
+    // last scroller on screen (after the month, whose pager comes first).
+    private fun reveal(text: String) = await(text) {
+        shows(text) || run {
+            nodes().lastOrNull { n -> n.isScrollable && n.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD } }
+                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            Thread.sleep(300); false
+        }
+    }
+    // Bug hunt 38 H2: what the test changes in the test app, put back even when it fails.
+    private var hoursBefore: Boolean? = null
+    @org.junit.After fun putBack() {
+        app.settings.setCalendarHidden(false)
+        hoursBefore?.let(app.settings::setDayHours)
+    }
     private fun shot(name: String) {
         val dir = java.io.File(ins.targetContext.cacheDir, "qa-maximised").apply { mkdirs() }
         ins.uiAutomation.takeScreenshot()?.let { b -> java.io.File(dir, "$name.png").outputStream().use { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; b.recycle() }
@@ -68,6 +83,9 @@ class MaximisedCalendarUiTest {
             app.repository.saveTask(PlannerTask(title = "Already done", dueDate = busy, done = true))
             for (h in 8..15) app.repository.saveItem(ItineraryItem(tripId = 0, date = busy.plusDays(1), startTime = LocalTime.of(h, 0), title = "Meeting $h"))
         }
+        // The day's list, not the hour grid, so the entries are read as text.
+        hoursBefore = app.settings.dayHours.value
+        app.settings.setCalendarHidden(false); app.settings.setDayHours(false)
         ins.targetContext.startActivity(Intent(ins.targetContext, MainActivity::class.java).apply {
             action = "com.example.itinerary.widget.OPEN_DATE"
             putExtra("widget_date", start.toString())
@@ -95,46 +113,54 @@ class MaximisedCalendarUiTest {
         // A tap on a day opens it: back to the month, that day selected, its list under the grid.
         clickNode(described("Tuesday 15 April 2036"), "15 April")
         await("the day's list") { shows("Tuesday 15 April 2036") && find("Calendar: month")?.isSelected == true }
-        await("its entries listed") { shows("Dentist") }
+        reveal("Dentist")
         assertFalse(app.settings.calendarMaximised.value)
         shot("opened-day")
 
-        // A swipe on the bar: down is one size bigger, up one size smaller.
+        // User, 16 Oct: the arrow and a swipe on the bar only fold the calendar away (▲, up) or bring it back (▼, down);
+        // they never switch Week | Month | Full.
+        val grid = { described("Tuesday 15 April 2036") != null }
         fun swipeBar(down: Boolean) {
             val r = android.graphics.Rect().also { find("Calendar: month")!!.getBoundsInScreen(it) }
             val y2 = if (down) r.centerY() + 300 else r.centerY() - 300
             ins.uiAutomation.executeShellCommand("input swipe ${r.left - 40} ${r.centerY()} ${r.left - 40} $y2 300").close()
         }
+        swipeBar(down = false)
+        await("swiped away") { app.settings.calendarHidden.value && !grid() && find("Show calendar") != null }
+        assertTrue("still Month", find("Calendar: month")!!.isSelected)
+        assertFalse(app.settings.calendarCollapsed.value || app.settings.calendarMaximised.value)
+        await("the day stays") { shows("Tuesday 15 April 2036") }
+        reveal("Dentist")
+        shot("hidden-month")
+        // Folded away, ‹ › beside the date change the day, and TalkBack reads out the new date (bug hunt 38 H1).
+        assertEquals(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE,
+            nodes().first { it.text?.toString() == "Tuesday 15 April 2036" }.liveRegion)
+        click("Next day")
+        await("next day") { shows("Wednesday 16 April 2036") && nodes().any { it.text?.toString()?.startsWith("Meeting ") == true } }
+        click("Previous day")
+        await("back a day") { shows("Tuesday 15 April 2036") }
         swipeBar(down = true)
-        await("swiped to full") { app.settings.calendarMaximised.value && find("Calendar: full screen")?.isSelected == true }
-        swipeBar(down = false)
-        await("swiped back to month") { !app.settings.calendarMaximised.value && find("Calendar: month")?.isSelected == true }
-        swipeBar(down = false)
-        await("swiped to week") { app.settings.calendarCollapsed.value && find("Calendar: week")?.isSelected == true }
-        // Straight from the week to the full screen in one tap.
-        click("Calendar: full screen")
-        await("full again") { app.settings.calendarMaximised.value && !app.settings.calendarCollapsed.value }
-        // A selected tab isn't clickable (tapping it would do nothing), so only when it isn't the size already.
-        if (find("Calendar: month")?.isSelected != true) click("Calendar: month")
-        await("month again") { find("Calendar: month")?.isSelected == true }
-        assertFalse(app.settings.calendarCollapsed.value)
-        assertFalse(app.settings.calendarMaximised.value)
+        await("swiped back") { !app.settings.calendarHidden.value && grid() && find("Hide calendar") != null }
+        assertTrue("still Month", find("Calendar: month")!!.isSelected)
+        assertNull("no ‹ › with the calendar shown", find("Next day"))
 
-        // The arrows at the left end do what the swipe does, and are greyed out at the smallest and biggest size.
-        // The label is on the icon; the button around it (its parent, greyed out or not) holds the enabled state.
-        fun arrow(label: String) = nodes().firstOrNull { it.contentDescription?.toString() == label }?.parent
-        click("Smaller calendar")
-        await("arrow to week") { app.settings.calendarCollapsed.value && find("Calendar: week")?.isSelected == true }
-        await("up greyed at week") { arrow("Smaller calendar")?.isEnabled == false && arrow("Bigger calendar")?.isEnabled == true }
-        click("Bigger calendar")
-        await("arrow to month") { !app.settings.calendarCollapsed.value && find("Calendar: month")?.isSelected == true }
-        click("Bigger calendar")
-        await("arrow to full") { app.settings.calendarMaximised.value && find("Calendar: full screen")?.isSelected == true }
-        await("down greyed at full") { arrow("Bigger calendar")?.isEnabled == false && arrow("Smaller calendar")?.isEnabled == true }
-        shot("arrows-full")
-        click("Smaller calendar")
-        await("arrow back to month") { !app.settings.calendarMaximised.value && find("Calendar: month")?.isSelected == true }
-        shot("arrows-month")
+        // The arrow, from the full screen: hidden, the day's list is there and Full is still the choice; back to Full.
+        click("Calendar: full screen")
+        await("full") { described("Tuesday 15 April 2036, 3 entries") != null }
+        click("Hide calendar")
+        await("full hidden") { app.settings.calendarHidden.value && shows("Tuesday 15 April 2036") && described("Tuesday 15 April 2036") == null }
+        assertTrue("still Full", find("Calendar: full screen")!!.isSelected)
+        assertTrue(app.settings.calendarMaximised.value)
+        shot("hidden-full")
+        click("Show calendar")
+        await("full again") { !app.settings.calendarHidden.value && described("Tuesday 15 April 2036, 3 entries") != null }
+        // Picking a size while folded away brings the calendar back at that size.
+        click("Hide calendar")
+        await("hidden again") { app.settings.calendarHidden.value }
+        click("Calendar: month")
+        await("month shown") { !app.settings.calendarHidden.value && grid() && find("Calendar: month")?.isSelected == true }
+        assertFalse(app.settings.calendarMaximised.value)
+        shot("shown-month")
     }
 
     // An event on several days is one bar per week row (drawn over the cells, hidden from TalkBack): each day it covers

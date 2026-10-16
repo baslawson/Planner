@@ -359,6 +359,7 @@ class BackupManager(
                 .put("appTheme", settings.appTheme.name)
                 .put("timeFormat", settings.timeFormat.name)
                 .put("calendarCollapsed", settings.calendarCollapsed)
+                .put("calendarHidden", settings.calendarHidden)
                 .put("hiddenCategories", JSONArray(settings.hiddenCategories.sorted()))
                 .put("upcomingOnTop", settings.upcomingOnTop)
                 .put("upcomingDays", settings.upcomingDays)
@@ -543,6 +544,8 @@ class BackupManager(
             timeFormat = runCatching { TimeFormat.valueOf(settingsJson?.optString("timeFormat").orEmpty()) }
                 .getOrDefault(TimeFormat.SYSTEM),
             calendarCollapsed = settingsJson?.optBoolean("calendarCollapsed", false) ?: false,
+            // Optional: backups made before the calendar could be folded away don't have it (shown).
+            calendarHidden = settingsJson?.optBoolean("calendarHidden", false) ?: false,
             // Optional: backups made before categories could be removed don't have it.
             hiddenCategories = settingsJson?.optJSONArray("hiddenCategories")
                 ?.let { array -> List(array.length()) { array.optString(it) } }

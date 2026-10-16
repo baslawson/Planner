@@ -192,7 +192,8 @@ fun QuickEntryEditor(
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var pickingDuration by rememberSaveable { mutableStateOf(false) }
     var durationText by rememberSaveable { mutableStateOf(initial.durationText) }
-    LaunchedEffect(text) { delay(650); settled = true }
+    // Bug hunt 37 E4: the title too, which also unsettles it (editTitle), or its feedback stayed hidden.
+    LaunchedEffect(text, title) { delay(650); settled = true }
     val showFeedback = settled || attempted || !fieldFocused
     var task by rememberSaveable { mutableStateOf(initial.task) }
     // "Remind me to …" picks Task or Event until the person chooses a type themselves.
@@ -256,8 +257,10 @@ fun QuickEntryEditor(
     }
     fun edit(value: String) = editField(TextFieldValue(value, TextRange(value.length)))
     fun editTitle(value: TextFieldValue) {
-        if (value.text != title) { settled = false; attempted = false; baseDate = LocalDate.now() }
-        titleField = value.copy(text = value.text.replace('\n', ' '))
+        val cleaned = value.text.replace('\n', ' ')
+        // Compared once cleaned, so a line break that changes nothing doesn't unsettle it with no new title to settle it again.
+        if (cleaned != title) { settled = false; attempted = false; baseDate = LocalDate.now() }
+        titleField = value.copy(text = cleaned)
     }
     val completions = if (fieldFocused && field.selection.collapsed && !busy)
         quickCompletions(text, field.selection.start, literalRanges, task) else emptyList()

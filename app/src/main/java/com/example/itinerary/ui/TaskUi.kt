@@ -211,6 +211,15 @@ fun rememberEditedTask(id: String, live: PlannerTask?): PlannerTask? {
     return live ?: last[0]
 }
 
+// Bug hunt 37 E6: a task asked for (a saved editor id after Planner was closed) that is no longer stored, as AppNav says it
+// for a widget task.
+@Composable
+fun TaskUnavailableDialog(onClose: () -> Unit) {
+    PlannerDialog("Task unavailable", onDismissRequest = onClose, dismiss = DialogAction("Close", onClick = onClose)) {
+        Text("This task may have been deleted.")
+    }
+}
+
 // SH-9: a camera photo whose result never came back, as an attachment named [name] when one was taken; an empty file
 // (nothing taken) is deleted. Null also when it is attached already.
 internal fun leftoverPhoto(file: java.io.File, name: String, attached: List<Attachment>): Attachment? = when {
@@ -376,9 +385,10 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
     }
     // E5-3: a file picked or a photo taken is in the draft at once, not after the pause: Planner was in the background
     // for the picker or camera, and Android may close it before the timer runs.
-    fun writeDraftNow(json: JSONObject) {
-        if (finished) return
-        try { draftStore.write(draftKey, json); lastWritten[0] = json.toString() } catch (_: Exception) { error = draftError }
+    // Bug hunt 37 E5: false when the write failed (storage full), so a removal doesn't release a file the old draft still lists.
+    fun writeDraftNow(json: JSONObject): Boolean {
+        if (finished) return true
+        return try { draftStore.write(draftKey, json); lastWritten[0] = json.toString(); true } catch (_: Exception) { error = draftError; false }
     }
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -573,9 +583,10 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                 attachments.forEach { attachment ->
                     AttachmentRow(attachment, attachmentStore, enabled = !busy, onOpen = { openAttachment(context, attachmentStore, attachment) }, onRemove = {
                         attachments = attachments.filterNot { it.fileName == attachment.fileName }
-                        // Persist the removal before checking shared-file ownership.
-                        draftStore.write(draftKey, snapshot.put("attachments", DraftCodec.attachments(attachments)))
-                        scope.launch { repo.releaseTaskFiles(listOf(attachment.fileName)) }
+                        // Persist the removal before checking shared-file ownership. Bug hunt 37 E5: a failed write (storage
+                        // full) says so instead of crashing, and keeps the file.
+                        if (writeDraftNow(snapshot.put("attachments", DraftCodec.attachments(attachments))))
+                            scope.launch { repo.releaseTaskFiles(listOf(attachment.fileName)) }
                     })
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -585,7 +596,8 @@ private fun TaskEditorContent(initial: PlannerTask, creating: Boolean, draft: JS
                         if (pendingPhoto != null) return@OutlinedButton
                         val file = attachmentStore.newPhotoFile()
                         pendingPhoto = file.name
-                        draftStore.write(draftKey, snapshot.put("pendingPhoto", file.name))
+                        // Bug hunt 37 E5: a failed write says so instead of crashing.
+                        writeDraftNow(snapshot.put("pendingPhoto", file.name))
                         try { takePhoto.launch(attachmentStore.uriFor(file.name)) }
                         catch (_: Exception) { file.delete(); pendingPhoto = null; error = "No camera is available." }
                     }) { Text("Take photo") }

@@ -184,10 +184,12 @@ class CalendarSync(
     fun phonePermitted(): Boolean = phone?.permitted() == true
 
     // Lists the phone's visible calendars (new ones start unticked) and reads the ticked ones' dates in the window.
-    // Without permission the phone's events leave Planner and its calendars say so. Returns false when already running.
-    suspend fun refreshPhone(): Boolean {
+    // Without permission the phone's events leave Planner and its calendars say so. Returns false when already running;
+    // with [wait] (bug hunt 37 N3: a calendar just ticked, which a refresh under way read its list too early to see), waits
+    // for it and then refreshes.
+    suspend fun refreshPhone(wait: Boolean = false): Boolean {
         val reader = phone ?: return false
-        if (!phoneLock.tryLock()) return false
+        if (wait) phoneLock.lock() else if (!phoneLock.tryLock()) return false
         try {
             _phoneState.value = State(running = true)
             _phoneState.value = try {
@@ -629,7 +631,10 @@ class CalendarSync(
         }
         // Gone from Nextcloud: to Recently deleted, unless it was changed in Planner meanwhile.
         // A pending one isn't there yet: the next send writes it. A restored conflict learns again that it's gone there.
-        for ((href, row) in synced) if (gone(href) && row.problem == SentEvent.CONFLICT && row.conflict == null) sentDao.put(row.copy(conflict = ""))
+        // Bug hunt 37 N2 (as TaskSync): any conflict whose file has gone since, not only a restored one: Nextcloud's side is
+        // now "deleted" (not the version it had); deleted on both sides, nothing is left to choose.
+        for ((href, row) in synced) if (gone(href) && row.problem == SentEvent.CONFLICT && row.conflict != "")
+            goneConflict(row, items[row.itemId] == null && row.itemId !in waiting).let { if (it == null) sentDao.delete(row.id) else sentDao.put(it) }
         for ((href, row) in synced) if (gone(href) && row.problem != SentEvent.CONFLICT && row.problem != SentEvent.PENDING) {
             val item = items[row.itemId]
             when {
@@ -718,9 +723,12 @@ class CalendarSync(
                             // Read-only there now; Planner's event stays as it is, and isn't sent again.
                             server == null -> sentDao.put(row.copy(etag = current.etag, ics = current.data, problem = SentEvent.DETACHED, conflict = null))
                             else -> {
-                                val id = if (item != null) { store.update(ServerEvents.apply(item, server)); item.id } else store.add(server)
-                                val saved = db.itemDao().byId(id) ?: return@withContext
-                                sentDao.put(row.copy(itemId = id, etag = current.etag, ics = current.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
+                                // Bug hunt 37 N5 (as TaskSync): made to the event as it is when saved, not the copy read
+                                // before the download (an edit made meanwhile keeps its Planner-only details).
+                                val saved = if (item != null) store.update(item.id) { ServerEvents.apply(it, server) }
+                                    else db.itemDao().byId(store.add(server))
+                                saved ?: return@withContext
+                                sentDao.put(row.copy(itemId = saved.id, etag = current.etag, ics = current.data, fingerprint = fingerprint(saved), problem = null, conflict = null))
                             }
                         }
                     }
@@ -792,9 +800,9 @@ class CalendarSync(
 
     // Downloads the ticked subscriptions again ([only] = just that one). The server says when nothing changed, so an
     // unchanged calendar costs almost nothing. A failed one keeps its last events and shows why on its row.
-    // Returns false when already running.
-    suspend fun refreshLinks(only: Long? = null): Boolean {
-        if (!linkLock.tryLock()) return false
+    // Returns false when already running; with [wait] (bug hunt 37 N3, as refreshPhone), waits for it and then downloads.
+    suspend fun refreshLinks(only: Long? = null, wait: Boolean = false): Boolean {
+        if (wait) linkLock.lock() else if (!linkLock.tryLock()) return false
         try {
             lastLinkAttempt = now()
             _linkState.value = State(running = true)
@@ -859,7 +867,7 @@ class CalendarSync(
     // Ticking a subscription downloads it straight away.
     suspend fun setLinkEnabled(id: Long, enabled: Boolean) {
         setEnabled(id, enabled)
-        if (enabled) refreshLinks(only = id)
+        if (enabled) refreshLinks(only = id, wait = true)
     }
 
     // The same window as Nextcloud: from the first of the month 3 months back to the end of the month 12 ahead.
@@ -881,7 +889,7 @@ class CalendarSync(
     // Ticking a phone calendar reads it straight away (it's on the phone).
     suspend fun setPhoneEnabled(id: Long, enabled: Boolean) {
         setEnabled(id, enabled)
-        refreshPhone()
+        refreshPhone(wait = true)
     }
 
     // Lists the calendars on the server (new ones start unticked) and downloads each ticked calendar that changed since
@@ -915,7 +923,17 @@ class CalendarSync(
         // synced calendar's and task list's pulls refresh it themselves when they read, and Planner's own events and
         // tasks through the Repository; the widget's own schedule (midnight, the date or zone changing) does the rest.
         var wrote = false
-        // Calendars of another login, and ones no longer on the server, go with their events.
+        // Bug hunt 37 N4: calendars of another login go first; a listing that came back empty, or without the calendar or
+        // task list kept in sync (a server hiccup), removes none of this login's (their ticks and sync choices stay) and
+        // the sync stops with an error. A calendar really deleted there is changed in Settings → Calendars.
+        db.withTransaction {
+            dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD && it.account != key }.forEach { dao.deleteSource(it.id); wrote = true }
+        }
+        untrustedListing(dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }, remote.keys)?.let {
+            if (wrote) onChanged()
+            throw BackupException(it)
+        }
+        // Calendars no longer on the server go with their events.
         db.withTransaction {
             val existing = dao.sources().filter { it.kind == OutsideCalendars.KIND_NEXTCLOUD }
             existing.filter { it.account != key || it.href !in remote }.forEach { dao.deleteSource(it.id); wrote = true }
@@ -1086,6 +1104,20 @@ class CalendarSync(
         const val MONTHS_BACK = 3L
         const val MONTHS_AHEAD = 12L
         const val PERMISSION_NEEDED = "Permission needed: allow Planner to read calendars."
+
+        // Bug hunt 37 N2: a conflict row whose file is gone from Nextcloud: marked gone there (conflict ""), or null (the
+        // row goes) when the event was deleted in Planner too and isn't waiting on its Undo.
+        internal fun goneConflict(row: SentEvent, deletedHere: Boolean): SentEvent? = if (deletedHere) null else row.copy(conflict = "")
+
+        // Bug hunt 37 N4: why a calendar listing can't be trusted to reconcile [existing] (this login's Nextcloud calendars)
+        // with: it came back empty, or without the calendar or task list kept in sync. Null: it can.
+        internal fun untrustedListing(existing: List<CalendarSource>, listed: Set<String>): String? {
+            if (existing.isEmpty()) return null
+            if (listed.isEmpty()) return "Nextcloud listed no calendars, so Planner kept your calendar choices. Try again later."
+            val chosen = existing.firstOrNull { (it.sendHere || it.tasksHere) && it.href !in listed } ?: return null
+            return "Nextcloud didn't list ${chosen.name}, which Planner keeps in sync with, so nothing was changed. " +
+                "If it was deleted there, choose another in Settings → Calendars."
+        }
 
         // R18-S1: the note on a calendar's row for [count] repeating events whose rule Planner can't follow (null: none).
         internal fun unreadRepeatsNote(count: Int): String? = when (count) {

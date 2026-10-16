@@ -1409,6 +1409,7 @@ class Repository(
             return@withLock false
         }
         val ids = mutableListOf<Long>()
+        val unchanged = mutableSetOf<Long>()
         var undone: ItineraryItem? = null
         val restored = db.withTransaction {
             val current = itemDao.byId(change.before.id)
@@ -1420,6 +1421,7 @@ class Repository(
                     ids += reminder.id
                     // Keep reminders edited or snoozed since payment; restore only unchanged ones.
                     if (change.remindersAfter.any { it == reminder }) {
+                        unchanged += reminder.id
                         val old = change.remindersBefore.find { it.id == reminder.id }?.snoozedUntil
                         reminderDao.snooze(reminder.id, old?.takeIf { it > System.currentTimeMillis() })
                     }
@@ -1429,8 +1431,24 @@ class Repository(
         }
         _pendingPayments.value = _pendingPayments.value.filterNot { it.token == token }
         undone?.takeIf { restored }?.let { tellBudget(it, it.copy(paid = change.before.paid, payments = change.before.payments)) }
-        if (restored) afterCommit(reminderIds = ids, cancelFirst = ids.toSet())
+        if (restored) {
+            afterCommit(reminderIds = ids, cancelFirst = ids.toSet())
+            showAgainAfterUndo(change.before.id, change.remindersBefore.map { it.id }.filter { it in unchanged })
+        }
         restored
+    }
+
+    // Bug hunt 37 R3: the payment took its reminders' notifications away (cancel); an Undo brings back, quietly with
+    // Mark paid, those that had gone off before it (their time passed and their delivery recorded). One snoozed to a later
+    // time is set again by afterCommit instead. A failure here never fails the Undo, which has committed.
+    private suspend fun showAgainAfterUndo(itemId: Long, reminderIds: List<Long>) {
+        try {
+            val item = itemDao.byId(itemId)?.takeIf { !it.paid && !it.skipped } ?: return
+            val now = System.currentTimeMillis()
+            reminderDao.forItem(itemId).filter { it.id in reminderIds && eventReminderAt(item, it) <= now && deliveredAlready(item, it) }
+                .forEach { scheduler.showAgain(item, it) }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Log.w("Repository", "Couldn't show the bill's reminders again after Undo", e) }
     }
 
     suspend fun finishPayment(token: String) = changes.withLock {

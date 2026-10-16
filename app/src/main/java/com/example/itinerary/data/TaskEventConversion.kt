@@ -80,8 +80,17 @@ object TaskEventConversion {
             ?.takeIf { it > now } ?: null.also { if (first != null) dropped += "The reminder: its time has passed." }
         // The same id each time this conversion is read, so a rebuilt window knows the new-task draft as its own (TE-6).
         val id = idSeed?.let { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() } ?: java.util.UUID.randomUUID().toString()
-        val task = PlannerTask(id = id, title = event.title, notes = event.notes, dueDate = occurrence.endDate ?: occurrence.date,
-            checklist = event.checklist, attachments = attachments.map { it.copy(id = 0, itemId = 0) },
+        // Bug hunt 37 R2: a task keeps files only (Tasks.validate), so a web link goes into the notes, one per line after a
+        // blank line, and is said; when the notes have no room for them, they are left out and that is said.
+        val links = attachments.mapNotNull { it.url }
+        val withLinks = if (links.isEmpty()) event.notes else listOf(event.notes.trimEnd(), links.joinToString("\n")).filter { it.isNotEmpty() }.joinToString("\n\n")
+        val fits = withLinks.length <= Tasks.MAX_NOTES
+        val notes = if (fits) withLinks else event.notes
+        val plural = if (links.size == 1) "The link" else "The ${links.size} links"
+        if (links.isNotEmpty()) dropped += if (fits) "$plural: a task keeps files only, so ${if (links.size == 1) "it is" else "they are"} added to the notes."
+            else "$plural: a task keeps files only, and the notes have no room for ${if (links.size == 1) "it" else "them"}."
+        val task = PlannerTask(id = id, title = event.title, notes = notes, dueDate = occurrence.endDate ?: occurrence.date,
+            checklist = event.checklist, attachments = attachments.filter { it.url == null }.map { it.copy(id = 0, itemId = 0) },
             repeat = if (repeating && wholeSeries) event.repeatRule else TaskRepeat.NONE.name, reminderAt = reminderAt, ringUntilDismissed = reminderAt != null && first?.ringUntilDismissed == true,
             ringSeconds = if (reminderAt != null) first?.ringSeconds ?: 0 else 0,
             repeatAnchorDay = if (wholeSeries) monthDay(event.repeatRule, seriesStart) else 0)

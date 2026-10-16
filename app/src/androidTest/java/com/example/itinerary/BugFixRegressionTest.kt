@@ -74,6 +74,7 @@ class BugFixRegressionTest {
         repo.saveItem(event(), added = listOf(Attachment(itemId = 0, name = "Restored", fileName = "restored.txt", mimeType = "text/plain")))
         settings.setAgendaRange(AgendaRange.ALL)
         settings.setCalendarCollapsed(false)
+        settings.setCalendarHidden(true)
         val original = repo.snapshot()
         val file = File(dir, "restore.zip")
         backup.export(Uri.fromFile(file))
@@ -81,6 +82,7 @@ class BugFixRegressionTest {
         repo.replaceAll(DataSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
         settings.setAgendaRange(AgendaRange.TODAY)
         settings.setCalendarCollapsed(true)
+        settings.setCalendarHidden(false)
         val failing = Repository(db, store, ReminderScheduler(context), onChanged = { error("Injected widget error") })
         val failingSettings = SettingsRepository(context) { error("Injected settings widget error") }
         BackupManager(context, failing, store, failingSettings).restore(staged)
@@ -88,6 +90,8 @@ class BugFixRegressionTest {
         assertEquals("Restored content", store.fileFor("restored.txt").readText())
         assertEquals(AgendaRange.ALL, failingSettings.agendaRange.value)
         assertFalse(failingSettings.calendarCollapsed.value)
+        // The calendar folded away by the ▲ arrow comes back folded away.
+        assertTrue(failingSettings.calendarHidden.value)
         assertEquals(setOf("widget"), failing.maintenanceIssues.value)
     }
 

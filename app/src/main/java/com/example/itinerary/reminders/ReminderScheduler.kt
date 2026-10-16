@@ -22,6 +22,8 @@ interface ReminderAlarms {
     fun ringOffTask(id: String) {}
     fun ringOffNote(id: String) {}
     fun ringOff(reminderId: Long) {}
+    // Bug hunt 37 R3: an event reminder that went off already shown again, quietly, with its buttons (showEventAgain).
+    fun showAgain(item: ItineraryItem, reminder: Reminder) {}
     // Hunt 22 P2: whether a reminder with this sound choice rings (ringSecondsNow), Default as Settings has it now.
     fun rings(ring: Boolean, seconds: Int): Boolean = ring || seconds > 0
     fun cancel(reminderId: Long)
@@ -193,6 +195,7 @@ class ReminderScheduler(private val context: Context) : ReminderAlarms {
     override fun ringOffTask(id: String) = AlarmService.quietIfRinging(context, "task", id)
     override fun ringOffNote(id: String) = AlarmService.quietIfRinging(context, "note", id)
     override fun ringOff(reminderId: Long) = AlarmService.quietIfRinging(context, reminderId)
+    override fun showAgain(item: ItineraryItem, reminder: Reminder) = showEventAgain(context, item, reminder)
     override fun rings(ring: Boolean, seconds: Int): Boolean = ringSecondsNow(context, ring, seconds) != null
 
     // A note's reminder, set and cleared as a task's is (a note has no "done": Done clears its reminder).

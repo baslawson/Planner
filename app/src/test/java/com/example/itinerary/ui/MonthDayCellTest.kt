@@ -25,14 +25,3 @@ class MonthDayCellTest {
         assertEquals("Monday 5 October 2026", dayCellDescription(oct5, isToday = false, hasItems = false, Locale.UK, emptyList()))
     }
 }
-
-// The bar under the calendar: a swipe down is one size bigger, up one size smaller, stopping at the ends.
-class CalendarSizeTest {
-    @Test fun sizesStepOneAtATimeAndStopAtTheEnds() {
-        assertEquals(CalendarSize.MONTH, CalendarSize.WEEK.bigger)
-        assertEquals(CalendarSize.FULL, CalendarSize.MONTH.bigger)
-        assertEquals(CalendarSize.FULL, CalendarSize.FULL.bigger)
-        assertEquals(CalendarSize.MONTH, CalendarSize.FULL.smaller)
-        assertEquals(CalendarSize.WEEK, CalendarSize.WEEK.smaller)
-    }
-}

@@ -96,6 +96,46 @@ class FifteenOctUiTest {
         app.getSystemService(NotificationManager::class.java).cancelAll()
     }
 
+    // Bug hunt 37 C4: the phone turned while an event is held on the hour grid. The calendar and the day's list move
+    // between the portrait and landscape layouts instead of being made again, so the grid keeps its place; Android itself
+    // cancels the held touch when the screen turns (seen on 5554), so the drag ends with nothing moved and no preview left.
+    @Test fun turningThePhoneMidDrag() {
+        runBlocking { app.repository.saveItem(ItineraryItem(tripId = 0, date = day, startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "Dentist")) }
+        open(day)
+        size("Calendar: month")
+        click("Hours")
+        await("the block") { described(", Dentist") != null }
+        val block = bounds(described(", Dentist")!!)
+        val hour = (56 * density).toInt()
+        val resolver = ins.targetContext.contentResolver
+        val autoRotate = android.provider.Settings.System.getInt(resolver, android.provider.Settings.System.ACCELEROMETER_ROTATION, 1)
+        val upright = android.provider.Settings.System.getInt(resolver, android.provider.Settings.System.USER_ROTATION, 0)
+        try {
+            send(MotionEvent.ACTION_DOWN, block.centerX(), block.top + hour / 4)
+            Thread.sleep(900)
+            moveTo(block.centerX(), block.top + hour / 4, block.centerX(), block.top + hour / 4 + hour)
+            Thread.sleep(300) // the preview is drawn only (not in the accessibility tree): seen in the screenshots
+            shot("rotate-before")
+            ins.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_FREEZE_90)
+            await("landscape") { ins.targetContext.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE }
+            Thread.sleep(1500)
+            send(MotionEvent.ACTION_MOVE, block.centerX(), block.top + hour / 4 + hour + 4)
+            send(MotionEvent.ACTION_UP, block.centerX(), block.top + hour / 4 + hour + 4)
+            Thread.sleep(1000)
+            shot("rotate-after")
+            assertEquals(LocalTime.of(9, 0), event("Dentist").startTime)
+            // Still on the grid, at the same hours (the event in sight, Hours still chosen).
+            assertNotNull(described(", Dentist"))
+            assertTrue(find("Hours")?.isSelected == true || find("Hours")?.parent?.isSelected == true)
+        } finally {
+            ins.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_FREEZE_0)
+            ins.uiAutomation.setRotation(android.app.UiAutomation.ROTATION_UNFREEZE)
+            // As the emulator was: UNFREEZE alone can leave auto-rotate off (seen on 5554, bug hunt 38) and the screen turned.
+            for (command in listOf("settings put system user_rotation $upright", "settings put system accelerometer_rotation $autoRotate"))
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+        }
+    }
+
     @Test fun anEventOnTheHourGridIsDraggedToAnotherTimeAndStretched() {
         runBlocking { app.repository.saveItem(ItineraryItem(tripId = 0, date = day, startTime = LocalTime.of(9, 0), durationMinutes = 60, title = "Dentist")) }
         open(day)
@@ -221,13 +261,14 @@ class FifteenOctUiTest {
         val done = PlannerTask(id = "a", title = "Gym", dueDate = day, done = true, doneOn = day.minusDays(1))
         val open = PlannerTask(id = "b", title = "Gym", dueDate = day.plusDays(7))
         assertEquals(listOf(done, open), TaskCodec.decode(TaskCodec.encode(listOf(done, open))))
-        // A file from before has no "doneOn"; one that is wrong, or on a task not done, is dropped rather than refused.
+        // A file from before has no "doneOn"; one that is wrong is dropped rather than refused. Bug hunt 37: a task not done keeps
+        // its day (unticking keeps it since bug hunt 35, used again if ticked).
         val old = TaskCodec.encode(listOf(done)).also { it.getJSONObject(0).remove("doneOn") }
         assertNull(TaskCodec.decode(old).single().doneOn)
         val odd = TaskCodec.encode(listOf(done)).also { it.getJSONObject(0).put("doneOn", "yesterday") }
         assertNull(TaskCodec.decode(odd).single().doneOn)
         val notDone = TaskCodec.encode(listOf(open)).also { it.getJSONObject(0).put("doneOn", day.toString()) }
-        assertNull(TaskCodec.decode(notDone).single().doneOn)
+        assertEquals(day, TaskCodec.decode(notDone).single().doneOn)
     }
 
     // Version 36 (before the done day) upgrades to 37 with every task kept and none with a done day.

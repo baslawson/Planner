@@ -371,6 +371,9 @@ fun AgendaScreen(
         editingTaskId?.let { id ->
             val task = rememberEditedTask(id, tasks.find { it.id == id })
             if (task != null) androidx.compose.runtime.key(id) { TaskEditor(task, false) { editingTaskId = null } }
+            // Bug hunt 37 E6: gone once loaded (deleted while Planner was closed): said, as for a widget task, and the id
+            // cleared, or the editor opened by itself if the task came back.
+            else if (loadedTasks != null) TaskUnavailableDialog { editingTaskId = null }
         }
         SettingsHost(vm = vm, show = showSettings, onDismiss = { showSettings = false }, showCalendars = showCalendars, onShowCalendars = { showCalendars = it })
     }

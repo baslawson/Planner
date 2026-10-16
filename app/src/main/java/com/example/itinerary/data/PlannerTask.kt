@@ -140,8 +140,9 @@ object TaskCodec {
             if (value.isNull("reminderAt")) null else value.strictLong("reminderAt") { "Invalid task reminder time" }, repeat = value.optString("repeat", "NONE"), repeatDays = value.optInt("repeatDays", 7),
             repeatAnchorDay = value.optInt("repeatAnchorDay", 0),
             nextTaskId = if (value.isNull("nextTaskId")) null else value.getString("nextTaskId"),
-            // Optional: older backups don't have it (those tasks count as done on time).
-            doneOn = if (!value.has("doneOn") || value.isNull("doneOn") || !value.getBoolean("done")) null
+            // Optional: older backups don't have it (those tasks count as done on time). Bug hunt 37: kept on one not done
+            // too (since bug hunt 35 unticking keeps the day, used again if ticked), or a delete and Undo lost it.
+            doneOn = if (!value.has("doneOn") || value.isNull("doneOn")) null
                 else runCatching { LocalDate.parse(value.getString("doneOn")) }.getOrNull(),
             checklist = ChecklistCodec.decode(value.optJSONArray("checklist")?.toString() ?: "[]"),
             attachments = DraftCodec.attachments(value.optJSONArray("attachments")),
