@@ -47,26 +47,28 @@ class FifteenOctFeaturesTest {
 
     @Test fun aStreakCountsOccurrencesDoneByTheirDueDayInARow() {
         val mon = LocalDate.of(2026, 9, 21)
+        // A fixed "today" (the open one's due day), so the test doesn't expire as the real date moves on.
+        val today = mon.plusWeeks(4)
         // Four weeks done on time (one a day early), the fifth open: 4 in a row on the open one, 4 on the last done one.
         val tasks = listOf(
             weekly("a", mon, 0, "b"), weekly("b", mon.plusWeeks(1), -1, "c"), weekly("c", mon.plusWeeks(2), 0, "d"),
             weekly("d", mon.plusWeeks(3), 0, "e"), weekly("e", mon.plusWeeks(4), null, null))
-        val streaks = TaskStreaks.streaks(tasks)
+        val streaks = TaskStreaks.streaks(tasks, today)
         assertEquals(4, streaks["e"]); assertEquals(4, streaks["d"]); assertEquals(2, streaks["b"])
         // Bug hunt 29 S1: the open one moved (Due tomorrow, a drag, Due on…) keeps what was earned.
-        assertEquals(4, TaskStreaks.streaks(tasks.dropLast(1) + weekly("e", mon.plusWeeks(4).plusDays(3), null, null))["e"])
+        assertEquals(4, TaskStreaks.streaks(tasks.dropLast(1) + weekly("e", mon.plusWeeks(4).plusDays(3), null, null), today)["e"])
         // S3: a day late breaks the run, for a weekly task as for a daily one.
         val late = listOf(
             weekly("a", mon, 0, "b"), weekly("b", mon.plusWeeks(1), 1, "c"),
             weekly("c", mon.plusWeeks(2), 0, "d"), weekly("d", mon.plusWeeks(3), 0, "e"), weekly("e", mon.plusWeeks(4), null, null))
-        assertEquals(2, TaskStreaks.streaks(late)["e"])
-        assertNull(TaskStreaks.streaks(late)["b"])
+        assertEquals(2, TaskStreaks.streaks(late, today)["e"])
+        assertNull(TaskStreaks.streaks(late, today)["b"])
         // An open one in the middle (undone again) ends a run too.
         assertNull(TaskStreaks.streaks(listOf(weekly("a", mon, 0, "b"), weekly("b", mon.plusWeeks(1), null, "c"),
-            weekly("c", mon.plusWeeks(2), 0, "d"), weekly("d", mon.plusWeeks(3), null, null)))["d"])
+            weekly("c", mon.plusWeeks(2), 0, "d"), weekly("d", mon.plusWeeks(3), null, null)), today)["d"])
         // One in a row isn't shown; nor is a task that doesn't repeat.
-        assertNull(TaskStreaks.streaks(listOf(weekly("a", mon, 0, "b"), weekly("b", mon.plusWeeks(1), null, null)))["b"])
-        assertNull(TaskStreaks.streaks(listOf(PlannerTask(id = "x", title = "Once", dueDate = mon, done = true)))["x"])
+        assertNull(TaskStreaks.streaks(listOf(weekly("a", mon, 0, "b"), weekly("b", mon.plusWeeks(1), null, null)), today)["b"])
+        assertNull(TaskStreaks.streaks(listOf(PlannerTask(id = "x", title = "Once", dueDate = mon, done = true)), today)["x"])
     }
 
     @Test fun doneBeforeTheDayWasKeptOrWithNoDueDateCountsAsOnTime() {
